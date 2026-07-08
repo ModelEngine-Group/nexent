@@ -425,6 +425,7 @@ from backend.agents.create_agent_info import (
     _normalize_tool_params_request,
     _get_agent_tool_overrides,
     _merge_tool_params,
+    _resolve_agent_run_model_id,
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
@@ -433,6 +434,19 @@ from backend.agents.create_agent_info import (
 HistoryItem = sys.modules["consts.model"].HistoryItem
 
 # Import ValidationError for testing (from mocked consts.exceptions)
+
+
+def test_resolve_agent_run_model_id_prefers_current_model_fields():
+    assert _resolve_agent_run_model_id(
+        {
+            "business_logic_model_id": 77,
+            "model_ids": [88],
+            "model_id": 99,
+        }
+    ) == 77
+    assert _resolve_agent_run_model_id({"model_ids": [88], "model_id": 99}) == 88
+    assert _resolve_agent_run_model_id({"model_id": 99}) == 99
+    assert _resolve_agent_run_model_id({"business_logic_model_id": 77}, 66) == 66
 ValidationError = sys.modules["consts.exceptions"].ValidationError
 
 # Import ToolParamsRequest for testing
@@ -1963,6 +1977,73 @@ class TestCreateAgentConfig:
                 safe_input_budget_snapshot=ANY,
                 verification_config=ANY
             )
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_nl2agent_metadata_uses_business_logic_model_id(self):
+        """NL2AGENT tools need a model id even when no request override is sent."""
+        finalize_tool = types.SimpleNamespace(
+            class_name="NL2AgentFinalizeAgentTool",
+            name="nl2agent_finalize_agent",
+            metadata=None,
+        )
+
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
+                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info._load_nl2agent_system_prompt', return_value="NL2AGENT prompt"), \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch('backend.agents.create_agent_info._get_skill_script_tools', return_value=[]):
+
+            mock_search_agent.return_value = {
+                "name": "nl2agent",
+                "description": "Agent builder",
+                "duty_prompt": "stale duty",
+                "constraint_prompt": "",
+                "few_shots_prompt": "",
+                "max_steps": 5,
+                "model_ids": [88],
+                "business_logic_model_id": 77,
+                "provide_run_summary": False,
+                "enable_context_manager": False,
+            }
+            mock_create_tools.return_value = [finalize_tool]
+            mock_get_template.return_value = {"system_prompt": "{{duty}}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "NL2AGENT prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "business_model"}
+
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                draft_agent_id=202,
+            )
+
+            mock_get_model_by_id.assert_called_once_with(77, tenant_id="tenant_1")
+            assert finalize_tool.metadata == {
+                "agent_id": "agent_1",
+                "user_id": "user_1",
+                "tenant_id": "tenant_1",
+                "model_id": 77,
+                "language": "zh",
+                "draft_agent_id": 202,
+            }
+            assert mock_agent_config.call_args.kwargs["model_name"] == "business_model"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):

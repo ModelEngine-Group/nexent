@@ -54,7 +54,7 @@ from utils.prompt_template_utils import (
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
-from consts.model import AgentToolParamsRequest, ToolParamsRequest
+from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
@@ -78,6 +78,41 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "default_output_reserve_tokens",
     "tokenizer_family",
 )
+
+
+def _coerce_model_id(value: Any) -> Optional[int]:
+    if value in (None, "", 0, "0"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_agent_run_model_id(
+    agent_info: Dict[str, Any],
+    override_model_id: int | None = None,
+) -> Optional[int]:
+    """Resolve the LLM model used for an agent run from current and legacy fields."""
+    override = _coerce_model_id(override_model_id)
+    if override is not None:
+        return override
+
+    business_logic_model_id = _coerce_model_id(
+        agent_info.get("business_logic_model_id")
+    )
+    if business_logic_model_id is not None:
+        return business_logic_model_id
+
+    model_ids = agent_info.get("model_ids") or []
+    if isinstance(model_ids, (str, int)):
+        model_ids = [model_ids]
+    for model_id in model_ids:
+        resolved = _coerce_model_id(model_id)
+        if resolved is not None:
+            return resolved
+
+    return _coerce_model_id(agent_info.get("model_id"))
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -909,7 +944,7 @@ async def create_agent_config(
                 prompt_template["system_prompt"], undefined=StrictUndefined
             ).render(render_kwargs)
 
-    model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    model_id_to_use = _resolve_agent_run_model_id(agent_info, override_model_id)
     model_info = None
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
@@ -968,7 +1003,12 @@ async def create_agent_config(
         "NL2AgentFinalizeAgentTool",
     }
     for tool_cfg in tool_list:
-        if tool_cfg.class_name in _NL2AGENT_TOOL_CLASS_NAMES:
+        try:
+            class_name = tool_cfg.class_name
+        except Exception as exc:
+            logger.warning(f"Failed to inspect tool class for NL2AGENT metadata: {exc}")
+            continue
+        if class_name in _NL2AGENT_TOOL_CLASS_NAMES:
             tool_cfg.metadata = {
                 "agent_id": agent_id,
                 "user_id": user_id,
