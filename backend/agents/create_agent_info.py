@@ -49,10 +49,10 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import (
     get_agent_prompt_template,
-    get_nl2agent_system_prompt_template,
+    get_nl2agent_system_prompt,
 )
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.context_utils import build_context_components
+from utils.context_utils import build_context_components, build_system_prompt_component
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -127,9 +127,8 @@ _CAPACITY_WARNING_LOCK = threading.Lock()
 def _load_nl2agent_system_prompt(language: str) -> Optional[str]:
     """Load the YAML-backed NL2AGENT system prompt, returning None on fallback."""
     try:
-        prompt_template = get_nl2agent_system_prompt_template(language)
-        system_prompt = prompt_template.get("system_prompt") if prompt_template else None
-        if isinstance(system_prompt, str) and system_prompt.strip():
+        system_prompt = get_nl2agent_system_prompt(language)
+        if system_prompt:
             return system_prompt
         logger.warning("NL2AGENT system prompt YAML has no system_prompt field.")
     except Exception as exc:
@@ -768,10 +767,6 @@ async def create_agent_config(
     nl2agent_system_prompt = (
         _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
     )
-    if nl2agent_system_prompt:
-        duty_prompt = nl2agent_system_prompt
-        constraint_prompt = ""
-        few_shots_prompt = ""
 
     # Get template content (use manager template if has any sub-agents)
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
@@ -1022,10 +1017,19 @@ async def create_agent_config(
     # prompt is supplied on this path.
     context_components = []
     if enable_context_manager:
-        context_components = build_context_components(
-            duty=duty_prompt,
-            constraint=constraint_prompt,
-            few_shots=few_shots_prompt,
+        if nl2agent_system_prompt:
+            context_components.append(
+                build_system_prompt_component(
+                    nl2agent_system_prompt,
+                    template_name="nl2agent_system_prompt",
+                    priority=100,
+                )
+            )
+
+        built_context_components = build_context_components(
+            duty=None if nl2agent_system_prompt else duty_prompt,
+            constraint=None if nl2agent_system_prompt else constraint_prompt,
+            few_shots=None if nl2agent_system_prompt else few_shots_prompt,
             app_name=app_name,
             app_description=app_description,
             user_id=user_id,
@@ -1040,6 +1044,10 @@ async def create_agent_config(
             knowledge_base_summary=knowledge_base_summary,
             kb_ids=kb_ids,
         )
+        if nl2agent_system_prompt:
+            context_components.extend(built_context_components)
+        else:
+            context_components = built_context_components
 
         logger.info(
             f"Agent {agent_id} context assembly: "

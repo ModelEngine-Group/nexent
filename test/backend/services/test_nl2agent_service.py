@@ -15,8 +15,23 @@ class _FixedUuid:
 def mock_nl2agent_seed_defaults(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "get_nl2agent_system_prompt_template",
-        MagicMock(return_value={"system_prompt": "NL2AGENT seed prompt"}),
+        "get_nl2agent_seed_config",
+        MagicMock(
+            return_value={
+                "agent_info": {
+                    "name": "nl2agent",
+                    "display_name": "Agent Builder",
+                    "description": "NL2AGENT public description",
+                    "business_description": "NL2AGENT business description",
+                },
+                "prompt_segments": {
+                    "duty_prompt": "NL2AGENT concise duty",
+                    "constraint_prompt": "NL2AGENT concise constraint",
+                    "few_shots_prompt": "",
+                },
+                "system_prompt": "NL2AGENT full runtime system prompt",
+            }
+        ),
     )
     monkeypatch.setattr(
         nl2agent_service,
@@ -28,10 +43,14 @@ def mock_nl2agent_seed_defaults(monkeypatch):
 def _seeded_nl2agent_info(agent_id: int = 101):
     return {
         "agent_id": agent_id,
+        "name": "nl2agent",
+        "display_name": "Agent Builder",
+        "description": "NL2AGENT public description",
+        "business_description": "NL2AGENT business description",
         "prompt_template_id": 0,
         "prompt_template_name": "system_default",
-        "duty_prompt": "NL2AGENT seed prompt",
-        "constraint_prompt": "",
+        "duty_prompt": "NL2AGENT concise duty",
+        "constraint_prompt": "NL2AGENT concise constraint",
         "few_shots_prompt": "",
         "verification_config": nl2agent_service._NL2AGENT_VERIFICATION_CONFIG,
         "model_ids": [],
@@ -155,10 +174,14 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
 
     assert result["nl2agent_agent_id"] == 101
     request = update_agent.call_args.kwargs["agent_info"]
+    assert request.display_name == "Agent Builder"
+    assert request.description == "NL2AGENT public description"
+    assert request.business_description == "NL2AGENT business description"
     assert request.prompt_template_id == 0
     assert request.prompt_template_name == "system_default"
-    assert request.duty_prompt == "NL2AGENT seed prompt"
-    assert request.constraint_prompt == ""
+    assert request.duty_prompt == "NL2AGENT concise duty"
+    assert request.duty_prompt != "NL2AGENT full runtime system prompt"
+    assert request.constraint_prompt == "NL2AGENT concise constraint"
     assert request.few_shots_prompt == ""
     update_agent.assert_called_once_with(
         agent_id=101,
@@ -576,10 +599,14 @@ def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatc
     assert result == 101
     payload = create_agent.call_args.args[0]
     assert payload["name"] == "nl2agent"
+    assert payload["display_name"] == "Agent Builder"
+    assert payload["description"] == "NL2AGENT public description"
+    assert payload["business_description"] == "NL2AGENT business description"
     assert payload["prompt_template_id"] == 0
     assert payload["prompt_template_name"] == "system_default"
-    assert payload["duty_prompt"] == "NL2AGENT seed prompt"
-    assert payload["constraint_prompt"] == ""
+    assert payload["duty_prompt"] == "NL2AGENT concise duty"
+    assert payload["duty_prompt"] != "NL2AGENT full runtime system prompt"
+    assert payload["constraint_prompt"] == "NL2AGENT concise constraint"
     assert payload["few_shots_prompt"] == ""
     assert payload["verification_config"]["enabled"] is True
     assert payload["verification_config"]["final_verification_enabled"] is True
@@ -597,6 +624,9 @@ def test_seed_nl2agent_default_agent_backfills_existing_seed_defaults(
             {
                 "agent_id": 101,
                 "name": "nl2agent",
+                "display_name": "Old Builder",
+                "description": "Old description",
+                "business_description": "Old business description",
                 "prompt_template_id": None,
                 "prompt_template_name": None,
                 "duty_prompt": "placeholder prompt",
@@ -632,10 +662,14 @@ def test_seed_nl2agent_default_agent_backfills_existing_seed_defaults(
     assert result == 101
     create_agent.assert_not_called()
     request = update_agent.call_args.kwargs["agent_info"]
+    assert request.display_name == "Agent Builder"
+    assert request.description == "NL2AGENT public description"
+    assert request.business_description == "NL2AGENT business description"
     assert request.prompt_template_id == 0
     assert request.prompt_template_name == "system_default"
-    assert request.duty_prompt == "NL2AGENT seed prompt"
-    assert request.constraint_prompt == ""
+    assert request.duty_prompt == "NL2AGENT concise duty"
+    assert request.duty_prompt != "NL2AGENT full runtime system prompt"
+    assert request.constraint_prompt == "NL2AGENT concise constraint"
     assert request.few_shots_prompt == ""
     assert request.verification_config["enabled"] is True
     assert request.verification_config["final_verification_enabled"] is True

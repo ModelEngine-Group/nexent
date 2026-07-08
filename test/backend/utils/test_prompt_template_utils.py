@@ -10,6 +10,8 @@ from utils.prompt_template_utils import (
     get_cluster_summary_reduce_prompt_template,
     get_skill_creation_simple_prompt_template,
     get_nl2agent_system_prompt_template,
+    get_nl2agent_system_prompt,
+    get_nl2agent_seed_config,
     get_prompt_template,
 )
 
@@ -180,6 +182,52 @@ class TestPromptTemplateUtils:
         assert mock_file.call_args[1]['encoding'] == 'utf-8'
         mock_yaml_load.assert_called_once()
         assert result == {"system_prompt": "builder"}
+
+    def test_get_nl2agent_system_prompt_returns_runtime_prompt(self, mocker):
+        """Test NL2AGENT runtime prompt extraction."""
+        mocker.patch(
+            'utils.prompt_template_utils.get_nl2agent_system_prompt_template',
+            return_value={"system_prompt": "  runtime builder prompt  "},
+        )
+
+        result = get_nl2agent_system_prompt(language='en')
+
+        assert result == "  runtime builder prompt  "
+
+    def test_get_nl2agent_seed_config_normalizes_metadata(self, mocker):
+        """Test NL2AGENT seed metadata extraction from the richer YAML shape."""
+        mocker.patch(
+            'utils.prompt_template_utils.get_nl2agent_system_prompt_template',
+            return_value={
+                "agent_info": {
+                    "name": "nl2agent",
+                    "display_name": " Agent Builder ",
+                    "description": "Builds agents",
+                    "ignored": "value",
+                },
+                "prompt_segments": {
+                    "duty_prompt": "Build agents",
+                    "constraint_prompt": "Confirm first",
+                    "few_shots_prompt": "   ",
+                },
+                "system_prompt": " Runtime prompt ",
+            },
+        )
+
+        result = get_nl2agent_seed_config(language='en')
+
+        assert result == {
+            "agent_info": {
+                "name": "nl2agent",
+                "display_name": "Agent Builder",
+                "description": "Builds agents",
+            },
+            "prompt_segments": {
+                "duty_prompt": "Build agents",
+                "constraint_prompt": "Confirm first",
+            },
+            "system_prompt": "Runtime prompt",
+        }
 
 
 class TestGetPromptTemplate:

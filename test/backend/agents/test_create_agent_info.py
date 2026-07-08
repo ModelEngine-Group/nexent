@@ -1794,6 +1794,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info._load_nl2agent_system_prompt') as mock_load_nl2agent_prompt, \
+                patch('backend.agents.create_agent_info.build_system_prompt_component') as mock_build_system_prompt_component, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
@@ -1806,6 +1807,12 @@ class TestCreateAgentConfig:
                     side_effect=lambda **kwargs: Mock(**kwargs),
                 ):
             mock_load_nl2agent_prompt.return_value = nl2agent_system_prompt
+            nl2agent_prompt_component = Mock(
+                component_type="system_prompt",
+                priority=100,
+                content=nl2agent_system_prompt,
+            )
+            mock_build_system_prompt_component.return_value = nl2agent_prompt_component
             mock_search_agent.return_value = {
                 "name": agent_name,
                 "description": "test description",
@@ -1837,6 +1844,8 @@ class TestCreateAgentConfig:
                 "prepare_templates": mock_prepare_templates,
                 "agent_config": mock_agent_config,
                 "load_nl2agent_prompt": mock_load_nl2agent_prompt,
+                "build_system_prompt_component": mock_build_system_prompt_component,
+                "nl2agent_prompt_component": nl2agent_prompt_component,
             }
 
     @pytest.mark.asyncio
@@ -1853,6 +1862,7 @@ class TestCreateAgentConfig:
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
         mocks["load_nl2agent_prompt"].assert_not_called()
+        mocks["build_system_prompt_component"].assert_not_called()
         assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == ""
         assert mocks["agent_config"].call_args.kwargs["context_components"] is components
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
@@ -1868,13 +1878,14 @@ class TestCreateAgentConfig:
 
         mocks["build_components"].assert_not_called()
         mocks["load_nl2agent_prompt"].assert_not_called()
+        mocks["build_system_prompt_component"].assert_not_called()
         assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
         assert mocks["agent_config"].call_args.kwargs["context_components"] == []
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_managed_nl2agent_uses_yaml_prompt_as_duty(self):
-        """Managed NL2AGENT should assemble components from the YAML system prompt."""
+    async def test_create_agent_config_managed_nl2agent_uses_yaml_prompt_component(self):
+        """Managed NL2AGENT should add the YAML system prompt as its own component."""
         components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=True,
@@ -1889,13 +1900,21 @@ class TestCreateAgentConfig:
         )
 
         mocks["load_nl2agent_prompt"].assert_called_once_with("zh")
+        mocks["build_system_prompt_component"].assert_called_once_with(
+            "YAML NL2AGENT prompt",
+            template_name="nl2agent_system_prompt",
+            priority=100,
+        )
         mocks["build_components"].assert_called_once()
         build_kwargs = mocks["build_components"].call_args.kwargs
-        assert build_kwargs["duty"] == "YAML NL2AGENT prompt"
-        assert build_kwargs["constraint"] == ""
-        assert build_kwargs["few_shots"] == ""
+        assert build_kwargs["duty"] is None
+        assert build_kwargs["constraint"] is None
+        assert build_kwargs["few_shots"] is None
         assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == ""
-        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
+        assert mocks["agent_config"].call_args.kwargs["context_components"] == [
+            mocks["nl2agent_prompt_component"],
+            *components,
+        ]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_legacy_nl2agent_uses_exact_yaml_prompt(self):

@@ -14,6 +14,17 @@ logger = logging.getLogger("prompt_template_utils")
 
 PROMPT_GENERATE_TEMPLATE_KEY_MAP = PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 PROMPT_GENERATE_TEMPLATE_KEYS = PROMPT_GENERATE_TEMPLATE_FIELDS
+NL2AGENT_AGENT_INFO_FIELDS = (
+    "name",
+    "display_name",
+    "description",
+    "business_description",
+)
+NL2AGENT_PROMPT_SEGMENT_FIELDS = (
+    "duty_prompt",
+    "constraint_prompt",
+    "few_shots_prompt",
+)
 
 
 def get_prompt_generate_template_keys() -> list[str]:
@@ -54,6 +65,23 @@ def merge_prompt_generate_templates(
                 merged[key] = value
 
     return merged
+
+
+def _normalize_string_fields(
+    section: Optional[Dict[str, Any]],
+    supported_fields: tuple[str, ...],
+) -> Dict[str, str]:
+    """Return stripped string values for the supported field names."""
+    normalized: Dict[str, str] = {}
+    if not isinstance(section, dict):
+        return normalized
+
+    for key in supported_fields:
+        value = section.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized[key] = value.strip()
+
+    return normalized
 
 
 def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> Dict[str, Any]:
@@ -199,6 +227,34 @@ def get_nl2agent_system_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[
         dict: Loaded NL2AGENT prompt template configuration
     """
     return get_prompt_template('nl2agent_system_prompt', language)
+
+
+def get_nl2agent_system_prompt(language: str = LANGUAGE["ZH"]) -> Optional[str]:
+    """Return the runtime NL2AGENT system prompt for the requested language."""
+    prompt_template = get_nl2agent_system_prompt_template(language)
+    system_prompt = prompt_template.get("system_prompt") if prompt_template else None
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        return system_prompt
+    return None
+
+
+def get_nl2agent_seed_config(language: str = LANGUAGE["EN"]) -> Dict[str, Any]:
+    """Return NL2AGENT DB seed fields extracted from the YAML prompt file."""
+    prompt_template = get_nl2agent_system_prompt_template(language)
+    system_prompt = prompt_template.get("system_prompt") if prompt_template else None
+    return {
+        "agent_info": _normalize_string_fields(
+            prompt_template.get("agent_info") if prompt_template else None,
+            NL2AGENT_AGENT_INFO_FIELDS,
+        ),
+        "prompt_segments": _normalize_string_fields(
+            prompt_template.get("prompt_segments") if prompt_template else None,
+            NL2AGENT_PROMPT_SEGMENT_FIELDS,
+        ),
+        "system_prompt": system_prompt.strip()
+        if isinstance(system_prompt, str) and system_prompt.strip()
+        else None,
+    }
 
 
 def get_generate_title_prompt_template(language: str = 'zh') -> Dict[str, Any]:

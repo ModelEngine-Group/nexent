@@ -58,7 +58,7 @@ from services.skill_service import (
 )
 from services.tool_configuration_service import list_all_tools
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_nl2agent_system_prompt_template
+from utils.prompt_template_utils import get_nl2agent_seed_config
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,28 @@ _NL2AGENT_SEED_PROMPT_FALLBACK = (
     "You are NL2AGENT, the Agent Builder. Help the user design and build "
     "a custom agent through multi-turn natural-language dialogue."
 )
+_NL2AGENT_AGENT_INFO_FALLBACK = {
+    "name": NL2AGENT_AGENT_NAME,
+    "display_name": "Agent Builder",
+    "description": (
+        "Conversational assistant that helps you design and build your own "
+        "custom agent through multi-turn natural-language dialogue."
+    ),
+    "business_description": (
+        "Conversational agent generator. Guides users through multi-turn "
+        "dialogue to define a custom agent, recommends local and web "
+        "resources, and finalizes a draft agent."
+    ),
+}
+_NL2AGENT_PROMPT_SEGMENTS_FALLBACK = {
+    "duty_prompt": _NL2AGENT_SEED_PROMPT_FALLBACK,
+    "constraint_prompt": (
+        "Always wait for explicit user confirmation before applying local "
+        "resources or finalizing the agent. Never make up tool or skill names. "
+        "Use the user's language."
+    ),
+    "few_shots_prompt": "",
+}
 
 _NL2AGENT_VERIFICATION_CONFIG = {
     "enabled": True,
@@ -100,19 +122,21 @@ def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
 
 
-def _load_nl2agent_seed_system_prompt() -> str:
-    """Load the stable prompt stored on the internal NL2AGENT agent row."""
+def _load_nl2agent_seed_fields() -> Dict[str, str]:
+    """Load user-facing NL2AGENT seed fields from the English YAML config."""
+    seed_fields = {
+        **_NL2AGENT_AGENT_INFO_FALLBACK,
+        **_NL2AGENT_PROMPT_SEGMENTS_FALLBACK,
+    }
     try:
-        prompt_template = get_nl2agent_system_prompt_template(LANGUAGE["EN"])
-        system_prompt = (
-            prompt_template.get("system_prompt") if prompt_template else None
-        )
-        if isinstance(system_prompt, str) and system_prompt.strip():
-            return system_prompt
+        seed_config = get_nl2agent_seed_config(LANGUAGE["EN"])
+        seed_fields.update(seed_config.get("agent_info") or {})
+        seed_fields.update(seed_config.get("prompt_segments") or {})
     except Exception as exc:
-        logger.warning(f"Failed to load NL2AGENT seed prompt template: {exc}")
+        logger.warning(f"Failed to load NL2AGENT seed config: {exc}")
 
-    return _NL2AGENT_SEED_PROMPT_FALLBACK
+    seed_fields["name"] = NL2AGENT_AGENT_NAME
+    return seed_fields
 
 
 def _normalize_model_ids(value: Any) -> List[int]:
@@ -167,11 +191,9 @@ def _get_available_llm_model_ids(tenant_id: str) -> List[int]:
 def _build_nl2agent_seed_defaults(tenant_id: str) -> Dict[str, Any]:
     model_ids = _get_available_llm_model_ids(tenant_id)
     defaults: Dict[str, Any] = {
+        **_load_nl2agent_seed_fields(),
         "prompt_template_id": SYSTEM_PROMPT_TEMPLATE_ID,
         "prompt_template_name": SYSTEM_PROMPT_TEMPLATE_NAME,
-        "duty_prompt": _load_nl2agent_seed_system_prompt(),
-        "constraint_prompt": "",
-        "few_shots_prompt": "",
         "verification_config": _NL2AGENT_VERIFICATION_CONFIG,
     }
     if model_ids:
@@ -192,6 +214,10 @@ def _ensure_nl2agent_seed_defaults(
     update_values: Dict[str, Any] = {}
 
     for field in (
+        "name",
+        "display_name",
+        "description",
+        "business_description",
         "prompt_template_id",
         "prompt_template_name",
         "duty_prompt",
@@ -937,17 +963,6 @@ def seed_nl2agent_default_agent(
 
     # 3. Create the NL2AGENT default agent.
     agent_payload = {
-        "name": NL2AGENT_AGENT_NAME,
-        "display_name": "Agent Builder",
-        "description": (
-            "Conversational assistant that helps you design and build your own "
-            "custom agent through multi-turn natural-language dialogue."
-        ),
-        "business_description": (
-            "Conversational agent generator. Guides users through multi-turn "
-            "dialogue to define a custom agent, recommends local and web "
-            "resources, and finalizes a draft agent."
-        ),
         "max_steps": 20,
         "enabled": True,
         "is_new": False,
