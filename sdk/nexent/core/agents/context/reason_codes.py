@@ -22,3 +22,9 @@ CONFIRMATION_REQUIRED = "confirmation_required"
 MINIMUM_FIDELITY_VIOLATION = "minimum_fidelity_violation"
 REDUCER_FAILED = "reducer_failed"
 REPRESENTATION_STALE = "representation_stale"
+
+# Policy validation reason codes
+POLICY_INVALID = "policy_invalid"
+POLICY_BUDGET_INVALID = "policy_budget_invalid"
+POLICY_DISABLED_MANDATORY = "policy_disabled_mandatory"
+POLICY_INVALID_REPRESENTATION = "policy_invalid_representation"
