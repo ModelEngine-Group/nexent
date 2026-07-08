@@ -33,6 +33,7 @@ _category_search = {
 _category_kb = {
     "dify_search": ["knowledge-base"], "datamate_search": ["knowledge-base"],
     "idata_search": ["knowledge-base"], "haotian_search": ["knowledge-base"],
+    "ragflow_search": ["knowledge-base"],
     "aidp_search": ["knowledge-base"],
 }
 _category_multimodal = {

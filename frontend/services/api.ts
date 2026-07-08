@@ -283,6 +283,9 @@ export const API_ENDPOINTS = {
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
   },
+  ragflow: {
+    datasets: `${API_BASE_URL}/ragflow/datasets`,
+  },
   idata: {
     knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,
     datasets: `${API_BASE_URL}/idata/datasets`,
