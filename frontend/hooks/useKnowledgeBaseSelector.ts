@@ -32,6 +32,7 @@ export function useKnowledgeBasesForToolConfig(
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "ragflow_search"
     | "aidp_search"
     | null = null,
   config?: {
@@ -109,6 +110,22 @@ export function useKnowledgeBasesForToolConfig(
           log.info("Dify knowledge bases fetched successfully:", kbs.length);
         } else {
           // No Dify config provided, return empty
+          kbs = [];
+        }
+      } else if (toolType === "ragflow_search") {
+        // For RAGFlow, fetch knowledge bases using provided config
+        if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+          try {
+            // Use RAGFlow /api/v1/datasets endpoint to list datasets
+            kbs = await knowledgeBaseService.getRagflowKnowledgeBases(
+              difyConfig.serverUrl,
+              difyConfig.apiKey
+            );
+          } catch (error: any) {
+            log.error("Failed to fetch RAGFlow knowledge bases:", error);
+            kbs = [];
+          }
+        } else {
           kbs = [];
         }
       } else if (toolType === "idata_search") {
@@ -204,6 +221,7 @@ export function usePrefetchKnowledgeBases() {
         | "datamate_search"
         | "idata_search"
         | "haotian_search"
+        | "ragflow_search"
         | "aidp_search"
         | null,
       difyConfig?: {
@@ -289,6 +307,21 @@ export function usePrefetchKnowledgeBases() {
               } catch (error: any) {
                 log.error("Failed to prefetch iData knowledge bases:", error);
                 // Show i18n error message to user
+                showErrorToUser(error, t);
+                kbs = [];
+              }
+            } else {
+              kbs = [];
+            }
+          } else if (toolType === "ragflow_search") {
+            if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+              try {
+                kbs = await knowledgeBaseService.getRagflowKnowledgeBases(
+                  difyConfig.serverUrl,
+                  difyConfig.apiKey
+                );
+              } catch (error: any) {
+                log.error("Failed to prefetch RAGFlow knowledge bases:", error);
                 showErrorToUser(error, t);
                 kbs = [];
               }
@@ -387,6 +420,15 @@ export function useSyncKnowledgeBases() {
                 config.apiKey,
                 config.userId,
                 config.knowledgeSpaceId
+              );
+            }
+            break;
+          case "ragflow_search":
+            // RAGFlow sync requires server URL and API key
+            if (config?.serverUrl && config?.apiKey) {
+              await knowledgeBaseService.getRagflowKnowledgeBases(
+                config.serverUrl,
+                config.apiKey
               );
             }
             break;

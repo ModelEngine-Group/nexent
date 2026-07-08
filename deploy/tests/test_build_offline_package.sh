@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TMP_DIR="${TMPDIR:-/tmp}/nexent-offline-package-test-$$"
 BIN_DIR="$TMP_DIR/bin"
 OUT_DIR="$TMP_DIR/out"
+export DEPLOYMENT_LANG=en
 
 mkdir -p "$BIN_DIR" "$OUT_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -75,14 +76,20 @@ assert_common_package_files() {
   [ -f "$package_dir/deploy/uninstall.sh" ] || fail "deploy/uninstall.sh should be packaged"
   [ -f "$package_dir/VERSION" ] || fail "root VERSION should be packaged"
   [ -f "$package_dir/deploy/env/.env.example" ] || fail "deploy/env/.env.example should be packaged"
+  [ -f "$package_dir/deploy/env/monitoring.env.example" ] || fail "deploy/env/monitoring.env.example should be packaged"
   [ -f "$package_dir/deploy/sql/init.sql" ] || fail "deploy/sql/init.sql should be packaged"
   [ -d "$package_dir/deploy/sql/migrations" ] || fail "deploy/sql/migrations should be packaged"
   [ -d "$package_dir/deploy/sql/supabase" ] || fail "deploy/sql/supabase should be packaged"
   [ -f "$package_dir/deploy/sql/supabase/webhooks.sql" ] || fail "deploy/sql/supabase/webhooks.sql should be packaged"
   [ ! -f "$package_dir/.env" ] || fail "root .env should not be packaged"
   [ ! -f "$package_dir/deploy/env/.env" ] || fail "deploy/env/.env should not be packaged"
+  [ ! -f "$package_dir/deploy/env/monitoring.env" ] || fail "generated deploy/env/monitoring.env should not be packaged"
   [ ! -f "$package_dir/deploy/docker/.env" ] || fail "deploy/docker/.env should not be packaged"
   [ ! -f "$package_dir/deploy/docker/.env.generated" ] || fail "deploy/docker/.env.generated should not be packaged"
+  if [ -d "$package_dir/deploy/docker" ]; then
+    [ ! -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env" ] || fail "generated monitoring.env should not be packaged"
+    [ ! -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env.example" ] || fail "monitoring.env.example should live under deploy/env"
+  fi
   [ ! -f "$package_dir/deploy/docker/deploy.options" ] || fail "deploy/docker/deploy.options should not be packaged"
 }
 
@@ -131,7 +138,7 @@ SH
 chmod +x "$deploy_wrapper_dir/load-images.sh"
 cat > "$deploy_wrapper_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'deploy:%s\n' "$*" >> "$DEPLOY_WRAPPER_LOG"
+printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/deploy/deploy.sh"
 
@@ -140,18 +147,31 @@ DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" do
 if grep -q '^load-images$' "$deploy_wrapper_log"; then
   fail "deploy.sh should not load images by default"
 fi
-grep -q '^deploy:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args without --load-images"
+grep -q '^deploy::docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args without --load-images"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [ "$first_line" = "load-images" ] || fail "deploy.sh --load-images should load images before deploy"
-[ "$second_line" = "deploy:docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+[ "$second_line" = "deploy::docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --defaults docker --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults before target should enable defaults mode"
+
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --defaults --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
 
 latest_package_dir="$OUT_DIR/latest"
 latest_pull_log="$TMP_DIR/latest-docker.log"
 : > "$latest_pull_log"
+
+output="$(bash "$PROJECT_ROOT/build.sh" --package --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
+echo "$output" | grep -q "=== DRY RUN MODE ===" || fail "build.sh --package should forward to offline package builder"
+echo "$output" | grep -q "Target: docker" || fail "build.sh --package should forward package arguments"
+echo "$output" | grep -q "nexent/nexent:v2.2.0" || fail "build.sh --package should render package image plan"
 
 PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
@@ -164,6 +184,41 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
+grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"$' "$latest_package_dir/deploy.sh" || fail "offline deploy.sh should reuse the root entrypoint with defaults mode enabled"
+offline_help="$(DEPLOYMENT_LANG=en bash "$latest_package_dir/deploy.sh" --help)"
+echo "$offline_help" | grep -q "deploys with saved configuration or built-in defaults" || fail "offline deploy help should explain default non-interactive mode"
+
+cat > "$latest_package_dir/load-images.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
+SH
+chmod +x "$latest_package_dir/load-images.sh"
+cat > "$latest_package_dir/deploy/deploy.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
+SH
+chmod +x "$latest_package_dir/deploy/deploy.sh"
+
+offline_deploy_log="$TMP_DIR/offline-deploy-wrapper.log"
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh should default to non-interactive defaults mode"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --config --foo bar
+grep -q '^deploy:tui:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and consume the flag"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --defaults --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --defaults should preserve defaults mode and consume the flag"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --load-images docker --foo bar
+first_line="$(sed -n '1p' "$offline_deploy_log")"
+second_line="$(sed -n '2p' "$offline_deploy_log")"
+[ "$first_line" = "load-images" ] || fail "offline deploy.sh --load-images should load images before deploy"
+[ "$second_line" = "deploy:defaults:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
+
 [ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
 ! grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should not be pulled"

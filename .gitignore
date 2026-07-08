@@ -20,7 +20,7 @@ docker/openssh-server
 docker/volumes/db/data
 docker/.env
 docker/.env.generated
-deploy/docker/assets/monitoring/monitoring.env
+deploy/env/monitoring.env
 docker/.run
 docker/deploy.options
 k8s/helm/deploy.options

@@ -1,5 +1,4 @@
 schemaVersion: "1"
-appVersion: "latest"
 
 # Default deployment: shared infrastructure plus Nexent core application.
 components:
@@ -21,7 +20,6 @@ monitoringProvider: "otlp"
 
 # Local development image example:
 # imageSource: "local-latest"
-# appVersion: "latest"
 
 # Mainland China registry mirror example:
 # imageSource: "mainland"
