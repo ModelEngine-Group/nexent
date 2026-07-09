@@ -17,7 +17,9 @@ import {
   Eye,
   Glasses,
   CircleOff,
+  AlertCircle,
 } from "lucide-react";
+import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 
@@ -58,7 +60,7 @@ const CONTAINER_HEIGHT_CLASS_MAP: Record<string, string> = {
 };
 
 const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
-  "56.8px": "h-[56.8px]",
+  "56.8px": "min-h-[56.8px]",
 };
 
 interface DocumentListProps {
@@ -253,6 +255,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     }));
     const [showDetail, setShowDetail] = React.useState(false);
     const [showChunk, setShowChunk] = React.useState(false);
+    const [nameStatus, setNameStatus] = useState<string>("available");
     const [summary, setSummary] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -545,60 +548,67 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const containerHeightClass =
       CONTAINER_HEIGHT_CLASS_MAP[containerHeight] ?? "h-full";
     const titleBarHeightClass =
-      TITLE_BAR_HEIGHT_CLASS_MAP[titleBarHeight] ?? "h-14";
+      TITLE_BAR_HEIGHT_CLASS_MAP[titleBarHeight] ?? "min-h-[56px]";
 
     return (
       <div
-        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm `}
+        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm overflow-hidden`}
       >
         {/* Title bar */}
         <div
-          className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center ${titleBarHeightClass}`}
+          className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-start ${titleBarHeightClass}`}
         >
           <div
-            className="flex items-center justify-between w-full"
+            className="flex items-start justify-between w-full"
             style={{ width: "100%" }}
           >
-            <div className="flex items-center" style={{ width: "100%" }}>
+            <div className="flex items-start flex-1 min-w-0 overflow-hidden">
               {isCreatingMode ? (
-                <div
-                  className="flex items-center flex-1"
-                  style={{ width: "100%" }}
-                >
-                  <Input
-                    value={knowledgeBaseName}
-                    onChange={(e) =>
-                      onNameChange && onNameChange(e.target.value)
-                    }
-                    placeholder={t("document.input.knowledgeBaseName")}
-                    className={`${LAYOUT.KB_TITLE_MARGIN} w-[240px] font-medium my-[2px]`}
-                    size="large"
-                    prefix={<span className="text-blue-600">📚</span>}
-                    autoFocus
-                    disabled={
-                      hasDocuments || isUploading || docState.isLoadingDocuments
-                    }
-                  />
-                  {/* Right-aligned container for dropdowns */}
+                <div className="flex flex-wrap items-start gap-3 w-full overflow-hidden">
+                  <div className="flex flex-col flex-1" style={{ minWidth: 120 }}>
+                    <Input
+                      value={knowledgeBaseName}
+                      onChange={(e) =>
+                        onNameChange && onNameChange(e.target.value)
+                      }
+                      placeholder={t("document.input.knowledgeBaseName")}
+                      className={`${LAYOUT.KB_TITLE_MARGIN} max-w-[240px] font-medium`}
+                      size="large"
+                      prefix={<span className="text-blue-600">📚</span>}
+                      status={
+                        isCreatingMode &&
+                        (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                          nameStatus === NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT)
+                          ? "error"
+                          : undefined
+                      }
+                      autoFocus
+                      disabled={
+                        hasDocuments || isUploading || docState.isLoadingDocuments
+                      }
+                    />
+                    {isCreatingMode &&
+                      (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                        nameStatus === NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
+                        <div className="flex items-center gap-1 text-red-500 text-s whitespace-nowrap mt-0.5 ml-3">
+                          <AlertCircle size={14} />
+                          <span>
+                            {t("tenantResources.knowledgeBase.nameExists")}
+                          </span>
+                        </div>
+                      )}
+                  </div>
+                  {/* Right dropdowns for create mode */}
                   <div
-                    className="flex items-center ml-auto justify-end"
-                    style={{
-                      gap: "12px",
-                      justifyContent: "flex-end",
-                      alignItems: "flex-end",
-                      width: "100%",
-                    }}
+                    className="flex items-center justify-end flex-wrap"
+                    style={{ gap: "12px" }}
                   >
                     {/* Embedding model selection - first position in create mode */}
                     {isCreatingMode && onEmbeddingModelChange && (
                       <Select
                         value={selectedEmbeddingModel}
                         onChange={onEmbeddingModelChange}
-                        style={{
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
+                        style={{ flex: "1 1 200px", minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={
                           t("knowledgeBase.create.embeddingModelPlaceholder") ||
                           "Select embedding model"
@@ -636,11 +646,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         mode="multiple"
                         value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
-                        style={{
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
+                        style={{ flex: "1 1 200px", minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t(
                           "knowledgeBase.create.permission.groupPlaceholder"
                         )}
@@ -655,11 +661,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       <Select
                         value={ingroupPermission}
                         onChange={onIngroupPermissionChange}
-                        style={{
-                          width: 160,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
+                        style={{ flex: "1 1 160px", minWidth: 160, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t(
                           "knowledgeBase.ingroup.permission.DEFAULT"
                         )}
@@ -671,7 +673,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         value={preserveSourceFile}
                         onChange={onPreserveSourceFileChange}
                         style={{
-                          width: 200,
+                          flex: "1 1 200px",
+                          minWidth: 200,
                           justifyContent: "center",
                           alignItems: "flex-end",
                         }}
@@ -692,7 +695,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               ) : (
                 <h3
-                  className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center`}
+                  className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center truncate`}
                 >
                   {knowledgeBaseName}
                 </h3>
@@ -705,7 +708,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             </div>
             {/* Right: overview and detail buttons */}
             {!isCreatingMode && !isDataMate && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-shrink-0 ml-3">
                 <Button
                   type="primary"
                   icon={<BookText size={16} />}
@@ -1107,6 +1110,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               indexName={knowledgeBaseId || knowledgeBaseName}
               newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
               modelMismatch={modelMismatch}
+              onNameStatusChange={setNameStatus}
             />
           ))}
 
