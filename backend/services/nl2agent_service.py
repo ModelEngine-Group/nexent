@@ -597,13 +597,18 @@ async def search_web_mcps(
     def append_registry_candidates(registry_data: Optional[Dict[str, Any]]) -> int:
         added = 0
         for srv in (registry_data or {}).get("servers", []) or []:
-            scoring_id = (
-                f"registry:{srv.get('id') or srv.get('name') or len(candidates)}"
+            # The MCP Registry nests the server fields under a "server" object
+            # (with provenance under "_meta"). Tolerate a flat shape as a
+            # defensive fallback so a proxied/legacy payload still parses.
+            server_obj = (
+                srv.get("server") if isinstance(srv.get("server"), dict) else srv
             )
+            name = server_obj.get("name") or ""
+            scoring_id = f"registry:{name or len(candidates)}"
             candidates.append({
                 "_scoring_id": scoring_id,
-                "name": srv.get("name") or srv.get("id") or "",
-                "description": (srv.get("description") or "")[:400],
+                "name": name,
+                "description": (server_obj.get("description") or "")[:400],
                 "source": "registry",
                 "url": "",  # registry entries are resolved at install time
                 "transport": "registry",

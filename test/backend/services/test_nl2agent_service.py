@@ -1,5 +1,6 @@
 """Unit tests for NL2AGENT service orchestration."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -301,8 +302,16 @@ async def test_search_web_mcps_returns_unranked_candidates_when_scoring_fails(mo
         return_value={
             "servers": [
                 {
-                    "name": "chart-mcp",
-                    "description": "Generate charts",
+                    "server": {
+                        "name": "chart-mcp",
+                        "description": "Generate charts",
+                        "version": "1.0.0",
+                    },
+                    "_meta": {
+                        "io.modelcontextprotocol.registry/official": {
+                            "status": "active",
+                        }
+                    },
                 }
             ]
         }
@@ -390,6 +399,97 @@ async def test_search_web_mcps_returns_unranked_candidates_when_scoring_ids_do_n
         }
     ]
     assert "_scoring_id" not in result[0]
+
+
+@pytest.mark.asyncio
+async def test_search_web_mcps_parses_nested_registry_server_payload(monkeypatch):
+    # The official MCP Registry returns each entry with its fields nested under
+    # a "server" object. Parsing must reach into it, otherwise name/description
+    # come back empty and every candidate scores 0 (the reported bug).
+    registry_search = AsyncMock(
+        return_value={
+            "servers": [
+                {
+                    "server": {
+                        "name": "io.github.acme/pptx",
+                        "description": "Create PowerPoint decks",
+                        "version": "1.2.0",
+                    },
+                    "_meta": {
+                        "io.modelcontextprotocol.registry/official": {
+                            "serverId": "sid-1",
+                            "status": "active",
+                        }
+                    },
+                },
+                {
+                    "server": {
+                        "name": "io.github.acme/charts",
+                        "description": "Render charts",
+                    },
+                },
+            ]
+        }
+    )
+    community_search = AsyncMock(return_value={"items": []})
+
+    monkeypatch.setattr(
+        nl2agent_service, "list_registry_mcp_services", registry_search
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "list_community_mcp_services", community_search
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "call_llm_for_system_prompt",
+        MagicMock(
+            return_value=json.dumps(
+                [
+                    {
+                        "mcp_id": "registry:io.github.acme/pptx",
+                        "score": 9,
+                        "reason": "direct match",
+                    },
+                    {
+                        "mcp_id": "registry:io.github.acme/charts",
+                        "score": 3,
+                        "reason": "loosely related",
+                    },
+                ]
+            )
+        ),
+    )
+
+    result = await nl2agent_service.search_web_mcps(
+        query="python-pptx",
+        tenant_id="tenant_1",
+        model_id=9,
+    )
+
+    # Nested registry fields are populated, not empty, and ranked by score.
+    assert result == [
+        {
+            "name": "io.github.acme/pptx",
+            "description": "Create PowerPoint decks",
+            "source": "registry",
+            "url": "",
+            "transport": "registry",
+            "tools_summary": "",
+            "score": 9,
+            "reason": "direct match",
+        },
+        {
+            "name": "io.github.acme/charts",
+            "description": "Render charts",
+            "source": "registry",
+            "url": "",
+            "transport": "registry",
+            "tools_summary": "",
+            "score": 3,
+            "reason": "loosely related",
+        },
+    ]
+    assert all("_scoring_id" not in item for item in result)
 
 
 @pytest.mark.asyncio
