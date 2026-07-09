@@ -112,6 +112,19 @@ export default function SkillDraftPanel({
     );
   };
 
+  const handleFileRowKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    path: string
+  ) => {
+    if (
+      event.target === event.currentTarget &&
+      (event.key === "Enter" || event.key === " ")
+    ) {
+      event.preventDefault();
+      setActiveSkillTab(path);
+    }
+  };
+
   const renderFileName = (tab: SkillFileContent, displayName: string) => {
     if (editingTabKey !== tab.path) {
       return <span className="min-w-0 flex-1 truncate">{displayName}</span>;
@@ -302,12 +315,15 @@ export default function SkillDraftPanel({
                 .map((tab) => (
                   <div
                     key={tab.path}
+                    role="button"
+                    tabIndex={0}
                     className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs transition-colors ${
                       activeSkillTab === tab.path
                         ? "bg-blue-50 text-blue-700"
                         : "text-slate-600 hover:bg-slate-100"
                     }`}
                     onClick={() => setActiveSkillTab(tab.path)}
+                    onKeyDown={(event) => handleFileRowKeyDown(event, tab.path)}
                   >
                     <FileText size={15} className="shrink-0" />
                     {renderFileName(tab, tab.path)}
@@ -333,12 +349,17 @@ export default function SkillDraftPanel({
                     .map((tab) => (
                       <div
                         key={tab.path}
+                        role="button"
+                        tabIndex={0}
                         className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg pl-7 pr-2 text-xs transition-colors ${
                           activeSkillTab === tab.path
                             ? "bg-blue-50 text-blue-700"
                             : "text-slate-600 hover:bg-slate-100"
                         }`}
                         onClick={() => setActiveSkillTab(tab.path)}
+                        onKeyDown={(event) =>
+                          handleFileRowKeyDown(event, tab.path)
+                        }
                       >
                         <FileText size={15} className="shrink-0" />
                         {renderFileName(

@@ -842,14 +842,9 @@ export default function SkillBuildModal({
             </div>
           </Spin>
 
-          <div
+          <label
+            htmlFor="skill-upload-input"
             className="flex flex-1 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-6 py-10 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/50"
-            onClick={() => {
-              const input = document.getElementById(
-                "skill-upload-input"
-              ) as HTMLInputElement;
-              input?.click();
-            }}
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -882,7 +877,7 @@ export default function SkillBuildModal({
               className="hidden"
               onChange={(e) => handleFileSelection(e.target.files)}
             />
-          </div>
+          </label>
 
           {uploadFile ? (
             <div className="rounded-lg border border-gray-200 bg-white">

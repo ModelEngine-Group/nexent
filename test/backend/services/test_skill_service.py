@@ -428,15 +428,63 @@ class TestParamsDictToStorable:
 class TestLocalSkillConfigYamlPath:
     """Test _local_skill_config_yaml_path function."""
 
-    def test_basic_path(self):
+    def test_basic_path(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "/skills",
+        )
         result = _local_skill_config_yaml_path("my_skill", "/skills")
-        result_normalized = result.replace("\\", "/")
-        assert result_normalized == "/skills/my_skill/config/config.yaml"
+        assert result == os.path.realpath(
+            os.path.join("/skills", "my_skill", "config", "config.yaml")
+        )
 
-    def test_with_subdir(self):
+    def test_with_subdir(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "/var/lib/skills",
+        )
         result = _local_skill_config_yaml_path("test-skill", "/var/lib/skills")
-        result_normalized = result.replace("\\", "/")
-        assert result_normalized == "/var/lib/skills/test-skill/config/config.yaml"
+        assert result == os.path.realpath(
+            os.path.join(
+                "/var/lib/skills",
+                "test-skill",
+                "config",
+                "config.yaml",
+            )
+        )
+
+    @pytest.mark.parametrize(
+        "unsafe_name",
+        [
+            "../outside",
+            r"..\outside",
+            f"{os.sep}outside",
+            f"C:{os.sep}outside",
+        ],
+    )
+    def test_rejects_unsafe_skill_name(self, mocker, unsafe_name):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "/skills",
+        )
+
+        with pytest.raises(SkillException, match="Invalid skill name"):
+            _local_skill_config_yaml_path(unsafe_name, "/skills")
+
+    def test_rejects_local_directory_outside_configured_root(
+        self,
+        mocker,
+        tmp_path,
+    ):
+        allowed_root = tmp_path / "allowed"
+        outside_root = tmp_path / "outside"
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(allowed_root),
+        )
+
+        with pytest.raises(SkillException, match="Unsafe local skills directory"):
+            _local_skill_config_yaml_path("skill", str(outside_root))
 
 
 # ===== SkillService Tests =====
@@ -631,6 +679,7 @@ class TestSkillServiceCreateSkillFromFile:
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "md_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -653,6 +702,7 @@ description: A MD skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "str_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -675,6 +725,7 @@ description: A string skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "bio_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -697,6 +748,7 @@ description: A BytesIO skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "explicit_md"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -4858,6 +4910,10 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         (tmp_path / "Skill A").mkdir()
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
 
         mocker.patch(
             "backend.services.skill_service.skill_db.get_skill_by_id",
@@ -4894,46 +4950,3 @@ class TestSkillServiceUpdateById:
         )
 
         service.skill_manager.delete_skill.assert_called_once_with("Skill A")
-
-    @pytest.mark.parametrize(
-        "unsafe_name",
-        [
-            "../outside",
-            r"..\outside",
-            "/tmp/outside",
-            r"C:\tmp\outside",
-        ],
-    )
-    def test_rejects_unsafe_local_skill_name_before_update(
-        self,
-        mocker,
-        tmp_path,
-        unsafe_name,
-    ):
-        service = SkillService(tenant_id="tenant-1")
-        service.skill_manager = MagicMock()
-        service.skill_manager.local_skills_dir = str(tmp_path)
-        mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
-            return_value={
-                "skill_id": 1,
-                "name": "Skill A",
-                "created_by": "user-1",
-            },
-        )
-        update_skill = mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
-            create=True,
-        )
-
-        with pytest.raises(
-            skill_service.SkillException,
-            match="Invalid skill name",
-        ):
-            service.update_skill_by_id(
-                1,
-                {"name": unsafe_name},
-                user_id="user-1",
-            )
-
-        update_skill.assert_not_called()

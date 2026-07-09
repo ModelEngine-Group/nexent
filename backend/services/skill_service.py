@@ -13,7 +13,6 @@ import uuid
 import zipfile
 import re
 import threading
-from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
@@ -759,37 +758,9 @@ def _get_skill_inputs_from_zip(
     return inputs
 
 
-def _safe_local_skill_path(
-    local_skills_dir: str,
-    skill_name: str,
-    *parts: str,
-) -> Path:
-    """Resolve a path under one local skill directory without allowing traversal."""
-    name = str(skill_name or "").strip()
-    safe_name = os.path.basename(name)
-    if (
-        not name
-        or name in {".", ".."}
-        or safe_name != name
-        or PurePosixPath(name).is_absolute()
-        or PureWindowsPath(name).is_absolute()
-        or PurePosixPath(name).name != name
-        or PureWindowsPath(name).name != name
-    ):
-        raise SkillException("Invalid skill name for local file access")
-
-    root = Path(local_skills_dir).resolve()
-    candidate = (root / safe_name / Path(*parts)).resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise SkillException("Unsafe local skill path") from exc
-    return candidate
-
-
-def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> Path:
+def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> str:
     """Absolute path to <local_skills_dir>/<skill_name>/config/config.yaml."""
-    return _safe_local_skill_path(
+    return _resolve_local_skill_path(
         local_skills_dir,
         skill_name,
         "config",
@@ -797,14 +768,53 @@ def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> Pat
     )
 
 
-def _local_skill_schema_yaml_path(skill_name: str, local_skills_dir: str) -> Path:
+def _local_skill_schema_yaml_path(skill_name: str, local_skills_dir: str) -> str:
     """Absolute path to <local_skills_dir>/<skill_name>/config/schema.yaml."""
-    return _safe_local_skill_path(
+    return _resolve_local_skill_path(
         local_skills_dir,
         skill_name,
         "config",
         "schema.yaml",
     )
+
+
+def _resolve_local_skill_path(
+    local_skills_dir: str,
+    skill_name: str,
+    *parts: str,
+) -> str:
+    """Resolve a path below the configured skills root and one skill directory."""
+    name = str(skill_name or "").strip()
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+        or os.path.basename(name) != name
+    ):
+        raise SkillException("Invalid skill name for local file access")
+
+    allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
+    local_root = os.path.realpath(local_skills_dir)
+    if (
+        local_root != allowed_root
+        and not local_root.startswith(allowed_root + os.sep)
+    ):
+        raise SkillException("Unsafe local skills directory")
+
+    candidate = os.path.realpath(os.path.join(local_root, name, *parts))
+    if (
+        candidate != allowed_root
+        and not candidate.startswith(allowed_root + os.sep)
+    ):
+        raise SkillException("Unsafe local skill path")
+    if (
+        candidate != local_root
+        and not candidate.startswith(local_root + os.sep)
+    ):
+        raise SkillException("Unsafe local skill path")
+    return candidate
 
 
 def _write_skill_params_to_local_config_yaml(
@@ -817,11 +827,11 @@ def _write_skill_params_to_local_config_yaml(
 
     if not local_skills_dir:
         return
-    config_dir = _safe_local_skill_path(local_skills_dir, skill_name, "config")
-    config_dir.mkdir(parents=True, exist_ok=True)
     path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
+    config_dir = os.path.dirname(path)
+    os.makedirs(config_dir, exist_ok=True)
     text = params_dict_to_roundtrip_yaml_text(params)
-    with path.open("w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     logger.info("Wrote skill params to %s", path)
 
@@ -831,8 +841,8 @@ def _remove_local_skill_config_yaml(skill_name: str, local_skills_dir: str) -> N
     if not local_skills_dir:
         return
     path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
-    if path.is_file():
-        path.unlink()
+    if os.path.isfile(path):
+        os.remove(path)
         logger.info("Removed %s (params cleared in DB)", path)
 
 
@@ -1009,8 +1019,10 @@ class SkillService:
 
         # Check if skill directory already exists locally
         resolved = self._resolve_local_skills_dir_for_overlay()
-        if resolved and os.path.exists(os.path.join(resolved, skill_name)):
-            raise SkillException(f"Skill '{skill_name}' already exists locally")
+        if resolved:
+            local_skill_dir = _resolve_local_skill_path(resolved, skill_name)
+            if os.path.exists(local_skill_dir):
+                raise SkillException(f"Skill '{skill_name}' already exists locally")
 
         # Set created_by and updated_by if user_id is provided
         if user_id:
@@ -1112,6 +1124,10 @@ class SkillService:
         name = skill_name or skill_data.get("name")
         if not name:
             raise SkillException("Skill name is required")
+        _resolve_local_skill_path(
+            self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH,
+            name,
+        )
 
         # Check if skill already exists in database
         existing = skill_db.get_skill_by_name(name, tenant_id)
@@ -1207,6 +1223,10 @@ class SkillService:
         name = skill_name or detected_skill_name
         if not name:
             raise SkillException("Skill name is required")
+        _resolve_local_skill_path(
+            self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH,
+            name,
+        )
 
         # Check if skill already exists in database
         existing = skill_db.get_skill_by_name(name, tenant_id)
@@ -1671,9 +1691,11 @@ class SkillService:
                 raise SkillException(f"Skill not found: {skill_id}")
             if not user_id or existing.get("created_by") != user_id:
                 raise ForbiddenError("Not authorized to update this skill")
+
+            local_dir = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
             if "name" in skill_data:
-                _safe_local_skill_path(
-                    self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH,
+                _resolve_local_skill_path(
+                    local_dir,
                     str(skill_data["name"] or ""),
                 )
 
@@ -1684,19 +1706,18 @@ class SkillService:
                 updated_by=user_id or None,
             )
 
-            local_dir = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
-            skill_id_directory = _safe_local_skill_path(
+            persisted_skill_id = int(existing["skill_id"])
+            skill_id_directory = _resolve_local_skill_path(
                 local_dir,
-                f"skill_{skill_id}",
+                f"skill_{persisted_skill_id}",
             )
             local_skill_name = (
-                f"skill_{skill_id}"
-                if skill_id_directory.is_dir()
+                f"skill_{persisted_skill_id}"
+                if os.path.isdir(skill_id_directory)
                 else str(result.get("name") or existing.get("name") or "")
             )
             if not local_skill_name:
                 return self._enrich_configs_from_yaml(result)
-            _safe_local_skill_path(local_dir, local_skill_name)
 
             if local_dir and "config_values" in skill_data:
                 try:
