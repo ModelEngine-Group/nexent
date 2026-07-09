@@ -16,7 +16,13 @@ logger = logging.getLogger("haotian_search_tool")
 
 
 class HaotianSearchTool(Tool):
-    """Haotian external knowledge base search tool."""
+    """Haotian external knowledge base search tool.
+
+    DEPRECATED: Use ExternalKnowledgeSearchTool with a Haotian adapter instead.
+    Register a Haotian adapter container via POST /api/v1/external-kb/adapters,
+    then use ExternalKnowledgeSearchTool with the returned adapter_id.
+    This class is retained for backward compatibility only.
+    """
 
     name = "haotian_search"
     description = (

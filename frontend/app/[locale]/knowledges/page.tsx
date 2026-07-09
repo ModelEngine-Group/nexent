@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import log from "@/lib/logger";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
+import unifiedKBService from "@/services/unifiedKBService";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
 
@@ -35,7 +35,9 @@ export default function KnowledgesContent() {
 
     const loadKnowledgeBaseList = async () => {
       try {
-        await knowledgeBaseService.getKnowledgeBases(true);
+        // Cache-warm: hit the unified dispatcher so subsequent list operations
+        // go through the LocalKBAdapter path. Return value is intentionally unused.
+        await unifiedKBService.listAllKnowledgeBases();
       } catch (error) {
         log.error("Failed to load knowledge base list:", error);
       }

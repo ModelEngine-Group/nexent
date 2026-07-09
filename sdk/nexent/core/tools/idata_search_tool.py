@@ -17,7 +17,13 @@ logger = logging.getLogger("idata_search_tool")
 
 
 class IdataSearchTool(Tool):
-    """iData knowledge base search tool"""
+    """iData knowledge base search tool.
+
+    DEPRECATED: Use ExternalKnowledgeSearchTool with an iData adapter instead.
+    Register an iData adapter container via POST /api/v1/external-kb/adapters,
+    then use ExternalKnowledgeSearchTool with the returned adapter_id.
+    This class is retained for backward compatibility only.
+    """
 
     name = "idata_search"
     description = (

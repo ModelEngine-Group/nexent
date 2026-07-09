@@ -240,6 +240,9 @@ NEXENT_MCP_DOCKER_IMAGE = os.getenv(
 ENABLE_UPLOAD_IMAGE = os.getenv(
     "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 ENABLE_JIUWEN_SDK = os.getenv("NEXENT_ENABLE_JIUWEN_SDK", "true").lower() == "true"
+# When True, the standard KB adapter routes (/api/v1/external-kb/*) are preferred.
+# Legacy routes (/indices/*, /nb/v1/knowledge/*) remain available but return Deprecation headers.
+USE_STANDARD_KB_ROUTES = os.getenv("USE_STANDARD_KB_ROUTES", "true").lower() == "true"
 
 
 # Celery Configuration
@@ -485,6 +488,31 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 IS_DEPLOYED_BY_KUBERNETES = os.getenv(
     "IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
+
+# External KB Adapter Host Configuration
+# Each platform's adapter host:port reachable inside the Docker/K8s network.
+# If empty, the platform is treated as not deployed.
+EXTERNAL_KB_DIFY_HOST = os.getenv("EXTERNAL_KB_DIFY_HOST", "")
+EXTERNAL_KB_DATAMATE_HOST = os.getenv("EXTERNAL_KB_DATAMATE_HOST", "")
+EXTERNAL_KB_RAGFLOW_HOST = os.getenv("EXTERNAL_KB_RAGFLOW_HOST", "")
+EXTERNAL_KB_AIDP_HOST = os.getenv("EXTERNAL_KB_AIDP_HOST", "")
+EXTERNAL_KB_CUSTOM_HOST = os.getenv("EXTERNAL_KB_CUSTOM_HOST", "")
+
+
+def get_external_kb_host(platform: str) -> str:
+    """Return the configured host for a given platform, or empty string if not configured."""
+    platform_lower = platform.lower()
+    if platform_lower == "dify":
+        return EXTERNAL_KB_DIFY_HOST
+    if platform_lower == "datamate":
+        return EXTERNAL_KB_DATAMATE_HOST
+    if platform_lower == "ragflow":
+        return EXTERNAL_KB_RAGFLOW_HOST
+    if platform_lower == "aidp":
+        return EXTERNAL_KB_AIDP_HOST
+    if platform_lower == "custom":
+        return EXTERNAL_KB_CUSTOM_HOST
+    return ""
 
 # Northbound API public base URL (used for A2A agent cards and external file proxy links)
 NORTHBOUND_EXTERNAL_URL = os.getenv(

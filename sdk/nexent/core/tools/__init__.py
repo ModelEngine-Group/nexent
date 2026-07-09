@@ -27,6 +27,7 @@ from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .external_kb_search_tool import ExternalKnowledgeSearchTool
 
 __all__ = [
     "MySqlTool",
@@ -60,4 +61,5 @@ __all__ = [
     "read_skill_config",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "ExternalKnowledgeSearchTool",
 ]

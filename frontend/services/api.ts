@@ -539,6 +539,85 @@ export const API_ENDPOINTS = {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
+  // ---- V4 standard knowledge base API (POST /api/v1/...) ----
+  standardKb: {
+    health: `${API_BASE_URL}/api/v1/health`,
+    capabilities: `${API_BASE_URL}/api/v1/capabilities`,
+    listKnowledgeBases: `${API_BASE_URL}/api/v1/knowledge-bases`,
+    createKnowledgeBase: `${API_BASE_URL}/api/v1/knowledge-bases`,
+    knowledgeBaseDetail: (kbId: string) =>
+      `${API_BASE_URL}/api/v1/knowledge-bases/${kbId}`,
+    listDocuments: (kbId: string) =>
+      `${API_BASE_URL}/api/v1/knowledge-bases/${kbId}/documents`,
+    uploadDocuments: (kbId: string) =>
+      `${API_BASE_URL}/api/v1/knowledge-bases/${kbId}/documents`,
+    documentStatus: (kbId: string, documentId: string) =>
+      `${API_BASE_URL}/api/v1/knowledge-bases/${kbId}/documents/${documentId}/status`,
+    downloadUrl: (kbId: string, documentId: string) =>
+      `${API_BASE_URL}/api/v1/knowledge-bases/${kbId}/documents/${documentId}/download-url`,
+    retrieve: `${API_BASE_URL}/api/v1/retrieve`,
+    registerExternalAdapter: `${API_BASE_URL}/api/v1/external-kb/adapters`,
+    discoverAdapters: `${API_BASE_URL}/api/v1/external-kb/adapters/discover`,
+    listExternalAdapters: `${API_BASE_URL}/api/v1/external-kb/adapters`,
+    deleteExternalAdapter: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}`,
+    listExternalAdapterKnowledgeBases: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases`,
+    createExternalAdapterKnowledgeBase: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases`,
+    getExternalAdapterKnowledgeBase: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}`,
+    updateExternalAdapterKnowledgeBase: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}`,
+    deleteExternalAdapterKnowledgeBase: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}`,
+    listExternalAdapterDocuments: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}/documents`,
+    uploadExternalAdapterDocuments: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}/documents`,
+    deleteExternalAdapterDocument: (adapterId: number, kbId: string, docId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}/documents/${docId}`,
+    getExternalAdapterDocumentStatus: (adapterId: number, kbId: string, docId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}/documents/${docId}/status`,
+    getExternalAdapterDocumentDownloadUrl: (adapterId: number, kbId: string, docId: string) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/knowledge-bases/${kbId}/documents/${docId}/download-url`,
+    retrieveFromExternalAdapter: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/external-kb/adapters/${adapterId}/retrieve`,
+  },
+  // ---- Unified KB API (/api/v1/kb/..., successor to standardKb) ----
+  // Single entry point for ALL knowledge bases (local + external) via adapter dispatcher.
+  // Local KB is auto-provisioned as a "local" adapter, so the same endpoints handle
+  // both ES-backed and external (Dify/AIDP/...) KBs.
+  unifiedKb: {
+    // Adapter management
+    adapters: `${API_BASE_URL}/api/v1/kb/adapters`,
+    adapter: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}`,
+    adapterHealth: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/health`,
+    adapterCapabilities: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/capabilities`,
+    // KB CRUD
+    knowledgeBases: (adapterId: number) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases`,
+    knowledgeBase: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases/${encodeURIComponent(kbId)}`,
+    // Document management
+    documents: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases/${encodeURIComponent(kbId)}/documents`,
+    document: (adapterId: number, kbId: string, docId: string) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(docId)}`,
+    documentStatus: (adapterId: number, kbId: string, docId: string) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(docId)}/status`,
+    documentDownloadUrl: (adapterId: number, kbId: string, docId: string) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(docId)}/download-url`,
+    // Retrieval
+    retrieve: (adapterId: number, kbId: string) =>
+      `${API_BASE_URL}/api/v1/kb/adapters/${adapterId}/knowledge-bases/${encodeURIComponent(kbId)}/retrieve`,
+    retrieveAll: `${API_BASE_URL}/api/v1/kb/retrieve-all`,
+    // Aggregated list (cross-adapter)
+    allKnowledgeBases: `${API_BASE_URL}/api/v1/kb/knowledge-bases/all`,
+  },
 };
 
 // Common error handling

@@ -9,8 +9,41 @@ from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
+# Save the original modules that this test will modify
+original_modules = {}
+for mod_name in [
+    "sdk", "sdk.nexent", "sdk.nexent.core", "sdk.nexent.core.tools",
+    "sdk.nexent.core.utils", "sdk.nexent.core.models", "sdk.nexent.vector_database",
+    "sdk.nexent.core.utils.observer", "sdk.nexent.core.utils.tools_common_message",
+    "sdk.nexent.core.utils.constants",
+    "smolagents", "smolagents.tools", "smolagents.memory", "smolagents.models"
+]:
+    original_modules[mod_name] = sys.modules.get(mod_name)
+
+class MockModule(types.ModuleType):
+    """A module that automatically creates sub-modules on attribute access."""
+    
+    _dynamically_added = []
+    
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(f"module {self.__name__!r} has no attribute {name!r}")
+        # Create a sub-module
+        sub_name = f"{self.__name__}.{name}"
+        if sub_name not in sys.modules:
+            sub_mod = MockModule(sub_name)
+            setattr(self, name, sub_mod)
+            sys.modules[sub_name] = sub_mod
+            MockModule._dynamically_added.append(sub_name)
+        else:
+            sub_mod = sys.modules[sub_name]
+            if name not in self.__dict__:
+                setattr(self, name, sub_mod)
+        return sub_mod
+
+
 def _pkg(name, path):
-    mod = types.ModuleType(name)
+    mod = MockModule(name)
     mod.__path__ = [str(path)]
     sys.modules.setdefault(name, mod)
     return mod
@@ -117,6 +150,40 @@ vector_pkg.base = vector_base_mod
 
 smolagents_mod = types.ModuleType("smolagents")
 smolagents_tools_mod = types.ModuleType("smolagents.tools")
+smolagents_memory_mod = types.ModuleType("smolagents.memory")
+smolagents_models_mod = types.ModuleType("smolagents.models")
+
+
+# Mock classes for smolagents.memory
+class ActionStep:
+    pass
+
+class AgentMemory:
+    pass
+
+class MemoryStep:
+    pass
+
+smolagents_memory_mod.ActionStep = ActionStep
+smolagents_memory_mod.AgentMemory = AgentMemory
+smolagents_memory_mod.MemoryStep = MemoryStep
+
+
+# Mock classes for smolagents.models
+class ChatMessage:
+    pass
+
+class OpenAIServerModel:
+    pass
+
+class MessageRole:
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+smolagents_models_mod.ChatMessage = ChatMessage
+smolagents_models_mod.OpenAIServerModel = OpenAIServerModel
+smolagents_models_mod.MessageRole = MessageRole
 
 
 class Tool:
@@ -182,8 +249,16 @@ class Tool:
 
 smolagents_tools_mod.Tool = Tool
 smolagents_mod.tools = smolagents_tools_mod
+smolagents_mod.Tool = Tool
+smolagents_mod.tool = lambda func=None, **kwargs: (
+    func if func else (lambda f: f)
+)  # Mock tool decorator (lowercase)
+smolagents_mod.memory = smolagents_memory_mod
+smolagents_mod.models = smolagents_models_mod
 sys.modules["smolagents"] = smolagents_mod
 sys.modules["smolagents.tools"] = smolagents_tools_mod
+sys.modules["smolagents.memory"] = smolagents_memory_mod
+sys.modules["smolagents.models"] = smolagents_models_mod
 
 MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "tools" / "knowledge_base_search_tool.py"
 MODULE_NAME = "sdk.nexent.core.tools.knowledge_base_search_tool"
@@ -192,6 +267,14 @@ knowledge_base_search_tool_module = importlib.util.module_from_spec(spec)
 sys.modules[MODULE_NAME] = knowledge_base_search_tool_module
 assert spec and spec.loader
 spec.loader.exec_module(knowledge_base_search_tool_module)
+
+# Restore sys.modules to prevent pollution
+for mod_name, mod_value in original_modules.items():
+    if mod_value is None:
+        sys.modules.pop(mod_name, None)
+    else:
+        sys.modules[mod_name] = mod_value
+
 tools_pkg.knowledge_base_search_tool = knowledge_base_search_tool_module
 KnowledgeBaseSearchTool = knowledge_base_search_tool_module.KnowledgeBaseSearchTool
 
@@ -232,6 +315,39 @@ def knowledge_base_search_tool(mock_observer, mock_vdb_core, mock_embedding_mode
         display_name_to_index_map={},
     )
     return tool
+
+
+@pytest.fixture(autouse=True)
+def ensure_mock_modules():
+    """Ensure mock modules are in sys.modules before each test."""
+    # Before test, ensure all mocks are in sys.modules
+    mock_modules = {
+        'smolagents': smolagents_mod,
+        'smolagents.tools': smolagents_tools_mod,
+        'smolagents.memory': smolagents_memory_mod,
+        'smolagents.models': smolagents_models_mod,
+        'sdk': sdk_pkg,
+        'sdk.nexent': nexent_pkg,
+        'sdk.nexent.core': core_pkg,
+        'sdk.nexent.core.tools': tools_pkg,
+        'sdk.nexent.core.utils': utils_pkg,
+        'sdk.nexent.core.models': models_pkg,
+        'sdk.nexent.core.utils.observer': observer_mod,
+        'sdk.nexent.core.utils.constants': constants_mod,
+        'sdk.nexent.core.utils.tools_common_message': tools_common_mod,
+        'sdk.nexent.core.models.embedding_model': embedding_mod,
+        'sdk.nexent.core.models.rerank_model': rerank_mod,
+        'sdk.nexent.vector_database': vector_pkg,
+        'sdk.nexent.vector_database.base': vector_base_mod,
+    }
+    
+    for mod_name, mod_value in mock_modules.items():
+        sys.modules[mod_name] = mod_value
+    
+    yield
+    
+    # After test, could restore if needed, but let's keep mocks in place
+    # for subsequent tests
 
 
 def create_mock_search_result(count=3):
@@ -834,11 +950,22 @@ class TestEffectiveTopK:
 
     def test_effective_top_k_increases_with_rerank(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """Test that effective_top_k is multiplied when rerank is enabled."""
+        import sys
+        print(f"\nDEBUG FIXTURE: sys.modules['sdk.nexent.core.utils.constants'] = {sys.modules.get('sdk.nexent.core.utils.constants')}")
+        if 'sdk.nexent.core.utils.constants' in sys.modules:
+            mod = sys.modules['sdk.nexent.core.utils.constants']
+            if hasattr(mod, 'RERANK_OVERSEARCH_MULTIPLIER'):
+                print(f"DEBUG FIXTURE: mock module has RERANK_OVERSEARCH_MULTIPLIER = {mod.RERANK_OVERSEARCH_MULTIPLIER}")
+        
         from sdk.nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
-
+        
+        # Debug: check what value we're using
+        print(f"\nDEBUG: RERANK_OVERSEARCH_MULTIPLIER = {RERANK_OVERSEARCH_MULTIPLIER}")
+        print(f"DEBUG: constants_mod.RERANK_OVERSEARCH_MULTIPLIER = {constants_mod.RERANK_OVERSEARCH_MULTIPLIER}")
+    
         mock_results = create_mock_search_result(10)
         mock_vdb_core.hybrid_search.return_value = mock_results
-
+    
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="hybrid",
@@ -849,10 +976,11 @@ class TestEffectiveTopK:
             observer=mock_observer,
             display_name_to_index_map={},
         )
-
+    
         tool.forward("test query")
-
+    
         call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        print(f"DEBUG: call_kwargs['top_k'] = {call_kwargs['top_k']}")
         assert call_kwargs["top_k"] == 5 * RERANK_OVERSEARCH_MULTIPLIER
 
     def test_effective_top_k_unchanged_without_rerank(self, mock_observer, mock_vdb_core, mock_embedding_model):
@@ -1861,3 +1989,20 @@ class TestDocumentPathsAccessControl:
 
         assert len(filtered) == 1
         assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
+
+
+# Restore original modules at module unload time
+def pytest_unconfigure(config):
+    """Clean up sys.modules when this test module is unloaded."""
+    for mod_name, original_mod in original_modules.items():
+        if original_mod is None:
+            sys.modules.pop(mod_name, None)
+        else:
+            sys.modules[mod_name] = original_mod
+    
+    # Also clean up any dynamically added mock modules
+    for mod_name in MockModule._dynamically_added:
+        if mod_name in sys.modules:
+            mod = sys.modules[mod_name]
+            if isinstance(mod, MockModule):
+                sys.modules.pop(mod_name, None)

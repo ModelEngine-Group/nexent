@@ -11,7 +11,8 @@ export type ToolKbType =
   | "datamate_search"
   | "idata_search"
   | "haotian_search"
-  | "aidp_search";
+  | "aidp_search"
+  | "external_kb_search";
 
 /**
  * Configuration for Dify tool

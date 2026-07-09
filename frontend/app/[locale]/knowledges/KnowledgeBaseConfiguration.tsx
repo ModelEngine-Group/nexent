@@ -213,6 +213,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     fetchDocuments,
     uploadDocuments,
     deleteDocument,
+    fetchDocumentsUnified,
+    uploadDocumentsUnified,
+    deleteDocumentUnified,
     dispatch: docDispatch,
   } = useDocumentContext();
 
@@ -235,6 +238,8 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
   const [showAutoDeselectModal, setShowAutoDeselectModal] = useState(false);
   const [newlyCreatedKbId, setNewlyCreatedKbId] = useState<string | null>(null); // Track newly created KB waiting for documents
+
+
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -310,7 +315,14 @@ function DataConfig({ isActive }: DataConfigProps) {
         setIsCreatingMode(false);
         setHasClickedUpload(false);
         setActiveKnowledgeBase(knowledgeBase);
-        fetchDocuments(knowledgeBase.id, false, knowledgeBase.source);
+        // Route through the unified surface when the KB carries an adapter_id
+        // (freshly-created local KBs get one from P3-4; external KBs carry it
+        // after fetchKnowledgeBases). For legacy-loaded KBs, fall back.
+        if (typeof knowledgeBase.adapter_id === "number") {
+          fetchDocumentsUnified(knowledgeBase.adapter_id, knowledgeBase.id);
+        } else {
+          fetchDocuments(knowledgeBase.id, false, knowledgeBase.source);
+        }
       }
     };
 
@@ -765,7 +777,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       danger: true,
       onOk: async () => {
         try {
-          await deleteDocument(kbId, docId);
+          const adapterId = kbState.activeKnowledgeBase?.adapter_id;
+          if (typeof adapterId === "number") {
+            await deleteDocumentUnified(adapterId, kbId, docId);
+          } else {
+            await deleteDocument(kbId, docId);
+          }
           message.success(t("document.message.deleteSuccess"));
         } catch (error) {
           message.error(t("document.message.deleteError"));
@@ -835,7 +852,20 @@ function DataConfig({ isActive }: DataConfigProps) {
         setHasClickedUpload(false);
         setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
 
-        await uploadDocuments(newKB.id, filesToUpload, selectedModelId);
+        // Route upload through the unified surface when the newly-created KB
+        // carries an adapter_id (always true for the P3-4 path).
+        if (typeof newKB.adapter_id === "number") {
+          await uploadDocumentsUnified(
+            newKB.adapter_id,
+            newKB.id,
+            filesToUpload,
+            selectedModelId != null
+              ? { metadata: JSON.stringify({ model_id: selectedModelId }) }
+              : {}
+          );
+        } else {
+          await uploadDocuments(newKB.id, filesToUpload, selectedModelId);
+        }
         setUploadFiles([]);
 
         knowledgeBasePollingService
@@ -875,8 +905,22 @@ function DataConfig({ isActive }: DataConfigProps) {
         displayName: kbState.activeKnowledgeBase?.embeddingModel,
         isMultimodal: kbState.activeKnowledgeBase?.is_multimodal,
       });
+      const activeAdapterId = kbState.activeKnowledgeBase?.adapter_id;
 
-      await uploadDocuments(kbId, filesToUpload, activeKbModelId);
+      // Route through the unified surface when the active KB carries an
+      // adapter_id. `modelId` becomes part of the unified `metadata` JSON.
+      if (typeof activeAdapterId === "number") {
+        await uploadDocumentsUnified(
+          activeAdapterId,
+          kbId,
+          filesToUpload,
+          activeKbModelId != null
+            ? { metadata: JSON.stringify({ model_id: activeKbModelId }) }
+            : {}
+        );
+      } else {
+        await uploadDocuments(kbId, filesToUpload, activeKbModelId);
+      }
       setUploadFiles([]);
 
       knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
@@ -1263,6 +1307,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           </div>
         </div>
       </Modal>
+
     </>
   );
 }

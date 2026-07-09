@@ -59,6 +59,14 @@ def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
 
 
 class AidpSearchTool(Tool):
+    """AIDP knowledge base search tool.
+
+    DEPRECATED: Use ExternalKnowledgeSearchTool with an AIDP adapter instead.
+    Register an AIDP adapter container via POST /api/v1/external-kb/adapters,
+    then use ExternalKnowledgeSearchTool with the returned adapter_id.
+    This class is retained for backward compatibility only.
+    """
+
     name = "aidp_search"
     description = (
         "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "

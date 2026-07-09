@@ -1,4 +1,4 @@
-﻿import json
+import json
 import threading
 import logging
 from typing import Any, Dict, List, Optional
@@ -850,6 +850,35 @@ async def create_agent_config(
                     # TODO: Prompt should be refactored to yaml file
                     knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
                 break  # Only process the first KnowledgeBaseSearchTool found
+            elif "ExternalKnowledgeSearchTool" == tool.class_name:
+                kb_refs_param = tool.params.get("kb_refs")
+                if kb_refs_param:
+                    refs = json.loads(kb_refs_param) if isinstance(kb_refs_param, str) else kb_refs_param
+                    for ref in refs:
+                        display_name = ref.get("display_name", ref.get("kb_id", ""))
+                        kb_id = ref.get("kb_id", "")
+                        knowledge_base_summary += f"**{display_name}** (external): {display_name}\n\n"
+                        if kb_id:
+                            kb_ids.append(kb_id)
+                else:
+                    kb_ids_param = tool.params.get("kb_ids", [])
+                    kb_display_names = tool.params.get("kb_display_names", [])
+                    if isinstance(kb_ids_param, str):
+                        import json as _json
+                        try:
+                            kb_ids_param = _json.loads(kb_ids_param)
+                        except Exception:
+                            kb_ids_param = []
+                    if isinstance(kb_display_names, str):
+                        import json as _json
+                        try:
+                            kb_display_names = _json.loads(kb_display_names)
+                        except Exception:
+                            kb_display_names = []
+                    for i, kb_id in enumerate(kb_ids_param):
+                        display_name = kb_display_names[i] if i < len(kb_display_names) else kb_id
+                        knowledge_base_summary += f"**{display_name}** (external): {display_name}\n\n"
+                        kb_ids.append(kb_id)
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
 
@@ -1092,6 +1121,55 @@ async def create_tool_config_list(
                     f"No embedding model found for index '{index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
+        elif tool_config.class_name == "ExternalKnowledgeSearchTool":
+            kb_refs_param = tool_config.params.get("kb_refs")
+
+            if kb_refs_param is not None:
+                kb_refs = json.loads(kb_refs_param) if isinstance(kb_refs_param, str) else kb_refs_param
+                all_adapter_ids = set(ref["adapter_id"] for ref in kb_refs if "adapter_id" in ref)
+            else:
+                adapter_id = tool_config.params.get("adapter_id")
+                kb_ids = tool_config.params.get("kb_ids", [])
+                kb_display_names = tool_config.params.get("kb_display_names", [])
+                if isinstance(kb_ids, str):
+                    kb_ids = json.loads(kb_ids)
+                if isinstance(kb_display_names, str):
+                    kb_display_names = json.loads(kb_display_names)
+                kb_refs = [
+                    {"adapter_id": adapter_id, "kb_id": kb_id, "display_name": kb_display_names[i] if i < len(kb_display_names) else kb_id}
+                    for i, kb_id in enumerate(kb_ids)
+                ]
+                all_adapter_ids = {adapter_id} if adapter_id else set()
+
+            for aid in all_adapter_ids:
+                from database.external_kb_adapter_db import get_adapter_by_id
+                adapter = get_adapter_by_id(aid, tenant_id)
+                if not adapter:
+                    raise ValidationError(
+                        f"[{agent_name or agent_id}] Adapter {aid} not found for tenant {tenant_id}.")
+                if not adapter.get("enabled", False):
+                    raise ValidationError(
+                        f"[{agent_name or agent_id}] Adapter {aid} is disabled.")
+
+            tool_config.params["kb_refs"] = json.dumps(kb_refs, ensure_ascii=False)
+
+            if all_adapter_ids:
+                from services.dispatcher_kb_client import DispatcherKBClient
+                primary_adapter_id = next(iter(all_adapter_ids))
+                client = DispatcherKBClient(
+                    adapter_id=primary_adapter_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            else:
+                client = None
+
+            tool_config.metadata = {
+                "client": client,
+                "observer": None,
+                "embedding_model_config": None,
+            }
+
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")

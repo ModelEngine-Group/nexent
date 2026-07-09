@@ -19,6 +19,12 @@ spec = importlib.util.spec_from_file_location(
 read_skill_md_tool_module = importlib.util.module_from_spec(spec)
 
 # Mock the smolagents.tool decorator and nexent.skills dependencies before loading
+# Save original sys.modules values to restore after loading
+original_smolagents = sys.modules.get('smolagents')
+original_smolagents_tool = sys.modules.get('smolagents.tool')
+original_nexent = sys.modules.get('nexent')
+original_nexent_skills = sys.modules.get('nexent.skills')
+
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 sys.modules['smolagents.tool'] = mock_smolagents.tool
@@ -46,6 +52,47 @@ sys.modules['nexent.skills'] = mock_nexent.skills
 
 # Now load the module
 spec.loader.exec_module(read_skill_md_tool_module)
+
+# Create fixture to ensure mocks are available during each test
+@pytest.fixture(autouse=True)
+def ensure_nexent_skills_mock():
+    """Ensure nexent.skills mock with SkillManager is available during tests."""
+    mock_skill_manager = MagicMock()
+    
+    class MockSkillManager:
+        def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
+            self.local_skills_dir = local_skills_dir
+            self.agent_id = agent_id
+            self.tenant_id = tenant_id
+            self.version_no = version_no
+
+        def load_skill(self, name):
+            return None
+    
+    mock_skill_manager.SkillManager = MockSkillManager
+    
+    mock_nexent = MagicMock()
+    mock_nexent.skills = MagicMock()
+    mock_nexent.skills.SkillManager = MockSkillManager
+    
+    old_nexent = sys.modules.get('nexent')
+    old_nexent_skills = sys.modules.get('nexent.skills')
+    
+    sys.modules['nexent'] = mock_nexent
+    sys.modules['nexent.skills'] = mock_nexent.skills
+    
+    yield
+    
+    # Restore after test
+    if old_nexent is not None:
+        sys.modules['nexent'] = old_nexent
+    else:
+        sys.modules.pop('nexent', None)
+    
+    if old_nexent_skills is not None:
+        sys.modules['nexent.skills'] = old_nexent_skills
+    else:
+        sys.modules.pop('nexent.skills', None)
 
 ReadSkillMdTool = read_skill_md_tool_module.ReadSkillMdTool
 get_read_skill_md_tool = read_skill_md_tool_module.get_read_skill_md_tool

@@ -19,6 +19,7 @@ class ToolSign(Enum):
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
     DATABASE_OPERATION = "z"  # Database operation tool identifier
     MEMORY_OPERATION = "n"      # Memory operation tool identifier
+    EXTERNAL_KB_SEARCH = "k"  # External knowledge base search tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -37,6 +38,7 @@ TOOL_SIGN_MAPPING = {
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
     "database_operation": ToolSign.DATABASE_OPERATION.value,
     "memory_operation": ToolSign.MEMORY_OPERATION.value,
+    "external_kb_search": ToolSign.EXTERNAL_KB_SEARCH.value,
 }
 
 # Reverse mapping for lookup
@@ -62,7 +64,12 @@ class SearchResultTextMessage:
     def __init__(self, title: str, url: str, text: str, published_date: Optional[str] = None,
                  source_type: Optional[str] = None, filename: Optional[str] = None, score: Optional[str] = None,
                  score_details: Optional[Dict[str, Any]] = None, cite_index: Optional[int] = None,
-                 search_type: Optional[str] = None, tool_sign: Optional[str] = None):
+                 search_type: Optional[str] = None, tool_sign: Optional[str] = None,
+                 # Lazy-download fields used by the external KB adapter standard path.
+                 # Other search tools leave these unset (None).
+                 adapter_id: Optional[int] = None,
+                 knowledge_base_id: Optional[str] = None,
+                 document_id: Optional[str] = None):
         self.title = title
         self.url = url
         self.text = text
@@ -74,13 +81,31 @@ class SearchResultTextMessage:
         self.cite_index = cite_index
         self.search_type = search_type
         self.tool_sign = tool_sign
+        self.adapter_id = adapter_id
+        self.knowledge_base_id = knowledge_base_id
+        self.document_id = document_id
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert SearchResult object to dictionary format to save all data."""
-        return {"title": self.title, "url": self.url, "text": self.text, "published_date": self.published_date,
-                "source_type": self.source_type, "filename": self.filename, "score": self.score,
-                "score_details": self.score_details, "cite_index": self.cite_index, "search_type": self.search_type,
-                "tool_sign": self.tool_sign}
+        d: Dict[str, Any] = {
+            "title": self.title,
+            "url": self.url,
+            "text": self.text,
+            "published_date": self.published_date,
+            "source_type": self.source_type,
+            "filename": self.filename,
+            "score": self.score,
+            "score_details": self.score_details,
+            "cite_index": self.cite_index,
+            "search_type": self.search_type,
+            "tool_sign": self.tool_sign,
+        }
+        # Only emit lazy-download refs when they are meaningful (external KB path).
+        if self.adapter_id is not None:
+            d["adapter_id"] = self.adapter_id
+            d["knowledge_base_id"] = self.knowledge_base_id
+            d["document_id"] = self.document_id
+        return d
 
     def to_model_dict(self) -> Dict[str, Any]:
         """Format for input to the large model summary."""

@@ -1,5 +1,12 @@
-// Knowledge Base Polling Service - Encapsulates polling logic, separates business logic from components
-
+/**
+ * @fileoverview Intentionally uses `knowledgeBaseService` (not `unifiedKBService`).
+ *
+ * Background polling with setInterval timers, document status transitions, and
+ * cross-component sync events. Migrating to the unified service would require
+ * restructuring the timer management and status polling contract without any
+ * user-visible improvement. This file is the last candidate for migration
+ * (P7+) — leave as-is unless a compelling reason appears.
+ */
 import knowledgeBaseService from './knowledgeBaseService';
 
 import { NON_TERMINAL_STATUSES } from '@/const/knowledgeBase';

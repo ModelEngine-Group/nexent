@@ -26,7 +26,6 @@ import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
@@ -43,6 +42,7 @@ interface KnowledgeBaseListProps {
   onCreateNew: () => void;
   onDataMateConfig?: () => void;
   showDataMateConfig?: boolean; // Control whether to show DataMate config button
+  onAdapterManage?: () => void;
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
   onKnowledgeBaseChange?: () => void; // Callback when knowledge base switches
@@ -68,6 +68,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   onCreateNew,
   onDataMateConfig,
   showDataMateConfig = false,
+  onAdapterManage,
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
@@ -402,6 +403,27 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               >
                 <span className="overflow-hidden text-ellipsis">
                   {t("knowledgeBase.button.dataMateConfig")}
+                </span>
+              </Button>
+            )}
+            {onAdapterManage && (
+              <Button
+                style={{
+                  padding: "4px 15px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  border: "1px solid #d9d9d9",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  minWidth: 0,
+                  flexShrink: 0,
+                }}
+                onClick={onAdapterManage}
+                icon={<FilterOutlined />}
+              >
+                <span className="overflow-hidden text-ellipsis">
+                  {t("knowledgeBase.button.manageAdapters", { defaultValue: "Adapters" })}
                 </span>
               </Button>
             )}

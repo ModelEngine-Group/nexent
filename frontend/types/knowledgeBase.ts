@@ -38,6 +38,9 @@ export interface KnowledgeBase {
   summaryFrequency?: string | null;
   lastSummaryTime?: string | null;
   preserve_source_file?: boolean;
+  // External adapter fields (present only for externally-managed KBs)
+  adapter_id?: number;
+  adapter_name?: string;
 }
 
 // Create knowledge base parameter type
@@ -217,4 +220,50 @@ export class DataMateSyncError extends Error {
 export interface KnowledgeBasesWithDataMateStatus {
   knowledgeBases: KnowledgeBase[];
   dataMateSyncError?: string;
+}
+
+// ---- V4 standard types (POST /api/v1/retrieve, GET /api/v1/knowledge-bases) ----
+
+export type DocStatus = "indexing" | "completed" | "failed" | "paused";
+
+export type SearchMethod = "semantic_search" | "keyword_search" | "hybrid_search";
+
+export interface RetrievalModel {
+  search_method?: SearchMethod;
+  top_k?: number;
+  score_threshold?: number;
+  score_threshold_enabled?: boolean;
+  reranking_enable?: boolean;
+  reranking_model?: { provider?: string; model?: string } | null;
+}
+
+export interface RetrieveRequest {
+  query: string;
+  knowledge_base_ids: string[];
+  retrieval_model?: RetrievalModel;
+}
+
+export interface Segment {
+  id: string;
+  position: number;
+  document_id: string;
+  document_name: string;
+  knowledge_base_id: string;
+  knowledge_base_name: string;
+  content: string;
+  keywords?: string[];
+  tokens?: number;
+  index_node_id?: string;
+  hit_count?: number;
+  enabled?: boolean;
+}
+
+export interface RetrieveRecord {
+  segment: Segment;
+  score: number;
+}
+
+export interface RetrieveResponse {
+  query: string;
+  records: RetrieveRecord[];
 }

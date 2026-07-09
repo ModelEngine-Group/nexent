@@ -9,6 +9,7 @@ import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import unifiedKBService from "@/services/unifiedKBService";
 import { type KnowledgeBase } from "@/types/knowledgeBase";
 import { KnowledgeBaseEditModal } from "../../../knowledges/components/knowledge/KnowledgeBaseEditModal";
 
@@ -46,9 +47,17 @@ export default function KnowledgeList({
     return groupIds.map((id) => groupNameMap.get(id) || `Group ${id}`).filter(Boolean);
   };
 
-  const handleDelete = async (knowledgeId: string) => {
+  const handleDelete = async (record: KnowledgeBase) => {
     try {
-      await knowledgeBaseService.deleteKnowledgeBase(knowledgeId);
+      // Route through unified surface when the KB carries an adapter_id.
+      // KnowledgeList filters out external sources via `isExternalSource`,
+      // so records reaching here typically have adapter_id set by the
+      // useKnowledgeList hook (which merges adapter info when available).
+      if (typeof record.adapter_id === "number") {
+        await unifiedKBService.deleteKnowledgeBase(record.adapter_id, record.id);
+      } else {
+        await knowledgeBaseService.deleteKnowledgeBase(record.id);
+      }
       message.success(t("tenantResources.knowledgeBase.deleted"));
       refetch();
     } catch (error: any) {
@@ -234,7 +243,7 @@ export default function KnowledgeList({
             <Popconfirm
               title={t("knowledgeBase.modal.deleteConfirm.title")}
               description={t("common.cannotBeUndone")}
-              onConfirm={() => handleDelete(record.id)}
+              onConfirm={() => handleDelete(record)}
               okText={t("common.confirm")}
               cancelText={t("common.cancel")}
             >

@@ -228,6 +228,15 @@ class NexentAgent:
                     tool_config.metadata.get(
                         "document_paths") if tool_config.metadata else None
                 )
+            elif class_name == "ExternalKnowledgeSearchTool":
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "client", "embedding_model_config"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.client = tool_config.metadata.get(
+                    "client", None) if tool_config.metadata else None
+                tools_obj.embedding_model_config = tool_config.metadata.get(
+                    "embedding_model_config", None) if tool_config.metadata else None
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()

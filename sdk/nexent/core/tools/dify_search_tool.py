@@ -18,7 +18,13 @@ logger = logging.getLogger("dify_search_tool")
 
 
 class DifySearchTool(Tool):
-    """Dify knowledge base search tool"""
+    """Dify knowledge base search tool.
+
+    DEPRECATED: Use ExternalKnowledgeSearchTool with a registered Dify adapter instead.
+    Register a Dify adapter via POST /api/v1/external-kb/adapters and use
+    ExternalKnowledgeSearchTool with the returned adapter_id.
+    This class is retained for backward compatibility only.
+    """
 
     name = "dify_search"
     description = (

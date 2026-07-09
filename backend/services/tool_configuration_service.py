@@ -807,6 +807,45 @@ def _validate_local_tool(
                 'document_paths': instantiation_params.get('document_paths'),
             }
             tool_instance = tool_class(**params)
+        elif tool_name == "external_kb_search":
+            # external_kb_search requires adapter_id + kb_ids from params.
+            # We inject a DispatcherKBClient (in-process, no HTTP hop) so the
+            # tool can run a real search against the adapter for validation.
+            adapter_id = instantiation_params.get("adapter_id")
+            kb_ids = instantiation_params.get("kb_ids", [])
+            if isinstance(kb_ids, str):
+                import json as _json
+                try:
+                    kb_ids = _json.loads(kb_ids)
+                except Exception:
+                    kb_ids = []
+            if not adapter_id or not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    "adapter_id, tenant_id, and user_id are required for external_kb_search validation")
+
+            # Validate that the adapter exists and is enabled before constructing the client
+            from database.external_kb_adapter_db import get_adapter_by_id
+            adapter = get_adapter_by_id(adapter_id, tenant_id)
+            if not adapter:
+                raise ToolExecutionException(
+                    f"Adapter {adapter_id} not found for tenant {tenant_id}")
+            if not adapter.get("enabled", False):
+                raise ToolExecutionException(
+                    f"Adapter {adapter_id} is disabled")
+
+            from services.dispatcher_kb_client import DispatcherKBClient
+            client = DispatcherKBClient(
+                adapter_id=adapter_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+
+            # Exclude backend-only params that cannot be passed to __init__
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                               if k not in ["observer", "client", "embedding_model_config"]}
+            filtered_params["observer"] = None
+            filtered_params["client"] = client
+            tool_instance = tool_class(**filtered_params)
         elif tool_name in ["dify_search", "datamate_search"]:
             # Get rerank configuration for dify and datamate search tools
             rerank = instantiation_params.get("rerank", False)

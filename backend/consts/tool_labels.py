@@ -31,7 +31,8 @@ _category_search = {
     "search_memory": ["search"], "knowledge_base_search": ["search"],
 }
 _category_kb = {
-    "dify_search": ["knowledge-base"], "datamate_search": ["knowledge-base"],
+    "external_kb_search": ["knowledge-base"], "dify_search": ["knowledge-base"],
+    "datamate_search": ["knowledge-base"],
     "idata_search": ["knowledge-base"], "haotian_search": ["knowledge-base"],
     "aidp_search": ["knowledge-base"],
 }

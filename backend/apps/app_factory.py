@@ -6,6 +6,8 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 
 from consts.exceptions import AppException
 
@@ -31,7 +33,7 @@ def create_app(
         version: API version
         root_path: Root path for the API
         cors_origins: List of allowed CORS origins (default: ["*"])
-        cors_methods: List of allowed CORS methods (default: ["*"])
+        cors_methods: List of allowed HTTP methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
 
     Returns:
@@ -52,6 +54,39 @@ def create_app(
         allow_methods=cors_methods or ["*"],
         allow_headers=["*"],
     )
+
+    # Inject Deprecation headers for legacy route prefixes.
+    # Successor: /api/v1/kb/... (unified_kb_app — single entry point for ALL KBs).
+    #
+    # Deprecated prefixes (legacy KB routes that will be migrated to unified):
+    #   /indices              → legacy vectordatabase CRUD
+    #   /nb/v1/knowledge      → legacy northbound KB routes
+    #   /dify, /aidp, /datamate → legacy per-platform KB routes (now unified)
+    _DEPRECATED_PREFIXES = (
+        "/indices",
+        "/nb/v1/knowledge",
+        "/dify",
+        "/aidp",
+        "/datamate",
+    )
+    _SUNSET_DATE = "2026-12-31"
+    _SUCCESSOR_LINK = '</api/v1/kb/adapters>; rel="successor-version"'
+
+    class DeprecatedRoutesMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: StarletteRequest, call_next):
+            response = await call_next(request)
+            path = request.url.path
+            if any(path.startswith(prefix) for prefix in _DEPRECATED_PREFIXES):
+                response.headers["Deprecation"] = "true"
+                response.headers["Sunset"] = _SUNSET_DATE
+                response.headers["Link"] = _SUCCESSOR_LINK
+                logger.warning(
+                    "Deprecated KB API called: %s %s — use /api/v1/kb/* instead (sunset: %s)",
+                    request.method, path, _SUNSET_DATE,
+                )
+            return response
+
+    app.add_middleware(DeprecatedRoutesMiddleware)
 
     # Register exception handlers
     register_exception_handlers(app)

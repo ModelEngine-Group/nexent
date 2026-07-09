@@ -17,7 +17,13 @@ logger = logging.getLogger("datamate_search_tool")
 
 
 class DataMateSearchTool(Tool):
-    """DataMate knowledge base search tool"""
+    """DataMate knowledge base search tool.
+
+    DEPRECATED: Use ExternalKnowledgeSearchTool with a DataMate adapter instead.
+    Register a DataMate adapter container via POST /api/v1/external-kb/adapters,
+    then use ExternalKnowledgeSearchTool with the returned adapter_id.
+    This class is retained for backward compatibility only.
+    """
     name = "datamate_search"
     description = (
         "Performs a DataMate knowledge base search based on your query then returns the top search results. "

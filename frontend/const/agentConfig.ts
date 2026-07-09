@@ -136,6 +136,13 @@ export const TOOL_PARAM_OPTIONS = {
     rewrite_enable: [true, false],
     related_search_enable: [true, false],
   },
+  // External KB search tool (V4: retrieval_model nested structure)
+  // search_method values use short names (stored in tool config); the backend
+  // HTTP adapter layer maps them to suffixed names (e.g. "hybrid" → "hybrid_search").
+  external_kb_search: {
+    search_method: ["hybrid", "accurate", "semantic"],
+    reranking_enable: [true, false],
+  },
 } as const;
 
 // Get options for a specific tool and parameter

@@ -1,3 +1,11 @@
+/**
+ * @fileoverview Intentionally uses `knowledgeBaseService` (not `unifiedKBService`).
+ *
+ * This hook depends on tenant-scoped filtering (`tenantId` param) and
+ * `updatedAt`-based sorting that the unified API does not expose at the same
+ * granularity. Migrating would require backend changes with no user-visible
+ * benefit.
+ */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 

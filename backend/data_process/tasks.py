@@ -1869,6 +1869,23 @@ def forward(
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Successfully stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
 
+        # Phase 2 T2.5: Update document status in PG (best-effort)
+        try:
+            from database.document_db import update_document_status
+            from database.knowledge_db import get_knowledge_record
+            kb_record = get_knowledge_record({"index_name": original_index_name})
+            if kb_record and kb_record.get("knowledge_id"):
+                update_document_status(
+                    knowledge_id=kb_record["knowledge_id"],
+                    source_uri=original_source,
+                    status="completed",
+                    chunk_count=final_processed,
+                    error_message=None,
+                )
+                logger.debug(f"[{self.request.id}] FORWARD TASK: Updated document status to completed in PG")
+        except Exception as pg_update_exc:
+            logger.warning(f"[{self.request.id}] FORWARD TASK: PG status update skipped: {pg_update_exc}")
+
         return {
             'task_id': task_id,
             'source': original_source,
@@ -1920,6 +1937,25 @@ def forward(
                     'stage': 'forward_task_failed'
                 }
             )
+
+            # Phase 2 T2.5: Update document status to failed in PG (best-effort)
+            try:
+                from database.document_db import update_document_status
+                from database.knowledge_db import get_knowledge_record
+                idx = error_info.get('index_name', original_index_name)
+                src = error_info.get('source', original_source)
+                if idx and src:
+                    kb_record = get_knowledge_record({"index_name": idx})
+                    if kb_record and kb_record.get("knowledge_id"):
+                        update_document_status(
+                            knowledge_id=kb_record["knowledge_id"],
+                            source_uri=src,
+                            status="failed",
+                            error_message=reason_to_store[:500] if reason_to_store else None,
+                        )
+                        logger.debug(f"[{task_id}] FORWARD TASK: Updated document status to failed in PG")
+            except Exception as pg_fail_exc:
+                logger.warning(f"[{task_id}] FORWARD TASK: PG failure status update skipped: {pg_fail_exc}")
         except Exception:
             logger.error(f"Error forwarding chunks: {str(e)}")
             # Try to save error even if parsing fails

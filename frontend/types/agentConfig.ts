@@ -149,6 +149,43 @@ export interface ToolParam {
   depends_on?: string;
 }
 
+/**
+ * V4 retrieval model configuration for ExternalKBSearchTool.
+ * Stored nested under `retrieval_model` in `ag_tool_info_t.params`.
+ * Accepts both legacy short names ("hybrid") and V4 suffixed names ("hybrid_search")
+ * for search_method to gracefully handle pre-migration data.
+ */
+export interface RetrievalModel {
+  search_method?: "hybrid_search" | "semantic_search" | "keyword_search" | "hybrid" | "semantic" | "accurate";
+  search_method_enabled?: boolean;
+  top_k?: number;
+  score_threshold?: number;
+  reranking_enable?: boolean;
+}
+
+/**
+ * Legacy flat field names that may appear in un-migrated tool params.
+ * Used by the normalization helpers in ToolConfigModal.
+ */
+export const RETRIEVAL_MODEL_LEGACY_KEYS = [
+  "search_mode",
+  "search_mode_enabled",
+  "top_k",
+  "score_threshold",
+  "reranking_enable",
+] as const;
+
+/**
+ * Map legacy flat param names → V4 nested field names inside retrieval_model.
+ */
+export const RETRIEVAL_MODEL_KEY_MAP: Record<string, keyof RetrievalModel> = {
+  search_mode: "search_method",
+  search_mode_enabled: "search_method_enabled",
+  top_k: "top_k",
+  score_threshold: "score_threshold",
+  reranking_enable: "reranking_enable",
+};
+
 export interface AidpKnowledgeBaseItem {
   kds_id: string;
   kds_name: string;

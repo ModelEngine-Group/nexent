@@ -1534,3 +1534,114 @@ class AgentEvaluationCase(TableBase):
         Index("ix_agent_eval_case_pass_status", "tenant_id", "agent_evaluation_id", "pass_status"),
         {"schema": SCHEMA},
     )
+
+
+class KnowledgeDocumentRecord(TableBase):
+    """
+    Knowledge base document metadata table.
+    
+    Phase 2 deliverable: Tracks document-level status independent of ES chunks.
+    Supports standard /api/v1/knowledge-bases/{kb_id}/documents endpoints.
+    """
+    __tablename__ = "kb_document_record_t"
+    __table_args__ = (
+        Index("ix_kb_doc_kb_id", "knowledge_id"),
+        Index("ix_kb_doc_tenant_id", "tenant_id"),
+        Index("ix_kb_doc_source_uri", "source_uri"),
+        Index("ix_kb_doc_uuid", "document_uuid"),
+        {"schema": SCHEMA, "extend_existing": True},
+    )
+
+    document_id = Column(
+        BigInteger,
+        Sequence("kb_document_record_t_document_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Document record ID, auto-increment primary key"
+    )
+    document_uuid = Column(
+        String(64),
+        unique=True,
+        nullable=False,
+        doc="Globally unique document UUID (for external API references)"
+    )
+    knowledge_id = Column(
+        BigInteger,
+        nullable=False,
+        doc="FK to knowledge_record_t.knowledge_id"
+    )
+    tenant_id = Column(
+        String(100),
+        nullable=False,
+        doc="Tenant ID for multi-tenancy isolation"
+    )
+    source_uri = Column(
+        String(1000),
+        nullable=False,
+        doc="MinIO object path or external URL (used as internal document identifier)"
+    )
+    filename = Column(
+        String(500),
+        nullable=False,
+        doc="Original filename displayed to user"
+    )
+    file_size = Column(
+        BigInteger,
+        doc="File size in bytes"
+    )
+    status = Column(
+        String(30),
+        nullable=False,
+        default="indexing",
+        doc="Document indexing status: indexing, completed, failed, paused"
+    )
+    error_message = Column(
+        Text,
+        doc="Error message if status=failed"
+    )
+    chunk_count = Column(
+        Integer,
+        default=0,
+        doc="Number of chunks/segments indexed from this document"
+    )
+    celery_task_id = Column(
+        String(100),
+        doc="Celery task ID for async indexing (optional)"
+    )
+
+
+class ExternalKBAdapter(TableBase):
+    """
+    Registered external KB adapter instances.
+
+    Each row represents one adapter. The ``platform`` field determines which
+    adapter class is instantiated (via ExternalKBAdapterRegistry). The
+    ``external_kb_config`` JSON field holds platform-specific credentials
+    (url, api_key, extra) passed to the adapter constructor.
+
+    For in-process adapters (e.g. LocalKBAdapter), ``service_host`` and
+    container fields are not used.
+    """
+    __tablename__ = "external_kb_adapter_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    adapter_id = Column(
+        Integer,
+        Sequence("external_kb_adapter_t_adapter_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Adapter ID, auto-increment primary key",
+    )
+    name = Column(String(100), doc="Adapter display name, e.g. '本地知识库'")
+    platform = Column(String(50), doc="Platform identifier: local / dify / datamate / aidp / custom")
+    image_url = Column(String(500), doc="Deprecated: Docker image URL (for containerized adapters)")
+    container_name = Column(String(200), doc="Deprecated: Docker container name")
+    service_host = Column(String(200), doc="Deprecated: adapter service host:port")
+    api_key = Column(String(500), doc="Deprecated: nexent → adapter auth key")
+    capabilities = Column(JSON, doc="Cached capabilities dict from adapter")
+    external_kb_config = Column(JSON, doc="Platform credentials: {url, api_key, extra}")
+    tenant_id = Column(String(100), doc="Tenant ID for multi-tenancy isolation")
+    enabled = Column(Boolean, default=True, doc="Whether this adapter is enabled for routing")
+    status = Column(String(20), default="running", doc="Adapter status: running / stopped / error")
+    health_status = Column(String(20), default="unknown", doc="Last health check result: ok / error / unknown")
+    last_health_check = Column(TIMESTAMP(timezone=False), nullable=True, doc="Timestamp of last health check")

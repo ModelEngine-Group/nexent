@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useCallback } from "react";
+/**
+ * @fileoverview Hybrid service imports — partially migrated to `unifiedKBService`.
+ *
+ * New adapter-related logic uses `unifiedKBService`. Legacy selection-state
+ * management (`shouldLoadSelected`, `selectedIds`, per-item loading) still
+ * calls `knowledgeBaseService` because the unified API has no equivalent
+ * selection-state concept. This is intentional, not a migration gap.
+ */
+import { useState, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import unifiedKBService from "@/services/unifiedKBService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
+import { UnifiedAdapter, UnifiedKnowledgeBase } from "@/types/unifiedKB";
 import log from "@/lib/logger";
 import { showErrorToUser } from "@/const/errorMessageI18n";
 
@@ -33,6 +43,7 @@ export function useKnowledgeBasesForToolConfig(
     | "idata_search"
     | "haotian_search"
     | "aidp_search"
+    | "external_kb_search"
     | null = null,
   config?: {
     serverUrl?: string;
@@ -205,6 +216,7 @@ export function usePrefetchKnowledgeBases() {
         | "idata_search"
         | "haotian_search"
         | "aidp_search"
+        | "external_kb_search"
         | null,
       difyConfig?: {
         serverUrl?: string;
@@ -483,5 +495,139 @@ export function useKnowledgeBaseSelection(initialSelectedIds: string[] = []) {
     clearSelection,
     hasSelection: selectedIds.length > 0,
     selectionCount: selectedIds.length,
+  };
+}
+
+// ============================================================================
+// P3-A hooks for cross-adapter (ExternalKnowledgeSearchTool) KB selection
+// ============================================================================
+
+/**
+ * Query key factory for unified KB adapter listing.
+ */
+export const unifiedKbKeys = {
+  all: ["unifiedKb"] as const,
+  adapters: () => [...unifiedKbKeys.all, "adapters"] as const,
+  kbsForAdapter: (adapterId: number) =>
+    [...unifiedKbKeys.all, "adapter", adapterId] as const,
+};
+
+/**
+ * Hook for fetching the list of enabled KB adapters via unifiedKBService.
+ * Returns only adapters with `enabled === true`.
+ *
+ * Used by ExternalKbSearchSelectorModal to let the user pick which adapters
+ * to search across.
+ */
+export function useKbAdapters() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: unifiedKbKeys.adapters(),
+    queryFn: async (): Promise<UnifiedAdapter[]> => {
+      try {
+        const response = await unifiedKBService.listAdapters(true);
+        const adapters = Array.isArray(response.list) ? response.list : [];
+        return adapters.filter((a) => a.enabled === true);
+      } catch (error: any) {
+        log.error("Failed to fetch KB adapters:", error);
+        return [];
+      }
+    },
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const invalidate = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: unifiedKbKeys.adapters() });
+  }, [queryClient]);
+
+  return { ...query, invalidate };
+}
+
+/**
+ * Hook for fetching knowledge bases for a specific adapter via unifiedKBService.
+ *
+ * When `adapterId` is null/undefined, the query is disabled and returns an empty list.
+ * Maps UnifiedKnowledgeBase → legacy-shape KnowledgeBase[] so that the UI
+ * components can render KB chips the same way they do for the legacy selectors.
+ *
+ * Each returned KnowledgeBase carries:
+ *   - `adapter_id` and `adapter_name` (enriched from the adapter record)
+ *   - `source` === adapter.platform (e.g. "local", "dify", "aidp")
+ *   - `index_name` via metadata (for local adapter) or fallback to id
+ */
+export function useKbsForAdapter(adapterId: number | null | undefined) {
+  const { data: adapters = [] } = useKbAdapters();
+
+  // Memoize the adapter record lookup
+  const adapterRecord = useMemo(
+    () => (adapterId ? adapters.find((a) => a.adapter_id === adapterId) : undefined),
+    [adapters, adapterId]
+  );
+
+  const query = useQuery({
+    queryKey: adapterId != null ? unifiedKbKeys.kbsForAdapter(adapterId) : ["_disabled", adapterId],
+    enabled: adapterId != null,
+    queryFn: async (): Promise<KnowledgeBase[]> => {
+      if (adapterId == null) return [];
+      try {
+        const response = await unifiedKBService.listKnowledgeBases(adapterId, {
+          pageSize: 500,
+        });
+        const items: UnifiedKnowledgeBase[] = Array.isArray(response.list)
+          ? response.list
+          : [];
+        return items.map((u) => mapUnifiedKbToLegacy(u, adapterRecord));
+      } catch (error: any) {
+        log.error(`Failed to fetch KBs for adapter ${adapterId}:`, error);
+        return [];
+      }
+    },
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  return { ...query, adapterRecord };
+}
+
+/**
+ * Map UnifiedKnowledgeBase → legacy-shape KnowledgeBase.
+ *
+ * Only the fields used by KB chip rendering + downstream `kb_refs` construction
+ * are populated; the rest get defensive defaults. Adapter metadata is enriched
+ * from the supplied UnifiedAdapter record so consumers get `source` and
+ * `adapter_id`/`adapter_name` for free.
+ */
+function mapUnifiedKbToLegacy(
+  u: UnifiedKnowledgeBase,
+  adapter?: UnifiedAdapter
+): KnowledgeBase {
+  const metadata = (u.metadata ?? {}) as Record<string, unknown>;
+  const kbId = String(u.knowledge_base_id);
+  return {
+    id: kbId,
+    name: u.name,
+    display_name: u.name,
+    description: u.description || "",
+    documentCount: u.document_count || 0,
+    chunkCount: u.chunk_count || 0,
+    createdAt: (metadata.create_time as string) || null,
+    updatedAt: (metadata.update_time as string) || null,
+    embeddingModel: u.embedding_model || "unknown",
+    avatar: "",
+    chunkNum: 0,
+    language: "",
+    nickname: "",
+    parserId: "",
+    permission: "",
+    tokenNum: 0,
+    source: adapter?.platform || u.platform || "external",
+    tenant_id: (metadata.tenant_id as string) || "",
+    index_name: (metadata.index_name as string) || kbId,
+    adapter_id: adapter?.adapter_id,
+    adapter_name: adapter?.name,
   };
 }

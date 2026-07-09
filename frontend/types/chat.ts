@@ -116,6 +116,11 @@ export interface SearchResult {
   preview_url?: string;
   download_url?: string;
   object_name?: string;
+  // External-KB adapter standard path: lazy download refs. Only populated
+  // for results from the external KB tool (source_type === "external").
+  adapter_id?: number;
+  knowledge_base_id?: string;
+  document_id?: string;
 }
 
 // File attachment type

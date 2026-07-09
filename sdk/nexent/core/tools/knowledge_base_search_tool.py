@@ -263,13 +263,12 @@ class KnowledgeBaseSearchTool(Tool):
         if len(search_index_names) == 0:
             return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
-        kb_search_data = self._run_search(
+        kb_search_results = self._run_search(
             query=query,
             index_names=search_index_names,
             search_mode=search_mode,
             top_k=effective_top_k,
-        )
-        kb_search_results = kb_search_data["results"]
+        )["results"]
 
         # Apply document_paths access control: filter out results not in allowed list
         kb_search_results = self._filter_by_document_paths(kb_search_results)

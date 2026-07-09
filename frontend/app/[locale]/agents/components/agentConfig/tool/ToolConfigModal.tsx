@@ -32,7 +32,13 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
-import { ToolParam, Tool } from "@/types/agentConfig";
+import {
+  ToolParam,
+  Tool,
+  RetrievalModel,
+  RETRIEVAL_MODEL_LEGACY_KEYS,
+  RETRIEVAL_MODEL_KEY_MAP,
+} from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
@@ -41,6 +47,9 @@ import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
 import AidpKnowledgeSelectorModal from "@/components/tool-config/AidpKnowledgeSelectorModal";
+import ExternalKbSearchSelectorModal, {
+  ExternalKbRef,
+} from "@/components/tool-config/ExternalKbSearchSelectorModal";
 import { useConfig } from "@/hooks/useConfig";
 import { useKnowledgeBasesForToolConfig, knowledgeBaseKeys } from "@/hooks/useKnowledgeBaseSelector";
 import {
@@ -78,6 +87,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "idata_search",
   "haotian_search",
   "aidp_search",
+  "external_kb_search",
 ];
 
 const TOOLS_SUPPORTING_RERANK = [
@@ -168,6 +178,139 @@ function withExtraToolParams(params: ToolParam[], toolName?: string): ToolParam[
   return withAnalyzeToolModelParam(withRerankParams(params, toolName), toolName);
 }
 
+// ---------------------------------------------------------------------------
+// V4 retrieval_model helpers for external_kb_search
+// ---------------------------------------------------------------------------
+
+/** Param names that belong inside the nested retrieval_model object. */
+const RETRIEVAL_PARAM_NAMES = new Set<string>([
+  "search_method",
+  "search_method_enabled",
+  "top_k",
+  "score_threshold",
+  "reranking_enable",
+  // Legacy flat names that may appear in un-migrated data:
+  "search_mode",
+  "search_mode_enabled",
+]);
+
+/**
+ * Flatten a nested `retrieval_model` ToolParam into individual flat params so
+ * the form can render them as separate fields. Also renames legacy keys
+ * (search_mode → search_method, search_mode_enabled → search_method_enabled).
+ *
+ * If no `retrieval_model` param exists, legacy flat params are renamed in-place.
+ * The `retrieval_model` param itself is removed from the returned array.
+ */
+function flattenRetrievalModelParams(params: ToolParam[]): ToolParam[] {
+  const retrievalParam = params.find((p) => p.name === "retrieval_model");
+  const result: ToolParam[] = [];
+
+  if (retrievalParam?.value) {
+    // Parse the nested object
+    let nested: Record<string, unknown> = {};
+    try {
+      nested =
+        typeof retrievalParam.value === "string"
+          ? JSON.parse(retrievalParam.value)
+          : retrievalParam.value;
+    } catch {
+      log.warn("Failed to parse retrieval_model param value");
+    }
+
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      for (const [key, val] of Object.entries(nested)) {
+        // Map legacy key names to V4 names
+        const v4Key = RETRIEVAL_MODEL_KEY_MAP[key] ?? key;
+        result.push({
+          name: v4Key as string,
+          type: inferParamType(v4Key as string, val),
+          required: false,
+          value: val,
+          description: getDescriptionForRetrievalField(v4Key as string),
+        });
+      }
+    }
+
+    // Copy all non-retrieval params
+    for (const p of params) {
+      if (p.name !== "retrieval_model" && !RETRIEVAL_PARAM_NAMES.has(p.name)) {
+        result.push(p);
+      }
+    }
+  } else {
+    // No retrieval_model param — rename legacy flat keys in-place
+    for (const p of params) {
+      if (p.name === "search_mode") {
+        result.push({ ...p, name: "search_method" });
+      } else if (p.name === "search_mode_enabled") {
+        result.push({ ...p, name: "search_method_enabled" });
+      } else {
+        result.push(p);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Reconstruct the nested `retrieval_model` object from flat params and return
+ * a new ToolParam[] where the retrieval fields are replaced by a single
+ * `retrieval_model` object param. Non-retrieval params pass through unchanged.
+ */
+function nestRetrievalModelParams(params: ToolParam[]): ToolParam[] {
+  const retrievalObj: Record<string, unknown> = {};
+  const otherParams: ToolParam[] = [];
+
+  for (const p of params) {
+    if (RETRIEVAL_PARAM_NAMES.has(p.name)) {
+      // Use V4 key names in the nested object
+      const v4Key = RETRIEVAL_MODEL_KEY_MAP[p.name] ?? p.name;
+      retrievalObj[v4Key] = p.value;
+    } else if (p.name === "retrieval_model") {
+      // Skip — we'll rebuild it
+    } else {
+      otherParams.push(p);
+    }
+  }
+
+  // Only add retrieval_model if there are retrieval fields
+  if (Object.keys(retrievalObj).length > 0) {
+    otherParams.push({
+      name: "retrieval_model",
+      type: "object",
+      required: false,
+      value: JSON.stringify(retrievalObj),
+      description: "Retrieval model configuration (V4 nested structure)",
+    });
+  }
+
+  return otherParams;
+}
+
+/** Infer ToolParam type from a retrieval model field value. */
+function inferParamType(
+  field: string,
+  value: unknown
+): "string" | "number" | "boolean" {
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return "string";
+}
+
+/** Human-readable descriptions for retrieval model fields. */
+function getDescriptionForRetrievalField(field: string): string {
+  const descriptions: Record<string, string> = {
+    search_method: "Search method: hybrid, semantic, or accurate (keyword)",
+    search_method_enabled: "Whether the search method configuration is active",
+    top_k: "Maximum number of results to return",
+    score_threshold: "Minimum relevance score threshold (0.0–1.0)",
+    reranking_enable: "Whether to enable reranking of search results",
+  };
+  return descriptions[field] ?? field;
+}
+
 export default function ToolConfigModal({
   isOpen,
   onCancel,
@@ -195,6 +338,11 @@ export default function ToolConfigModal({
     null
   );
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+
+  // P3-A: independent KB-refs state for external_kb_search tool (cross-adapter).
+  // Each entry is {adapter_id, kb_id, display_name}. Persisted under params.kb_refs
+  // as JSON string (matches backend create_agent_info.py's reader).
+  const [selectedKbRefs, setSelectedKbRefs] = useState<ExternalKbRef[]>([]);
 
   // Use React Query for config data
   const { data: configData } = useConfig();
@@ -290,6 +438,7 @@ export default function ToolConfigModal({
     | "idata_search"
     | "haotian_search"
     | "aidp_search"
+    | "external_kb_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
     const name = tool?.name;
@@ -298,6 +447,7 @@ export default function ToolConfigModal({
     if (name === "idata_search") return "idata_search";
     if (name === "haotian_search") return "haotian_search";
     if (name === "aidp_search") return "aidp_search";
+    if (name === "external_kb_search") return "external_kb_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
 
@@ -1044,6 +1194,17 @@ export default function ToolConfigModal({
     );
   }, [tool?.name]);
 
+  // Migrate V4 retrieval_model for external_kb_search: flatten nested
+  // retrieval_model into individual params so the form can render them.
+  // Also handles backward-compat with legacy flat param names.
+  const migrateExternalKbRetrievalModel = useCallback(
+    (params: ToolParam[]): ToolParam[] => {
+      if (tool?.name !== "external_kb_search") return params;
+      return flattenRetrievalModelParams(params);
+    },
+    [tool?.name]
+  );
+
   // Initialize form values for non-datamate tools
   useEffect(() => {
     // Skip if it's datamate_search tool (handled by other useEffects above)
@@ -1054,7 +1215,8 @@ export default function ToolConfigModal({
     // Initialize form values
     const paramsWithDefaults = applyInitParamDefaults(initialParams);
     const paramsMigrated = migrateAidpParamNames(paramsWithDefaults);
-    const paramsWithRerank = withExtraToolParams(paramsMigrated, tool?.name);
+    const paramsRetrievalFlat = migrateExternalKbRetrievalModel(paramsMigrated);
+    const paramsWithRerank = withExtraToolParams(paramsRetrievalFlat, tool?.name);
     setCurrentParams(paramsWithRerank);
     const formValues: Record<string, any> = {};
     paramsWithRerank.forEach((param, index) => {
@@ -1062,8 +1224,96 @@ export default function ToolConfigModal({
     });
     form.setFieldsValue(formValues);
 
-    // Parse initial index_names/dataset_ids value for knowledge base selection
+    // Parse initial index_names/dataset_ids/kb_refs value for knowledge base selection
     if (toolRequiresKbSelection) {
+      // P3-A: external_kb_search uses a different schema (kb_refs) with
+      // backward-compat fallback to the older adapter_id/kb_ids/kb_display_names
+      // schema used by create_agent_info.py.
+      if (toolKbType === "external_kb_search") {
+        const kbRefsParam = initialParams.find((p) => p.name === "kb_refs");
+        let refs: ExternalKbRef[] = [];
+
+        // Try the new schema first (kb_refs)
+        if (kbRefsParam?.value) {
+          try {
+            const parsed =
+              typeof kbRefsParam.value === "string"
+                ? JSON.parse(kbRefsParam.value)
+                : kbRefsParam.value;
+            if (Array.isArray(parsed)) {
+              refs = parsed
+                .filter(
+                  (r: any) =>
+                    r &&
+                    typeof r.adapter_id === "number" &&
+                    typeof r.kb_id === "string"
+                )
+                .map((r: any) => ({
+                  adapter_id: r.adapter_id,
+                  kb_id: r.kb_id,
+                  display_name:
+                    typeof r.display_name === "string" ? r.display_name : r.kb_id,
+                }));
+            }
+          } catch (e) {
+            log.warn("Failed to parse kb_refs from initialParams:", e);
+          }
+        }
+
+        // Backward-compat fallback: assemble kb_refs from the legacy
+        // {adapter_id, kb_ids, kb_display_names} triple if kb_refs was empty.
+        if (refs.length === 0) {
+          const adapterIdParam = initialParams.find(
+            (p) => p.name === "adapter_id"
+          );
+          const kbIdsParam = initialParams.find((p) => p.name === "kb_ids");
+          const displayNamesParam = initialParams.find(
+            (p) => p.name === "kb_display_names"
+          );
+          const adapterId =
+            adapterIdParam?.value != null ? Number(adapterIdParam.value) : NaN;
+          const kbIds: string[] = Array.isArray(kbIdsParam?.value)
+            ? (kbIdsParam!.value as any[]).map(String)
+            : typeof kbIdsParam?.value === "string"
+            ? (() => {
+                try {
+                  const p = JSON.parse(kbIdsParam!.value as string);
+                  return Array.isArray(p) ? p.map(String) : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          const displayNames: string[] = Array.isArray(displayNamesParam?.value)
+            ? (displayNamesParam!.value as any[]).map(String)
+            : typeof displayNamesParam?.value === "string"
+            ? (() => {
+                try {
+                  const p = JSON.parse(displayNamesParam!.value as string);
+                  return Array.isArray(p) ? p.map(String) : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+
+          if (Number.isFinite(adapterId) && kbIds.length > 0) {
+            refs = kbIds.map((kbId, i) => ({
+              adapter_id: adapterId,
+              kb_id: kbId,
+              display_name: displayNames[i] || kbId,
+            }));
+          }
+        }
+
+        if (refs.length > 0) {
+          setSelectedKbRefs(refs);
+        }
+        // external_kb_search doesn't use selectedKbIds; return here so the
+        // legacy index_names/dataset_ids branch below doesn't run.
+        return;
+      }
+
       // Support both index_names and dataset_ids
       const kbParam = initialParams.find(
         (p) =>
@@ -1100,7 +1350,7 @@ export default function ToolConfigModal({
         }
       }
     }
-  }, [initialParams, toolRequiresKbSelection, tool?.name, form, applyInitParamDefaults, migrateAidpParamNames]);
+  }, [initialParams, toolRequiresKbSelection, tool?.name, form, applyInitParamDefaults, migrateAidpParamNames, migrateExternalKbRetrievalModel]);
 
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
@@ -1392,7 +1642,13 @@ export default function ToolConfigModal({
           }
         });
       }
-      const paramsObj = syncedParams.reduce(
+
+      // V4: For external_kb_search, nest retrieval fields under retrieval_model
+      const finalParams = toolToSave.name === "external_kb_search"
+        ? nestRetrievalModelParams(syncedParams)
+        : syncedParams;
+
+      const paramsObj = finalParams.reduce(
         (acc, param) => {
           acc[param.name] = param.value;
           return acc;
@@ -1404,7 +1660,7 @@ export default function ToolConfigModal({
       // Include display_names for knowledge base tools to pass to prompt generation
       const updatedTool: typeof toolToSave = {
         ...toolToSave,
-        initParams: syncedParams,
+        initParams: finalParams,
         // Store knowledge base display names for prompt generation
         ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
           ? { display_names: selectedKbDisplayNames }
@@ -1660,6 +1916,109 @@ export default function ToolConfigModal({
     (param: ToolParam, index: number) => {
       const fieldName = `param_${index}`;
       const formValue = form.getFieldValue(fieldName);
+
+      // --------------------------------------------------------------------
+      // P3-A: cross-adapter (external_kb_search) chip UI
+      //
+      // Reads from `selectedKbRefs` state (set by the ExternalKbSearchSelectorModal
+      // onConfirm handler). Each chip shows "<KB name> · <adapter platform>" so
+      // the user can see which adapter each selected KB belongs to. Removing a
+      // chip splices that ref out of selectedKbRefs and mirrors the change into
+      // currentParams[kb_refs] as JSON string.
+      // --------------------------------------------------------------------
+      if (param.name === "kb_refs") {
+        const placeholder = t(
+          "toolConfig.input.knowledgeBaseSelector.placeholder",
+          {
+            name:
+              getLocalizedDescription(param.description, param.description_zh) ||
+              param.name,
+          }
+        );
+        const hasError =
+          hasSubmitted && param.required && selectedKbRefs.length === 0;
+
+        const onRemove = (refIndex: number) => {
+          const next = selectedKbRefs.filter((_, i) => i !== refIndex);
+          setSelectedKbRefs(next);
+          // Mirror the ref removal into currentParams so the save path sees it.
+          // We only update the kb_refs slot; other params stay untouched.
+          setCurrentParams((prev) =>
+            prev.map((p) =>
+              p.name === "kb_refs"
+                ? { ...p, value: JSON.stringify(next) }
+                : p
+            )
+          );
+          form.setFieldValue(fieldName, JSON.stringify(next));
+          setHasSubmitted(false);
+        };
+
+        return (
+          <div>
+            <div
+              className={`cursor-pointer bg-white border rounded px-3 py-2 transition-colors ${
+                hasError
+                  ? "border-red-500 hover:border-red-500"
+                  : "border-gray-300 hover:border-blue-400"
+              }`}
+              onClick={() => openKbSelector(index)}
+              style={{
+                width: "100%",
+                minHeight: "32px",
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: "4px",
+              }}
+              title={selectedKbRefs
+                .map((r) => r.display_name || r.kb_id)
+                .join(", ")}
+            >
+              {selectedKbRefs.length > 0 ? (
+                selectedKbRefs.map((ref, i) => (
+                  <Tag
+                    key={`${ref.adapter_id}:${ref.kb_id}:${i}`}
+                    closeIcon={
+                      <span className="ant-tag-close-icon">
+                        <CloseOutlined style={{ fontSize: "10px" }} />
+                      </span>
+                    }
+                    onClose={(e) => {
+                      e.stopPropagation();
+                      onRemove(i);
+                    }}
+                    style={{
+                      marginRight: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      lineHeight: "20px",
+                      padding: "0 8px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {ref.display_name || ref.kb_id}
+                  </Tag>
+                ))
+              ) : (
+                <span className="text-gray-400 text-sm">{placeholder}</span>
+              )}
+            </div>
+            {hasError && (
+              <div
+                className="ant-form-item-explain-error"
+                style={{ marginTop: "4px" }}
+              >
+                {t("toolConfig.validation.selectKb")}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // --------------------------------------------------------------------
+      // Legacy single-adapter KB selector chip UI (unchanged).
+      // --------------------------------------------------------------------
 
       // Get display names based on current form value and knowledgeBases
       let displayNames: string[] = [];
@@ -2162,6 +2521,26 @@ export default function ToolConfigModal({
                     });
                   }
 
+                  // P3-A: custom validator for `kb_refs` parameter of
+                  // external_kb_search tool. Same UX pattern as the legacy
+                  // KB selector — the custom chip UI drives the required
+                  // validation because this field isn't wrapped in a Form.Item.
+                  if (
+                    toolRequiresKbSelection &&
+                    param.name === "kb_refs"
+                  ) {
+                    rules.push({
+                      validator: async () => {
+                        if (selectedKbRefs.length === 0) {
+                          return Promise.reject(
+                            t("toolConfig.validation.selectKb")
+                          );
+                        }
+                        return Promise.resolve();
+                      },
+                    });
+                  }
+
                   // Add type-specific validation rules
                   switch (param.type) {
                     case TOOL_PARAM_TYPES.ARRAY:
@@ -2246,7 +2625,8 @@ export default function ToolConfigModal({
                       {toolRequiresKbSelection &&
                       (param.name === "index_names" ||
                         param.name === "dataset_ids" ||
-                        param.name === "kds_list")
+                        param.name === "kds_list" ||
+                        param.name === "kb_refs")
                         ? renderKbSelectorInput(param, index)
                         : renderParamInput(param, index)}
                     </Form.Item>
@@ -2324,7 +2704,33 @@ export default function ToolConfigModal({
       </Modal>
 
       {/* Knowledge Base Selector Modal */}
-      {toolKbType === "haotian_search" ? (
+      {toolKbType === "external_kb_search" ? (
+        <ExternalKbSearchSelectorModal
+          open={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={(refs) => {
+            // Store refs in their own state (rendering + handleSave read this)
+            setSelectedKbRefs(refs);
+
+            // Mirror into currentParams so the underlying ToolParam[]
+            // (persisted via handleSave) picks up kb_refs as JSON string.
+            setCurrentParams((prev) =>
+              prev.map((p) =>
+                p.name === "kb_refs"
+                  ? {
+                      ...p,
+                      value: JSON.stringify(refs),
+                    }
+                  : p
+              )
+            );
+
+            setKbSelectorVisible(false);
+          }}
+          initialRefs={selectedKbRefs}
+          title="Select knowledge bases"
+        />
+      ) : toolKbType === "haotian_search" ? (
         <HaotianKnowledgeSelectorModal
           isOpen={kbSelectorVisible}
           onClose={() => setKbSelectorVisible(false)}

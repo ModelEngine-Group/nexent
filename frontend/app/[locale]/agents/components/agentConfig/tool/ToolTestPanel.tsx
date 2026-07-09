@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Input, Button, Card, Typography, Tooltip, Modal, Form, Tag } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
 
-import { Tool, ToolParam } from "@/types/agentConfig";
+import { Tool, ToolParam, RETRIEVAL_MODEL_KEY_MAP } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import {
   validateTool,
@@ -102,7 +102,7 @@ export interface ToolTestPanelProps {
   /** Callback to notify parent when testPanelKbIds should change (e.g., from manual JSON edit) */
   onTestPanelKbIdsChange?: (ids: string[], displayNames: string[]) => void;
   /** Tool type for KB selection (used to determine parameter name) */
-  toolKbType?: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | null;
+  toolKbType?: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | "external_kb_search" | null;
   /** Haotian knowledge sets for display name resolution */
   haotianKnowledgeSets?: Array<{
     name: string;
@@ -643,6 +643,33 @@ export default function ToolTestPanel({
 
       // Merge KB selection config into configs
       const finalConfigs = { ...configs, ...kbSelectionConfig };
+
+      // V4: For external_kb_search, nest retrieval fields under retrieval_model
+      if (tool?.name === "external_kb_search") {
+        const retrievalObj: Record<string, unknown> = {};
+        const retrievalKeys = new Set([
+          "search_method",
+          "search_method_enabled",
+          "top_k",
+          "score_threshold",
+          "reranking_enable",
+          "search_mode",
+          "search_mode_enabled",
+        ]);
+        for (const [key, val] of Object.entries(finalConfigs)) {
+          if (retrievalKeys.has(key)) {
+            const v4Key = (RETRIEVAL_MODEL_KEY_MAP as Record<string, string>)[key] ?? key;
+            retrievalObj[v4Key] = val;
+          }
+        }
+        if (Object.keys(retrievalObj).length > 0) {
+          for (const key of retrievalKeys) {
+            delete finalConfigs[key];
+          }
+          finalConfigs.retrieval_model = retrievalObj;
+        }
+      }
+
       // Call validateTool with parameters
       const toolName = tool.origin_name || tool.name || "";
       const toolSource = tool.source || "";

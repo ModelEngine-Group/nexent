@@ -20,6 +20,11 @@ spec = importlib.util.spec_from_file_location(
 write_skill_file_tool_module = importlib.util.module_from_spec(spec)
 
 # Mock the smolagents.tool decorator
+# Save the original modules
+original_modules = {}
+for mod in ['smolagents', 'smolagents.tool']:
+    original_modules[mod] = sys.modules.get(mod)
+
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 sys.modules['smolagents.tool'] = mock_smolagents.tool
@@ -89,6 +94,13 @@ sys.modules['nexent.skills.skill_loader'] = mock_skill_loader_module
 
 # Now load the module
 spec.loader.exec_module(write_skill_file_tool_module)
+
+# Restore sys.modules to prevent pollution
+for mod_name, mod_value in original_modules.items():
+    if mod_value is None:
+        sys.modules.pop(mod_name, None)
+    else:
+        sys.modules[mod_name] = mod_value
 
 WriteSkillFileTool = write_skill_file_tool_module.WriteSkillFileTool
 get_write_skill_file_tool = write_skill_file_tool_module.get_write_skill_file_tool

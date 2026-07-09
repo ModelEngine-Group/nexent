@@ -20,6 +20,11 @@ spec = importlib.util.spec_from_file_location(
 read_skill_config_tool_module = importlib.util.module_from_spec(spec)
 
 # Mock the smolagents.tool decorator and nexent.skills dependencies before loading
+# Save the original modules
+original_modules = {}
+for mod in ['smolagents', 'smolagents.tool', 'nexent', 'nexent.skills']:
+    original_modules[mod] = sys.modules.get(mod)
+
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 sys.modules['smolagents.tool'] = mock_smolagents.tool
@@ -32,6 +37,13 @@ sys.modules['nexent.skills'] = mock_nexent.skills
 
 # Now load the module
 spec.loader.exec_module(read_skill_config_tool_module)
+
+# Restore sys.modules
+for mod, original_mod in original_modules.items():
+    if original_mod is not None:
+        sys.modules[mod] = original_mod
+    else:
+        del sys.modules[mod]
 
 ReadSkillConfigTool = read_skill_config_tool_module.ReadSkillConfigTool
 get_read_skill_config_tool = read_skill_config_tool_module.get_read_skill_config_tool

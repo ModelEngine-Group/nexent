@@ -127,6 +127,56 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     e.preventDefault();
     e.stopPropagation();
 
+    // Standard external-KB adapter path: fetch a presigned download URL
+    // lazily from the spec endpoint
+    // GET /adapters/{adapter_id}/knowledge-bases/{kb_id}/documents/{doc_id}/download-url
+    if (
+      source_type === "external" &&
+      typeof result?.adapter_id === "number" &&
+      result?.knowledge_base_id &&
+      result?.document_id
+    ) {
+      setIsDownloading(true);
+      try {
+        const { unifiedKBService } = await import(
+          "@/services/unifiedKBService"
+        );
+        const resp = await unifiedKBService.getDocumentDownloadUrl(
+          result.adapter_id,
+          result.knowledge_base_id,
+          result.document_id
+        );
+        const downloadUrl = resp?.download_url;
+        if (!downloadUrl) {
+          message.error(
+            t(
+              "chatRightPanel.fileDownloadError",
+              "Failed to obtain download URL for this document"
+            )
+          );
+          return;
+        }
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = resp?.filename || filename || "download";
+        link.click();
+        message.success(
+          t("chatRightPanel.fileDownloadSuccess", "File download started")
+        );
+      } catch (error) {
+        log.error("Failed to fetch download URL via spec endpoint:", error);
+        message.error(
+          t(
+            "chatRightPanel.fileDownloadError",
+            "Failed to download file. Please try again."
+          )
+        );
+      } finally {
+        setIsDownloading(false);
+      }
+      return;
+    }
+
     if (!filename && !url) {
       message.error(
         t("chatRightPanel.fileDownloadError", "File name or URL is missing")

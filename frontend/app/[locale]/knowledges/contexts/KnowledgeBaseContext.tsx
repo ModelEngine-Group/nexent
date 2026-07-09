@@ -1,5 +1,38 @@
 "use client";
 
+/**
+ * @fileoverview KnowledgeBaseContext — central state provider for KB pages.
+ *
+ * ## Service imports (Approach A — hybrid)
+ *
+ * This file intentionally imports **both** `unifiedKBService` and
+ * `knowledgeBaseService`. This is NOT a migration half-finished:
+ *
+ *   - `unifiedKBService` handles cross-platform standard operations
+ *     (listAllKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase,
+ *     listDocuments). These work uniformly across local and external KBs.
+ *
+ *   - `knowledgeBaseService` is retained for two narrow, legitimate purposes:
+ *       1. Enriching the unified KB list with local-only metadata fields
+ *          (`summaryFrequency`, `lastSummaryTime`, `preserve_source_file`,
+ *          `ingroup_permission`, `group_ids`) that `UnifiedKnowledgeBase`
+ *          does not carry yet — see `_fetchAllKbsUnified`.
+ *       2. `syncDataMateAndCreateRecords()` (DataMate sync) — still served
+ *          by legacy `/api/datamate/*` routes.
+ *       3. Fallback `getAllFiles()` for KBs missing `adapter_id` (only
+ *          reachable with stale cache state) — see `_refreshActiveDocuments`.
+ *
+ * The full design rationale lives in `P2-frontend-migration-plan.md`
+ * (§9.4 "Dual-import hygiene"). `knowledgeBaseService` is explicitly
+ * **not deprecated** — see its own file header.
+ *
+ * ## Future (Approach C)
+ *
+ * If local-only features later move under `/api/v1/kb/.../ext/*` (see
+ * Plan §13), only the URL builder inside `knowledgeBaseService.ts`
+ * changes — this file's imports and call sites remain the same.
+ */
+
 import {
   createContext,
   useReducer,
@@ -12,6 +45,8 @@ import {
 import { useTranslation } from "react-i18next";
 
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import unifiedKBService from "@/services/unifiedKBService";
+import type { UnifiedAdapter, UnifiedKnowledgeBase } from "@/types/unifiedKB";
 
 import {
   KnowledgeBase,
@@ -23,6 +58,70 @@ import { KNOWLEDGE_BASE_ACTION_TYPES } from "@/const/knowledgeBase";
 
 import { useConfig } from "@/hooks/useConfig";
 import log from "@/lib/logger";
+
+// =============================================================================
+// Module-level helpers
+// =============================================================================
+
+/**
+ * Map a UnifiedKnowledgeBase (cross-platform shape from unifiedKBService) +
+ * optional legacy metadata (from knowledgeBaseService.getKnowledgeBasesInfo)
+ * into the legacy KnowledgeBase shape that all existing components expect.
+ *
+ * Under Approach A, the unified API carries only cross-platform fields
+ * (name, document_count, chunk_count, embedding_model, adapter_id, ...).
+ * Local-only fields like `summaryFrequency`, `lastSummaryTime`,
+ * `preserve_source_file`, `ingroup_permission`, etc. are merged in from the
+ * legacy metadata fetch.
+ */
+const buildKbFromUnified = (
+  unified: UnifiedKnowledgeBase,
+  legacyMeta: Partial<KnowledgeBase> | undefined
+): KnowledgeBase => {
+  const metadata = (unified.metadata ?? {}) as Record<string, unknown>;
+  return {
+    id: String(unified.knowledge_base_id),
+    name: unified.name,
+    index_name: (metadata.index_name as string) || String(unified.knowledge_base_id),
+    display_name: unified.name,
+    description: unified.description ?? null,
+    documentCount: unified.document_count || 0,
+    chunkCount: unified.chunk_count || 0,
+    createdAt: (metadata.create_time as string) ?? null,
+    updatedAt: (metadata.update_time as string) ?? null,
+    embeddingModel: unified.embedding_model || "unknown",
+    avatar: "",
+    chunkNum: 0,
+    language: "",
+    nickname: "",
+    parserId: "",
+    permission: legacyMeta?.permission || "",
+    tokenNum: 0,
+    source: unified.platform || "nexent",
+    tenant_id: (metadata.tenant_id as string) ?? undefined,
+    adapter_id: unified.adapter_id,
+    adapter_name: unified.adapter_name,
+    // Local-only fields enriched from legacy metadata (only present for local KBs)
+    summaryFrequency: legacyMeta?.summaryFrequency ?? null,
+    lastSummaryTime: legacyMeta?.lastSummaryTime ?? null,
+    is_multimodal: legacyMeta?.is_multimodal ?? false,
+    preserve_source_file: legacyMeta?.preserve_source_file ?? true,
+    knowledge_sources: legacyMeta?.knowledge_sources ?? undefined,
+    ingroup_permission: legacyMeta?.ingroup_permission ?? "",
+    group_ids: legacyMeta?.group_ids ?? [],
+    store_size: legacyMeta?.store_size ?? "",
+    process_source: legacyMeta?.process_source ?? "",
+  };
+};
+
+/**
+ * Empty legacy metadata bucket — used when `getKnowledgeBasesInfo` fails so
+ * the unified-path mapping still proceeds (just without local-only enrichment).
+ */
+const emptyLegacyMeta = () => ({
+  knowledgeBases: [] as KnowledgeBase[],
+  dataMateSyncError: undefined as string | undefined,
+});
 
 // Reducer function
 const knowledgeBaseReducer = (
@@ -237,6 +336,187 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel]
   );
 
+  // ---------------------------------------------------------------------------
+  // Private inner helpers (Approach A)
+  //
+  // Under Approach A, the cross-platform KB list fetches go through
+  // unifiedKBService.listAllKnowledgeBases() and the legacy
+  // knowledgeBaseService is kept in parallel ONLY to enrich the list with
+  // local-only metadata (summaryFrequency, lastSummaryTime,
+  // preserve_source_file, ingroup_permission, group_ids, etc.) that doesn't
+  // exist on UnifiedKnowledgeBase yet.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Core unified fetch: pulls the cross-platform KB list, enriches with legacy
+   * metadata, optionally triggers DataMate sync, and returns the mapped
+   * KnowledgeBase[] plus any DataMate error.
+   *
+   * Both legacy and DataMate calls are wrapped in `.catch()` so a partial
+   * failure doesn't drop the unified list.
+   */
+  const _fetchAllKbsUnified = useCallback(
+    async (
+      includeDataMateSync: boolean
+    ): Promise<{
+      mapped: KnowledgeBase[];
+      dataMateSyncError: string | undefined;
+    }> => {
+      // 1. Parallel fetch: unified list + legacy local metadata.
+      const [unified, legacyMeta] = await Promise.all([
+        unifiedKBService.listAllKnowledgeBases().catch((err) => {
+          log.warn("listAllKnowledgeBases failed:", err);
+          return { list: [], total: 0 } as Awaited<
+            ReturnType<typeof unifiedKBService.listAllKnowledgeBases>
+          >;
+        }),
+        knowledgeBaseService
+          .getKnowledgeBasesInfo(true, false)
+          .catch((err) => {
+            log.warn(
+              "legacy metadata fetch failed (continuing without summary fields):",
+              err
+            );
+            return emptyLegacyMeta();
+          }),
+      ]);
+
+      // 2. Build lookup keyed by kb_id (legacy stores id === index_name,
+      //    which for local KBs matches knowledge_base_id).
+      const metaById = new Map<string, KnowledgeBase>();
+      legacyMeta.knowledgeBases.forEach((kb) => metaById.set(kb.id, kb));
+
+      // 3. Map UnifiedKnowledgeBase → legacy KnowledgeBase shape, enriched
+      //    with local-only metadata from the legacy fetch when available.
+      const mapped: KnowledgeBase[] = unified.list.map((unifiedKb) => {
+        const legacyKb = metaById.get(String(unifiedKb.knowledge_base_id));
+        return buildKbFromUnified(unifiedKb, legacyKb);
+      });
+
+      // 4. DataMate sync (only when caller opts in and datamateUrl is configured).
+      let dataMateSyncError: string | undefined;
+      if (includeDataMateSync) {
+        const datamateUrl = appConfig?.datamateUrl ?? null;
+        if (datamateUrl && datamateUrl.trim() !== "") {
+          try {
+            const syncResult =
+              await knowledgeBaseService.syncDataMateAndCreateRecords();
+            if (syncResult.indices_info) {
+              const datamateRecords: KnowledgeBase[] = syncResult.indices_info.map(
+                (indexInfo: any) => {
+                  const stats = indexInfo.stats?.base_info || {};
+                  return {
+                    id: String(indexInfo.name),
+                    name: indexInfo.display_name || indexInfo.name,
+                    index_name: String(indexInfo.name),
+                    display_name: indexInfo.display_name || indexInfo.name,
+                    description: "DataMate knowledge base",
+                    documentCount: stats.doc_count || 0,
+                    chunkCount: stats.chunk_count || 0,
+                    createdAt: stats.creation_date || null,
+                    updatedAt:
+                      stats.update_date || stats.creation_date || null,
+                    embeddingModel: stats.embedding_model || "unknown",
+                    avatar: "",
+                    chunkNum: 0,
+                    language: "",
+                    nickname: "",
+                    parserId: "",
+                    permission: "",
+                    tokenNum: 0,
+                    source: "datamate",
+                    tenant_id: indexInfo.tenant_id || "",
+                  };
+                }
+              );
+              // Merge DataMate-only KBs, avoiding duplicates by id
+              const existingIds = new Set(mapped.map((k) => k.id));
+              datamateRecords.forEach((dm) => {
+                if (!existingIds.has(dm.id)) mapped.push(dm);
+              });
+            }
+          } catch (e) {
+            dataMateSyncError = e instanceof Error ? e.message : String(e);
+            log.error("Failed to sync DataMate knowledge bases:", e);
+          }
+        } else {
+          log.info(
+            "DataMate URL not configured, skipping DataMate knowledge base sync"
+          );
+        }
+      }
+
+      return { mapped, dataMateSyncError };
+    },
+    [appConfig?.datamateUrl]
+  );
+
+  /**
+   * Refresh the active KB's document list via the unified surface.
+   *
+   * Phase 4 (Approach A): replaces legacy `knowledgeBaseService.getAllFiles`.
+   * Uses `unifiedKBService.listDocuments` when the active KB carries an
+   * `adapter_id`; the legacy `getAllFiles` is kept as a fallback for KBs
+   * loaded from a pre-migration cache that might be missing `adapter_id`.
+   *
+   * Maps `UnifiedDocument[]` back to the legacy `Document[]` shape so that
+   * the dispatched `documentsUpdated` event continues to carry the same
+   * payload that existing consumers expect.
+   */
+  const _refreshActiveDocuments = useCallback(
+    async (activeKnowledgeBase: KnowledgeBase) => {
+      try {
+        const adapterId = activeKnowledgeBase.adapter_id;
+        let documents: import("@/types/knowledgeBase").Document[];
+
+        if (typeof adapterId === "number") {
+          const response = await unifiedKBService.listDocuments(
+            adapterId,
+            activeKnowledgeBase.id,
+            { pageSize: 1000 }
+          );
+          documents = (response.list || []).map((ud) => ({
+            id: ud.id,
+            kb_id: activeKnowledgeBase.id,
+            name: ud.name || ud.id,
+            type: ud.type || "unknown",
+            size: ud.size || 0,
+            create_time: ud.created_at || "",
+            chunk_num: ud.chunk_count || 0,
+            token_num: 0,
+            status: ud.status || "unknown",
+            latest_task_id: "",
+            error_reason: ud.error_message,
+          }));
+        } else {
+          // Stale-state KB or one loaded from pre-migration cache — fall back
+          // to legacy. Phase 5 (component-level) will eventually eliminate
+          // these paths entirely.
+          log.warn(
+            `KB ${activeKnowledgeBase.id} has no adapter_id; falling back to legacy getAllFiles for document refresh`
+          );
+          documents = await knowledgeBaseService.getAllFiles(
+            activeKnowledgeBase.id,
+            activeKnowledgeBase.source
+          );
+        }
+
+        log.log("documents", documents);
+        window.dispatchEvent(
+          new CustomEvent("documentsUpdated", {
+            detail: {
+              kbId: activeKnowledgeBase.id,
+              documents,
+            },
+          })
+        );
+      } catch (error) {
+        log.error("Failed to refresh document information:", error);
+      }
+    },
+    []
+  );
+
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
   const fetchKnowledgeBases = useCallback(
     async (
@@ -260,26 +540,23 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         localStorage.removeItem("preloaded_kb_data");
         localStorage.removeItem("kb_cache");
 
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-          skipHealthCheck,
-          includeDataMateSync,
-          null,
-          appConfig?.datamateUrl ?? null
+        const { mapped, dataMateSyncError } = await _fetchAllKbsUnified(
+          includeDataMateSync
         );
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
-          payload: result.knowledgeBases,
+          payload: mapped,
         });
 
         // Set DataMate sync error if present and throw to trigger error handling
-        if (result.dataMateSyncError) {
+        if (dataMateSyncError) {
           dispatch({
             type: KNOWLEDGE_BASE_ACTION_TYPES.SET_DATA_MATE_SYNC_ERROR,
-            payload: result.dataMateSyncError,
+            payload: dataMateSyncError,
           });
           // Throw DataMateSyncError to signal failure to the caller
-          throw new DataMateSyncError(result.dataMateSyncError);
+          throw new DataMateSyncError(dataMateSyncError);
         }
       } catch (error) {
         // Check if it's a DataMate sync error
@@ -296,7 +573,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: false });
       }
     },
-    [state.isLoading, t]
+    [state.isLoading, t, _fetchAllKbsUnified]
   );
 
   // Select knowledge base - memoized with useCallback
@@ -353,6 +630,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       preserve_source_file?: boolean
     ) => {
       try {
+        // Resolve embedding model from model config
         const selectedEmbeddingModel = embeddingModel?.trim() || "";
         const defaultMultiEmbeddingModel =
           modelConfig?.multiEmbedding?.modelName?.trim() || "";
@@ -366,16 +644,55 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           : state.currentEmbeddingModel || "";
         const resolvedEmbeddingModel =
           selectedEmbeddingModel || fallbackEmbeddingModel;
-        const newKB = await knowledgeBaseService.createKnowledgeBase({
-          name,
-          description,
-          source,
-          embeddingModel: resolvedEmbeddingModel,
-          ingroup_permission,
-          group_ids,
+
+        // Get local adapter ID
+        const adaptersResponse = await unifiedKBService.listAdapters();
+        const localAdapter = adaptersResponse.list.find(
+          (a: UnifiedAdapter) => a.platform === "local"
+        );
+        if (!localAdapter) {
+          throw new Error("Local adapter not found");
+        }
+
+        // Create knowledge base via unified service
+        // Backend LocalKBAdapter.create_knowledge_base() accepts:
+        //   extra = { embedding_model, ingroup_permission, group_ids, is_multimodal, preserve_source_file }
+        const unifiedKB = await unifiedKBService.createKnowledgeBase(
+          localAdapter.adapter_id,
+          {
+            name,
+            description,
+            extra: {
+              embedding_model: resolvedEmbeddingModel,
+              ingroup_permission,
+              group_ids,
+              is_multimodal: resolvedIsMultimodal,
+              preserve_source_file,
+            },
+          }
+        );
+
+        // Map UnifiedKnowledgeBase → legacy KnowledgeBase (must supply all required fields).
+        const newKB: KnowledgeBase = {
+          id: unifiedKB.knowledge_base_id,
+          name: unifiedKB.name,
+          description: unifiedKB.description || "",
+          chunkCount: unifiedKB.chunk_count || 0,
+          documentCount: unifiedKB.document_count || 0,
+          createdAt: null,
+          avatar: "",
+          chunkNum: 0,
+          language: "",
+          nickname: "",
+          parserId: "",
+          permission: "",
+          tokenNum: 0,
+          source: unifiedKB.platform || source,
+          embeddingModel: unifiedKB.embedding_model || resolvedEmbeddingModel,
           is_multimodal: resolvedIsMultimodal,
-          preserve_source_file,
-        });
+          adapter_id: unifiedKB.adapter_id,
+          adapter_name: unifiedKB.adapter_name,
+        };
         return newKB;
       } catch (error) {
         log.error(t("knowledgeBase.error.create"), error);
@@ -393,7 +710,19 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   const deleteKnowledgeBase = useCallback(
     async (id: string) => {
       try {
-        await knowledgeBaseService.deleteKnowledgeBase(id);
+        // Look up the KB in local state to get its adapter_id.
+        // All KBs (local + external) should carry adapter_id after fetchKnowledgeBases.
+        const kb = state.knowledgeBases.find((k) => k.id === id);
+        if (kb && typeof kb.adapter_id === "number") {
+          await unifiedKBService.deleteKnowledgeBase(kb.adapter_id, id);
+        } else {
+          // Fallback to legacy path - should only trigger if state is stale
+          // or the KB was loaded from a pre-migration cache.
+          log.warn(
+            `KB ${id} has no adapter_id in local state; falling back to legacy deleteKnowledgeBase`
+          );
+          await knowledgeBaseService.deleteKnowledgeBase(id);
+        }
 
         // Update knowledge base list
         dispatch({
@@ -430,52 +759,31 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         return false;
       }
     },
-    [state.knowledgeBases, state.selectedIds, state.activeKnowledgeBase]
+    [state.knowledgeBases, state.selectedIds, state.activeKnowledgeBase, t]
   );
 
-  // Add a function to refresh the knowledge base data
+  // Refresh knowledge base data (no DataMate sync — used for background refreshes).
+  // Uses unified KB list + legacy metadata enrichment via _fetchAllKbsUnified.
   const refreshKnowledgeBaseData = useCallback(
     async (forceRefresh = false) => {
       try {
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-          false,
-          true,
-          null,
-          appConfig?.datamateUrl ?? null
-        );
+        const { mapped, dataMateSyncError } = await _fetchAllKbsUnified(false);
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
-          payload: result.knowledgeBases,
+          payload: mapped,
         });
 
-        if (result.dataMateSyncError) {
+        if (dataMateSyncError) {
           dispatch({
             type: KNOWLEDGE_BASE_ACTION_TYPES.SET_DATA_MATE_SYNC_ERROR,
-            payload: result.dataMateSyncError,
+            payload: dataMateSyncError,
           });
         }
 
         // If there is an active knowledge base, also refresh its document information
         if (state.activeKnowledgeBase) {
-          // Publish document update event to notify document list component to refresh document data
-          try {
-            const documents = await knowledgeBaseService.getAllFiles(
-              state.activeKnowledgeBase.id,
-              state.activeKnowledgeBase.source
-            );
-            log.log("documents", documents);
-            window.dispatchEvent(
-              new CustomEvent("documentsUpdated", {
-                detail: {
-                  kbId: state.activeKnowledgeBase.id,
-                  documents,
-                },
-              })
-            );
-          } catch (error) {
-            log.error("Failed to refresh document information:", error);
-          }
+          await _refreshActiveDocuments(state.activeKnowledgeBase);
         }
       } catch (error) {
         log.error("Failed to refresh knowledge base data:", error);
@@ -485,54 +793,34 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         });
       }
     },
-    [state.activeKnowledgeBase]
+    [state.activeKnowledgeBase, _fetchAllKbsUnified, _refreshActiveDocuments]
   );
 
-  // Add a function to refresh the knowledge base data with DataMate sync and create records
+  // Refresh knowledge base data AND trigger DataMate sync.
+  // Uses unified KB list + legacy DataMate sync via _fetchAllKbsUnified.
+  // Throws DataMateSyncError on DataMate failure so callers can react.
   const refreshKnowledgeBaseDataWithDataMate = useCallback(async () => {
     try {
-      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-        false,
-        true,
-        null,
-        appConfig?.datamateUrl ?? null
-      );
+      const { mapped, dataMateSyncError } = await _fetchAllKbsUnified(true);
 
       dispatch({
         type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
-        payload: result.knowledgeBases,
+        payload: mapped,
       });
 
       // Handle DataMate sync error
-      if (result.dataMateSyncError) {
+      if (dataMateSyncError) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.SET_DATA_MATE_SYNC_ERROR,
-          payload: result.dataMateSyncError,
+          payload: dataMateSyncError,
         });
         // Throw DataMateSyncError to signal failure to the caller
-        throw new DataMateSyncError(result.dataMateSyncError);
+        throw new DataMateSyncError(dataMateSyncError);
       }
 
       // If there is an active knowledge base, also refresh its document information
       if (state.activeKnowledgeBase) {
-        // Publish document update event to notify document list component to refresh document data
-        try {
-          const documents = await knowledgeBaseService.getAllFiles(
-            state.activeKnowledgeBase.id,
-            state.activeKnowledgeBase.source
-          );
-          log.log("documents", documents);
-          window.dispatchEvent(
-            new CustomEvent("documentsUpdated", {
-              detail: {
-                kbId: state.activeKnowledgeBase.id,
-                documents,
-              },
-            })
-          );
-        } catch (error) {
-          log.error("Failed to refresh document information:", error);
-        }
+        await _refreshActiveDocuments(state.activeKnowledgeBase);
       }
     } catch (error) {
       // Check if it's a DataMate sync error - re-throw to be handled by caller
@@ -545,7 +833,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         payload: "Failed to refresh knowledge base data with DataMate",
       });
     }
-  }, [state.activeKnowledgeBase]);
+  }, [state.activeKnowledgeBase, _fetchAllKbsUnified, _refreshActiveDocuments]);
 
   // Initial data loading - with optimized dependencies
   useEffect(() => {

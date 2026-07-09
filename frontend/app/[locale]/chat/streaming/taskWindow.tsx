@@ -340,6 +340,12 @@ type KnowledgeSiteInfo = {
   objectName?: string;
   downloadUrl?: string;
   canOpenWeb: boolean;
+  // Lazy-download refs for the standard external KB adapter path.
+  // When these are present, the download handler calls
+  // GET /adapters/{adapter_id}/knowledge-bases/{kb_id}/documents/{doc_id}/download-url
+  adapterId?: number;
+  knowledgeBaseId?: string;
+  documentId?: string;
 };
 
 // Define the handlers for different types of messages to improve extensibility
@@ -550,6 +556,9 @@ const messageHandlers: MessageHandler[] = [
             objectName,
             downloadUrl: result.download_url,
             canOpenWeb,
+            adapterId: result.adapter_id,
+            knowledgeBaseId: result.knowledge_base_id,
+            documentId: result.document_id,
           };
         }
       );
@@ -558,6 +567,56 @@ const messageHandlers: MessageHandler[] = [
         site: KnowledgeSiteInfo
       ): Promise<void> => {
         try {
+          // Standard external-KB adapter path: fetch a presigned download URL
+          // lazily from the spec-compliant GET /download-url endpoint.
+          if (
+            site.sourceType === "external" &&
+            site.adapterId !== undefined &&
+            site.knowledgeBaseId &&
+            site.documentId
+          ) {
+            try {
+              const { unifiedKBService } = await import(
+                "@/services/unifiedKBService"
+              );
+              const resp = await unifiedKBService.getDocumentDownloadUrl(
+                site.adapterId,
+                site.knowledgeBaseId,
+                site.documentId
+              );
+              const downloadUrl = resp?.download_url;
+              if (!downloadUrl) {
+                antdMessage.error(
+                  t(
+                    "taskWindow.downloadError",
+                    "Failed to obtain download URL for this document"
+                  )
+                );
+                return;
+              }
+              const link = document.createElement("a");
+              link.href = downloadUrl;
+              link.download = resp?.filename || site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => document.body.removeChild(link), 100);
+              antdMessage.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            } catch (err) {
+              log.error("Failed to fetch download URL via spec endpoint:", err);
+              antdMessage.error(
+                t(
+                  "taskWindow.downloadError",
+                  "Failed to download file. Please try again."
+                )
+              );
+              return;
+            }
+          }
+
           if (site.sourceType === "datamate") {
             if (!context?.appConfig?.modelEngineEnabled) {
               antdMessage.error(

@@ -43,6 +43,105 @@ if _sdk_dir not in sys.path:
 sys.modules.update({k: v for k, v in _mem0_stubs.items() if k not in sys.modules})
 sys.modules.update({k: v for k, v in _optional_sdk_stubs.items() if k not in sys.modules})
 
+
+# ---------------------------------------------------------------------------
+# V4 knowledge API test stubs
+#
+# Some knowledge API tests import backend modules that depend on live vector
+# database or DataMate services. Register permissive stubs at import time so
+# unit tests can exercise HTTP routing without external services.
+# ---------------------------------------------------------------------------
+def _install_v4_adapter_stubs() -> None:
+    # services.vectordatabase_service
+    vdb_mod = types.ModuleType("services.vectordatabase_service")
+    vdb_mod.ElasticSearchService = MagicMock()
+    vdb_mod.ElasticSearchService.search_hybrid = MagicMock(return_value={"results": []})
+    vdb_mod.ElasticSearchService.search_semantic = MagicMock(return_value={"results": []})
+    vdb_mod.ElasticSearchService.search_accurate = MagicMock(return_value={"results": []})
+
+    # IMPORTANT: use a real function (not a MagicMock) for get_vector_db_core so
+    # FastAPI's dependency analyser sees an empty signature and does not
+    # introspect ``args``/``kwargs`` as required query parameters. Tests that
+    # need a MagicMock can replace this on the module directly via monkeypatch.
+    def _stub_get_vector_db_core():
+        return MagicMock()
+    vdb_mod.get_vector_db_core = _stub_get_vector_db_core
+
+    sys.modules["services.vectordatabase_service"] = vdb_mod
+
+    # services.datamate_service
+    dm_mod = types.ModuleType("services.datamate_service")
+    dm_mod._get_datamate_core = MagicMock(return_value=MagicMock())
+    sys.modules["services.datamate_service"] = dm_mod
+
+    # Attach stubs as attributes on the parent ``services`` package so that
+    # ``unittest.mock.patch`` can resolve them without triggering a real import.
+    import services as _services_pkg
+    for name, stub in [
+        ("vectordatabase_service", vdb_mod),
+        ("datamate_service", dm_mod),
+    ]:
+        setattr(_services_pkg, name, stub)
+
+    # Also propagate to all already-imported backend modules that hold bindings
+    # to ElasticSearchService / get_vector_db_core so they pick up the stub.
+    for _mod_name, _mod in list(sys.modules.items()):
+        if not _mod_name.startswith("backend."):
+            continue
+        if hasattr(_mod, "ElasticSearchService"):
+            _mod.ElasticSearchService = vdb_mod.ElasticSearchService
+        if hasattr(_mod, "get_vector_db_core"):
+            _mod.get_vector_db_core = _stub_get_vector_db_core
+
+
+_install_v4_adapter_stubs()
+
+
+# ---------------------------------------------------------------------------
+# Optional dependency stubs
+#
+# Some backend modules transitively import heavy optional libraries
+# (boto3 for nexent.storage, etc.) that are not required for unit-level
+# testing. Provide minimal stubs so ``from database... import ...``-style
+# import chains do not blow up the test environment.
+# ---------------------------------------------------------------------------
+def _install_optional_dependency_stubs() -> None:
+    for module_name in ("boto3", "supabase"):
+        if module_name not in sys.modules:
+            stub = MagicMock(name=module_name)
+            stub.client = MagicMock()
+            stub.resource = MagicMock()
+            stub.create_client = MagicMock()
+            sys.modules[module_name] = stub
+
+
+_install_optional_dependency_stubs()
+
+
+# ---------------------------------------------------------------------------
+# Re-bind V4 adapter stubs into modules that imported them before the stubs
+# were registered.  pytest runs conftest.py once at session start; test
+# fixtures then replace the stub with fresh MagicMock instances.
+# ---------------------------------------------------------------------------
+def _sync_vdb_stub_to_importers() -> None:
+    """Propagate the current services.vectordatabase_service stub to all
+    already-imported backend modules that hold a binding to
+    ElasticSearchService / get_vector_db_core."""
+    vdb_mod = sys.modules.get("services.vectordatabase_service")
+    if vdb_mod is None:
+        return
+    for mod_name, mod in list(sys.modules.items()):
+        if not mod_name.startswith("backend."):
+            continue
+        if hasattr(mod, "ElasticSearchService"):
+            mod.ElasticSearchService = vdb_mod.ElasticSearchService
+        if hasattr(mod, "get_vector_db_core"):
+            mod.get_vector_db_core = vdb_mod.get_vector_db_core
+
+
+_sync_vdb_stub_to_importers()
+
+
 # Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
 # in environments where the optional SDK is not installed.  We register a
 # permissive module-like object that exposes ``open_workbook`` so the .xls

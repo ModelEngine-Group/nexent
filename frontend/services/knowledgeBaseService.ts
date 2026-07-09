@@ -1,4 +1,56 @@
-// Unified encapsulation of knowledge base related API calls
+/**
+ * Local-knowledge-base extension service.
+ *
+ * This service is **not deprecated**. It intentionally carries methods
+ * specific to Nexent's own Elasticsearch-backed KB that have **no equivalent**
+ * in the cross-platform unified API ({@link ./unifiedKBService.ts unifiedKBService}):
+ *
+ *   - AI summaries:
+ *       summaryIndex, changeSummary, getSummary, updateSummaryFrequency
+ *   - Chunk CRUD & preview:
+ *       previewChunks, previewChunksPaginated, createChunk, updateChunk,
+ *       deleteChunk, hybridSearch
+ *   - Embedding model config:
+ *       getEmbeddingModelStatus, updateEmbeddingModel
+ *   - Name validation:
+ *       checkKnowledgeBaseName, checkKnowledgeBaseNameExists
+ *   - Document error info:
+ *       getDocumentErrorInfo
+ *   - KB metadata with permissions:
+ *       updateKnowledgeBase (with ingroup_permission/group_ids)
+ *   - Local-only cross-KB retrieval:
+ *       getAllFiles (per-KB file listing), hybridSearch (local hybrid scoring)
+ *   - Platform-specific data-source listings (until external adapters
+ *     are implemented by their respective platforms):
+ *       getDifyKnowledgeBases, syncDifyKnowledgeBases,
+ *       getIdataKnowledgeBases, syncIdataKnowledgeBases,
+ *       getAidpKnowledgeBases(All), mapAidpKnowledgeBasesToKnowledgeBases,
+ *       getHaotianKnowledgeSets, testHaotianConnection,
+ *       syncDataMateAndCreateRecords, testDataMateConnection
+ *
+ * Cross-platform standard operations (KB list/create/delete, document
+ * upload/list/delete, retrieve) go through
+ * {@link ./unifiedKBService.ts unifiedKBService}.
+ *
+ * ## URL strategy (Approach A — current)
+ *
+ * This service calls legacy backend paths:
+ *   - /api/summary/{index}/...       — summaries
+ *   - /api/indices/{index}/...       — chunks, embedding model config, metadata
+ *   - /api/indices/check_exist       — name validation
+ *   - /api/dify/... /api/haotian/... — platform-specific listings
+ *   - /api/datamate/...              — DataMate sync
+ *   - /api/file/upload + /process    — document upload
+ * These paths are still served by `vectordatabase_app`, `knowledge_summary_app`,
+ * and the per-platform apps (dify_app, haotian_app, etc.).
+ *
+ * ## Future: Approach C (optional, deferred)
+ *
+ * If the team decides to migrate these URLs under the unified API namespace,
+ * the migration is captured in §13 "Approach C 备选方案 (Future)" of
+ * `P2-frontend-migration-plan.md`. Under Approach C, only the URL builder in
+ * this file changes — the method signatures and all call sites remain the same.
+ */
 
 import i18n from "i18next";
 
@@ -9,7 +61,6 @@ import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
 import {
   Document,
   KnowledgeBase,
-  KnowledgeBaseCreateParams,
   KnowledgeBasesWithDataMateStatus,
   DataMateSyncError,
 } from "@/types/knowledgeBase";
@@ -866,86 +917,6 @@ class KnowledgeBaseService {
     }
   }
 
-  // Create a new knowledge base
-  async createKnowledgeBase(
-    params: KnowledgeBaseCreateParams
-  ): Promise<KnowledgeBase> {
-    try {
-      // First check Elasticsearch health status to avoid subsequent operation failures
-      const isHealthy = await this.checkHealth();
-      if (!isHealthy) {
-        throw new Error(
-          "Elasticsearch service unavailable, cannot create knowledge base"
-        );
-      }
-
-      // Build request body with optional group permission and user groups
-      const requestBody: {
-        name: string;
-        description: string;
-        embeddingModel?: string;
-        ingroup_permission?: string;
-        group_ids?: number[];
-        is_multimodal?: boolean;
-        preserve_source_file?: boolean;
-      } = {
-        name: params.name,
-        description: params.description || "",
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
-      };
-
-      // Include group permission and user groups if provided
-      if (params.ingroup_permission) {
-        requestBody.ingroup_permission = params.ingroup_permission;
-      }
-      if (params.group_ids && params.group_ids.length > 0) {
-        requestBody.group_ids = params.group_ids;
-      }
-      if (params.preserve_source_file !== undefined) {
-        requestBody.preserve_source_file = params.preserve_source_file;
-      }
-
-      const response = await fetch(
-        API_ENDPOINTS.knowledgeBase.indexDetail(params.name),
-        {
-          method: "POST",
-          headers: getAuthHeaders(), // Add user authentication information to obtain the user id
-          body: JSON.stringify(requestBody),
-        }
-      );
-
-      const result = await response.json();
-      // Modify judgment logic, backend returns status field instead of success field
-      if (result.status !== "success") {
-        throw new Error(result.message || "Failed to create knowledge base");
-      }
-
-      // Create a full KnowledgeBase object with default values
-      return {
-        id: result.id || params.name, // Use returned ID or name as ID
-        name: params.name,
-        description: params.description || null,
-        documentCount: 0,
-        chunkCount: 0,
-        createdAt: new Date().toISOString(),
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
-        avatar: "",
-        chunkNum: 0,
-        language: "",
-        nickname: "",
-        parserId: "",
-        permission: "",
-        tokenNum: 0,
-        source: params.source || "elasticsearch",
-      };
-    } catch (error) {
-      log.error("Failed to create knowledge base:", error);
-      throw error;
-    }
-  }
-
   // Delete a knowledge base
   async deleteKnowledgeBase(id: string): Promise<void> {
     try {
@@ -1702,6 +1673,105 @@ class KnowledgeBaseService {
         throw error;
       }
       throw new Error("Failed to get embedding model status");
+    }
+  }
+
+  // ---- V4 standard API methods ----
+
+  /**
+   * GET /api/v1/knowledge-bases — paginated list using the V4 standard route.
+   * Returns local KBs in the unified {code, data, message} envelope.
+   */
+  async listKnowledgeBasesStandard(
+    keyword?: string,
+    page = 1,
+    pageSize = 50
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const url = new URL(
+        API_ENDPOINTS.standardKb.listKnowledgeBases,
+        window.location.origin
+      );
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("page_size", String(pageSize));
+      if (keyword) url.searchParams.set("keyword", keyword);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      const body = await response.json();
+      if (body.code !== 0) {
+        throw new ApiError(body.code, body.message || "Failed to list knowledge bases");
+      }
+      const list: any[] = body.data?.list || [];
+      return list.map((item: any): KnowledgeBase => ({
+        id: String(item.id ?? ""),
+        name: item.name ?? "",
+        display_name: item.name ?? "",
+        description: item.description ?? null,
+        documentCount: item.document_count ?? 0,
+        chunkCount: item.chunk_count ?? 0,
+        createdAt: item.created_at ?? null,
+        updatedAt: item.updated_at ?? null,
+        embeddingModel: item.embedding_model ?? "unknown",
+        source: "nexent",
+        avatar: "",
+        chunkNum: 0,
+        language: "",
+        nickname: "",
+        parserId: "",
+        permission: "",
+        tokenNum: 0,
+      }));
+    } catch (error) {
+      log.error("Failed to list knowledge bases via V4 route:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * POST /api/v1/retrieve — cross-KB retrieval using the V4 standard route.
+   * Supports hybrid / semantic / keyword search across multiple KB ids.
+   */
+  async retrieve(
+    query: string,
+    knowledgeBaseIds: string[],
+    options?: {
+      searchMethod?: "hybrid_search" | "semantic_search" | "keyword_search";
+      topK?: number;
+      scoreThreshold?: number;
+      rerankingEnable?: boolean;
+    }
+  ): Promise<import("@/types/knowledgeBase").RetrieveResponse> {
+    try {
+      const body = {
+        query,
+        knowledge_base_ids: knowledgeBaseIds,
+        retrieval_model: {
+          search_method: options?.searchMethod ?? "hybrid_search",
+          top_k: options?.topK ?? 5,
+          score_threshold: options?.scoreThreshold ?? 0,
+          score_threshold_enabled: (options?.scoreThreshold ?? 0) > 0,
+          reranking_enable: options?.rerankingEnable ?? false,
+        },
+      };
+      const response = await fetch(API_ENDPOINTS.standardKb.retrieve, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (data.code !== 0) {
+        throw new ApiError(data.code, data.message || "Retrieve failed");
+      }
+      return data.data as import("@/types/knowledgeBase").RetrieveResponse;
+    } catch (error) {
+      log.error("Failed to retrieve via V4 route:", error);
+      throw error;
     }
   }
 
