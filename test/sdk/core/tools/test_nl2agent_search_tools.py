@@ -269,3 +269,148 @@ def test_nl2agent_install_web_skill_passes_skill_name(monkeypatch):
     assert calls[0]["skill_name"] == "search-web-tavily"
     assert calls[0]["tenant_id"] == "tenant_1"
     assert calls[0]["user_id"] == "user_1"
+
+
+def test_nl2agent_search_local_resources_caches_repeat_query(monkeypatch):
+    _reset_nl2agent_modules(monkeypatch)
+
+    from nexent.core.tools.nl2agent.search_local_resources_tool import (
+        get_search_local_resources_tool,
+        nl2agent_search_local_resources,
+    )
+
+    calls = []
+
+    async def fake_recommend_local_resources(**kwargs):
+        calls.append(kwargs)
+        return {"tools": [{"tool_id": 1, "name": "Search"}], "skills": []}
+
+    _install_fake_nl2agent_service(
+        monkeypatch, recommend_local_resources=fake_recommend_local_resources
+    )
+
+    get_search_local_resources_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        model_id=7,
+        language="en",
+    )
+
+    first = nl2agent_search_local_resources(query="web search")
+    # Same query modulo whitespace/case normalization: served from cache.
+    second = nl2agent_search_local_resources(query="  Web Search  ")
+    # A different query bypasses the cache.
+    third = nl2agent_search_local_resources(query="database query")
+
+    assert first == second
+    assert json.loads(third)["tools"] == [{"tool_id": 1, "name": "Search"}]
+    assert len(calls) == 2
+
+
+def test_nl2agent_search_web_mcps_cache_survives_context_reset(monkeypatch):
+    _reset_nl2agent_modules(monkeypatch)
+
+    from nexent.core.tools.nl2agent.search_web_mcps_tool import (
+        get_search_web_mcps_tool,
+        nl2agent_search_web_mcps,
+    )
+
+    calls = []
+
+    async def fake_search_web_mcps(**kwargs):
+        calls.append(kwargs)
+        return [{"name": "GitHub MCP", "source": "community"}]
+
+    _install_fake_nl2agent_service(monkeypatch, search_web_mcps=fake_search_web_mcps)
+
+    context_kwargs = dict(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        model_id=7,
+        language="en",
+    )
+    get_search_web_mcps_tool(**context_kwargs)
+    first = nl2agent_search_web_mcps(query="github")
+
+    # A new chat message rebuilds the agent and re-runs the tool initializer;
+    # the cache must survive that context reset to deduplicate across turns.
+    get_search_web_mcps_tool(**context_kwargs)
+    second = nl2agent_search_web_mcps(query="github")
+
+    assert first == second
+    assert len(calls) == 1
+
+
+def test_nl2agent_search_web_skills_caches_repeat_query(monkeypatch):
+    _reset_nl2agent_modules(monkeypatch)
+
+    from nexent.core.tools.nl2agent.search_web_skills_tool import (
+        get_search_web_skills_tool,
+        nl2agent_search_web_skills,
+    )
+
+    calls = []
+
+    async def fake_search_web_skills(**kwargs):
+        calls.append(kwargs)
+        return [{"skill_id": 12, "name": "doc-review"}]
+
+    _install_fake_nl2agent_service(
+        monkeypatch, search_web_skills=fake_search_web_skills
+    )
+
+    get_search_web_skills_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        model_id=7,
+        language="en",
+    )
+
+    first = nl2agent_search_web_skills(query="code review")
+    second = nl2agent_search_web_skills(query="code review")
+
+    assert first == second
+    assert len(calls) == 1
+
+
+def test_nl2agent_search_local_resources_does_not_cache_errors(monkeypatch):
+    _reset_nl2agent_modules(monkeypatch)
+
+    from nexent.core.tools.nl2agent.search_local_resources_tool import (
+        get_search_local_resources_tool,
+        nl2agent_search_local_resources,
+    )
+
+    attempts = []
+
+    async def flaky_recommend_local_resources(**kwargs):
+        attempts.append(kwargs)
+        if len(attempts) == 1:
+            raise RuntimeError("backend down")
+        return {"tools": [], "skills": []}
+
+    _install_fake_nl2agent_service(
+        monkeypatch, recommend_local_resources=flaky_recommend_local_resources
+    )
+
+    get_search_local_resources_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        model_id=7,
+        language="en",
+    )
+
+    first = nl2agent_search_local_resources(query="web search")
+    second = nl2agent_search_local_resources(query="web search")
+
+    assert json.loads(first) == {"error": "backend down"}
+    assert json.loads(second) == {"agent_id": 202, "tools": [], "skills": []}
+    assert len(attempts) == 2

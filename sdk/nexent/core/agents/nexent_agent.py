@@ -6,7 +6,7 @@ import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
@@ -40,6 +40,29 @@ def _tool_name(tool_obj: Any) -> str:
         getattr(tool_obj, "name", None)
         or getattr(tool_obj, "__name__", None)
         or type(tool_obj).__name__
+    )
+
+
+# Matches fenced NL2AGENT card blocks such as ```nl2agent-local-resources ... ```
+_NL2AGENT_CARD_PATTERN = re.compile(r"```(nl2agent-[\w-]+)[ \t]*\n(.*?)```", re.DOTALL)
+
+
+def _extract_nl2agent_observations(content: str) -> Optional[str]:
+    """Extract NL2AGENT card blocks from assistant text as tool observations.
+
+    History assistant messages only carry the final answer text, so search
+    results from prior turns would otherwise never reappear as an
+    "Observation:" message and the LLM re-runs the same searches. Returns None
+    when the content has no nl2agent card blocks so that non-NL2AGENT agents
+    keep observations=None (unchanged behavior).
+    """
+    if not content:
+        return None
+    matches = _NL2AGENT_CARD_PATTERN.findall(content)
+    if not matches:
+        return None
+    return "\n\n".join(
+        f"Previous tool result ({tag}):\n{body.strip()}" for tag, body in matches
     )
 
 
@@ -606,7 +629,8 @@ class NexentAgent:
             elif msg.role == 'assistant':
                 self.agent.memory.steps.append(ActionStep(step_number=len(self.agent.memory.steps) + 1,
                                                           timing=Timing(start_time=time.time()),
-                                                          action_output=msg.content, model_output=msg.content))
+                                                          action_output=msg.content, model_output=msg.content,
+                                                          observations=_extract_nl2agent_observations(msg.content)))
 
         self.agent._history_step_count = len(self.agent.memory.steps)
     def agent_run_with_observer(self, query: str, reset=True):

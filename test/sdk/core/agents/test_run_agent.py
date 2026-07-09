@@ -64,11 +64,12 @@ for _sub in [
             def __init__(self, task=None):
                 self.task = task
         class _ActionStepBase:
-            def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+            def __init__(self, step_number=None, timing=None, action_output=None, model_output=None, observations=None):
                 self.step_number = step_number
                 self.timing = timing
                 self.action_output = action_output
                 self.model_output = model_output
+                self.observations = observations
         setattr(sub_mod, "TaskStep", _TaskStepBase)
         setattr(sub_mod, "ActionStep", _ActionStepBase)
         setattr(sub_mod, "AgentMemory", MagicMock)

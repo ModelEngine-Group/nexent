@@ -28,11 +28,12 @@ mock_smolagents = MagicMock()
 
 
 class _ActionStep:
-    def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+    def __init__(self, step_number=None, timing=None, action_output=None, model_output=None, observations=None):
         self.step_number = step_number
         self.timing = timing
         self.action_output = action_output
         self.model_output = model_output
+        self.observations = observations
 
 
 class _TaskStep:
@@ -1420,6 +1421,65 @@ def test_add_history_to_agent_user_and_assistant_history(nexent_agent_instance, 
     assert isinstance(second_step, ActionStep)
     assert second_step.action_output == "Assistant reply"
     assert second_step.model_output == "Assistant reply"
+    assert second_step.observations is None
+
+
+def test_extract_nl2agent_observations_joins_card_blocks():
+    """_extract_nl2agent_observations extracts hyphenated NL2AGENT card blocks."""
+    content = (
+        "Here is what I found:\n"
+        "```nl2agent-local-resources\n"
+        '{"agent_id": 202, "tools": [{"tool_id": 1}], "skills": []}\n'
+        "```\n"
+        "Web options:\n"
+        "```nl2agent-web-mcps\n"
+        '{"agent_id": 202, "items": [{"name": "GitHub MCP"}]}\n'
+        "```"
+    )
+
+    observations = nexent_agent._extract_nl2agent_observations(content)
+
+    assert observations == (
+        "Previous tool result (nl2agent-local-resources):\n"
+        '{"agent_id": 202, "tools": [{"tool_id": 1}], "skills": []}\n\n'
+        "Previous tool result (nl2agent-web-mcps):\n"
+        '{"agent_id": 202, "items": [{"name": "GitHub MCP"}]}'
+    )
+
+
+def test_extract_nl2agent_observations_returns_none_without_cards():
+    """Non-NL2AGENT content yields None so other agents keep observations unset."""
+    assert nexent_agent._extract_nl2agent_observations(None) is None
+    assert nexent_agent._extract_nl2agent_observations("") is None
+    assert nexent_agent._extract_nl2agent_observations("Plain assistant reply") is None
+    assert nexent_agent._extract_nl2agent_observations("```python\nprint('hi')\n```") is None
+
+
+def test_add_history_to_agent_sets_observations_for_nl2agent_cards(nexent_agent_instance, mock_core_agent):
+    """Assistant history containing NL2AGENT cards replays them as observations."""
+    nexent_agent_instance.agent = mock_core_agent
+
+    card_content = (
+        "Found these:\n"
+        "```nl2agent-local-resources\n"
+        '{"agent_id": 202, "tools": [], "skills": []}\n'
+        "```"
+    )
+    history = [
+        AgentHistory(role="user", content="Find tools"),
+        AgentHistory(role="assistant", content=card_content),
+        AgentHistory(role="assistant", content="Anything else?"),
+    ]
+
+    nexent_agent_instance.add_history_to_agent(history)
+
+    card_step = mock_core_agent.memory.steps[1]
+    assert card_step.observations == (
+        "Previous tool result (nl2agent-local-resources):\n"
+        '{"agent_id": 202, "tools": [], "skills": []}'
+    )
+    plain_step = mock_core_agent.memory.steps[2]
+    assert plain_step.observations is None
 
 
 def test_add_history_to_agent_invalid_agent_type(nexent_agent_instance):

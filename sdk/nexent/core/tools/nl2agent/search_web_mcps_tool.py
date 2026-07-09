@@ -9,7 +9,9 @@ from smolagents import tool
 
 from ._context import (
     Nl2AgentContext,
+    get_cached_search,
     get_nl2agent_context,
+    set_cached_search,
     set_nl2agent_context,
 )
 
@@ -47,7 +49,7 @@ def nl2agent_search_web_mcps(query: str) -> str:
     AddMcpServiceModal prefilled.
 
     Args:
-        query: The user's intent or task description.
+        query: 1-3 short keywords matching MCP server names or tags (e.g. "github", "email"). Never a full sentence.
 
     Returns:
         JSON string ``{"agent_id": 123, "items": [...]}`` containing web MCP
@@ -64,6 +66,11 @@ def nl2agent_search_web_mcps(query: str) -> str:
             {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )
 
+    cached_result = get_cached_search("nl2agent_search_web_mcps", query)
+    if cached_result is not None:
+        logger.info(f"nl2agent_search_web_mcps cache hit for query: {query}")
+        return cached_result
+
     try:
         from services.nl2agent_service import search_web_mcps as _search
 
@@ -75,10 +82,12 @@ def nl2agent_search_web_mcps(query: str) -> str:
                 top_n=5,
             )
         )
-        return json.dumps(
+        result_json = json.dumps(
             {"agent_id": target_agent_id, "items": items or []},
             ensure_ascii=False,
         )
+        set_cached_search("nl2agent_search_web_mcps", query, result_json)
+        return result_json
     except Exception as exc:
         logger.exception(f"nl2agent_search_web_mcps failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

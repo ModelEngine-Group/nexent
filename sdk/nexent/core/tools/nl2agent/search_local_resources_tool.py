@@ -9,7 +9,9 @@ from smolagents import tool
 
 from ._context import (
     Nl2AgentContext,
+    get_cached_search,
     get_nl2agent_context,
+    set_cached_search,
     set_nl2agent_context,
 )
 
@@ -44,7 +46,7 @@ def nl2agent_search_local_resources(query: str) -> str:
     ``tools``, and ``skills``. The ``agent_id`` is the draft agent being built.
 
     Args:
-        query: The user's intent or task description (e.g., "summarize PDFs and email them").
+        query: Concise search keywords (2-6 words) for one capability, e.g. "web search" or "PDF summarization". Never a full sentence.
 
     Returns:
         JSON string ``{"agent_id": 123, "tools": [...], "skills": [...]}``.
@@ -65,6 +67,11 @@ def nl2agent_search_local_resources(query: str) -> str:
             {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )
 
+    cached_result = get_cached_search("nl2agent_search_local_resources", query)
+    if cached_result is not None:
+        logger.info(f"nl2agent_search_local_resources cache hit for query: {query}")
+        return cached_result
+
     try:
         from services.nl2agent_service import recommend_local_resources
 
@@ -82,7 +89,9 @@ def nl2agent_search_local_resources(query: str) -> str:
             "tools": result.get("tools", []),
             "skills": result.get("skills", []),
         }
-        return json.dumps(card_payload, ensure_ascii=False)
+        result_json = json.dumps(card_payload, ensure_ascii=False)
+        set_cached_search("nl2agent_search_local_resources", query, result_json)
+        return result_json
     except Exception as exc:
         logger.exception(f"nl2agent_search_local_resources failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
