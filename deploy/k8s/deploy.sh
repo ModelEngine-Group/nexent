@@ -213,7 +213,7 @@ render_one_persistence_values() {
     printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
     printf '    storageClassName: "%s"\n' "$storage_class"
     printf '    accessModes:\n'
-    printf '      - ReadWriteOnce\n'
+    printf '      - ReadWriteMany\n'
     printf '    localPath: "%s/%s"\n' "$LOCAL_PATH" "$component"
     printf '    existingClaim: "%s"\n' "$(persistence_existing_claim "$component")"
     printf '  storage:\n'
@@ -234,7 +234,7 @@ render_monitoring_persistence_values() {
     printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
     printf '    storageClassName: "%s"\n' "$storage_class"
     printf '    accessModes:\n'
-    printf '      - ReadWriteOnce\n'
+    printf '      - ReadWriteMany\n'
     printf '    localPath: "%s"\n' "$LOCAL_PATH"
     printf '    existingClaimPrefix: "%s"\n' "$EXISTING_CLAIM_PREFIX"
   } >> "$output_file"
@@ -252,7 +252,7 @@ render_shared_storage_persistence_values() {
     printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
     printf '    storageClassName: "%s"\n' "$storage_class"
     printf '    accessModes:\n'
-    printf '      - ReadWriteOnce\n'
+    printf '      - ReadWriteMany\n'
     printf '    workspace:\n'
     printf '      size: "10Gi"\n'
     printf '      localPath: "/var/lib/nexent"\n'

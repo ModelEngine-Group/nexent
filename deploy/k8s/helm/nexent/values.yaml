@@ -6,7 +6,7 @@ global:
     mode: "local"
     storageClassName: "nexent-local"
     accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     workspace:
       size: "10Gi"
       localPath: "/var/lib/nexent"
