@@ -144,7 +144,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$SCRIPT_DIR"
-deployment_source_root_env "$PROJECT_ROOT" "$PROJECT_ROOT/docker" || exit 1
+if [ "$COMMAND" != "help" ]; then
+    deployment_source_root_env "$PROJECT_ROOT" "$PROJECT_ROOT/docker" || exit 1
+fi
 
 # Helper function to sanitize input (remove Windows CR)
 sanitize_input() {

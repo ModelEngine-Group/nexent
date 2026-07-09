@@ -264,6 +264,16 @@ def test_get_run_state_returns_hash_and_handles_errors(caplog):
     assert "Failed to get runtime run state" in caplog.text
 
 
+def test_mark_run_finished_swallows_redis_errors(caplog):
+    client = FakeRedisClient()
+    client.fail_next.add("hset")
+    service = TestRuntimeStateService(client)
+
+    service.mark_run_finished("user-1", 42, "failed")
+
+    assert "Failed to mark runtime run state as finished" in caplog.text
+
+
 def test_cancel_signal_set_and_read_with_error_paths(caplog):
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
