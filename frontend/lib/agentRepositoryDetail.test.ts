@@ -14,6 +14,7 @@ describe("mapRepositoryListingDetail", () => {
       name: "agent_one",
       display_name: "Agent One",
       description: "desc",
+      author: "Alice",
       status: "shared",
       version_label: "v1",
       downloads: 5,
@@ -26,6 +27,7 @@ describe("mapRepositoryListingDetail", () => {
 
     assert.equal(result.status, "shared");
     assert.equal(result.display_name, "Agent One");
+    assert.equal(result.author, "Alice");
     assert.deepEqual(result.tools, ["search", "calc"]);
   });
 });
@@ -37,6 +39,7 @@ describe("mapAgentVersionDetail", () => {
       name: "draft_agent",
       display_name: "Draft Agent",
       description: "draft desc",
+      author: "Bob",
       model_name: "gpt",
       duty_prompt: "assist",
       tools: [
@@ -53,6 +56,7 @@ describe("mapAgentVersionDetail", () => {
     const result = mapAgentVersionDetail(detail);
 
     assert.equal(result.status, undefined);
+    assert.equal(result.author, "Bob");
     assert.equal(result.version_label, "Draft");
     assert.equal(result.created_at, "2026-01-01T00:00:00Z");
     assert.deepEqual(result.tools, ["web_search", "calculator"]);

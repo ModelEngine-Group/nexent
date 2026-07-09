@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   App,
   Button,
@@ -60,6 +61,7 @@ export default function AgentRepositoryPage() {
   const { pageVariants, pageTransition } = useSetupFlow();
   const { user } = useAuthorizationContext();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const searchParams = useSearchParams();
 
   const [tab, setTab] = useState<AgentRepositoryTab>(AgentRepositoryTab.REPOSITORY);
   const [searchQuery, setSearchQuery] = useState("");
@@ -73,6 +75,21 @@ export default function AgentRepositoryPage() {
   );
   const [copyOpen, setCopyOpen] = useState(false);
   const [copyListing, setCopyListing] = useState<AgentRepositoryListingItem | null>(null);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === AgentRepositoryTab.MINE) {
+      setTab(AgentRepositoryTab.MINE);
+      return;
+    }
+    if (tabParam === AgentRepositoryTab.REPOSITORY) {
+      setTab(AgentRepositoryTab.REPOSITORY);
+      return;
+    }
+    if (tabParam === AgentRepositoryTab.REVIEW && isAdmin) {
+      setTab(AgentRepositoryTab.REVIEW);
+    }
+  }, [searchParams, isAdmin]);
 
   const isRepositoryTab = tab === AgentRepositoryTab.REPOSITORY;
   const isReviewTab = tab === AgentRepositoryTab.REVIEW;

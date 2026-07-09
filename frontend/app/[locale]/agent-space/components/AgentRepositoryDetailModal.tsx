@@ -8,6 +8,8 @@ import {
   Clock,
   Cpu,
   Download,
+  Tag as TagIcon,
+  User,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -133,25 +135,40 @@ function AgentRepositoryDetailMeta({
   const { t } = useTranslation("common");
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-      {detail.model_name ? (
+    <div className="mt-3 space-y-2.5 text-xs text-slate-500 dark:text-slate-400">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {detail.model_name ? (
+          <span className="inline-flex items-center gap-1">
+            <Cpu className="size-3.5" aria-hidden />
+            {detail.model_name}
+          </span>
+        ) : null}
+        {detail.version_label ? (
+          <span className="inline-flex items-center gap-1">
+            <TagIcon className="size-3.5" aria-hidden />
+            {detail.version_label}
+          </span>
+        ) : null}
         <span className="inline-flex items-center gap-1">
-          <Cpu className="size-3.5" aria-hidden />
-          {detail.model_name}
+          <Download className="size-3.5" aria-hidden />
+          {t("agentRepository.detail.downloads", {
+            count: downloads.toLocaleString(),
+          })}
         </span>
-      ) : null}
-      {detail.version_label ? <span>{detail.version_label}</span> : null}
-      <span className="inline-flex items-center gap-1">
-        <Download className="size-3.5" aria-hidden />
-        {t("agentRepository.detail.downloads", {
-          count: downloads.toLocaleString(),
-        })}
-      </span>
-      {createdAtText ? (
-        <span className="inline-flex items-center gap-1">
-          <Calendar className="size-3.5" aria-hidden />
-          {createdAtText}
-        </span>
+        {createdAtText ? (
+          <span className="inline-flex items-center gap-1">
+            <Calendar className="size-3.5" aria-hidden />
+            {createdAtText}
+          </span>
+        ) : null}
+      </div>
+      {detail.author?.trim() ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="inline-flex items-center gap-1">
+            <User className="size-3.5" aria-hidden />
+            {t("agentRepository.detail.author", { author: detail.author })}
+          </span>
+        </div>
       ) : null}
     </div>
   );

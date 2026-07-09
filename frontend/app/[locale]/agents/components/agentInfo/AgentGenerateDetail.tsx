@@ -193,10 +193,22 @@ export default function AgentGenerateDetail({}) {
       }
     }
 
+    const defaultAuthor =
+      editedAgent.author?.trim() ||
+      user?.email ||
+      (isSpeedMode ? "Default User" : "");
+
+    if (!editedAgent.author?.trim()) {
+      const resolvedAuthor = user?.email || (isSpeedMode ? "Default User" : "");
+      if (resolvedAuthor) {
+        updateAgentConfig({ author: resolvedAuthor });
+      }
+    }
+
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
-      agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
+      agentAuthor: defaultAuthor,
       mainAgentModels: mainAgentModels,
       mainAgentModelIds: mainAgentModelIds,
       mainAgentMaxStep: editedAgent.max_step || 15,
@@ -217,7 +229,7 @@ export default function AgentGenerateDetail({}) {
     };
     form.setFieldsValue(initialAgentInfo);
 
-  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels]);
+  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels, user?.email, isSpeedMode, updateAgentConfig]);
 
   // Re-validate requested output tokens when the selected model's max changes,
   // so switching to a model with a lower cap surfaces the violation immediately
