@@ -13459,6 +13459,192 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
                     assert result.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
+    """Redis cancel polling should set the local stop event."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+    stop_event = asyncio.Event()
+
+    await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
+
+    assert stop_event.is_set()
+    fake_runtime_state.is_cancelled_async.assert_any_await(user_id="user1", conversation_id=123)
+    assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_on_runtime_signal_cancels_task(monkeypatch):
+    """Redis cancel polling should cancel an active asyncio task."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
+    task = MagicMock()
+    task.done.return_value = False
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+
+    task.cancel.assert_called_once()
+    fake_runtime_state.is_cancelled_async.assert_awaited_once_with(user_id="user1", conversation_id=123)
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch):
+    """_stream_agent_chunks should persist stopped terminal status when cancellation wins."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    stop_event = asyncio.Event()
+    stop_event.set()
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = stop_event
+    agent_run_info.query = "test"
+
+    memory_ctx = MagicMock()
+    memory_ctx.user_config.memory_switch = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    class FakeFuture:
+        def __init__(self, value=None):
+            self.value = value
+
+        def result(self):
+            return self.value
+
+    def fake_submit(fn, *args, **kwargs):
+        return FakeFuture(777)
+
+    statuses = []
+    unregister_calls = []
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_service, "submit", fake_submit, raising=False)
+    monkeypatch.setattr(agent_service, "update_unit_content", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(agent_service, "update_unit_status", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock(), raising=False)
+    monkeypatch.setattr(
+        agent_service,
+        "update_message_status",
+        lambda message_id, status, user_id: statuses.append((message_id, status, user_id)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "unregister_agent_run",
+        lambda conv_id, user_id, status="completed": unregister_calls.append((conv_id, user_id, status)),
+        raising=False,
+    )
+
+    collected = []
+    async for chunk in agent_service._stream_agent_chunks(
+        agent_request,
+        "user1",
+        "tenant1",
+        agent_run_info,
+        memory_ctx,
+    ):
+        collected.append(chunk)
+
+    assert collected
+    assert statuses[-1] == (4242, "stopped", "user1")
+    assert unregister_calls[-1] == (999, "user1", "stopped")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkeypatch):
+    """Resume should replay Redis stream events when the run lives on another replica."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.enabled = True
+    fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[
+        {"status": "running"},
+        {"status": "completed"},
+    ])
+    fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[
+        ("1-0", 'data: {"type": "model_output", "content": "old"}\n\n'),
+        ("2-0", ""),
+    ])
+    fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[
+        ("3-0", 'data: {"type": "final_answer", "content": "new"}\n\n'),
+    ])
+    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={"status": "completed"})
+
+    with patch(
+        "backend.services.agent_service._resolve_user_tenant_language",
+        return_value=("user1", "tenant1", "en"),
+    ), \
+            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
+            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
+            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+        mock_detect.return_value = {
+            "should_resume": True,
+            "message_id": 1,
+            "message_status": "streaming",
+            "resume_from_unit_index": 5,
+            "reason": "backend_streaming",
+        }
+        mock_mgr.get_agent_run_info.return_value = None
+        mock_channel_mgr.get_channel.return_value = None
+        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+        result = await agent_service.run_agent_stream(
+            agent_request,
+            MagicMock(),
+            "Bearer token",
+            resume=True,
+        )
+
+        chunks = []
+        async for chunk in result.body_iterator:
+            chunks.append(chunk)
+
+    assert result.status_code == 200
+    assert result.headers["X-Stream-Status"] == "resumed"
+    assert result.headers["X-Last-Unit-Index"] == "5"
+    assert chunks[0] == agent_service.STREAM_STATUS_EVENT
+    assert '"replay_chunk_count": 2' in chunks[1]
+    assert "old" in "".join(chunks)
+    assert "new" in "".join(chunks)
+    assert '"status": "completed"' in chunks[-1]
+    fake_runtime_state.wait_for_stream_events_async.assert_awaited_once_with(
+        user_id="user1",
+        conversation_id=999,
+        last_id="2-0",
+    )
+
+
 
 def test_validate_requested_output_tokens_no_requested_tokens():
     """_validate_requested_output_tokens_for_agent should return when requested_output_tokens is None."""

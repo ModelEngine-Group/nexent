@@ -336,6 +336,52 @@ class TestIdempotencyStartEnd:
             ns.NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
         )
 
+    @pytest.mark.asyncio
+    async def test_idempotency_redis_duplicate_raises(self):
+        """Test Redis-backed idempotency rejects duplicate in-flight requests."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.acquire_idempotency_async = AsyncMock(return_value=False)
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            with pytest.raises(LimitExceededError, match="Duplicate request"):
+                await ns.idempotency_start("redis-key")
+
+    @pytest.mark.asyncio
+    async def test_idempotency_redis_error_fails_closed(self):
+        """Test Redis errors make idempotency fail closed."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.acquire_idempotency_async = AsyncMock(side_effect=RuntimeError("redis down"))
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            with pytest.raises(LimitExceededError, match="Idempotency service is unavailable"):
+                await ns.idempotency_start("redis-key")
+
+    @pytest.mark.asyncio
+    async def test_idempotency_end_uses_redis_and_swallows_release_error(self, caplog):
+        """Test Redis-backed idempotency release path and warning handling."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.release_idempotency_async = AsyncMock(side_effect=RuntimeError("release failed"))
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            await ns.idempotency_end("redis-key")
+
+        fake_runtime_state.release_idempotency_async.assert_awaited_once_with("redis-key")
+        assert "Northbound idempotency release failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_idempotency_multi_replica_without_redis_fails_closed(self):
+        """Test multi-replica mode requires Redis idempotency."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = False
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state), \
+                patch.object(ns, "MULTI_REPLICA_MODE", True):
+            with pytest.raises(LimitExceededError, match="Idempotency service is unavailable"):
+                await ns.idempotency_start("local-key")
+
 
 class TestRateLimiting:
     """Tests for rate limiting functionality."""
@@ -376,6 +422,53 @@ class TestRateLimiting:
             tenant_id="tenant-redis",
             limit_per_minute=ns.NORTHBOUND_RATE_LIMIT_PER_MINUTE,
         )
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_disabled_returns_without_state(self):
+        """Test disabled rate limit avoids both Redis and local counters."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.consume_rate_limit_async = AsyncMock()
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state), \
+                patch.object(ns, "NORTHBOUND_RATE_LIMIT_ENABLED", False):
+            await ns.check_and_consume_rate_limit("tenant-disabled")
+
+        fake_runtime_state.consume_rate_limit_async.assert_not_awaited()
+        assert "tenant-disabled" not in ns._RATE_STATE
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_redis_value_error_maps_to_limit_exceeded(self):
+        """Test Redis rate-limit over-quota result maps to the API exception."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.consume_rate_limit_async = AsyncMock(side_effect=ValueError("rate limit exceeded"))
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            with pytest.raises(LimitExceededError, match="Query rate exceeded"):
+                await ns.check_and_consume_rate_limit("tenant-redis")
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_redis_error_fails_closed(self):
+        """Test Redis errors make rate limiting fail closed."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.consume_rate_limit_async = AsyncMock(side_effect=RuntimeError("redis down"))
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            with pytest.raises(LimitExceededError, match="Rate limit service is unavailable"):
+                await ns.check_and_consume_rate_limit("tenant-redis")
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_multi_replica_without_redis_fails_closed(self):
+        """Test multi-replica mode requires Redis rate limiting."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = False
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state), \
+                patch.object(ns, "MULTI_REPLICA_MODE", True):
+            with pytest.raises(LimitExceededError, match="Rate limit service is unavailable"):
+                await ns.check_and_consume_rate_limit("tenant-local")
 
     @pytest.mark.asyncio
     async def test_rate_limit_different_tenants(self):
