@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 
 from consts.const import (
     ASSET_OWNER_TENANT_ID,
-    MULTI_REPLICA_MODE,
     NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
     NORTHBOUND_RATE_LIMIT_ENABLED,
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
@@ -261,15 +260,12 @@ async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None
     if runtime_state_service.enabled:
         try:
             acquired = await runtime_state_service.acquire_idempotency_async(key, ttl)
-        except Exception as exc:
-            logger.error("Northbound idempotency Redis operation failed: %s", exc)
+        except Exception:
+            logger.exception("Northbound idempotency Redis operation failed")
             raise LimitExceededError("Idempotency service is unavailable. Please try again later.")
         if not acquired:
             raise LimitExceededError("Duplicate request is still running, please wait.")
         return
-
-    if MULTI_REPLICA_MODE:
-        raise LimitExceededError("Idempotency service is unavailable. Please try again later.")
 
     async with _IDEMPOTENCY_LOCK:
         # purge expired
@@ -312,12 +308,9 @@ async def check_and_consume_rate_limit(tenant_id: str) -> None:
             return
         except ValueError:
             raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        except Exception as exc:
-            logger.error("Northbound rate limit Redis operation failed: %s", exc)
+        except Exception:
+            logger.exception("Northbound rate limit Redis operation failed")
             raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
-
-    if MULTI_REPLICA_MODE:
-        raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
 
     bucket = _minute_bucket()
     async with _RATE_LOCK:

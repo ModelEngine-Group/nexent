@@ -653,7 +653,6 @@ Ingress：
 - `NORTHBOUND_IDEMPOTENCY_TTL_SECONDS`
 - `NORTHBOUND_RATE_LIMIT_ENABLED`
 - `NORTHBOUND_RATE_LIMIT_PER_MINUTE`
-- `MULTI_REPLICA_MODE`
 
 Web chart 建议新增或确认：
 
@@ -717,7 +716,6 @@ Northbound 主要影响：
 ### 5.1 默认行为
 
 - 默认单副本行为保持不变。
-- 不开启 `MULTI_REPLICA_MODE` 时，允许继续使用本地内存实现；但建议 runtime/northbound 改造后统一走 Redis，减少双路径。
 - 第一阶段 Helm 不引入 HPA/autoscaling，所有副本数通过 `replicaCount` 手工控制。
 
 ### 5.2 上线步骤

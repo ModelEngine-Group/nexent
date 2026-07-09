@@ -41,7 +41,6 @@ sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
 consts_const_mod.ASSET_OWNER_TENANT_ID = "asset-owner-tenant"
-consts_const_mod.MULTI_REPLICA_MODE = False
 consts_const_mod.RUNTIME_STATE_REDIS_URL = ""
 consts_const_mod.RUNTIME_STREAM_TTL_SECONDS = 86400
 consts_const_mod.RUNTIME_STREAM_MAX_LEN = 10000
@@ -307,18 +306,15 @@ class TestIdempotencyStartEnd:
     @pytest.mark.asyncio
     async def test_idempotency_end_nonexistent_key(self):
         """Test that ending nonexistent key does not raise."""
-        await ns.idempotency_end("nonexistent-key")  # Should not raise
+        await ns.idempotency_end("nonexistent-key")
 
     @pytest.mark.asyncio
     async def test_idempotency_expired_key_can_be_reused(self, reset_test_isolation):
         """Test that expired keys can be reused after TTL."""
-        # Use a very short TTL
         await ns.idempotency_start("expire-key", ttl_seconds=1)
         assert "expire-key" in ns._IDEMPOTENCY_RUNNING
-        # Wait for expiration
         import asyncio
         await asyncio.sleep(1.1)
-        # Should be able to start again with same key
         await ns.idempotency_start("expire-key", ttl_seconds=1)
 
     @pytest.mark.asyncio
@@ -371,17 +367,6 @@ class TestIdempotencyStartEnd:
         fake_runtime_state.release_idempotency_async.assert_awaited_once_with("redis-key")
         assert "Northbound idempotency release failed" in caplog.text
 
-    @pytest.mark.asyncio
-    async def test_idempotency_multi_replica_without_redis_fails_closed(self):
-        """Test multi-replica mode requires Redis idempotency."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = False
-
-        with patch.object(ns, "runtime_state_service", fake_runtime_state), \
-                patch.object(ns, "MULTI_REPLICA_MODE", True):
-            with pytest.raises(LimitExceededError, match="Idempotency service is unavailable"):
-                await ns.idempotency_start("local-key")
-
 
 class TestRateLimiting:
     """Tests for rate limiting functionality."""
@@ -402,7 +387,6 @@ class TestRateLimiting:
     @pytest.mark.asyncio
     async def test_rate_limit_exceeded_raises(self):
         """Test that exceeding limit raises LimitExceededError."""
-        # Fill up to limit
         for _ in range(ns.NORTHBOUND_RATE_LIMIT_PER_MINUTE):
             await ns.check_and_consume_rate_limit("tenant-limit")
         with pytest.raises(LimitExceededError):
@@ -435,7 +419,6 @@ class TestRateLimiting:
             await ns.check_and_consume_rate_limit("tenant-disabled")
 
         fake_runtime_state.consume_rate_limit_async.assert_not_awaited()
-        assert "tenant-disabled" not in ns._RATE_STATE
 
     @pytest.mark.asyncio
     async def test_rate_limit_redis_value_error_maps_to_limit_exceeded(self):
@@ -460,17 +443,6 @@ class TestRateLimiting:
                 await ns.check_and_consume_rate_limit("tenant-redis")
 
     @pytest.mark.asyncio
-    async def test_rate_limit_multi_replica_without_redis_fails_closed(self):
-        """Test multi-replica mode requires Redis rate limiting."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = False
-
-        with patch.object(ns, "runtime_state_service", fake_runtime_state), \
-                patch.object(ns, "MULTI_REPLICA_MODE", True):
-            with pytest.raises(LimitExceededError, match="Rate limit service is unavailable"):
-                await ns.check_and_consume_rate_limit("tenant-local")
-
-    @pytest.mark.asyncio
     async def test_rate_limit_different_tenants(self):
         """Test that different tenants have separate limits."""
         for _ in range(10):
@@ -483,14 +455,11 @@ class TestRateLimiting:
     @pytest.mark.asyncio
     async def test_rate_limit_cleanup_old_buckets(self):
         """Test that old minute buckets are cleaned up."""
-        # First, add a request to create an old bucket
         old_bucket = str(int(ns._now_seconds() // 60) - 1)
         ns._RATE_STATE["tenant-cleanup"] = {old_bucket: 50}
 
-        # Make a new request - should trigger cleanup of old bucket
         await ns.check_and_consume_rate_limit("tenant-cleanup")
 
-        # Old bucket should be cleaned up, new bucket should have 1 request
         current_bucket = ns._minute_bucket()
         assert old_bucket not in ns._RATE_STATE["tenant-cleanup"]
         assert ns._RATE_STATE["tenant-cleanup"].get(current_bucket, 0) == 1

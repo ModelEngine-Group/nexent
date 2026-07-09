@@ -43,7 +43,6 @@ data:
   # Redis Config
   REDIS_URL: {{ .Values.config.redis.url | quote }}
   REDIS_BACKEND_URL: {{ .Values.config.redis.backendUrl | quote }}
-  MULTI_REPLICA_MODE: {{ .Values.config.multiReplica.enabled | quote }}
   RUNTIME_STATE_REDIS_URL: {{ default .Values.config.redis.url .Values.config.runtimeState.redisUrl | quote }}
   RUNTIME_STREAM_TTL_SECONDS: {{ .Values.config.runtimeState.streamTtlSeconds | quote }}
   RUNTIME_STREAM_MAX_LEN: {{ .Values.config.runtimeState.streamMaxLen | quote }}

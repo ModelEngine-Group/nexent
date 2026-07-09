@@ -38,8 +38,6 @@ config:
     url: "redis://nexent-redis:6379/0"
     backendUrl: "redis://nexent-redis:6379/1"
     port: "6379"
-  multiReplica:
-    enabled: "false"
   runtimeState:
     redisUrl: ""
     streamTtlSeconds: "86400"
