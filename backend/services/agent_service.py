@@ -62,7 +62,7 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
+from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name, get_valid_model_ids
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -1412,19 +1412,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["external_sub_agent_id_list"] = []
 
     # Get model names from model_ids array
-    model_ids = agent_info.get("model_ids")
+    # Filter out deleted models (delete_flag='Y' in model_record_t)
+    model_ids = agent_info.get("model_ids") or []
+    valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
+    agent_info["model_ids"] = valid_model_ids
+
     model_names: List[str] = []
-    if model_ids and len(model_ids) > 0:
-        for mid in model_ids:
-            model_info = get_model_by_model_id(mid)
-            if model_info:
-                display_name = model_info.get("display_name")
-                if display_name:
-                    model_names.append(display_name)
+    for mid in valid_model_ids:
+        model_info = get_model_by_model_id(mid)
+        if model_info:
+            display_name = model_info.get("display_name")
+            if display_name:
+                model_names.append(display_name)
     agent_info["model_names"] = model_names
-    # Always derive model_name from model_ids so the API contract is consistent.
-    if model_ids and len(model_ids) > 0:
-        first_model_info = get_model_by_model_id(model_ids[0])
+    # Always derive model_name from valid_model_ids so the API contract is consistent.
+    if valid_model_ids:
+        first_model_info = get_model_by_model_id(valid_model_ids[0])
         agent_info["model_name"] = first_model_info.get(
             "display_name", None) if first_model_info is not None else None
     else:
@@ -2382,6 +2385,11 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
                 if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
+
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent["model_ids"] = valid_model_ids
 
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(

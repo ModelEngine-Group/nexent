@@ -182,7 +182,7 @@ def get_model_by_display_name(display_name: str, tenant_id: str, model_type: str
         tenant_id:
     """
     filters = {'display_name': display_name}
-    
+
     if model_type in ["multiEmbedding", "multi_embedding"]:
         filters['model_type'] = "multi_embedding"
     elif model_type == "embedding":
@@ -216,7 +216,7 @@ def get_model_id_by_display_name(display_name: str, tenant_id: str, model_type: 
     Get a model ID by display name
 
     Args:
-        display_name: Model display name 
+        display_name: Model display name
         tenant_id: tenant_id
 
     Returns:
@@ -280,15 +280,44 @@ def get_models_by_tenant_factory_type(tenant_id: str, model_factory: str, model_
     return get_model_records(filters, tenant_id)
 
 
+def get_valid_model_ids(model_ids: List[int], tenant_id: str) -> List[int]:
+    """
+    Filter model IDs to only include those that are not soft-deleted (delete_flag='N').
+
+    When a model is deleted from model management, its delete_flag is set to 'Y'.
+    This function ensures that only valid (non-deleted) model IDs are returned,
+    preserving the order of the input model_ids.
+
+    Args:
+        model_ids: List of model IDs to filter
+        tenant_id: Tenant ID for filtering
+
+    Returns:
+        List[int]: Filtered list of valid model IDs in original order
+    """
+    if not model_ids:
+        return []
+
+    with get_db_session() as session:
+        stmt = select(ModelRecord.model_id).where(
+            ModelRecord.model_id.in_(model_ids),
+            ModelRecord.delete_flag == 'N'
+        )
+        valid_ids = session.scalars(stmt).all()
+        valid_ids_set = set(valid_ids)
+
+        return [mid for mid in model_ids if mid in valid_ids_set]
+
+
 def get_model_by_name_factory(model_name: str, model_factory: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     """
     Get a model record by model_name and model_factory for deduplication.
-    
+
     Args:
         model_name: Model name (e.g., "deepseek-r1-distill-qwen-14b")
         model_factory: Model factory (e.g., "ModelEngine")
         tenant_id: Tenant ID
-        
+
     Returns:
         Optional[Dict[str, Any]]: Model record if found, None otherwise
     """

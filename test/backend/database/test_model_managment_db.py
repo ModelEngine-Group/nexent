@@ -447,3 +447,81 @@ def test_get_model_by_model_id_not_found(monkeypatch):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
     assert model_mgmt_db.get_model_by_model_id(999, tenant_id="t") is None
+
+
+def test_get_valid_model_ids_empty_input(monkeypatch):
+    """Test get_valid_model_ids with empty input returns empty list."""
+    result = model_mgmt_db.get_valid_model_ids([], "tenant1")
+    assert result == []
+
+
+def test_get_valid_model_ids_all_valid(monkeypatch):
+    """Test get_valid_model_ids when all model IDs are valid (not deleted)."""
+    # Mock session.scalars().all() to return all model IDs
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [1, 2, 3]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # All model IDs are valid
+    result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
+    assert result == [1, 2, 3]
+
+
+def test_get_valid_model_ids_some_deleted(monkeypatch):
+    """Test get_valid_model_ids filters out deleted models."""
+    # Mock session.scalars().all() to return only valid model IDs (1 and 3, 2 is deleted)
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [1, 3]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # Model 2 was deleted (delete_flag='Y'), so only 1 and 3 should be returned
+    result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
+    assert result == [1, 3]
+
+
+def test_get_valid_model_ids_preserves_order(monkeypatch):
+    """Test get_valid_model_ids preserves the order of valid model IDs."""
+    # Mock session.scalars().all() to return valid model IDs in arbitrary order from DB
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [3, 1]  # DB returns in different order
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # Original order should be preserved for valid IDs
+    result = model_mgmt_db.get_valid_model_ids([2, 3, 1], "tenant1")
+    assert result == [3, 1]  # Only valid ones in original order
+
+
+def test_get_valid_model_ids_none_deleted(monkeypatch):
+    """Test get_valid_model_ids when all models are deleted."""
+    # Mock session.scalars().all() to return empty list (all deleted)
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # All models were deleted
+    result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
+    assert result == []

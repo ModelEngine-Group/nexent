@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Modal, Tabs, Input, Checkbox, Button, Select } from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
+import i18n from "i18next";
 
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
@@ -29,6 +30,14 @@ function isToolDisabled(name: string, img: boolean, vid: boolean, emb: boolean):
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) return true;
   if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) return true;
   return false;
+}
+
+function getToolDescription(tool: any): string {
+  const locale = i18n.language || "en";
+  if (locale === "zh" && tool.description_zh) {
+    return tool.description_zh;
+  }
+  return tool.description || "";
 }
 
 const SOURCE_TABS: { key: string; labelKey: string; sourceValue: string }[] = [
@@ -124,11 +133,12 @@ export default function SelectToolsDialog({
     if (!hasSearch && !hasLabels) return groups;
 
     const filterOne = (tool: any): boolean => {
-      // Search filter (OR across name/desc/tags)
+      // Search filter (OR across name/desc/desc_zh/tags)
       if (hasSearch) {
+        const toolDesc = getToolDescription(tool);
         const matchSearch =
           tool.name.toLowerCase().includes(kw) ||
-          (tool.description && tool.description.toLowerCase().includes(kw)) ||
+          (toolDesc && toolDesc.toLowerCase().includes(kw)) ||
           getToolLabels(tool).some((l: string) => l.toLowerCase().includes(kw));
         if (!matchSearch) return false;
       }
@@ -434,7 +444,7 @@ export default function SelectToolsDialog({
                               </div>
                               {tool.description && (
                                 <p className="truncate text-xs text-gray-400">
-                                  {tool.description}
+                                  {getToolDescription(tool)}
                                 </p>
                               )}
                             </div>

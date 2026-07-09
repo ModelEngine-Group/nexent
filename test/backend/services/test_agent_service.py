@@ -523,6 +523,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "sub_agent_id_list": mock_sub_agent_ids,
         "skills": [],
         "external_sub_agent_id_list": [],
+        "model_ids": [],  # Added for get_valid_model_ids integration
         "model_names": [],
         "model_name": None,
         "business_logic_model_name": None,
@@ -600,6 +601,7 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "sub_agent_id_list": mock_sub_agent_ids,
         "skills": [],
         "external_sub_agent_id_list": [],
+        "model_ids": [],  # Added for get_valid_model_ids integration
         "model_names": [],
         "model_name": None,
         "business_logic_model_name": None,
@@ -9536,6 +9538,20 @@ def _stub_requested_output_tokens_validator():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _stub_get_valid_model_ids():
+    """Auto-mock get_valid_model_ids to pass through when not explicitly mocked by a test.
+
+    This fixture ensures that existing tests that don't mock get_valid_model_ids still work.
+    Tests that need to verify get_valid_model_ids behavior can mock it explicitly.
+    """
+    with patch(
+        "backend.services.agent_service.get_valid_model_ids",
+        side_effect=lambda model_ids, tenant_id: model_ids,
+    ):
+        yield
+
+
 # Tests for update_agent_info_impl skill handling exception
 @patch("backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info")
 @patch("backend.services.agent_service.skill_db.query_skill_instances_by_agent_id")
@@ -13842,3 +13858,293 @@ async def test_run_agent_stream_title_generation_success(
 
             # Should complete successfully
             assert response.status_code == 200
+
+
+# ============================================================================
+# Tests for get_valid_model_ids integration in list_all_agent_info_impl
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_filters_deleted_models(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+    mock_get_valid_model_ids,
+):
+    """Test that list_all_agent_info_impl filters out deleted models from model_ids.
+
+    This test verifies that:
+    1. get_valid_model_ids is called to filter deleted models
+    2. The filtered model_ids are used for availability check and model name resolution
+    3. The returned model_ids only contain valid (non-deleted) models
+    """
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent with models",
+            "enabled": True,
+            "model_ids": [1, 2, 3],  # Original model_ids including deleted ones
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+        }
+    ]
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
+
+    # Mock get_valid_model_ids to filter out model_id=2 (deleted)
+    mock_get_valid_model_ids.return_value = [1, 3]  # Only models 1 and 3 are valid
+
+    # Mock model info for valid models (get_model_by_model_id takes 2 args: model_id and tenant_id)
+    def get_model_side_effect(model_id, tenant_id=None):
+        if model_id == 1:
+            return {"display_name": "Model 1", "model_id": 1}
+        elif model_id == 3:
+            return {"display_name": "Model 3", "model_id": 3}
+        return None
+    mock_get_model.side_effect = get_model_side_effect
+
+    mock_check_availability.return_value = (True, [])
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Verify get_valid_model_ids was called with original model_ids and tenant_id
+    mock_get_valid_model_ids.assert_called_once_with([1, 2, 3], "test_tenant")
+
+    # Verify result contains only valid model_ids
+    assert len(result) == 1
+    assert result[0]["model_ids"] == [1, 3]
+    assert result[0]["model_names"] == ["Model 1", "Model 3"]
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_all_models_deleted(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+    mock_get_valid_model_ids,
+):
+    """Test that list_all_agent_info_impl handles when all models are deleted.
+
+    This test verifies that:
+    1. get_valid_model_ids returns empty list when all models are deleted
+    2. model_names is empty
+    3. Availability check is still performed with empty model_ids
+    """
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent",
+            "enabled": True,
+            "model_ids": [1, 2, 3],
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+        }
+    ]
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
+
+    # All models were deleted
+    mock_get_valid_model_ids.return_value = []
+
+    mock_check_availability.return_value = (True, [])
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Verify result has empty model_ids and model_names
+    assert len(result) == 1
+    assert result[0]["model_ids"] == []
+    assert result[0]["model_names"] == []
+    assert result[0]["model_name"] is None
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_empty_model_ids(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+    mock_get_valid_model_ids,
+):
+    """Test that list_all_agent_info_impl handles empty model_ids."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent",
+            "enabled": True,
+            "model_ids": [],  # Empty model_ids
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+        }
+    ]
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
+
+    # get_valid_model_ids should be called with empty list
+    mock_get_valid_model_ids.return_value = []
+
+    mock_check_availability.return_value = (True, [])
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    mock_get_valid_model_ids.assert_called_once_with([], "test_tenant")
+    assert result[0]["model_ids"] == []
+    assert result[0]["model_names"] == []
+
+
+# ============================================================================
+# Tests for get_valid_model_ids integration in get_agent_info_impl
+# ============================================================================
+
+
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_filters_deleted_models(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Test that get_agent_info_impl filters out deleted models from model_ids.
+
+    This test verifies that:
+    1. get_valid_model_ids is called to filter deleted models
+    2. The filtered model_ids are used for availability check and model name resolution
+    3. The returned model_ids only contain valid (non-deleted) models
+    """
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_ids": [1, 2, 3],  # Original model_ids including deleted ones
+        "business_description": "Test agent"
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_query_sub_agents_id.return_value = [456]
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+
+    # Mock get_model_by_model_id for valid models
+    def get_model_side_effect(model_id, tenant_id=None):
+        if model_id == 1:
+            return {"display_name": "Model 1", "model_id": 1}
+        elif model_id == 3:
+            return {"display_name": "Model 3", "model_id": 3}
+        return None
+    mock_get_model_by_model_id.side_effect = get_model_side_effect
+
+    mock_check_availability.return_value = (True, [])
+
+    # Mock get_valid_model_ids to filter out model_id=2 (deleted)
+    with patch("backend.services.agent_service.get_valid_model_ids") as mock_get_valid_model_ids:
+        mock_get_valid_model_ids.return_value = [1, 3]
+
+        result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+        # Verify get_valid_model_ids was called
+        mock_get_valid_model_ids.assert_called_once_with([1, 2, 3], "test_tenant")
+
+    # Verify result contains only valid model_ids
+    assert result["model_ids"] == [1, 3]
+    assert result["model_names"] == ["Model 1", "Model 3"]
+    assert result["model_name"] == "Model 1"  # First model's display_name
+
+
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_all_models_deleted(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Test that get_agent_info_impl handles when all models are deleted."""
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_ids": [1, 2, 3],
+        "business_description": "Test agent"
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+
+    with patch("backend.services.agent_service.get_valid_model_ids") as mock_get_valid_model_ids:
+        mock_get_valid_model_ids.return_value = []  # All models deleted
+
+        result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert result["model_ids"] == []
+    assert result["model_names"] == []
+    assert result["model_name"] is None
