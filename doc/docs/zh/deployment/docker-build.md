@@ -242,3 +242,5 @@ bash deploy.sh --load-images docker \
   --components infrastructure,application,data-process,supabase \
   --image-source local-latest
 ```
+
+如果离线部署时需要推送到内部镜像仓库，可将 `--load-images` 替换为 `--push-images --image-registry-prefix registry.example.com/nexent`。如果省略前缀，入口脚本会先询问镜像仓库前缀，随后 `push-images.sh` 询问仓库账号和密码。部署配置会使用同一个镜像仓库前缀生成 Docker Compose 镜像引用。

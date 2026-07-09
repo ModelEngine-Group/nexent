@@ -41,6 +41,15 @@ case "$1" in
     [ -n "${FAKE_DOCKER_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
     exit 0
     ;;
+  login)
+    password="$(cat)"
+    [ -n "${FAKE_DOCKER_LOG:-}" ] && printf '%s password=%s\n' "$*" "$password" >> "$FAKE_DOCKER_LOG"
+    exit 0
+    ;;
+  load|tag|push)
+    [ -n "${FAKE_DOCKER_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+    exit 0
+    ;;
   save)
     [ -n "${FAKE_DOCKER_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
     out=""
@@ -70,6 +79,7 @@ assert_common_package_files() {
   [ ! -f "$package_dir/install.sh" ] || fail "install.sh should not be packaged"
   [ ! -f "$package_dir/offline-install.sh" ] || fail "offline-install.sh should not be packaged"
   [ -f "$package_dir/load-images.sh" ] || fail "load-images.sh should be packaged"
+  [ -f "$package_dir/push-images.sh" ] || fail "push-images.sh should be packaged"
   [ -f "$package_dir/manifest.yaml" ] || fail "manifest.yaml should be packaged"
   [ -f "$package_dir/checksums.txt" ] || fail "checksums.txt should be packaged"
   [ -f "$package_dir/deploy/deploy.sh" ] || fail "deploy/deploy.sh should be packaged"
@@ -95,6 +105,13 @@ assert_common_package_files() {
 
 create_fake_docker
 
+WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
+echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
+echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "offline package workflow package name should include source suffix"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--compress false' || fail "offline package workflow should let GitHub create the final artifact zip"
+echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
+! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
+
 for target in docker k8s all; do
   package_dir="$OUT_DIR/$target"
   PATH="$BIN_DIR:$PATH" \
@@ -108,6 +125,7 @@ for target in docker k8s all; do
       --output-dir "$package_dir" >/tmp/nexent-offline-package-${target}.log
 
   assert_common_package_files "$package_dir"
+  [ "$(cat "$package_dir/VERSION")" = "v2.2.0" ] || fail "root VERSION should match requested package version for target $target"
   [ -f "$OUT_DIR/nexent-offline-${target}-amd64-v2.2.0.zip" ] || fail "zip package should be created for target $target"
   grep -q "target: \"$target\"" "$package_dir/manifest.yaml" || fail "manifest should record target $target"
   grep -q "nexent/nexent:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include Nexent image"
@@ -136,6 +154,12 @@ cat > "$deploy_wrapper_dir/load-images.sh" <<'SH'
 printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/load-images.sh"
+cat > "$deploy_wrapper_dir/push-images.sh" <<'SH'
+#!/usr/bin/env bash
+args=("$@")
+printf 'push:%s:%s\n' "${REGISTRY_PASSWORD:-}" "${args[*]}" >> "$DEPLOY_WRAPPER_LOG"
+SH
+chmod +x "$deploy_wrapper_dir/push-images.sh"
 cat > "$deploy_wrapper_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
@@ -164,6 +188,24 @@ grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "depl
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --defaults --foo bar
 grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
 
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent docker --foo bar
+first_line="$(sed -n '1p' "$deploy_wrapper_log")"
+second_line="$(sed -n '2p' "$deploy_wrapper_log")"
+[[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "deploy.sh --push-images should delegate push args to push-images.sh"
+[ "$second_line" = "deploy::docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --push-images should forward image registry prefix to deploy config"
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --load-images --push-images --image-registry-prefix registry.local/nexent docker --foo bar
+first_line="$(sed -n '1p' "$deploy_wrapper_log")"
+second_line="$(sed -n '2p' "$deploy_wrapper_log")"
+[[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "deploy.sh --load-images --push-images should not load before push login"
+[ "$second_line" = "deploy::docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --load-images --push-images should forward deploy args"
+
+if DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --push-images docker --foo bar >/tmp/nexent-deploy-wrapper-missing-prefix.log 2>&1; then
+  fail "deploy.sh --push-images should require image registry prefix in non-interactive mode"
+fi
+grep -q -- '--image-registry-prefix' /tmp/nexent-deploy-wrapper-missing-prefix.log || fail "deploy.sh missing prefix error should be explicit"
+
 latest_package_dir="$OUT_DIR/latest"
 latest_pull_log="$TMP_DIR/latest-docker.log"
 : > "$latest_pull_log"
@@ -184,15 +226,55 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
+[ "$(cat "$latest_package_dir/VERSION")" = "latest" ] || fail "root VERSION should match requested latest package version"
 grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"$' "$latest_package_dir/deploy.sh" || fail "offline deploy.sh should reuse the root entrypoint with defaults mode enabled"
 offline_help="$(DEPLOYMENT_LANG=en bash "$latest_package_dir/deploy.sh" --help)"
 echo "$offline_help" | grep -q "deploys with saved configuration or built-in defaults" || fail "offline deploy help should explain default non-interactive mode"
+
+push_log="$TMP_DIR/push-images.log"
+: > "$push_log"
+PATH="$BIN_DIR:$PATH" \
+  FAKE_DOCKER_LOG="$push_log" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  REGISTRY_PASSWORD=secret \
+  bash "$latest_package_dir/push-images.sh" \
+    --image-registry-prefix https://registry.local/nexent/ \
+    --registry-username user \
+    --output-env-file "$TMP_DIR/push-images.env" >/tmp/nexent-offline-package-push.log
+grep -q '^login registry.local --username user --password-stdin password=secret$' "$push_log" || fail "push-images.sh should login to registry host with password stdin"
+grep -q '^IMAGE_REGISTRY_PREFIX=registry.local/nexent$' "$TMP_DIR/push-images.env" || fail "push-images.sh should write selected registry prefix to output env file"
+grep -q '^tag nexent/nexent:latest registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should tag Nexent image with registry prefix"
+grep -q '^push registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should push prefixed Nexent image"
+grep -q '^tag docker.elastic.co/elasticsearch/elasticsearch:8.17.4 registry.local/nexent/docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$push_log" || fail "push-images.sh should tag third-party image with registry prefix"
+: > "$push_log"
+PATH="$BIN_DIR:$PATH" \
+  FAKE_DOCKER_LOG="$push_log" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  REGISTRY_PASSWORD=secret \
+  bash "$latest_package_dir/push-images.sh" \
+    --load-images \
+    --image-registry-prefix registry.local/nexent \
+    --registry-username user >/tmp/nexent-offline-package-push-load.log
+first_line="$(sed -n '1p' "$push_log")"
+second_line="$(sed -n '2p' "$push_log")"
+[ "$first_line" = "login registry.local --username user --password-stdin password=secret" ] || fail "push-images.sh should docker login before loading images"
+[[ "$second_line" == load\ -i\ * ]] || fail "push-images.sh should load images only after docker login"
+if PATH="$BIN_DIR:$PATH" REGISTRY_PASSWORD=secret bash "$latest_package_dir/push-images.sh" --image-registry-prefix registry.local/nexent >/tmp/nexent-offline-package-push-missing-user.log 2>&1; then
+  fail "push-images.sh should require registry username in non-interactive mode"
+fi
+grep -q -- '--registry-username is required' /tmp/nexent-offline-package-push-missing-user.log || fail "push-images.sh missing username error should be explicit"
 
 cat > "$latest_package_dir/load-images.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$latest_package_dir/load-images.sh"
+cat > "$latest_package_dir/push-images.sh" <<'SH'
+#!/usr/bin/env bash
+args=("$@")
+printf 'push:%s:%s\n' "${REGISTRY_PASSWORD:-}" "${args[*]}" >> "$DEPLOY_WRAPPER_LOG"
+SH
+chmod +x "$latest_package_dir/push-images.sh"
 cat > "$latest_package_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
@@ -219,11 +301,18 @@ second_line="$(sed -n '2p' "$offline_deploy_log")"
 [ "$first_line" = "load-images" ] || fail "offline deploy.sh --load-images should load images before deploy"
 [ "$second_line" = "deploy:defaults:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
 
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$latest_package_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent docker --foo bar
+first_line="$(sed -n '1p' "$offline_deploy_log")"
+second_line="$(sed -n '2p' "$offline_deploy_log")"
+[[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "offline deploy.sh --push-images should push before deploy"
+[ "$second_line" = "deploy:defaults:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "offline deploy.sh --push-images should preserve defaults mode and forward registry prefix"
+
 [ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
-! grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should not be pulled"
-! grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should not be pulled"
-! grep -q '^pull .*nexent/nexent-mcp:latest$' "$latest_pull_log" || fail "latest Nexent MCP image should not be pulled"
+grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should be pulled"
+grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should be pulled"
+grep -q '^pull .*nexent/nexent-mcp:latest$' "$latest_pull_log" || fail "latest Nexent MCP image should be pulled"
 grep -q '^pull .*docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$latest_pull_log" || fail "non-latest infrastructure images should still be pulled"
 
 local_package_dir="$OUT_DIR/local-existing/package"
@@ -243,6 +332,7 @@ PATH="$BIN_DIR:$PATH" \
     --output-dir "$local_package_dir" >/tmp/nexent-offline-package-local-existing.log
 
 assert_common_package_files "$local_package_dir"
+[ "$(cat "$local_package_dir/VERSION")" = "v2.2.0" ] || fail "root VERSION should match requested package version"
 [ -f "$OUT_DIR/local-existing/nexent-offline-docker-amd64-v2.2.0.zip" ] || fail "zip package should be created for local existing package"
 ! grep -q '^pull .*nexent/nexent:v2.2.0$' "$local_pull_log" || fail "existing local Nexent image should not be pulled"
 ! grep -q '^pull .*docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$local_pull_log" || fail "existing local infrastructure image should not be pulled"
