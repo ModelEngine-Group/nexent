@@ -74,6 +74,14 @@ Development must be documentation-first:
 
 Only tiny mechanical fixes may skip a full SPEC update, and only when they do not change API, DB schema, runtime contracts, cross-module behavior, or user-visible behavior. In that case, state why no SPEC update was needed.
 
+Development must be test-verified against the documented acceptance criteria:
+- Unit tests should relact the acceptance criteria and edge cases from the SPEC.
+- Unit tests must reach 90% coverage for any new or modified module.
+- Integration tests must verify cross-module behavior and runtime flows.
+- For all frontend-affected changes, `playwright` must be used to verify user-visible behavior and acceptance criteria.
+- For all backend-affected changes, `curl` or `wget` must be used to verify API behavior and acceptance criteria.
+- For all SDK-affacted changes, when actual model calls are required to perform functional test, ask the user to provide one, and test with `LangFuse` to trace every step's input and output.
+
 ---
 
 ## Developer Commands

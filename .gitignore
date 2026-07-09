@@ -87,3 +87,5 @@ _doc/
 agent_repository_frontend
 
 .tokensave
+
+.playwright-mcp/

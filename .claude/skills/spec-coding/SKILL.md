@@ -10,7 +10,7 @@ Use this skill for Nexent coding work that changes product behavior, architectur
 
 ## Source of Truth
 
-Use the Feishu Wiki named `Nexent Development SPECs`.
+Use the Feishu Wiki named `Nexent Development SPECs`. URL: https://dcnvjn24oieg.feishu.cn/wiki/KyU6wFj3siGJ1WkWlu8cTHgwnYb
 
 Top-level organization is by implementation status:
 
