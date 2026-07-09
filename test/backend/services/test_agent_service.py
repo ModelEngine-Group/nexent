@@ -4498,7 +4498,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
         unregister_called["user_id"] = user_id
 
@@ -4553,7 +4553,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
 
     called = {"unregistered": None, "user_id": None}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         called["unregistered"] = conv_id
         called["user_id"] = user_id
 
@@ -11849,7 +11849,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Track unregister calls
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -11903,7 +11903,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -11970,7 +11970,7 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12041,7 +12041,7 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12125,7 +12125,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12207,7 +12207,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12288,7 +12288,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12351,7 +12351,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12427,7 +12427,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12483,7 +12483,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12536,7 +12536,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12593,7 +12593,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12653,7 +12653,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12714,7 +12714,7 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12774,7 +12774,7 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
