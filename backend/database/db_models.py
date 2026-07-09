@@ -43,6 +43,7 @@ class ConversationRecord(TableBase):
     conversation_id = Column(Integer, Sequence(
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
+    agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
 
 
 class ConversationMessage(TableBase):

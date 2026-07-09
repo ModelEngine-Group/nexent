@@ -297,8 +297,32 @@ def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     # ensure not in speed mode and no DEBUG_JWT_EXPIRE_SECONDS was set for this test
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
     monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     seconds = au.get_jwt_expiry_seconds(token)
     assert seconds == 1234
+
+
+def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
+    """Expiry seconds must not trust JWT claims from tokens with invalid signatures."""
+    now = int(time.time())
+    forged_token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "iat": now,
+            "exp": now + 10 * 365 * 24 * 60 * 60,
+            "aud": "nexent-api",
+        },
+        "attacker-secret",
+        algorithm="HS256",
+    )
+
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    seconds = au.get_jwt_expiry_seconds(forged_token)
+
+    assert seconds == 3600
 
 
 def test_calculate_expires_at_speed_mode(monkeypatch):

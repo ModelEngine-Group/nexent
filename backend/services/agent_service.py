@@ -99,6 +99,7 @@ from services.conversation_management_service import (
     save_source_image,
     save_source_search,
     save_skill_files_to_conversation,
+    update_conversation_agent_id_service,
     update_message_content,
     update_message_status,
     update_unit_content,
@@ -2949,6 +2950,7 @@ async def run_agent_stream(
         conversation_data = create_new_conversation(
             title=default_title,
             user_id=resolved_user_id,
+            agent_id=agent_request.agent_id,
         )
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -2956,6 +2958,19 @@ async def run_agent_stream(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
             resolved_user_id,
+        )
+
+    if (
+        not agent_request.is_debug
+        and not resume
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+        and agent_request.agent_id is not None
+    ):
+        update_conversation_agent_id_service(
+            conversation_id=agent_request.conversation_id,
+            agent_id=agent_request.agent_id,
+            user_id=resolved_user_id,
         )
 
     # Resume mode: check for existing streaming message

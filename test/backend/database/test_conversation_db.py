@@ -101,6 +101,7 @@ db_models_mod = types.ModuleType("database.db_models")
 class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
+    agent_id = MagicMock(name="ConversationRecord.agent_id")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -479,6 +480,7 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     mock_record = MagicMock()
     mock_record.conversation_id = 42
     mock_record.conversation_title = "Test Title"
+    mock_record.agent_id = 7
     mock_record.create_time = 1234567890.123
     mock_record.update_time = 1234567890.456
     session.execute.return_value.fetchone.return_value = mock_record
@@ -489,6 +491,7 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
 
     assert result["conversation_id"] == 42
     assert result["conversation_title"] == "Test Title"
+    assert result["agent_id"] == 7
     assert result["create_time"] == 1234567890
     assert result["update_time"] == 1234567890
     session.execute.assert_called_once()
@@ -500,6 +503,7 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
     mock_record = MagicMock()
     mock_record.conversation_id = 1
     mock_record.conversation_title = "No User Title"
+    mock_record.agent_id = None
     mock_record.create_time = 1000.0
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record

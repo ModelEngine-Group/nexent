@@ -446,7 +446,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["conversation_id"], 123)
         self.assertEqual(result["title"], "New Chat")
         mock_create_conversation.assert_called_once_with(
-            "New Chat", self.user_id)
+            "New Chat", self.user_id, agent_id=None)
 
     @patch('backend.services.conversation_management_service.get_conversation_list')
     def test_get_conversation_list_service(self, mock_get_conversation_list):
