@@ -2361,7 +2361,7 @@ def test_get_message_units_by_message_string_conversation_id(monkeypatch, mock_s
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
     monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
 
-    result = get_message_units_by_message("42")
+    result = get_message_units_by_message(42)
 
     assert len(result) == 1
 

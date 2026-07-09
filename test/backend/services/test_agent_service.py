@@ -13856,3 +13856,301 @@ async def test_run_agent_stream_title_generation_success(
 
             # Should complete successfully
             assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
+    """TOOL + EXECUTION_LOGS chunks should be merged into a single tool_call row."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "step_count", "content": "**Step 1**"})
+        yield json.dumps({"type": "tool", "content": "search('query')"})
+        yield json.dumps({"type": "execution_logs", "content": "result: found 3 items"})
+        yield json.dumps({"type": "final_answer", "content": "Done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        lambda *a, **kw: 4242,
+        raising=False,
+    )
+
+    saved_units = []
+
+    class FakeFuture:
+        def __init__(self, unit_id):
+            self._unit_id = unit_id
+        def result(self):
+            return self._unit_id
+
+    def fake_submit(fn, *args, **kwargs):
+        if "unit_type" in kwargs:
+            unit_id = len(saved_units) + 100
+            saved_units.append({
+                "unit_type": kwargs.get("unit_type"),
+                "unit_content": kwargs.get("unit_content"),
+                "step_index": kwargs.get("step_index"),
+            })
+            return FakeFuture(unit_id)
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit", fake_submit, raising=False
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.generate_conversation_title_service",
+        AsyncMock(),
+        raising=False,
+    )
+
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    tool_call_units = [u for u in saved_units if u["unit_type"] == "tool_call"]
+    assert len(tool_call_units) == 1, f"Expected 1 tool_call unit, got {len(tool_call_units)}: {saved_units}"
+
+    merged = json.loads(tool_call_units[0]["unit_content"])
+    assert merged["tool_call"] == "search('query')"
+    assert merged["execution_result"] == "result: found 3 items"
+
+    standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
+    standalone_logs = [u for u in saved_units if u["unit_type"] == "execution_logs"]
+    assert len(standalone_tools) == 0
+    assert len(standalone_logs) == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
+    """Orphaned TOOL chunk (no EXECUTION_LOGS) should be flushed as standalone 'tool' row at end of stream."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "step_count", "content": "**Step 1**"})
+        yield json.dumps({"type": "tool", "content": "search('query')"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        lambda *a, **kw: 4242,
+        raising=False,
+    )
+
+    saved_units = []
+
+    class FakeFuture:
+        def __init__(self, unit_id):
+            self._unit_id = unit_id
+        def result(self):
+            return self._unit_id
+
+    def fake_submit(fn, *args, **kwargs):
+        if "unit_type" in kwargs:
+            unit_id = len(saved_units) + 100
+            saved_units.append({
+                "unit_type": kwargs.get("unit_type"),
+                "unit_content": kwargs.get("unit_content"),
+            })
+            return FakeFuture(unit_id)
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit", fake_submit, raising=False
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.generate_conversation_title_service",
+        AsyncMock(),
+        raising=False,
+    )
+
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
+    assert len(standalone_tools) == 1, f"Expected 1 standalone tool, got: {saved_units}"
+    assert standalone_tools[0]["unit_content"] == "search('query')"
+
+    tool_call_units = [u for u in saved_units if u["unit_type"] == "tool_call"]
+    assert len(tool_call_units) == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
+    """Multiple TOOL + EXECUTION_LOGS pairs should each produce one tool_call row."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "step_count", "content": "**Step 1**"})
+        yield json.dumps({"type": "tool", "content": "search('a')"})
+        yield json.dumps({"type": "execution_logs", "content": "result a"})
+        yield json.dumps({"type": "tool", "content": "search('b')"})
+        yield json.dumps({"type": "execution_logs", "content": "result b"})
+        yield json.dumps({"type": "final_answer", "content": "Done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        lambda *a, **kw: 4242,
+        raising=False,
+    )
+
+    saved_units = []
+
+    class FakeFuture:
+        def __init__(self, unit_id):
+            self._unit_id = unit_id
+        def result(self):
+            return self._unit_id
+
+    def fake_submit(fn, *args, **kwargs):
+        if "unit_type" in kwargs:
+            unit_id = len(saved_units) + 100
+            saved_units.append({
+                "unit_type": kwargs.get("unit_type"),
+                "unit_content": kwargs.get("unit_content"),
+            })
+            return FakeFuture(unit_id)
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit", fake_submit, raising=False
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.generate_conversation_title_service",
+        AsyncMock(),
+        raising=False,
+    )
+
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    tool_call_units = [u for u in saved_units if u["unit_type"] == "tool_call"]
+    assert len(tool_call_units) == 2, f"Expected 2 tool_call units, got {len(tool_call_units)}: {saved_units}"
+
+    merged_a = json.loads(tool_call_units[0]["unit_content"])
+    assert merged_a["tool_call"] == "search('a')"
+    assert merged_a["execution_result"] == "result a"
+
+    merged_b = json.loads(tool_call_units[1]["unit_content"])
+    assert merged_b["tool_call"] == "search('b')"
+    assert merged_b["execution_result"] == "result b"
