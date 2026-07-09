@@ -169,13 +169,14 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                   {...uploadProps}
                   className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200"
                   showUploadList={false}
+                  style={{ height: "100%", overflow: "auto" }}
                 >
-                  <div className="flex flex-col items-center justify-center h-full">
+                  <div className="flex flex-col items-center justify-center">
                     <p className="ant-upload-drag-icon !mb-4">
                       <Inbox size={48} className="text-blue-600" />
                     </p>
                     <p className="ant-upload-text !mb-2 text-base">
-                      {t("knowledgeBase.upload.dragHint")}
+                      {t("knowledgeBase.upload.dragHint")}   
                     </p>
                     <p className="ant-upload-hint text-gray-500">
                       {t("knowledgeBase.upload.supportedFormats")}

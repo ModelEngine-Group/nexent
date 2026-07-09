@@ -562,9 +562,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             className="flex items-start justify-between w-full"
             style={{ width: "100%" }}
           >
-            <div className="flex items-start flex-1 min-w-0">
+            <div className="flex items-start flex-1 min-w-0 overflow-hidden">
               {isCreatingMode ? (
-                <div className="flex flex-wrap items-start gap-3 w-full">
+                <div className="flex flex-wrap items-start gap-3 w-full overflow-hidden">
                   <div className="flex flex-col flex-1" style={{ minWidth: 120 }}>
                     <Input
                       value={knowledgeBaseName}
@@ -695,7 +695,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               ) : (
                 <h3
-                  className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center`}
+                  className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center truncate`}
                 >
                   {knowledgeBaseName}
                 </h3>
@@ -708,7 +708,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             </div>
             {/* Right: overview and detail buttons */}
             {!isCreatingMode && !isDataMate && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-shrink-0 ml-3">
                 <Button
                   type="primary"
                   icon={<BookText size={16} />}

@@ -332,7 +332,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center min-w-0" style={{ gap: "6px" }}>
+          <div className="flex items-center min-w-0 overflow-x-auto" style={{ gap: "6px" }}>
             <Button
               style={{
                 padding: "4px 15px",
@@ -391,16 +391,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   backgroundColor: "#1677ff",
                   color: "white",
                   border: "none",
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  minWidth: 0,
+                  flexShrink: 0,
                 }}
                 className="hover:!bg-blue-600"
                 type="primary"
                 onClick={onDataMateConfig}
                 icon={<SettingOutlined />}
               >
-                <span className="overflow-hidden text-ellipsis">
+                <span className="truncate max-w-[120px]">
                   {t("knowledgeBase.button.dataMateConfig")}
                 </span>
               </Button>
