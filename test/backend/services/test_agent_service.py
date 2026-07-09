@@ -491,7 +491,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [456, 789]
@@ -515,11 +515,12 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 
     # Assert
+    expected_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     expected_result = {
         "agent_id": 123,
         "model_id": None,
         "business_description": "Test agent",
-        "tools": mock_tools,
+        "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "skills": [],
         "external_sub_agent_id_list": [],
@@ -566,7 +567,7 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [456, 789]
@@ -593,11 +594,12 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant", version_no=5)
 
     # Assert
+    expected_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     expected_result = {
         "agent_id": 123,
         "model_id": None,
         "business_description": "Test agent",
-        "tools": mock_tools,
+        "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "skills": [],
         "external_sub_agent_id_list": [],
@@ -1636,7 +1638,7 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     # Mock query_sub_agents_id_list to raise an exception
@@ -1687,7 +1689,7 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [789]
@@ -1795,7 +1797,7 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [789]
@@ -1870,7 +1872,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [789]
@@ -1942,7 +1944,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [101, 102]
@@ -2040,7 +2042,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [101, 102]
@@ -2131,7 +2133,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     }
     mock_search_agent_info.return_value = mock_agent_info
 
-    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
     mock_search_tools.return_value = mock_tools
 
     mock_sub_agent_ids = [101, 102]
@@ -2202,6 +2204,382 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     assert mock_get_model_by_model_id.call_count == 3
     mock_get_model_by_model_id.assert_any_call(456)
     mock_get_model_by_model_id.assert_any_call(789)
+
+
+@patch("backend.services.agent_service.query_current_version_no")
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_marks_mcp_model_unavailable_when_deleted(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+    mock_query_current_version_no,
+):
+    """Tools whose selected_model_id has been soft-deleted should be marked mcp_model_unavailable."""
+    mock_search_agent_info.return_value = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+    }
+
+    mock_tools = [
+        {
+            "tool_id": 1,
+            "name": "Tool 1",
+            "params": [{"name": "selected_model_id", "default": 99}],
+        },
+        {
+            "tool_id": 2,
+            "name": "Tool 2",
+            "params": [{"name": "selected_model_id", "default": 100}],
+        },
+    ]
+    mock_search_tools.return_value = mock_tools
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+
+    def fake_ignore_delete(model_id, tenant_id):
+        if model_id == 99:
+            return {"model_id": 99, "delete_flag": "Y"}
+        return {"model_id": model_id, "delete_flag": "N"}
+
+    mock_get_model_by_model_id_ignore_delete.side_effect = fake_ignore_delete
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert result["tools"][0]["unavailable_reasons"] == ["mcp_model_unavailable"]
+    assert result["tools"][1]["unavailable_reasons"] == []
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_handles_tools_without_params(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Tools without a params list should still return an empty unavailable_reasons and not crash."""
+    mock_search_agent_info.return_value = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+    }
+
+    mock_tools = [
+        {"tool_id": 1, "name": "Tool 1"},  # no params key
+        {"tool_id": 2, "name": "Tool 2", "params": []},  # empty params list
+        {"tool_id": 3, "name": "Tool 3", "params": [{"name": "other", "default": "x"}]},  # no selected_model_id
+    ]
+    mock_search_tools.return_value = mock_tools
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    for tool in result["tools"]:
+        assert tool["unavailable_reasons"] == []
+    mock_get_model_by_model_id_ignore_delete.assert_not_called()
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_skips_unset_selected_model_default(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Tools with `selected_model_id` declared but no default should skip the DB lookup."""
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": None}
+    mock_search_tools.return_value = [
+        {"tool_id": 1, "name": "T1", "params": [{"name": "selected_model_id"}]},
+        {"tool_id": 2, "name": "T2", "params": [{"name": "selected_model_id", "default": None}]},
+    ]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=1, tenant_id="test_tenant")
+
+    assert result["tools"][0]["unavailable_reasons"] == []
+    assert result["tools"][1]["unavailable_reasons"] == []
+    mock_get_model_by_model_id_ignore_delete.assert_not_called()
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_selected_model_not_found(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """When `get_model_by_model_id_ignore_delete` returns None we should not mark the tool unavailable."""
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": None}
+    mock_search_tools.return_value = [
+        {"tool_id": 1, "name": "T1", "params": [{"name": "selected_model_id", "default": 555}]},
+    ]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=1, tenant_id="test_tenant")
+
+    assert result["tools"][0]["unavailable_reasons"] == []
+    mock_get_model_by_model_id_ignore_delete.assert_called_once_with(555, "test_tenant")
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_selected_model_not_deleted(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """A tool whose selected model is still active must not be marked unavailable."""
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": None}
+    mock_search_tools.return_value = [
+        {"tool_id": 1, "name": "T1", "params": [{"name": "selected_model_id", "default": 7}]},
+    ]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = {"model_id": 7, "delete_flag": "N"}
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=1, tenant_id="test_tenant")
+
+    assert result["tools"][0]["unavailable_reasons"] == []
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_skips_non_list_params(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Tool `params` values that aren't a list (e.g. dict, string) should be safely ignored."""
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": None}
+    mock_search_tools.return_value = [
+        {"tool_id": 1, "name": "T1", "params": {"selected_model_id": 5}},
+        {"tool_id": 2, "name": "T2", "params": "invalid"},
+    ]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=1, tenant_id="test_tenant")
+
+    for tool in result["tools"]:
+        assert tool["unavailable_reasons"] == []
+    mock_get_model_by_model_id_ignore_delete.assert_not_called()
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_param_loop_skips_non_dict_entries(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Within a list, non-dict entries must be skipped without crashing."""
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": None}
+    mock_search_tools.return_value = [
+        {
+            "tool_id": 1,
+            "name": "T1",
+            "params": [
+                None,
+                "string-not-a-dict",
+                42,
+                True,
+                {"name": "selected_model_id", "default": 9},
+            ],
+        },
+    ]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = {
+        "model_id": 9,
+        "delete_flag": "Y",
+    }
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=1, tenant_id="test_tenant")
+
+    assert result["tools"][0]["unavailable_reasons"] == ["mcp_model_unavailable"]
+    mock_get_model_by_model_id_ignore_delete.assert_called_once_with(9, "test_tenant")
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_valid_model_ids")
+@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_breaks_after_selected_model_id(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id_ignore_delete,
+    mock_get_valid_model_ids,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """After locating `selected_model_id` other params in the same tool should be skipped."""
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": None}
+    mock_search_tools.return_value = [
+        {
+            "tool_id": 1,
+            "name": "T1",
+            "params": [
+                {"name": "selected_model_id", "default": 9},
+                {"name": "another_selected_model_id", "default": 10},
+            ],
+        },
+    ]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+    mock_query_external_sub_agents.return_value = []
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=1, tenant_id="test_tenant")
+
+    assert result["tools"][0]["unavailable_reasons"] == []
+    # Only one lookup per tool should be issued thanks to the `break`.
+    mock_get_model_by_model_id_ignore_delete.assert_called_once_with(9, "test_tenant")
 
 
 @pytest.mark.asyncio
@@ -7837,6 +8215,7 @@ def test_check_single_model_availability_returns_empty_for_available_model():
 # ============================================================================
 
 
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
 @patch('backend.services.agent_service._collect_model_availability_reasons')
 @patch('backend.services.agent_service.check_tool_is_available')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
@@ -7845,7 +8224,8 @@ def test_check_agent_availability_all_available(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when all tools and models are available."""
     from backend.services.agent_service import check_agent_availability
@@ -7868,6 +8248,7 @@ def test_check_agent_availability_all_available(
     mock_check_tool.assert_called_once_with([1, 2])
 
 
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
 @patch('backend.services.agent_service._collect_model_availability_reasons')
 @patch('backend.services.agent_service.check_tool_is_available')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
@@ -7876,7 +8257,8 @@ def test_check_agent_availability_tool_unavailable(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when some tools are unavailable."""
     from backend.services.agent_service import check_agent_availability
@@ -7896,6 +8278,7 @@ def test_check_agent_availability_tool_unavailable(
     assert reasons == ["tool_unavailable"]
 
 
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
 @patch('backend.services.agent_service._collect_model_availability_reasons')
 @patch('backend.services.agent_service.check_tool_is_available')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
@@ -7904,7 +8287,8 @@ def test_check_agent_availability_model_unavailable(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when model is unavailable."""
     from backend.services.agent_service import check_agent_availability
@@ -7922,6 +8306,193 @@ def test_check_agent_availability_model_unavailable(
 
     assert is_available is False
     assert reasons == ["model_unavailable"]
+
+
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_mcp_model_deleted(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
+):
+    """Test check_agent_availability when tool has selected_model_id pointing to a deleted model."""
+    from backend.services.agent_service import check_agent_availability
+
+    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [
+        {
+            "tool_id": 1,
+            "params": [{"name": "selected_model_id", "default": 99}],
+        },
+        {
+            "tool_id": 2,
+            "params": [{"name": "selected_model_id", "default": 100}],
+        },
+    ]
+    mock_check_tool.return_value = [True, True]
+    mock_collect_model_reasons.return_value = []
+
+    def fake_ignore_delete(model_id, tenant_id):
+        if model_id == 99:
+            return {"model_id": 99, "delete_flag": "Y"}
+        return {"model_id": model_id, "delete_flag": "N"}
+
+    mock_get_model_by_model_id_ignore_delete.side_effect = fake_ignore_delete
+
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant"
+    )
+
+    assert is_available is False
+    # Agent-level unavailability re-uses the same TOOL_UNAVAILABLE reason as
+    # the per-tool check, but it is only emitted once even when multiple tools
+    # point to deleted models.
+    assert "tool_unavailable" in reasons
+    assert reasons.count("tool_unavailable") == 1
+    # confirm the deleted model was the source of the reason
+    expected_lookups = {99, 100}
+    looked_up = {call.args[0]
+                 for call in mock_get_model_by_model_id_ignore_delete.call_args_list}
+    assert looked_up == expected_lookups
+
+
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_mcp_model_selected_default_none(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
+):
+    """`selected_model_id` set without a default value should be skipped without lookups."""
+    from backend.services.agent_service import check_agent_availability
+
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_tools.return_value = [
+        {"tool_id": 1, "params": [{"name": "selected_model_id"}]},  # default is None
+    ]
+    mock_check_tool.return_value = [True]
+    mock_collect_model_reasons.return_value = []
+
+    is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
+
+    assert is_available is True
+    assert reasons == []
+    mock_get_model_by_model_id_ignore_delete.assert_not_called()
+
+
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_mcp_model_record_missing(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
+):
+    """If the DB lookup returns None we should not raise and not add a reason."""
+    from backend.services.agent_service import check_agent_availability
+
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_tools.return_value = [
+        {"tool_id": 1, "params": [{"name": "selected_model_id", "default": 999}]},
+    ]
+    mock_check_tool.return_value = [True]
+    mock_collect_model_reasons.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
+
+    assert is_available is True
+    assert reasons == []
+
+
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_mcp_model_params_non_dict_entries(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
+):
+    """Non-dict entries inside `params` (and missing `params`) must not crash the loop."""
+    from backend.services.agent_service import check_agent_availability
+
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_tools.return_value = [
+        {"tool_id": 1},                                              # no params
+        {"tool_id": 2, "params": None},                               # explicit None
+        {"tool_id": 3, "params": "not-a-list"},                        # wrong type, skip
+        {"tool_id": 4, "params": [None, "string", 42, True]},          # non-dict entries
+        {"tool_id": 5, "params": [{"name": "unrelated", "default": 7}]},  # wrong param name
+    ]
+    mock_check_tool.return_value = [True] * 5
+    mock_collect_model_reasons.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
+
+    assert is_available is True
+    assert reasons == []
+    # No selected_model_id found in any tool's params, so the lookup is never invoked.
+    mock_get_model_by_model_id_ignore_delete.assert_not_called()
+
+
+@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_mcp_model_loop_breaks_after_first_match(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons,
+    mock_get_model_by_model_id_ignore_delete,
+):
+    """Once `selected_model_id` is located, subsequent params in the same tool are skipped."""
+    from backend.services.agent_service import check_agent_availability
+
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_tools.return_value = [
+        {
+            "tool_id": 1,
+            "params": [
+                {"name": "other_param", "default": 1},
+                {"name": "selected_model_id", "default": 99},
+                {"name": "trailing", "default": 2},
+            ],
+        },
+    ]
+    mock_check_tool.return_value = [True]
+    mock_collect_model_reasons.return_value = []
+    mock_get_model_by_model_id_ignore_delete.return_value = None
+
+    is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
+
+    assert is_available is True
+    assert reasons == []
+    # Only one lookup should be performed for the tool, regardless of how many
+    # other params follow `selected_model_id` in the schema list.
+    assert mock_get_model_by_model_id_ignore_delete.call_count == 1
 
 
 @patch('backend.services.agent_service._collect_model_availability_reasons')

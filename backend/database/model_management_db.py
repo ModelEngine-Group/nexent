@@ -228,7 +228,7 @@ def get_model_id_by_display_name(display_name: str, tenant_id: str, model_type: 
 
 def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Get a model record using native SQLAlchemy query
+    Get a model record using native SQLAlchemy query.
 
     Args:
         model_id (int): Model ID
@@ -266,6 +266,37 @@ def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Opt
             if result_dict.get("maximum_chunk_size") is None:
                 result_dict["maximum_chunk_size"] = DEFAULT_MAXIMUM_CHUNK_SIZE
 
+        return result_dict
+
+
+def get_model_by_model_id_ignore_delete(model_id: int, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get a model record without filtering by delete_flag.
+
+    Used when checking whether a previously selected model has been deleted
+    (e.g., for tools that store a selected_model_id in their params).
+
+    Args:
+        model_id (int): Model ID
+        tenant_id (Optional[str]): Tenant ID, optional
+
+    Returns:
+        Optional[Dict[str, Any]]: Model record as a dictionary, or None if not found
+    """
+    with get_db_session() as session:
+        stmt = select(ModelRecord).where(ModelRecord.model_id == model_id)
+        if tenant_id:
+            stmt = stmt.where(ModelRecord.tenant_id == tenant_id)
+        result = session.scalars(stmt).first()
+        if result is None:
+            return None
+        result_dict = {key: value for key,
+                       value in result.__dict__.items() if not key.startswith('_')}
+        if result_dict.get("model_type") in ["embedding", "multi_embedding"]:
+            if result_dict.get("expected_chunk_size") is None:
+                result_dict["expected_chunk_size"] = DEFAULT_EXPECTED_CHUNK_SIZE
+            if result_dict.get("maximum_chunk_size") is None:
+                result_dict["maximum_chunk_size"] = DEFAULT_MAXIMUM_CHUNK_SIZE
         return result_dict
 
 

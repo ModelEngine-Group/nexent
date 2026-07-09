@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Tabs, Input, Checkbox, Button, Select } from "antd";
+import { Modal, Tabs, Input, Checkbox, Button, Select, Tooltip } from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
 import i18n from "i18next";
@@ -30,6 +30,19 @@ function isToolDisabled(name: string, img: boolean, vid: boolean, emb: boolean):
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) return true;
   if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) return true;
   return false;
+}
+
+function getToolDisabledTooltipKey(name: string, img: boolean, vid: boolean, emb: boolean): string | null {
+  if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name) && !img) {
+    return "toolPool.imageUnderstandingDisabledTooltip";
+  }
+  if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) {
+    return "toolPool.videoUnderstandingDisabledTooltip";
+  }
+  if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) {
+    return "toolPool.embeddingDisabledTooltip";
+  }
+  return null;
 }
 
 function getToolDescription(tool: any): string {
@@ -406,60 +419,78 @@ export default function SelectToolsDialog({
                         isVideoUnderstandingAvailable,
                         isEmbeddingAvailable
                       );
+                      const disabledTooltipKey = disabled
+                        ? getToolDisabledTooltipKey(
+                            tool.name,
+                            isImageUnderstandingAvailable,
+                            isVideoUnderstandingAvailable,
+                            isEmbeddingAvailable
+                          )
+                        : null;
+
+                      const row = (
+                        <div
+                          role="button"
+                          tabIndex={disabled ? -1 : 0}
+                          className={`group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
+                            disabled
+                              ? "cursor-not-allowed opacity-50"
+                              : "cursor-pointer hover:bg-gray-50"
+                          }`}
+                          onClick={disabled ? undefined : () => handleToolToggle(tool)}
+                          onKeyDown={(e) => {
+                            if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+                              e.preventDefault();
+                              handleToolToggle(tool);
+                            }
+                          }}
+                        >
+                          <Checkbox checked={isSelected} disabled={disabled} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-mono text-xs font-medium text-gray-800">
+                                {tool.name}
+                              </span>
+                              {getToolLabels(tool)
+                                .slice(0, 2)
+                                .map((label: string) => (
+                                  <span
+                                    key={label}
+                                    className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                            </div>
+                            {tool.description && (
+                              <p className="truncate text-xs text-gray-400">
+                                {getToolDescription(tool)}
+                              </p>
+                            )}
+                          </div>
+                          {!disabled && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openConfigModal(tool);
+                              }}
+                              className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100"
+                            >
+                              <Settings className="size-4" />
+                            </button>
+                          )}
+                        </div>
+                      );
 
                       return (
                         <li key={tool.id}>
-                          <div
-                            role="button"
-                            tabIndex={disabled ? -1 : 0}
-                            className={`group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
-                              disabled
-                                ? "cursor-not-allowed opacity-50"
-                                : "cursor-pointer hover:bg-gray-50"
-                            }`}
-                            onClick={disabled ? undefined : () => handleToolToggle(tool)}
-                            onKeyDown={(e) => {
-                              if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
-                                e.preventDefault();
-                                handleToolToggle(tool);
-                              }
-                            }}
-                          >
-                            <Checkbox checked={isSelected} disabled={disabled} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="truncate font-mono text-xs font-medium text-gray-800">
-                                  {tool.name}
-                                </span>
-                                {getToolLabels(tool)
-                                  .slice(0, 2)
-                                  .map((label: string) => (
-                                    <span
-                                      key={label}
-                                      className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
-                                    >
-                                      {label}
-                                    </span>
-                                  ))}
-                              </div>
-                              {tool.description && (
-                                <p className="truncate text-xs text-gray-400">
-                                  {getToolDescription(tool)}
-                                </p>
-                              )}
-                            </div>
-                            {!disabled && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openConfigModal(tool);
-                                }}
-                                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100"
-                              >
-                                <Settings className="size-4" />
-                              </button>
-                            )}
-                          </div>
+                          {disabledTooltipKey ? (
+                            <Tooltip title={t(disabledTooltipKey)} mouseEnterDelay={0.2}>
+                              {row}
+                            </Tooltip>
+                          ) : (
+                            row
+                          )}
                         </li>
                       );
                     })}

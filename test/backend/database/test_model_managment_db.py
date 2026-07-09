@@ -525,3 +525,186 @@ def test_get_valid_model_ids_none_deleted(monkeypatch):
     # All models were deleted
     result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_model_by_model_id_ignore_delete
+# ---------------------------------------------------------------------------
+
+
+def _patch_session(monkeypatch, scalars_first, scalars_all=None):
+    """Helper to install a fake DB session returning the given scalars."""
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = scalars_first
+    if scalars_all is not None:
+        mock_scalars.all.return_value = scalars_all
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.model_management_db.get_db_session", lambda: ctx)
+    return session
+
+
+def test_get_model_by_model_id_ignore_delete_returns_chat_model(monkeypatch):
+    """Non-embedding records should be returned untouched, without chunk-size defaults."""
+    mock_model = SimpleNamespace(
+        model_id=101,
+        model_factory="openai",
+        model_type="chat",
+        tenant_id="tenant_ignore_chat",
+        delete_flag="Y",  # explicitly soft-deleted; the function must still return it
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+        _sa_instance_state=None,  # underscore-prefixed; should be dropped from dict
+    )
+    session = _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        101, tenant_id="tenant_ignore_chat")
+
+    # The filtered-by-underscore dictionary must contain only the public attributes.
+    assert result["model_id"] == 101
+    assert result["model_type"] == "chat"
+    assert result["delete_flag"] == "Y"
+    # No default chunk-size backfill for non-embedding types.
+    assert result["expected_chunk_size"] is None
+    assert result["maximum_chunk_size"] is None
+    # Private attributes beginning with "_" are removed from the dict.
+    assert all(not key.startswith("_") for key in result)
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_fills_defaults(monkeypatch):
+    """For embedding records with None chunk sizes, defaults must be applied."""
+    mock_model = SimpleNamespace(
+        model_id=102,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_emb",
+        delete_flag="Y",
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        102, tenant_id="tenant_ignore_emb")
+
+    assert result["model_type"] == "embedding"
+    assert result["expected_chunk_size"] == 1024
+    assert result["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_ignore_delete_multi_embedding_fills_defaults(monkeypatch):
+    """For multi_embedding records with None chunk sizes, defaults must also be applied."""
+    mock_model = SimpleNamespace(
+        model_id=103,
+        model_factory="openai",
+        model_type="multi_embedding",
+        tenant_id="tenant_ignore_multi",
+        delete_flag="Y",
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        103, tenant_id="tenant_ignore_multi")
+
+    assert result["model_type"] == "multi_embedding"
+    assert result["expected_chunk_size"] == 1024
+    assert result["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_keeps_existing_sizes(monkeypatch):
+    """Pre-existing chunk sizes (even for embedding) must NOT be overwritten."""
+    mock_model = SimpleNamespace(
+        model_id=104,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_keep",
+        delete_flag="Y",
+        expected_chunk_size=256,
+        maximum_chunk_size=512,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        104, tenant_id="tenant_ignore_keep")
+
+    # The pre-existing sizes must be preserved.
+    assert result["expected_chunk_size"] == 256
+    assert result["maximum_chunk_size"] == 512
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_only_one_size_missing(monkeypatch):
+    """When only one of the chunk sizes is missing, only that one should be defaulted."""
+    mock_model = SimpleNamespace(
+        model_id=105,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_partial",
+        delete_flag="Y",
+        expected_chunk_size=256,        # already set
+        maximum_chunk_size=None,        # missing — must be defaulted
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        105, tenant_id="tenant_ignore_partial")
+
+    assert result["expected_chunk_size"] == 256
+    assert result["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_fills_only_max_if_min_present(monkeypatch):
+    """Complement of the partial-fill test: missing `expected_chunk_size` defaults
+    even though `maximum_chunk_size` is supplied."""
+    mock_model = SimpleNamespace(
+        model_id=106,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_min",
+        delete_flag="Y",
+        expected_chunk_size=None,
+        maximum_chunk_size=999,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        106, tenant_id="tenant_ignore_min")
+
+    assert result["expected_chunk_size"] == 1024
+    assert result["maximum_chunk_size"] == 999
+
+
+def test_get_model_by_model_id_ignore_delete_not_found_returns_none(monkeypatch):
+    """When the DB query finds nothing, the function returns None."""
+    _patch_session(monkeypatch, scalars_first=None)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        9999, tenant_id="tenant_ignore_missing")
+
+    assert result is None
+
+
+def test_get_model_by_model_id_ignore_delete_without_tenant_id(monkeypatch):
+    """Omitting tenant_id must look up the record purely by model_id."""
+    mock_model = SimpleNamespace(
+        model_id=107,
+        model_factory="openai",
+        model_type="chat",
+        tenant_id="some_tenant",
+        delete_flag="Y",
+    )
+    session = _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(107)
+
+    assert result is not None
+    assert result["model_id"] == 107
+    # Filter by model_id alone; the absence of tenant_id means we still call
+    # scalars() exactly once.
+    assert session.scalars.call_count == 1
