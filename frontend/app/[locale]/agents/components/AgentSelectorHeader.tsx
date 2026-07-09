@@ -3,9 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Spin, Tag, theme } from "antd";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, FileInput, Settings, ChevronDown, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
+import { Plus, FileInput, Settings, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -47,6 +48,11 @@ export default function AgentSelectorHeader({
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
+  const showBackFromRepository = searchParams.get("from") === "agent-space";
   const queryClient = useQueryClient();
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
@@ -578,6 +584,14 @@ export default function AgentSelectorHeader({
     return divider ? [agentItem, divider] : [agentItem];
   });
 
+  const handleBackToRepository = async () => {
+    const canLeave = await checkUnsavedChanges.saveWithModal();
+    if (!canLeave) {
+      return;
+    }
+    router.push(`/${locale}/agent-space?tab=mine`);
+  };
+
   return (
     <>
       <div className="w-full h-full px-6" style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -594,7 +608,18 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex min-w-0"
           >
-            <Dropdown
+            <Flex vertical className="min-w-0 w-full">
+              {showBackFromRepository ? (
+                <Button
+                  type="text"
+                  className="mb-1 flex w-fit items-center gap-1 px-2 text-gray-600"
+                  icon={<ChevronLeft className="size-4" aria-hidden />}
+                  onClick={handleBackToRepository}
+                >
+                  {t("agentRepository.mine.backToRepository")}
+                </Button>
+              ) : null}
+              <Dropdown
               trigger={["click"]}
               placement="bottomLeft"
               open={dropdownOpen}
@@ -636,6 +661,7 @@ export default function AgentSelectorHeader({
                 <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
               </div>
             </Dropdown>
+            </Flex>
 
 
           </Col>
