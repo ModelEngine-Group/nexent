@@ -352,6 +352,7 @@ skill_service.get_skill_manager = lambda tenant_id=None: _mock_skill_manager_ins
 
 def create_test_service(tenant_id="test-tenant"):
     """Create a SkillService instance with a tenant_id for testing."""
+    _mock_skill_manager_instance.local_skills_dir = "/tmp/skills"
     service = SkillService(tenant_id=tenant_id)
     service._overlay_params_from_local_config_yaml = lambda x: x
     return service

@@ -871,7 +871,12 @@ class SkillService:
 
     def _resolve_local_skills_dir_for_overlay(self) -> Optional[str]:
         """Directory where skill folders live: ``SKILLS_PATH``, else ``ROOT_DIR/skills`` if present."""
-        d = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
+        manager_dir = getattr(self.skill_manager, "local_skills_dir", None)
+        d = (
+            manager_dir
+            if isinstance(manager_dir, str)
+            else CONTAINER_SKILLS_PATH
+        )
         if d:
             return str(d).rstrip(os.sep) or None
         if ROOT_DIR:
@@ -1124,10 +1129,9 @@ class SkillService:
         name = skill_name or skill_data.get("name")
         if not name:
             raise SkillException("Skill name is required")
-        _resolve_local_skill_path(
-            self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH,
-            name,
-        )
+        local_dir = self._resolve_local_skills_dir_for_overlay()
+        if local_dir:
+            _resolve_local_skill_path(local_dir, name)
 
         # Check if skill already exists in database
         existing = skill_db.get_skill_by_name(name, tenant_id)
@@ -1223,10 +1227,9 @@ class SkillService:
         name = skill_name or detected_skill_name
         if not name:
             raise SkillException("Skill name is required")
-        _resolve_local_skill_path(
-            self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH,
-            name,
-        )
+        local_dir = self._resolve_local_skills_dir_for_overlay()
+        if local_dir:
+            _resolve_local_skill_path(local_dir, name)
 
         # Check if skill already exists in database
         existing = skill_db.get_skill_by_name(name, tenant_id)
@@ -1692,8 +1695,8 @@ class SkillService:
             if not user_id or existing.get("created_by") != user_id:
                 raise ForbiddenError("Not authorized to update this skill")
 
-            local_dir = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
-            if "name" in skill_data:
+            local_dir = self._resolve_local_skills_dir_for_overlay()
+            if local_dir and "name" in skill_data:
                 _resolve_local_skill_path(
                     local_dir,
                     str(skill_data["name"] or ""),
@@ -1705,6 +1708,9 @@ class SkillService:
                 effective_tenant_id,
                 updated_by=user_id or None,
             )
+
+            if not local_dir:
+                return self._enrich_configs_from_yaml(result)
 
             persisted_skill_id = int(existing["skill_id"])
             skill_id_directory = _resolve_local_skill_path(
