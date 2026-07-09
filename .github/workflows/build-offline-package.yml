@@ -6,15 +6,7 @@ on:
       version:
         description: 'Image version tag, e.g. v2.2.0 or latest'
         required: false
-        default: ''
-      platform:
-        description: 'Target platform'
-        required: false
-        default: 'amd64'
-        type: choice
-        options:
-          - amd64
-          - arm64
+        default: 'latest'
       image_source:
         description: 'Image source'
         required: false
@@ -23,15 +15,6 @@ on:
         options:
           - general
           - mainland
-      target:
-        description: 'Package target'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - docker
-          - k8s
-          - all
       include_source:
         description: 'Include source code in the package'
         required: false
@@ -41,6 +24,12 @@ on:
 jobs:
   build-offline-package:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - amd64
+          - arm64
 
     steps:
       - name: Free disk space
@@ -63,7 +52,7 @@ jobs:
       - name: Set version and platform variables
         id: set-vars
         run: |
-          PLATFORM="${{ inputs.platform }}"
+          PLATFORM="${{ matrix.platform }}"
           REF_TYPE="${{ github.ref_type }}"
           REF_NAME="${{ github.ref_name }}"
 
@@ -81,9 +70,14 @@ jobs:
             VERSION="latest"
           fi
 
+          SOURCE_SUFFIX=""
+          if [ "${{ inputs.include_source }}" = "true" ]; then
+            SOURCE_SUFFIX="-with-source"
+          fi
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-offline-${{ inputs.target }}-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
+          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> $GITHUB_OUTPUT
 
       - name: Set deployment components
         id: set-components
@@ -104,24 +98,25 @@ jobs:
             --include-source "${{ inputs.include_source }}" \
             --image-source "${{ inputs.image_source }}" \
             --components "${{ steps.set-components.outputs.components }}" \
-            --target "${{ inputs.target }}" \
-            --compress true
+            --target all \
+            --compress false
 
-
-
-      - name: Show zip package
+      - name: Show offline package
         run: |
           PACKAGE_NAME="${{ steps.set-vars.outputs.package-name }}"
 
-          echo "Package created by build script: ${PACKAGE_NAME}.zip"
+          echo "Package directory created by build script: ./offline-output"
+          echo "GitHub Actions will publish the final downloadable artifact as ${PACKAGE_NAME}.zip"
 
-          ls -lh "${PACKAGE_NAME}.zip"
+          du -sh ./offline-output
+          find ./offline-output -maxdepth 2 -type f | sort | head -50
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.set-vars.outputs.package-name }}
-          path: ${{ steps.set-vars.outputs.package-name }}.zip
+          path: ./offline-output
+          if-no-files-found: error
           include-hidden-files: true
           retention-days: 30
 
@@ -134,6 +129,7 @@ jobs:
           echo "Version: ${{ steps.set-vars.outputs.version }}"
           echo "Platform: ${{ steps.set-vars.outputs.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
+          echo "Note: the downloaded artifact zip contains the offline package contents directly."
           echo "Target: ${{ inputs.target }}"
           echo "Components: ${{ steps.set-components.outputs.components }}"
           echo "Image source: ${{ inputs.image_source }}"

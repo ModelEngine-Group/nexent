@@ -9,12 +9,14 @@ DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process,supabase"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
+DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT=""
 DEPLOYMENT_MONITORING_PROVIDER_DEFAULT="otlp"
 
 DEPLOYMENT_COMPONENTS=""
 DEPLOYMENT_PORT_POLICY=""
 DEPLOYMENT_IMAGE_SOURCE=""
 DEPLOYMENT_REGISTRY_PROFILE=""
+DEPLOYMENT_IMAGE_REGISTRY_PREFIX=""
 DEPLOYMENT_APP_VERSION=""
 DEPLOYMENT_MONITORING_PROVIDER=""
 DEPLOYMENT_USE_LOCAL_CONFIG="false"
@@ -113,6 +115,7 @@ deployment_i18n_format() {
       validation.unsupported_port_policy) printf '%s' '不支持的端口策略：%s。可用值：development 或 production。' ;;
       validation.unsupported_image_source) printf '%s' '不支持的镜像源：%s。可用值：general、mainland 或 local-latest。' ;;
       validation.unsupported_registry_profile) printf '%s' '不支持的 registry profile：%s' ;;
+      validation.unsupported_image_registry_prefix) printf '%s' '不支持的镜像仓库前缀：%s。请使用 registry.example.com/project 格式，不要包含空格。' ;;
       validation.unsupported_monitoring_provider) printf '%s' '不支持的监控 provider：%s' ;;
       tui.cancelled) printf '已取消部署配置。' ;;
       tui.components.title) printf '选择部署组件' ;;
@@ -149,13 +152,14 @@ deployment_i18n_format() {
       image_build.detail.docs) printf 'VitePress 文档站点' ;;
       local_config.found) printf '%s' '发现已有部署配置：%s' ;;
       local_config.choose) printf '请选择如何处理已保存的部署选项：' ;;
-      local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源和监控 provider。' ;;
+      local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源、镜像仓库前缀和监控 provider。' ;;
       local_config.reconfigure) printf '  2) 重新配置 - 将已保存的值作为默认值，并显示菜单供修改。' ;;
       local_config.reconfigure_hint) printf '     启用/禁用监控、切换 provider 或调整部署范围时请选择此项。' ;;
       prompt.choose_1_2) printf '请选择 [1/2]（默认：1）：' ;;
       summary.components) printf '%s' '部署组件：%s' ;;
       summary.port_policy) printf '%s' '端口策略：%s' ;;
       summary.image_source) printf '%s' '镜像源：%s' ;;
+      summary.image_registry_prefix) printf '%s' '镜像仓库前缀：%s' ;;
       summary.monitoring_provider) printf '%s' '监控 provider：%s' ;;
       summary.docker_services) printf '%s' 'Docker 服务：%s' ;;
       summary.docker_ports) printf '%s' 'Docker 暴露端口：%s' ;;
@@ -173,6 +177,7 @@ deployment_i18n_format() {
       validation.unsupported_port_policy) printf '%s' 'Unsupported port policy: %s. Use development or production.' ;;
       validation.unsupported_image_source) printf '%s' 'Unsupported image source: %s. Use general, mainland, or local-latest.' ;;
       validation.unsupported_registry_profile) printf '%s' 'Unsupported registry profile: %s' ;;
+      validation.unsupported_image_registry_prefix) printf '%s' 'Unsupported image registry prefix: %s. Use registry.example.com/project format without spaces.' ;;
       validation.unsupported_monitoring_provider) printf '%s' 'Unsupported monitoring provider: %s' ;;
       tui.cancelled) printf 'Deployment configuration cancelled.' ;;
       tui.components.title) printf 'Select deployment components' ;;
@@ -209,13 +214,14 @@ deployment_i18n_format() {
       image_build.detail.docs) printf 'VitePress documentation site' ;;
       local_config.found) printf '%s' 'Existing deployment config found: %s' ;;
       local_config.choose) printf 'Choose how to handle saved deployment options:' ;;
-      local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, and monitoring provider.' ;;
+      local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, image registry prefix, and monitoring provider.' ;;
       local_config.reconfigure) printf '  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them.' ;;
       local_config.reconfigure_hint) printf '     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope.' ;;
       prompt.choose_1_2) printf 'Choose [1/2] (default: 1): ' ;;
       summary.components) printf '%s' 'Deployment components: %s' ;;
       summary.port_policy) printf '%s' 'Port policy: %s' ;;
       summary.image_source) printf '%s' 'Image source: %s' ;;
+      summary.image_registry_prefix) printf '%s' 'Image registry prefix: %s' ;;
       summary.monitoring_provider) printf '%s' 'Monitoring provider: %s' ;;
       summary.docker_services) printf '%s' 'Docker services: %s' ;;
       summary.docker_ports) printf '%s' 'Docker published ports: %s' ;;
@@ -579,6 +585,7 @@ deployment_prepare_monitoring_env() {
   local legacy_file
   local telemetry_enabled
   local dashboard_url
+  local existing_dashboard_url
   local provider
   local collector_config_file
   local otlp_endpoint
@@ -607,8 +614,13 @@ deployment_prepare_monitoring_env() {
   deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
 
   deployment_source_env_file "$env_file"
-  dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
-  deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+  existing_dashboard_url="$(deployment_get_env_var_file "$env_file" "MONITORING_DASHBOARD_URL" 2>/dev/null || true)"
+  if [ "$telemetry_enabled" != "true" ]; then
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" ""
+  elif [ -z "$existing_dashboard_url" ]; then
+    dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+  fi
 
   case "$target" in
     k8s|helm)
@@ -692,6 +704,7 @@ deployment_init_defaults() {
   DEPLOYMENT_PORT_POLICY="$DEPLOYMENT_PORT_POLICY_DEFAULT"
   DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_IMAGE_SOURCE_DEFAULT"
   DEPLOYMENT_REGISTRY_PROFILE="$DEPLOYMENT_REGISTRY_PROFILE_DEFAULT"
+  DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
   DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
@@ -704,6 +717,7 @@ deployment_init_defaults() {
   DEPLOYMENT_CONFIG_VALUES_LOADED="false"
   DEPLOYMENT_DOCKER_PORTS=""
   unset DEPLOYMENT_COMPONENTS_EXPLICIT DEPLOYMENT_PORT_POLICY_EXPLICIT DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT
+  unset DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT
   unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
 }
 
@@ -724,6 +738,10 @@ deployment_parse_common_args() {
         ;;
       --registry-profile)
         DEPLOYMENT_REGISTRY_PROFILE="$2"
+        shift 2
+        ;;
+      --image-registry-prefix|--registry-prefix|--image-registry)
+        DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$2"
         shift 2
         ;;
       --app-version|--version)
@@ -825,6 +843,10 @@ deployment_load_config_file() {
           DEPLOYMENT_REGISTRY_PROFILE="$value"
           loaded_config_value="true"
           ;;
+        imageRegistryPrefix)
+          DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$value"
+          loaded_config_value="true"
+          ;;
         monitoringProvider)
           DEPLOYMENT_MONITORING_PROVIDER="$value"
           loaded_config_value="true"
@@ -910,6 +932,40 @@ deployment_normalize_image_source() {
   esac
 }
 
+deployment_normalize_image_registry_prefix_value() {
+  local prefix="$1"
+  prefix="$(deployment_trim "$prefix")"
+  prefix="${prefix#http://}"
+  prefix="${prefix#https://}"
+  while [[ "$prefix" == */ ]]; do
+    prefix="${prefix%/}"
+  done
+  printf '%s' "$prefix"
+}
+
+deployment_normalize_image_registry_prefix() {
+  DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$(deployment_normalize_image_registry_prefix_value "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
+}
+
+deployment_add_image_registry_prefix() {
+  local image="$1"
+  local prefix="${2:-$DEPLOYMENT_IMAGE_REGISTRY_PREFIX}"
+  prefix="$(deployment_normalize_image_registry_prefix_value "$prefix")"
+
+  if [ -z "$prefix" ]; then
+    printf '%s' "$image"
+    return 0
+  fi
+  case "$image" in
+    "$prefix"/*)
+      printf '%s' "$image"
+      ;;
+    *)
+      printf '%s/%s' "$prefix" "$image"
+      ;;
+  esac
+}
+
 deployment_ensure_required_components() {
   local source_components="$DEPLOYMENT_COMPONENTS"
   local normalized=""
@@ -972,6 +1028,10 @@ deployment_validate() {
     deployment_error "$(deployment_i18n validation.unsupported_registry_profile "$DEPLOYMENT_REGISTRY_PROFILE")"
     return 1
   }
+  if [[ "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" == *[[:space:]]* ]]; then
+    deployment_error "$(deployment_i18n validation.unsupported_image_registry_prefix "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
+    return 1
+  fi
   deployment_is_valid_value "$DEPLOYMENT_MONITORING_PROVIDER" $deployment_monitoring_provider_list || {
     deployment_error "$(deployment_i18n validation.unsupported_monitoring_provider "$DEPLOYMENT_MONITORING_PROVIDER")"
     return 1
@@ -1599,6 +1659,7 @@ deployment_render_image_rollout_checksums() {
 
 deployment_apply_image_source() {
   local version="${DEPLOYMENT_APP_VERSION:-latest}"
+  local image_var
 
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
     export NEXENT_IMAGE="nexent/nexent:latest"
@@ -1620,6 +1681,47 @@ deployment_apply_image_source() {
   export SUPABASE_KONG="${SUPABASE_KONG:-kong:2.8.1}"
   export SUPABASE_GOTRUE="${SUPABASE_GOTRUE:-supabase/gotrue:v2.170.0}"
   export SUPABASE_DB="${SUPABASE_DB:-supabase/postgres:15.8.1.060}"
+
+  export OTEL_COLLECTOR_IMAGE="${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.151.0}"
+  export PHOENIX_IMAGE="${PHOENIX_IMAGE:-arizephoenix/phoenix:15}"
+  export TEMPO_IMAGE="${TEMPO_IMAGE:-grafana/tempo:2.10.5}"
+  export GRAFANA_IMAGE="${GRAFANA_IMAGE:-grafana/grafana:12.4}"
+  export ZIPKIN_IMAGE="${ZIPKIN_IMAGE:-openzipkin/zipkin:latest}"
+  export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
+  export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
+  export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
+  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  export LANGFUSE_REDIS_IMAGE="${LANGFUSE_REDIS_IMAGE:-docker.io/redis:alpine}"
+  export LANGFUSE_POSTGRES_IMAGE="${LANGFUSE_POSTGRES_IMAGE:-docker.io/postgres:15-alpine}"
+
+  if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
+    for image_var in \
+      NEXENT_IMAGE \
+      NEXENT_WEB_IMAGE \
+      NEXENT_DATA_PROCESS_IMAGE \
+      NEXENT_MCP_DOCKER_IMAGE \
+      ELASTICSEARCH_IMAGE \
+      POSTGRESQL_IMAGE \
+      REDIS_IMAGE \
+      MINIO_IMAGE \
+      OPENSSH_SERVER_IMAGE \
+      SUPABASE_KONG \
+      SUPABASE_GOTRUE \
+      SUPABASE_DB \
+      OTEL_COLLECTOR_IMAGE \
+      PHOENIX_IMAGE \
+      TEMPO_IMAGE \
+      GRAFANA_IMAGE \
+      ZIPKIN_IMAGE \
+      LANGFUSE_WORKER_IMAGE \
+      LANGFUSE_WEB_IMAGE \
+      CLICKHOUSE_IMAGE \
+      LANGFUSE_MINIO_IMAGE \
+      LANGFUSE_REDIS_IMAGE \
+      LANGFUSE_POSTGRES_IMAGE; do
+      export "$image_var=$(deployment_add_image_registry_prefix "${!image_var}")"
+    done
+  fi
 }
 
 deployment_monitoring_enabled() {
@@ -1674,8 +1776,12 @@ deployment_monitoring_dashboard_url() {
 
 deployment_render_docker_env() {
   local output_file="$1"
+  local compose_image_registry_prefix=""
+  [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && compose_image_registry_prefix="${DEPLOYMENT_IMAGE_REGISTRY_PREFIX}/"
   mkdir -p "$(dirname "$output_file")"
   {
+    printf 'DEPLOYMENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
+    printf 'NEXENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$compose_image_registry_prefix"
     printf 'NEXENT_IMAGE="%s"\n' "$NEXENT_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
@@ -1688,6 +1794,17 @@ deployment_render_docker_env() {
     printf 'SUPABASE_KONG="%s"\n' "$SUPABASE_KONG"
     printf 'SUPABASE_GOTRUE="%s"\n' "$SUPABASE_GOTRUE"
     printf 'SUPABASE_DB="%s"\n' "$SUPABASE_DB"
+    printf 'OTEL_COLLECTOR_IMAGE="%s"\n' "$OTEL_COLLECTOR_IMAGE"
+    printf 'PHOENIX_IMAGE="%s"\n' "$PHOENIX_IMAGE"
+    printf 'TEMPO_IMAGE="%s"\n' "$TEMPO_IMAGE"
+    printf 'GRAFANA_IMAGE="%s"\n' "$GRAFANA_IMAGE"
+    printf 'ZIPKIN_IMAGE="%s"\n' "$ZIPKIN_IMAGE"
+    printf 'LANGFUSE_WORKER_IMAGE="%s"\n' "$LANGFUSE_WORKER_IMAGE"
+    printf 'LANGFUSE_WEB_IMAGE="%s"\n' "$LANGFUSE_WEB_IMAGE"
+    printf 'CLICKHOUSE_IMAGE="%s"\n' "$CLICKHOUSE_IMAGE"
+    printf 'LANGFUSE_MINIO_IMAGE="%s"\n' "$LANGFUSE_MINIO_IMAGE"
+    printf 'LANGFUSE_REDIS_IMAGE="%s"\n' "$LANGFUSE_REDIS_IMAGE"
+    printf 'LANGFUSE_POSTGRES_IMAGE="%s"\n' "$LANGFUSE_POSTGRES_IMAGE"
   } > "$output_file"
 }
 
@@ -1704,7 +1821,7 @@ deployment_render_component_values() {
 
 deployment_render_image_values() {
   local local_pull_policy="IfNotPresent"
-  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
+  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && [ -z "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && local_pull_policy="Never"
 
   printf 'nexent-config:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
@@ -1786,7 +1903,7 @@ deployment_render_helm_chart_values() {
   local local_pull_policy="IfNotPresent"
   local northbound_type="NodePort"
   local internal_type="ClusterIP"
-  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
+  [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && [ -z "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && local_pull_policy="Never"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
     internal_type="NodePort"
   fi
@@ -1841,6 +1958,7 @@ deployment_render_helm_chart_values() {
   printf 'nexent-supabase-auth:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_GOTRUE")" "$(deployment_image_tag "$SUPABASE_GOTRUE")"
+  printf '  initImage:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$POSTGRESQL_IMAGE")" "$(deployment_image_tag "$POSTGRESQL_IMAGE")"
   printf '  service:\n    type: "%s"\n    nodePort: 30999\n' "$internal_type"
   printf 'nexent-supabase-db:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
@@ -1889,27 +2007,59 @@ deployment_render_helm_monitoring_global_values() {
   printf '    traceMaxItems: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_ITEMS "20")")"
 }
 
+deployment_render_monitoring_image_value() {
+  local key="$1"
+  local repository="$2"
+  local tag="$3"
+  local image
+  image="$(deployment_add_image_registry_prefix "${repository}:${tag}")"
+
+  printf '    %s:\n' "$key"
+  printf '      repository: %s\n' "$(deployment_yaml_quote "$(deployment_image_repo "$image")")"
+  printf '      tag: %s\n' "$(deployment_yaml_quote "$(deployment_image_tag "$image")")"
+}
+
 deployment_render_helm_monitoring_chart_values() {
   local enabled
   local langfuse_nextauth_url
+  local otel_collector_tag
+  local phoenix_tag
+  local tempo_tag
+  local grafana_tag
+  local zipkin_tag
+  local langfuse_tag
+  local clickhouse_tag
+  local minio_tag
+  local redis_tag
+  local postgres_tag
   enabled="$(deployment_monitoring_enabled)"
   langfuse_nextauth_url="$(deployment_monitoring_env_value K8S_LANGFUSE_NEXTAUTH_URL "http://localhost:${K8S_LANGFUSE_NODE_PORT:-30001}")"
+  otel_collector_tag="$(deployment_monitoring_env_value OTEL_COLLECTOR_VERSION "0.151.0")"
+  phoenix_tag="$(deployment_monitoring_env_value PHOENIX_VERSION "15")"
+  tempo_tag="$(deployment_monitoring_env_value TEMPO_VERSION "2.10.5")"
+  grafana_tag="$(deployment_monitoring_env_value GRAFANA_VERSION "12.4")"
+  zipkin_tag="$(deployment_monitoring_env_value ZIPKIN_VERSION "latest")"
+  langfuse_tag="$(deployment_monitoring_env_value LANGFUSE_VERSION "3")"
+  clickhouse_tag="$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")"
+  minio_tag="$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")"
+  redis_tag="$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")"
+  postgres_tag="$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")"
 
   printf 'nexent-monitoring:\n'
   printf '  enabled: %s\n' "$enabled"
   printf '  provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
   printf '  images:\n'
-  printf '    otelCollector:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_VERSION "0.151.0")")"
-  printf '    phoenix:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value PHOENIX_VERSION "15")")"
-  printf '    tempo:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TEMPO_VERSION "2.10.5")")"
-  printf '    grafana:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_VERSION "12.4")")"
-  printf '    zipkin:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value ZIPKIN_VERSION "latest")")"
-  printf '    langfuseWeb:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_VERSION "3")")"
-  printf '    langfuseWorker:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_VERSION "3")")"
-  printf '    clickhouse:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")")"
-  printf '    minio:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")")"
-  printf '    redis:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")")"
-  printf '    postgres:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")")"
+  deployment_render_monitoring_image_value otelCollector otel/opentelemetry-collector-contrib "$otel_collector_tag"
+  deployment_render_monitoring_image_value phoenix arizephoenix/phoenix "$phoenix_tag"
+  deployment_render_monitoring_image_value tempo grafana/tempo "$tempo_tag"
+  deployment_render_monitoring_image_value grafana grafana/grafana "$grafana_tag"
+  deployment_render_monitoring_image_value zipkin openzipkin/zipkin "$zipkin_tag"
+  deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
+  deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
+  deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
+  deployment_render_monitoring_image_value minio docker.io/minio/minio "$minio_tag"
+  deployment_render_monitoring_image_value redis docker.io/redis "$redis_tag"
+  deployment_render_monitoring_image_value postgres docker.io/postgres "$postgres_tag"
   printf '  collector:\n'
   printf '    configFile: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_CONFIG_FILE "$(deployment_monitoring_collector_config_file k8s "$DEPLOYMENT_MONITORING_PROVIDER")")")"
   printf '    service:\n'
@@ -1987,6 +2137,7 @@ deployment_render_helm_values() {
     fi
     printf '  portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf '  imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
+    printf '  imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     deployment_render_helm_monitoring_global_values
     deployment_render_helm_monitoring_chart_values
     deployment_render_helm_chart_values
@@ -2009,6 +2160,7 @@ deployment_persist_local_config() {
     IFS="$old_ifs"
     printf 'portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf 'imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
+    printf 'imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     printf 'monitoringProvider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
   } > "$output_file"
 }
@@ -2019,6 +2171,9 @@ deployment_print_summary() {
   deployment_log "$(deployment_i18n summary.components "$DEPLOYMENT_COMPONENTS")"
   deployment_log "$(deployment_i18n summary.port_policy "$DEPLOYMENT_PORT_POLICY")"
   deployment_log "$(deployment_i18n summary.image_source "$DEPLOYMENT_IMAGE_SOURCE")"
+  if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
+    deployment_log "$(deployment_i18n summary.image_registry_prefix "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
+  fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     deployment_log "$(deployment_i18n summary.monitoring_provider "$DEPLOYMENT_MONITORING_PROVIDER")"
   fi
@@ -2051,6 +2206,7 @@ deployment_prepare_config() {
       --port-policy) DEPLOYMENT_PORT_POLICY_EXPLICIT="true" ;;
       --image-source) DEPLOYMENT_IMAGE_SOURCE_EXPLICIT="true" ;;
       --registry-profile) DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT="true" ;;
+      --image-registry-prefix|--registry-prefix|--image-registry) DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT="true" ;;
       --app-version|--version) DEPLOYMENT_APP_VERSION_EXPLICIT="true" ;;
       --monitoring-provider) DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT="true" ;;
       --config) DEPLOYMENT_RECONFIGURE="true" ;;
@@ -2076,6 +2232,7 @@ deployment_prepare_config() {
   deployment_run_tui_configuration || tui_result=$?
   [ "$tui_result" -eq 0 ] || return "$tui_result"
   deployment_normalize_image_source || return 1
+  deployment_normalize_image_registry_prefix
   deployment_validate || return 1
   deployment_compute_selection
 }

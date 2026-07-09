@@ -186,7 +186,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+包目录会包含 `images/*.tar`、`load-images.sh`、`push-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
 
 在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择：
 
@@ -194,6 +194,14 @@ bash deploy/offline/build_offline_package.sh \
 cd offline-package
 bash deploy.sh --load-images docker
 ```
+
+如果需要先推送到内部镜像仓库并使用该前缀部署：
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
+```
+
+启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀；随后 `push-images.sh` 在推送前询问仓库账号和密码。
 
 ## 🔌 端口映射
 

@@ -547,6 +547,10 @@ persist_deploy_options() {
     echo "APP_VERSION=\"${APP_VERSION}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
     echo "DEPLOYMENT_VERSION=\"${VERSION_CHOICE_SAVED}\""
+    echo "PERSISTENCE_MODE=\"${PERSISTENCE_MODE}\""
+    echo "STORAGE_CLASS_NAME=\"${STORAGE_CLASS_NAME}\""
+    echo "LOCAL_PATH=\"${LOCAL_PATH}\""
+    echo "EXISTING_CLAIM_PREFIX=\"${EXISTING_CLAIM_PREFIX}\""
   } > "$DEPLOY_OPTIONS_FILE"
 }
 
@@ -1234,6 +1238,7 @@ print_usage() {
         echo "  --components LIST          要部署的组件"
         echo "  --port-policy POLICY       development 或 production"
         echo "  --image-source SOURCE      general、mainland 或 local-latest"
+        echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
         echo "  --is-mainland Y|N          兼容旧参数，映射为 mainland/general 镜像源"
         echo "  --version VERSION          指定应用版本（未设置时自动从 const.py 检测）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
@@ -1261,6 +1266,7 @@ print_usage() {
     echo "  --components LIST          Components to deploy"
     echo "  --port-policy POLICY       development or production"
     echo "  --image-source SOURCE      general, mainland, or local-latest"
+    echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
     echo "  --is-mainland Y|N          Legacy alias for image source mainland/general"
     echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"

@@ -56,7 +56,7 @@ Docker and Kubernetes both use `deploy/env/.env` as the runtime configuration fi
 
 Docker uninstall is handled by `bash uninstall.sh docker`. It can preserve or delete data volumes: run it interactively, pass `--delete-volumes true|false`, or use `bash uninstall.sh docker delete-all` to remove containers and persistent data.
 
-Offline image packages can be built with `bash build.sh --package --target docker --compress true` or `bash deploy/offline/build_offline_package.sh --target docker --compress true`. The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, deployment scripts, SQL files, `manifest.yaml`, and `checksums.txt`. Package deploys use saved `deploy.options` or built-in defaults without opening the TUI; add `--config` to configure interactively. Deploy with `bash deploy.sh --load-images docker ...` on the target host.
+Offline image packages can be built with `bash build.sh --package --target docker --compress true` or `bash deploy/offline/build_offline_package.sh --target docker --compress true`. The package includes image tar files, `load-images.sh`, `push-images.sh`, root deploy/uninstall entrypoints, deployment scripts, SQL files, `manifest.yaml`, and `checksums.txt`. Package deploys use saved `deploy.options` or built-in defaults without opening the TUI; add `--config` to configure interactively. Deploy with `bash deploy.sh --load-images docker ...` on the target host, or use `bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker ...` to push loaded images to an internal registry and deploy with that image prefix. When `--push-images` is used without a prefix, `deploy.sh` asks for it before `push-images.sh` prompts for the registry username and password.
 
 For detailed deployment instructions, see [Docker Installation](https://modelengine-group.github.io/nexent/en/quick-start/installation.html).
 
@@ -74,7 +74,7 @@ The native Kubernetes implementation is `bash deploy/k8s/deploy.sh`. It reads th
 
 Kubernetes uninstall is handled by `bash uninstall.sh k8s`. It removes the Helm release first, then can optionally delete the namespace and local PV data. Use `--delete-namespace true|false`, `--delete-local-data true|false`, or `bash uninstall.sh k8s delete-all`; pass `--keep-local-data` with `delete-all` to preserve local volume contents.
 
-Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or push the loaded images to an internal registry before deploying with the same version and image-source options used during packaging.
+Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or use `--push-images --image-registry-prefix registry.example.com/nexent` to push the images to an internal registry before deploying with the same version, image source, and image registry prefix.
 
 For detailed deployment instructions, see [Kubernetes Installation](https://modelengine-group.github.io/nexent/en/quick-start/kubernetes-installation.html).
 

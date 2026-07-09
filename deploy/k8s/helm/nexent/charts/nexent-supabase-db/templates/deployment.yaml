@@ -42,6 +42,8 @@ spec:
               cp /custom-supabase-sql/_supabase.sql /initdb.d/migrations/97-_supabase.sql
               cp /custom-supabase-sql/pooler.sql /initdb.d/migrations/99-pooler.sql
 
+              chmod 755 -R /initdb.d/
+
               echo "Initialization scripts are ready"
           volumeMounts:
             - mountPath: /custom-supabase-sql

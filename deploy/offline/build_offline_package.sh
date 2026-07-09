@@ -59,6 +59,8 @@ show_help() {
     echo "  --components LIST       用于镜像选择的部署组件"
     echo "  --image-source SOURCE   general、mainland 或 local-latest"
     echo "  --registry-profile NAME 兼容旧参数，映射到 --image-source general|mainland"
+    echo "  --image-registry-prefix PREFIX"
+    echo "                           使用指定镜像仓库前缀拉取和打包镜像"
     echo "  --defaults              复用保存配置或内置默认值并跳过交互界面"
     echo "  --config                进入交互式部署配置界面"
     echo "  --dry-run               只展示执行计划，不执行实际操作"
@@ -91,6 +93,8 @@ show_help() {
   echo "  --components LIST       Deployment components for image selection"
   echo "  --image-source SOURCE   general, mainland, or local-latest"
   echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
+  echo "  --image-registry-prefix PREFIX"
+  echo "                           Pull and package images with this registry prefix"
   echo "  --defaults              Use saved config or built-in defaults and skip TUI"
   echo "  --config                Open the interactive deployment configuration"
   echo "  --dry-run               Show execution plan without actual operations"
@@ -135,7 +139,7 @@ parse_args() {
         DRY_RUN="true"
         shift
         ;;
-      --components|--image-source|--registry-profile|--app-version|--monitoring-provider|--port-policy|--local-config)
+      --components|--image-source|--registry-profile|--image-registry-prefix|--registry-prefix|--image-registry|--app-version|--monitoring-provider|--port-policy|--local-config)
         COMMON_ARGS+=("$1" "$2")
         shift 2
         ;;
@@ -223,6 +227,7 @@ show_dry_run_plan() {
     echo "压缩：$COMPRESS"
     echo "组件：$DEPLOYMENT_COMPONENTS"
     echo "镜像源：$DEPLOYMENT_IMAGE_SOURCE"
+    [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "镜像仓库前缀：$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     echo ""
     echo "将拉取的镜像："
     get_nexent_images
@@ -241,6 +246,7 @@ show_dry_run_plan() {
     echo "Compress: $COMPRESS"
     echo "Components: $DEPLOYMENT_COMPONENTS"
     echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
+    [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "Image registry prefix: $DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     echo ""
     echo "Images to pull:"
     get_nexent_images
@@ -260,6 +266,12 @@ get_nexent_images() {
 }
 
 get_third_party_images() {
+  local image
+  echo_image_ref() {
+    deployment_add_image_registry_prefix "$1"
+    echo ""
+  }
+
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
     echo "$ELASTICSEARCH_IMAGE"
     echo "$POSTGRESQL_IMAGE"
@@ -272,21 +284,24 @@ get_third_party_images() {
     echo "$SUPABASE_DB"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    echo "otel/opentelemetry-collector-contrib:0.151.0"
+    echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
-      phoenix) echo "arizephoenix/phoenix:15" ;;
+      phoenix) echo_image_ref "arizephoenix/phoenix:15" ;;
       grafana)
-        echo "grafana/tempo:2.10.5"
-        echo "grafana/grafana:12.4"
+        echo_image_ref "grafana/tempo:2.10.5"
+        echo_image_ref "grafana/grafana:12.4"
         ;;
-      zipkin) echo "openzipkin/zipkin:latest" ;;
+      zipkin) echo_image_ref "openzipkin/zipkin:latest" ;;
       langfuse)
-        echo "docker.io/langfuse/langfuse-worker:3"
-        echo "docker.io/langfuse/langfuse:3"
-        echo "docker.io/clickhouse/clickhouse-server:26.3-alpine"
-        echo "docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z"
-        echo "docker.io/redis:alpine"
-        echo "docker.io/postgres:15-alpine"
+        for image in \
+          "docker.io/langfuse/langfuse-worker:3" \
+          "docker.io/langfuse/langfuse:3" \
+          "docker.io/clickhouse/clickhouse-server:26.3-alpine" \
+          "docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+          "docker.io/redis:alpine" \
+          "docker.io/postgres:15-alpine"; do
+          echo_image_ref "$image"
+        done
         ;;
     esac
   fi
@@ -309,11 +324,6 @@ should_skip_pull() {
 
   if image_exists_locally "$image"; then
     echo "Using existing local image without pulling: $image"
-    return 0
-  fi
-
-  if uses_latest_tag "$image"; then
-    echo "Skipping pull for latest image; expecting local image: $image"
     return 0
   fi
 
@@ -514,6 +524,9 @@ copy_source_code() {
   done <<< "$git_files"
 
   echo "✅ Git-managed source code copied to: $source_dir"
+  if [ -f "$source_dir/VERSION" ]; then
+    printf '%s\n' "$VERSION" > "$source_dir/VERSION"
+  fi
 
   local total_size
   total_size=$(du -sh "$source_dir" | cut -f1)
@@ -522,38 +535,44 @@ copy_source_code() {
   return 0
 }
 
-create_load_script() {
+copy_load_script() {
   local load_script="$OUTPUT_DIR/load-images.sh"
+  local template_script="$SCRIPT_DIR/load-images.sh"
 
   echo ""
   echo "========================================"
-  echo "Creating load-images.sh script..."
+  echo "Copying load-images.sh script..."
   echo "========================================"
 
-  cat > "$load_script" << 'LOADSCRIPT'
-#!/bin/bash
-
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGES_DIR="$SCRIPT_DIR/images"
-
-echo "Loading Docker images from $IMAGES_DIR..."
-
-for tar_file in "$IMAGES_DIR"/*.tar; do
-  if [[ -f "$tar_file" ]]; then
-    echo "Loading: $tar_file"
-    docker load -i "$tar_file"
+  if [ ! -f "$template_script" ]; then
+    echo "❌ load-images.sh template not found: $template_script"
+    return 1
   fi
-done
 
-echo ""
-echo "✅ All images loaded successfully"
-LOADSCRIPT
-
+  cp "$template_script" "$load_script"
   chmod +x "$load_script"
 
   echo "✅ Created: $load_script"
+}
+
+copy_push_script() {
+  local push_script="$OUTPUT_DIR/push-images.sh"
+  local template_script="$SCRIPT_DIR/push-images.sh"
+
+  echo ""
+  echo "========================================"
+  echo "Copying push-images.sh script..."
+  echo "========================================"
+
+  if [ ! -f "$template_script" ]; then
+    echo "❌ push-images.sh template not found: $template_script"
+    return 1
+  fi
+
+  cp "$template_script" "$push_script"
+  chmod +x "$push_script"
+
+  echo "✅ Created: $push_script"
 }
 
 create_offline_deploy_entrypoint() {
@@ -581,7 +600,7 @@ copy_deployment_bundle() {
 
   cp "$PROJECT_ROOT/deploy.sh" "$OUTPUT_DIR/deploy.sh"
   cp "$PROJECT_ROOT/uninstall.sh" "$OUTPUT_DIR/uninstall.sh"
-  cp "$PROJECT_ROOT/VERSION" "$OUTPUT_DIR/VERSION"
+  printf '%s\n' "$VERSION" > "$OUTPUT_DIR/VERSION"
 
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \
@@ -610,7 +629,7 @@ copy_deployment_bundle() {
 
   create_offline_deploy_entrypoint
   find "$OUTPUT_DIR" -name '.git' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" 2>/dev/null || true
+  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" "$OUTPUT_DIR/push-images.sh" 2>/dev/null || true
   find "$OUTPUT_DIR/deploy" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
   echo "✅ Deployment bundle copied"
@@ -631,6 +650,7 @@ create_manifest() {
     echo "target: \"$TARGET\""
     echo "components: \"$DEPLOYMENT_COMPONENTS\""
     echo "imageSource: \"$DEPLOYMENT_IMAGE_SOURCE\""
+    echo "imageRegistryPrefix: \"$DEPLOYMENT_IMAGE_REGISTRY_PREFIX\""
     echo "images:"
     while IFS= read -r image; do
       [ -n "$image" ] && echo "  - \"$image\""
@@ -723,6 +743,7 @@ main() {
   echo "Compress: $COMPRESS"
   echo "Components: $DEPLOYMENT_COMPONENTS"
   echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
+  [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "Image registry prefix: $DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
   echo "========================================"
 
   rm -rf "$OUTPUT_DIR"
@@ -743,8 +764,13 @@ main() {
     exit 1
   }
 
-  create_load_script || {
+  copy_load_script || {
     echo "❌ Load script creation failed, aborting"
+    exit 1
+  }
+
+  copy_push_script || {
+    echo "❌ Push script creation failed, aborting"
     exit 1
   }
 
