@@ -18,9 +18,9 @@ from database.market_mcp_db import (
     delete_mcp_market_record_by_id,
     get_mcp_market_record_by_id,
     get_mcp_market_records,
-    get_mcp_market_tag_stats,
+    get_mcp_market_tag_stats_by_tenant,
     list_mcp_market_records_by_tenant_and_user,
-    update_mcp_market_record_version,
+    update_mcp_market_record,
 )
 from database.market_review_db import (
     create_mcp_market_review,
@@ -45,7 +45,6 @@ MCP_REVIEW_PENDING = "pending"
 MCP_REVIEW_APPROVED = "approved"
 MCP_REVIEW_REJECTED = "rejected"
 MCP_REVIEW_TYPE_INITIAL_LISTING = "initial_listing"
-MCP_REVIEW_TYPE_VERSION_UPDATE = "version_update"
 ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SU"}
 SUPER_ADMIN_ROLES = {"SUPER_ADMIN", "SU"}
 
@@ -76,7 +75,6 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "reviewId": row.get("review_id"),
         "sourceMcpId": row.get("source_mcp_id"),
         "name": row.get("mcp_name"),
-        "version": row.get("version"),
         "description": row.get("description"),
         "status": "active",
         "createdAt": row.get("create_time"),
@@ -89,8 +87,6 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "tags": row.get("tags") or [],
         "reviewStatus": row.get("review_status") if "review_status" in row else MCP_REVIEW_APPROVED,
         "reviewType": row.get("review_type") or MCP_REVIEW_TYPE_INITIAL_LISTING,
-        "previousVersion": row.get("previous_version"),
-        "pendingVersion": row.get("version") if row.get("review_status") == MCP_REVIEW_PENDING else None,
         "installCount": row.get("download_count") or 0,
         "authorDisplayName": _resolve_author_display_name(row.get("user_id")),
     }
@@ -102,15 +98,17 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
 
 async def list_community_mcp_services(
     *,
+    tenant_id: str,
     search: str | None = None,
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
-    """List public community MCP services.
+    """List community MCP services scoped to a tenant.
 
     Args:
+        tenant_id: Tenant ID for isolation
         search: Search keyword
         tag: Filter by tag
         transport_type: Filter by transport (url or container)
@@ -121,6 +119,7 @@ async def list_community_mcp_services(
         Dictionary with count, nextCursor, and items
     """
     db_result = get_mcp_market_records(
+        tenant_id=tenant_id,
         search=search,
         tag=tag,
         transport_type=transport_type,
@@ -137,16 +136,9 @@ async def list_community_mcp_services(
     }
 
 
-def list_community_mcp_tag_stats() -> List[Dict[str, Any]]:
-    """Get community MCP tag statistics.
-
-    Args:
-        tenant_id: Tenant ID
-
-    Returns:
-        List of tag statistics
-    """
-    return get_mcp_market_tag_stats()
+def list_community_mcp_tag_stats(tenant_id: str) -> List[Dict[str, Any]]:
+    """Get community MCP tag statistics scoped to a tenant."""
+    return get_mcp_market_tag_stats_by_tenant(tenant_id=tenant_id)
 
 
 async def publish_community_mcp_service(
@@ -156,7 +148,6 @@ async def publish_community_mcp_service(
     mcp_id: int,
     name: str | None = None,
     description: str | None = None,
-    version: str | None = None,
     tags: List[str] | None = None,
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
@@ -177,7 +168,6 @@ async def publish_community_mcp_service(
 
     final_name = name if name is not None else source_record.get("mcp_name")
     final_description = description if description is not None else source_record.get("description")
-    final_version = version if version is not None else source_record.get("version")
     final_tags = tags if tags is not None else source_record.get("tags")
     final_mcp_server = (
         mcp_server if mcp_server is not None else source_record.get("mcp_server")
@@ -197,7 +187,6 @@ async def publish_community_mcp_service(
             "mcp_name": final_name,
             "source_mcp_id": mcp_id,
             "mcp_server": final_mcp_server,
-            "version": final_version,
             "registry_json": source_registry_json,
             "transport_type": source_record.get("transport_type") or community_transport_type,
             "config_json": final_config_json,
@@ -220,15 +209,14 @@ async def update_community_mcp_service(
     name: str | None,
     description: str | None,
     tags: List[str] | None,
-    version: str | None,
     registry_json: Dict[str, Any] | None,
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
     transport_type: str | None = None,
 ) -> None:
-    """Submit a version update review for a published market MCP.
+    """Submit an update review for a published market MCP.
 
-    Creates a review record with review_type='version_update'. The market record
+    Creates a review record with review_type='update'. The market record
     is NOT modified until an admin approves the review.
 
     Args:
@@ -238,7 +226,6 @@ async def update_community_mcp_service(
         name: New MCP service name
         description: MCP service description
         tags: MCP tags
-        version: New version being submitted
         registry_json: Registry metadata JSON
         mcp_server: MCP server URL
         config_json: Container MCP configuration JSON
@@ -269,13 +256,11 @@ async def update_community_mcp_service(
             "market_id": market_id,
             "mcp_name": name,
             "mcp_server": mcp_server,
-            "version": version,
             "registry_json": next_registry_json,
             "transport_type": next_transport_type,
             "config_json": next_config_json,
             "review_status": MCP_REVIEW_PENDING,
-            "review_type": MCP_REVIEW_TYPE_VERSION_UPDATE,
-            "previous_version": current.get("version"),
+            "review_type": "update",
             "tags": tags,
             "description": description,
         },
@@ -320,23 +305,22 @@ async def approve_community_mcp_service(
 ) -> None:
     """Approve a review submission.
 
-    For initial_listing: creates a market record and links the review to it.
-    For version_update: updates the existing market record's version/registry_json.
+    Creates a market record for new listings, or updates the existing
+    market record for update submissions.
     """
     review_tenant_id = _get_mcp_review_admin_scope(user_id, tenant_id)
     current = get_mcp_market_review_by_id(review_id=review_id, tenant_id=review_tenant_id)
     if not current:
         raise McpNotFoundError("Review record not found")
 
-    review_type = current.get("review_type") or MCP_REVIEW_TYPE_INITIAL_LISTING
+    market_id = current.get("market_id")
 
-    if review_type == MCP_REVIEW_TYPE_INITIAL_LISTING:
-        # Promote to market: create a market record from the review data
+    if market_id is None:
+        # New listing: create a market record from the review data
         market_id = create_mcp_market_record(
             mcp_data={
                 "mcp_name": current.get("mcp_name"),
                 "mcp_server": current.get("mcp_server"),
-                "version": current.get("version"),
                 "registry_json": current.get("registry_json"),
                 "transport_type": current.get("transport_type"),
                 "config_json": current.get("config_json"),
@@ -361,15 +345,17 @@ async def approve_community_mcp_service(
                 market_id=market_id,
             )
     else:
-        # Version update: update the existing market record
-        market_id = current.get("market_id")
-        if market_id is None:
-            raise McpNotFoundError("Market record not found for version update")
-        update_mcp_market_record_version(
+        # Update: update the existing market record with review data
+        update_mcp_market_record(
             market_id=market_id,
-            version=current.get("version"),
-            registry_json=current.get("registry_json"),
             user_id=user_id,
+            mcp_name=current.get("mcp_name"),
+            description=current.get("description"),
+            tags=current.get("tags"),
+            registry_json=current.get("registry_json"),
+            mcp_server=current.get("mcp_server"),
+            config_json=current.get("config_json"),
+            transport_type=current.get("transport_type"),
         )
 
     # Mark review as approved

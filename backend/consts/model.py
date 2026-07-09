@@ -1489,12 +1489,11 @@ class CommunityPublishRequest(BaseModel):
     mcp_id: int = Field(..., gt=0, description="MCP record ID to publish")
     name: Optional[str] = Field(None, description="Community display name override")
     description: Optional[str] = Field(None, description="Description override")
-    version: Optional[str] = Field(None, description="Version override")
     tags: Optional[List[str]] = Field(None, description="Tags override")
     mcp_server: Optional[str] = Field(None, max_length=500, description="Remote MCP server URL override (URL / HTTP / SSE transports)")
     config_json: Optional[Dict[str, Any]] = Field(None, description="Container MCP configuration JSON override")
 
-    @field_validator("name", "description", "version", "mcp_server", mode="before")
+    @field_validator("name", "description", "mcp_server", mode="before")
     @classmethod
     def _strip_publish_optional_text(cls, value: Any):
         if isinstance(value, str):
@@ -1509,7 +1508,6 @@ class CommunityUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, description="New MCP service name")
     description: Optional[str] = Field(None, description="MCP service description")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
-    version: Optional[str] = Field(None, description="MCP version")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     mcp_server: Optional[str] = Field(None, max_length=500, description="MCP server URL")
     transport_type: Optional[str] = Field(None, description="Transport type")
@@ -1518,7 +1516,7 @@ class CommunityUpdateRequest(BaseModel):
         description="Container MCP configuration JSON (omit to leave unchanged)",
     )
 
-    @field_validator("name", "description", "version", "mcp_server", "transport_type", mode="before")
+    @field_validator("name", "description", "mcp_server", "transport_type", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):

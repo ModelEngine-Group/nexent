@@ -901,10 +901,14 @@ function getDeduplicatedMineItems(
   localServices: McpServiceItem[],
   publishedServices: CommunityMcpCard[]
 ): MineMcpCardItem[] {
+  // Only show local MCPs that belong to the current user
+  const myLocalServices = localServices.filter(
+    (s) => s.permission === "EDIT"
+  );
   const linkedCommunityIds = new Set<number>();
   const localNames = new Set<string>();
 
-  for (const service of localServices) {
+  for (const service of myLocalServices) {
     if (service.communityId) linkedCommunityIds.add(service.communityId);
     localNames.add(normalizeMcpName(service.name));
   }
@@ -921,7 +925,7 @@ function getDeduplicatedMineItems(
   });
 
   return [
-    ...localServices.map((service) => ({
+    ...myLocalServices.map((service) => ({
       kind: "local" as const,
       service,
     })),

@@ -95,8 +95,9 @@ async def list_community_mcp_services_api(
     List public community MCP services.
     """
     try:
-        get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
         data = await list_community_mcp_services(
+            tenant_id=tenant_id,
             search=query.search,
             tag=query.tag,
             transport_type=query.transport_type,
@@ -131,8 +132,8 @@ async def list_community_mcp_tag_stats_api(
     Get community MCP tag statistics.
     """
     try:
-        get_current_user_info(authorization, http_request)
-        stats = list_community_mcp_tag_stats()
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        stats = list_community_mcp_tag_stats(tenant_id=tenant_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": stats},
@@ -268,7 +269,6 @@ async def publish_community_mcp_service_api(
             mcp_id=payload.mcp_id,
             name=payload.name,
             description=payload.description,
-            version=payload.version,
             tags=payload.tags,
             mcp_server=payload.mcp_server,
             config_json=payload.config_json,
@@ -314,7 +314,6 @@ async def update_community_mcp_service_api(
             name=payload.name,
             description=payload.description,
             tags=payload.tags,
-            version=payload.version,
             registry_json=payload.registry_json,
             mcp_server=payload.mcp_server,
             config_json=payload.config_json,

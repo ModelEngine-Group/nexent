@@ -443,3 +443,68 @@ EXECUTE FUNCTION update_ag_tool_instance_update_time();
 
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_ag_tool_instance_update_time_trigger ON nexent.ag_tool_instance_t IS 'Trigger to call update_ag_tool_instance_update_time function before each update on ag_tool_instance_t table';
+
+-- ============================================================================
+-- MCP Market Tables (v2.3.0)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS nexent.mcp_market_record_t (
+    market_id       SERIAL PRIMARY KEY NOT NULL,
+    tenant_id       VARCHAR(100),
+    user_id         VARCHAR(100),
+    mcp_name        VARCHAR(100) NOT NULL,
+    mcp_server      VARCHAR(500) NOT NULL,
+    source          VARCHAR(30) DEFAULT 'community',
+    registry_json   JSONB,
+    transport_type  VARCHAR(30),
+    config_json     JSON,
+    tags            TEXT[],
+    description     TEXT,
+    download_count  INTEGER DEFAULT 0,
+    create_time     TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by      VARCHAR(100),
+    updated_by      VARCHAR(100),
+    delete_flag     VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.mcp_market_record_t OWNER TO root;
+
+COMMENT ON TABLE nexent.mcp_market_record_t IS 'Approved MCP market records (Repository tab)';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_market_tenant_delete
+    ON nexent.mcp_market_record_t (tenant_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_market_tags_gin
+    ON nexent.mcp_market_record_t USING GIN (tags);
+
+CREATE TABLE IF NOT EXISTS nexent.mcp_market_review_t (
+    review_id       SERIAL PRIMARY KEY NOT NULL,
+    market_id       INTEGER,
+    source_mcp_id   INTEGER,
+    tenant_id       VARCHAR(100),
+    user_id         VARCHAR(100),
+    mcp_name        VARCHAR(100) NOT NULL,
+    mcp_server      VARCHAR(500) NOT NULL,
+    source          VARCHAR(30) DEFAULT 'community',
+    registry_json   JSONB,
+    transport_type  VARCHAR(30),
+    config_json     JSON,
+    review_status   VARCHAR(30) DEFAULT 'pending',
+    review_type     VARCHAR(30) DEFAULT 'initial_listing',
+    tags            TEXT[],
+    description     TEXT,
+    create_time     TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by      VARCHAR(100),
+    updated_by      VARCHAR(100),
+    delete_flag     VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.mcp_market_review_t OWNER TO root;
+
+COMMENT ON TABLE nexent.mcp_market_review_t IS 'MCP market review submissions';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_market_review_tenant_delete
+    ON nexent.mcp_market_review_t (tenant_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_market_review_status
+    ON nexent.mcp_market_review_t (review_status);

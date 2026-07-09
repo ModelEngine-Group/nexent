@@ -925,7 +925,6 @@ async def get_remote_mcp_server_list(
             "container_port": record.get("container_port"),
             "registry_json": record.get("registry_json"),
             "config_json": record.get("config_json"),
-            "version": record.get("version"),
             "market_id": record.get("market_id"),
             "is_listed_in_repository": record.get("market_id") is not None,
             "container_status": container_status,

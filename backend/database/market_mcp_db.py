@@ -11,20 +11,21 @@ logger = logging.getLogger("market_mcp_db")
 
 def get_mcp_market_records(
     *,
+    tenant_id: str | None = None,
     search: str | None = None,
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
-    """Cursor-paginated listing of approved market records (Repository tab).
-
-    All records in mcp_market_record_t are approved, so no review_status filter needed.
-    """
+    """Cursor-paginated listing of approved market records scoped to a tenant."""
     with get_db_session() as session:
         query = session.query(McpMarketRecord).filter(
             McpMarketRecord.delete_flag != "Y",
         )
+
+        if tenant_id:
+            query = query.filter(McpMarketRecord.tenant_id == tenant_id)
 
         if transport_type:
             query = query.filter(McpMarketRecord.transport_type == transport_type)
@@ -130,17 +131,34 @@ def check_mcp_market_name_exists(mcp_name: str) -> bool:
         return record is not None
 
 
-def update_mcp_market_record_version(
+def update_mcp_market_record(
     *,
     market_id: int,
-    version: str,
-    registry_json: Dict[str, Any] | None = None,
     user_id: str,
+    mcp_name: str | None = None,
+    description: str | None = None,
+    tags: List[str] | None = None,
+    registry_json: Dict[str, Any] | None = None,
+    mcp_server: str | None = None,
+    config_json: Dict[str, Any] | None = None,
+    transport_type: str | None = None,
 ) -> None:
-    """Update the version (and optional registry_json) on an approved market record."""
-    update_fields: Dict[str, Any] = {"version": version, "updated_by": user_id}
+    """Update fields on an approved market record."""
+    update_fields: Dict[str, Any] = {"updated_by": user_id}
+    if mcp_name is not None:
+        update_fields["mcp_name"] = mcp_name
+    if description is not None:
+        update_fields["description"] = description
+    if tags is not None:
+        update_fields["tags"] = tags
     if registry_json is not None:
         update_fields["registry_json"] = registry_json
+    if mcp_server is not None:
+        update_fields["mcp_server"] = mcp_server
+    if config_json is not None:
+        update_fields["config_json"] = config_json
+    if transport_type is not None:
+        update_fields["transport_type"] = transport_type
 
     with get_db_session() as session:
         session.query(McpMarketRecord).filter(
