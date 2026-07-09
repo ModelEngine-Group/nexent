@@ -1637,10 +1637,10 @@
 
   "memoryService.loadMemoryError": "Failed to load memories, please try again later",
   "memoryService.tenantSharedGroupTitle": "Tenant shared memories",
-  "memoryService.agentSharedGroupTitle": "{{AgentName}}",
+  "memoryService.agentSharedGroupTitle": "{{agentName}}",
   "memoryService.agentSharedPlaceholder": "Agent Shared Memories",
   "memoryService.userPersonalGroupTitle": "User's personal memories",
-  "memoryService.userAgentGroupTitle": "{{AgentName}}",
+  "memoryService.userAgentGroupTitle": "{{agentName}}",
   "memoryService.userAgentPlaceholder": "User Agent Memories",
 
   "memoryManageModal.title": "Memory Management",
