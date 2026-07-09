@@ -14,6 +14,32 @@ from fastapi import Request
 # STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
 # =============================================================================
 
+email_validator_mock = types.ModuleType("email_validator")
+
+
+class MockEmailNotValidError(ValueError):
+    pass
+
+
+def mock_validate_email(email, check_deliverability=False):
+    local_part = email.split("@", 1)[0]
+    return types.SimpleNamespace(normalized=email, local_part=local_part)
+
+email_validator_mock.EmailNotValidError = MockEmailNotValidError
+email_validator_mock.validate_email = mock_validate_email
+sys.modules['email_validator'] = email_validator_mock
+
+try:
+    import pydantic.networks as pydantic_networks
+    original_package_version = pydantic_networks.version
+    pydantic_networks.version = (
+        lambda package_name: "2.0.0"
+        if package_name == "email-validator"
+        else original_package_version(package_name)
+    )
+except Exception:
+    pass
+
 # Create mock ToolConfig class with all necessary methods
 class MockToolConfig:
     """Mock ToolConfig for testing - accepts any arguments."""
@@ -75,6 +101,18 @@ sys.modules['backend.database.client'] = _mock_db_client
 services_module = types.ModuleType("services")
 services_module.__path__ = []
 sys.modules['services'] = services_module
+
+runtime_state_service_module = types.ModuleType("services.runtime_state_service")
+runtime_state_service_mock = MagicMock()
+runtime_state_service_mock.enabled = False
+runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
+runtime_state_service_mock.get_run_state_async = AsyncMock(return_value={})
+runtime_state_service_mock.read_stream_events_async = AsyncMock(return_value=[])
+runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value=[])
+runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
+runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
+runtime_state_service_module.runtime_state_service = runtime_state_service_mock
+sys.modules['services.runtime_state_service'] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
