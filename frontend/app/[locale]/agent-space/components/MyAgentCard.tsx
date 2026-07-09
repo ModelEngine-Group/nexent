@@ -29,6 +29,7 @@ interface MyAgentCardProps {
   onApplyListing: () => void;
   onViewReview: (mode: "review" | "reviewUpdate") => void;
   onDelete: () => void;
+  onEvaluate: () => void;
   isApplying?: boolean;
   isDeleting?: boolean;
 }
@@ -58,6 +59,7 @@ export function MyAgentCard({
   onApplyListing,
   onViewReview,
   onDelete,
+  onEvaluate,
   isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
@@ -75,6 +77,7 @@ export function MyAgentCard({
   const versionLabel = agent.version_label;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
+  const canEvaluate = canView;
   const menuActions = getMineCardMenuActions(agent);
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
@@ -230,7 +233,8 @@ export function MyAgentCard({
             type="default"
             className="min-w-0 flex-1"
             icon={<LineChart className="size-3.5" aria-hidden />}
-            disabled
+            onClick={onEvaluate}
+            disabled={!canEvaluate}
           >
             {t("agentRepository.mine.evaluate")}
           </Button>

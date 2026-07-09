@@ -376,7 +376,20 @@ Additional Args:
         )
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
-        self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
+        # Baseline for the per-step compression ratio. ``final_context.messages``
+        # is already the COMPRESSED payload, so using it here made save%
+        # structurally ~0%. Use the ContextManager's truly-uncompressed memory
+        # token count (computed in compress_if_needed from the raw memory) as the
+        # baseline; fall back to the (compressed) input size when no
+        # ContextManager is active -- the legacy path does not compress, so 0% is
+        # correct there.
+        uncompressed_tokens = None
+        if self.context_manager is not None:
+            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        if uncompressed_tokens:
+            self._last_uncompressed_est = uncompressed_tokens
+        else:
+            self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
