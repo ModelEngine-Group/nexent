@@ -62,7 +62,6 @@ export default function AgentRepositoryPage() {
   const searchParams = useSearchParams();
   const { user } = useAuthorizationContext();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
-  const searchParams = useSearchParams();
 
   const [tab, setTab] = useState<AgentRepositoryTab>(() => {
     const backTab = searchParams.get("back_tab");
