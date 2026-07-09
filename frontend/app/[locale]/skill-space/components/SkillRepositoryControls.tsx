@@ -48,7 +48,9 @@ export function AsyncContent({
     );
   }
 
-  return <div className={cn("relative", isFetching && "opacity-70")}>{children}</div>;
+  return (
+    <div className={cn("relative", isFetching && "opacity-70")}>{children}</div>
+  );
 }
 
 export function PaginationBar({
@@ -109,7 +111,13 @@ export function FilterButton({
   );
 }
 
-export function CountBadge({ count, strong = false }: { count: number; strong?: boolean }) {
+export function CountBadge({
+  count,
+  strong = false,
+}: {
+  count: number;
+  strong?: boolean;
+}) {
   if (!strong) {
     return (
       <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">

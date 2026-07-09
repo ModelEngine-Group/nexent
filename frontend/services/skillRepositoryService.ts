@@ -79,7 +79,9 @@ export async function fetchMyEditableSkills(
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch my editable skills: ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch my editable skills: ${response.statusText}`
+      );
     }
 
     return response.json();

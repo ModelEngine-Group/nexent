@@ -23,7 +23,10 @@ import {
   Loader2,
   Square,
 } from "lucide-react";
-import { extractSkillInfo, extractSkillInfoFromContent } from "@/lib/skillFileUtils";
+import {
+  extractSkillInfo,
+  extractSkillInfoFromContent,
+} from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import {
   THINKING_STEPS_ZH,
@@ -41,9 +44,7 @@ import {
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
-import {
-  fetchSkillById,
-} from "@/services/agentConfigService";
+import { fetchSkillById } from "@/services/agentConfigService";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
@@ -73,7 +74,8 @@ export default function SkillBuildModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadExtractedSkillName, setUploadExtractedSkillName] = useState<string>("");
+  const [uploadExtractedSkillName, setUploadExtractedSkillName] =
+    useState<string>("");
   const [uploadExtractingName, setUploadExtractingName] = useState(false);
 
   // Interactive creation state
@@ -109,7 +111,9 @@ export default function SkillBuildModal({
     const ref = textareaRefs.current[tabPath] as any;
     const textarea = ref?.resizableTextArea?.textArea || ref?.textArea || ref;
     if (!textarea) return true;
-    return textarea.scrollHeight - textarea.scrollTop - textarea.clientHeight < 20;
+    return (
+      textarea.scrollHeight - textarea.scrollTop - textarea.clientHeight < 20
+    );
   };
 
   // Update shouldAutoScrollRef when user scrolls manually
@@ -137,7 +141,9 @@ export default function SkillBuildModal({
   const isStreamingCompleteRef = useRef(false);
 
   // Track current tabs during streaming to avoid stale closure issues
-  const streamingTabsRef = useRef<SkillFileContent[]>([{ path: "SKILL.md", content: "" }]);
+  const streamingTabsRef = useRef<SkillFileContent[]>([
+    { path: "SKILL.md", content: "" },
+  ]);
 
   // AbortController ref for stopping streaming
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -215,7 +221,8 @@ export default function SkillBuildModal({
     if (!currentAssistantIdRef.current) return;
     if (!summaryContent) return;
     setChatMessages((prev) => {
-      if (!prev.some((m) => m.id === currentAssistantIdRef.current)) return prev;
+      if (!prev.some((m) => m.id === currentAssistantIdRef.current))
+        return prev;
       return prev.map((msg) =>
         msg.id === currentAssistantIdRef.current
           ? { ...msg, content: summaryContent }
@@ -241,7 +248,9 @@ export default function SkillBuildModal({
     const skillName = editingSkill.name?.trim() || "";
     let cancelled = false;
 
-    const applySkillInfo = (skill: Partial<SkillListItem> & { content?: string | null }) => {
+    const applySkillInfo = (
+      skill: Partial<SkillListItem> & { content?: string | null }
+    ) => {
       if (cancelled) return;
       const nextName = skill.name?.trim() || skillName;
       setInteractiveSkillName(nextName);
@@ -301,18 +310,22 @@ export default function SkillBuildModal({
       }
       setIsSubmitting(true);
 
-      const skillTab = skillTabs.find(t => t.path === "SKILL.md");
+      const skillTab = skillTabs.find((t) => t.path === "SKILL.md");
       const content = skillTab?.content || "";
 
       const extraFiles = skillTabs
-        .filter(t => t.path !== "SKILL.md")
-        .map(t => ({
+        .filter((t) => t.path !== "SKILL.md")
+        .map((t) => ({
           path: t.path,
           content: t.content || "",
         }));
 
       await submitSkillForm(
-        { ...values, content, files: extraFiles.length > 0 ? extraFiles : undefined } as SkillData,
+        {
+          ...values,
+          content,
+          files: extraFiles.length > 0 ? extraFiles : undefined,
+        } as SkillData,
         allSkills,
         onSuccess,
         onCancel,
@@ -399,11 +412,19 @@ export default function SkillBuildModal({
   const parseAndUpdateFrontmatter = (frontmatterYaml: string) => {
     try {
       // Parse the frontmatter using js-yaml
-      const parsed = yaml.load(frontmatterYaml) as Record<string, unknown> | null;
+      const parsed = yaml.load(frontmatterYaml) as Record<
+        string,
+        unknown
+      > | null;
       if (parsed && typeof parsed === "object") {
         const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-        const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
-        const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
+        const description =
+          typeof parsed.description === "string"
+            ? parsed.description.trim()
+            : "";
+        const tags = Array.isArray(parsed.tags)
+          ? parsed.tags.filter((t): t is string => typeof t === "string")
+          : [];
 
         if (name && !isEditMode) {
           form.setFieldsValue({ name });
@@ -439,7 +460,9 @@ export default function SkillBuildModal({
       formValues.description ? `当前技能描述：${formValues.description}` : "",
       formValues.tags?.length ? `当前标签：${formValues.tags.join(", ")}` : "",
       assembledContent ? `当前技能文件内容：\n${assembledContent}` : "",
-    ].filter(Boolean).join("\n\n");
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -451,7 +474,9 @@ export default function SkillBuildModal({
     setChatMessages((prev) => [...prev, userMessage]);
     setIsChatLoading(true);
     setIsThinkingVisible(true);
-    setThinkingDescription(t("skillManagement.generatingSkill") || "生成技能内容中 ...");
+    setThinkingDescription(
+      t("skillManagement.generatingSkill") || "生成技能内容中 ..."
+    );
 
     // Clear content input before streaming — start fresh so the streamed content
     // reflects the (possibly refined) result of this turn.
@@ -467,7 +492,12 @@ export default function SkillBuildModal({
 
     setChatMessages((prev) => [
       ...prev,
-      { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: new Date(),
+      },
     ]);
 
     currentAssistantIdRef.current = assistantId;
@@ -486,12 +516,14 @@ export default function SkillBuildModal({
       await createSkillStream(
         {
           user_request: userPrompt,
-          existing_skill: draft ? {
-            name: draft.name || formValues.name || "",
-            description: draft.description || formValues.description || "",
-            tags: draft.tags?.length ? draft.tags : (formValues.tags || []),
-            content: assembledContent,
-          } : undefined,
+          existing_skill: draft
+            ? {
+                name: draft.name || formValues.name || "",
+                description: draft.description || formValues.description || "",
+                tags: draft.tags?.length ? draft.tags : formValues.tags || [],
+                content: assembledContent,
+              }
+            : undefined,
           complexity: "complicated",
           language: "zh",
         },
@@ -506,7 +538,10 @@ export default function SkillBuildModal({
             setIsThinkingVisible(visible);
           },
           onStepCount: (step) => {
-            setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === step)?.description || "生成技能内容中 ...");
+            setThinkingDescription(
+              THINKING_STEPS_ZH.find((s) => s.step === step)?.description ||
+                "生成技能内容中 ..."
+            );
           },
           onFrontmatter: (content) => {
             // Accumulate frontmatter content as it streams in
@@ -514,11 +549,22 @@ export default function SkillBuildModal({
             frontmatterBufferRef.current += content;
             // Try to parse incrementally for form field updates
             try {
-              const parsed = yaml.load(frontmatterBufferRef.current) as Record<string, unknown> | null;
+              const parsed = yaml.load(frontmatterBufferRef.current) as Record<
+                string,
+                unknown
+              > | null;
               if (parsed && typeof parsed === "object") {
-                const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-                const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
-                const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
+                const name =
+                  typeof parsed.name === "string" ? parsed.name.trim() : "";
+                const description =
+                  typeof parsed.description === "string"
+                    ? parsed.description.trim()
+                    : "";
+                const tags = Array.isArray(parsed.tags)
+                  ? parsed.tags.filter(
+                      (t): t is string => typeof t === "string"
+                    )
+                  : [];
 
                 if (name && !isEditMode) {
                   form.setFieldsValue({ name });
@@ -548,7 +594,9 @@ export default function SkillBuildModal({
             if (isNewFile) {
               // New file detected, create a new tab
               setSkillTabs((prev) => {
-                const newTabs = prev.find((t) => t.path === path) ? prev : [...prev, { path, content: "" }];
+                const newTabs = prev.find((t) => t.path === path)
+                  ? prev
+                  : [...prev, { path, content: "" }];
                 streamingTabsRef.current = newTabs;
                 shouldAutoScrollRef.current[path] = true;
                 return newTabs;
@@ -570,20 +618,25 @@ export default function SkillBuildModal({
             isStreamingCompleteRef.current = true;
 
             // Get SKILL.md content and strip frontmatter for textarea display
-            const skillTab = result.skillTabs.find(t => t.path === "SKILL.md");
+            const skillTab = result.skillTabs.find(
+              (t) => t.path === "SKILL.md"
+            );
             const fullContent = skillTab?.content || "";
 
             if (fullContent || result.skillTabs.length > 0) {
               // Strip frontmatter from SKILL.md content for textarea display
               const skillInfo = extractSkillInfoFromContent(fullContent);
-              const contentWithoutFrontmatter = skillInfo?.contentWithoutFrontmatter || "";
+              const contentWithoutFrontmatter =
+                skillInfo?.contentWithoutFrontmatter || "";
 
               // Use the current tabs from ref (avoids stale closure)
               const currentTabs = streamingTabsRef.current;
 
               // Build updated tabs: start with current tabs, update matching ones from backend
               const updatedTabs = currentTabs.map((tab) => {
-                const backendTab = result.skillTabs.find((t) => t.path === tab.path);
+                const backendTab = result.skillTabs.find(
+                  (t) => t.path === tab.path
+                );
                 if (tab.path === "SKILL.md") {
                   return { ...tab, content: contentWithoutFrontmatter };
                 }
@@ -594,7 +647,9 @@ export default function SkillBuildModal({
               });
 
               // Add any new tabs from backend that don't exist in current tabs
-              const newTabsFromBackend = result.skillTabs.filter((t) => !currentTabs.find((tab) => tab.path === t.path));
+              const newTabsFromBackend = result.skillTabs.filter(
+                (t) => !currentTabs.find((tab) => tab.path === t.path)
+              );
               const finalTabs = [...updatedTabs, ...newTabsFromBackend];
 
               // Sort so SKILL.md is always first
@@ -623,7 +678,9 @@ export default function SkillBuildModal({
               const newDraft = {
                 name: skillInfo?.name || draft?.name || "",
                 description: skillInfo?.description || draft?.description || "",
-                tags: skillInfo?.tags?.length ? skillInfo.tags : (draft?.tags || []),
+                tags: skillInfo?.tags?.length
+                  ? skillInfo.tags
+                  : draft?.tags || [],
                 content: assembledDraft,
               };
               setAccumulatedDraft(newDraft);
@@ -693,16 +750,20 @@ export default function SkillBuildModal({
   // Scroll to bottom of chat when new messages arrive
   useEffect(() => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      chatContainerRef.current.scrollTop =
+        chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
 
   const modalBodyFrame = "min(92vh, 760px)";
-  const editingSkillName = editingSkill?.name?.trim() || interactiveSkillName.trim();
+  const editingSkillName =
+    editingSkill?.name?.trim() || interactiveSkillName.trim();
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
-      (s) => s.name.trim().toLowerCase() === uploadExtractedSkillName.trim().toLowerCase()
+      (s) =>
+        s.name.trim().toLowerCase() ===
+        uploadExtractedSkillName.trim().toLowerCase()
     );
 
     const handleFileSelection = async (files: FileList | null) => {
@@ -722,7 +783,9 @@ export default function SkillBuildModal({
         if (!extractedName || !extractedDesc) {
           setUploadFile(null);
           setUploadExtractedSkillName("");
-          message.warning(t("skillManagement.message.nameOrDescriptionMissing"));
+          message.warning(
+            t("skillManagement.message.nameOrDescriptionMissing")
+          );
           return;
         }
         setUploadExtractedSkillName(extractedName);
@@ -734,9 +797,7 @@ export default function SkillBuildModal({
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
-          <p className="text-sm font-semibold text-gray-800">
-            安装
-          </p>
+          <p className="text-sm font-semibold text-gray-800">安装</p>
           <p className="text-xs text-gray-500">
             {t("skillManagement.form.uploadHint")}
           </p>
@@ -751,7 +812,9 @@ export default function SkillBuildModal({
               <Input
                 value={uploadExtractedSkillName}
                 readOnly
-                placeholder={t("skillManagement.form.uploadSkillNamePlaceholder")}
+                placeholder={t(
+                  "skillManagement.form.uploadSkillNamePlaceholder"
+                )}
                 style={{ fontWeight: 500 }}
                 status={
                   existingSkill
@@ -777,7 +840,9 @@ export default function SkillBuildModal({
           <div
             className="flex flex-1 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-6 py-10 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/50"
             onClick={() => {
-              const input = document.getElementById("skill-upload-input") as HTMLInputElement;
+              const input = document.getElementById(
+                "skill-upload-input"
+              ) as HTMLInputElement;
               input?.click();
             }}
             onDragOver={(e) => {
@@ -837,7 +902,9 @@ export default function SkillBuildModal({
                     event.stopPropagation();
                     setUploadFile(null);
                     setUploadExtractedSkillName("");
-                    const input = document.getElementById("skill-upload-input") as HTMLInputElement;
+                    const input = document.getElementById(
+                      "skill-upload-input"
+                    ) as HTMLInputElement;
                     if (input) input.value = "";
                   }}
                 >
@@ -865,7 +932,8 @@ export default function SkillBuildModal({
               {isEditMode ? (
                 <>
                   <p>
-                    你好！我是 Skill 构建助手，当前正在编辑「{editingSkillName}」。
+                    你好！我是 Skill 构建助手，当前正在编辑「{editingSkillName}
+                    」。
                   </p>
                   <p className="mt-3">
                     你可以告诉我需要优化或调整的地方，我会帮你更新对应的文件内容。
@@ -874,7 +942,9 @@ export default function SkillBuildModal({
               ) : (
                 <>
                   <p>
-                    你好！我是 Skill 构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill 的结构和代码。
+                    你好！我是 Skill
+                    构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill
+                    的结构和代码。
                   </p>
                   <p className="mt-3">
                     例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」
@@ -933,13 +1003,19 @@ export default function SkillBuildModal({
                   }
                 }
               }}
-              placeholder={isEditMode ? "告诉我需要如何优化这个技能..." : "描述你想要的技能..."}
+              placeholder={
+                isEditMode
+                  ? "告诉我需要如何优化这个技能..."
+                  : "描述你想要的技能..."
+              }
               disabled={isChatLoading || isStreaming}
               autoSize={{ minRows: 1, maxRows: 3 }}
               className="resize-none rounded-xl"
             />
             {isChatLoading || isStreaming ? (
-              <Tooltip title={t("skillManagement.stopGenerating") || "Stop generating"}>
+              <Tooltip
+                title={t("skillManagement.stopGenerating") || "Stop generating"}
+              >
                 <Button
                   type="primary"
                   danger
@@ -955,7 +1031,12 @@ export default function SkillBuildModal({
                 icon={<Send size={14} />}
                 onClick={handleChatSend}
                 disabled={!chatInput.trim()}
-                style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 12 }}
+                style={{
+                  width: 40,
+                  height: 40,
+                  flexShrink: 0,
+                  borderRadius: 12,
+                }}
               />
             )}
           </Flex>
@@ -1022,7 +1103,9 @@ export default function SkillBuildModal({
             {isEditMode ? "编辑技能" : t("skillManagement.title")}
           </div>
           <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
-            {isEditMode ? `正在编辑：${editingSkillName}` : "创建、编辑并发布你的 Skill。"}
+            {isEditMode
+              ? `正在编辑：${editingSkillName}`
+              : "创建、编辑并发布你的 Skill。"}
           </div>
         </div>
       }
@@ -1040,10 +1123,7 @@ export default function SkillBuildModal({
         },
       }}
       footer={[
-        <Button
-          key="cancel"
-          onClick={handleModalClose}
-        >
+        <Button key="cancel" onClick={handleModalClose}>
           {t("common.cancel")}
         </Button>,
         isEditMode || activeTab === "interactive" ? (
@@ -1061,7 +1141,11 @@ export default function SkillBuildModal({
             type="primary"
             loading={isSubmitting}
             onClick={handleUploadSubmit}
-            disabled={!uploadFile || !uploadExtractedSkillName.trim() || !uploadIsCreateMode}
+            disabled={
+              !uploadFile ||
+              !uploadExtractedSkillName.trim() ||
+              !uploadIsCreateMode
+            }
           >
             {getConfirmButtonText()}
           </Button>
@@ -1084,9 +1168,7 @@ export default function SkillBuildModal({
           {renderDraftPanel()}
         </div>
       ) : (
-        <div className="min-h-0 flex-1">
-          {renderUploadTab()}
-        </div>
+        <div className="min-h-0 flex-1">{renderUploadTab()}</div>
       )}
       <style jsx global>{`
         .skill-build-info-form .ant-form-item-label {

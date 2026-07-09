@@ -44,7 +44,6 @@ export function RepositoryView({
   installingRepositoryId: number | null;
   takingDownRepositoryId: number | null;
 }) {
-
   return (
     <div className="space-y-5">
       <div className="relative">
@@ -59,7 +58,8 @@ export function RepositoryView({
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">
-        共 {total} 个 Skill · 同租户内的 Skill 需先「复制为我的 Skill」后才能编辑
+        共 {total} 个 Skill · 同租户内的 Skill 需先「复制为我的
+        Skill」后才能编辑
       </p>
 
       <AsyncContent
@@ -77,7 +77,9 @@ export function RepositoryView({
               listing={listing}
               onDetailClick={() => onDetailClick(listing)}
               showAdminMenu={showAdminMenu}
-              isTakingDown={takingDownRepositoryId === listing.skill_repository_id}
+              isTakingDown={
+                takingDownRepositoryId === listing.skill_repository_id
+              }
               onTakeDown={() => onTakeDown(listing)}
               action={
                 <div className="flex items-center gap-2">
@@ -85,7 +87,9 @@ export function RepositoryView({
                     type="primary"
                     className="flex-1 text-sm"
                     icon={<Copy className="size-3.5" />}
-                    loading={installingRepositoryId === listing.skill_repository_id}
+                    loading={
+                      installingRepositoryId === listing.skill_repository_id
+                    }
                     onClick={() => onInstall(listing)}
                   >
                     复制

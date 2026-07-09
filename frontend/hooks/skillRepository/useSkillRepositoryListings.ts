@@ -105,8 +105,7 @@ export function useCreateSkillRepositoryListing() {
     }: {
       skillId: number;
       payload: SkillRepositoryListingCreatePayload;
-    }) =>
-      skillRepositoryService.createSkillRepositoryListing(skillId, payload),
+    }) => skillRepositoryService.createSkillRepositoryListing(skillId, payload),
     onSuccess: async () => {
       await invalidateSkillRepositoryCaches(queryClient);
     },

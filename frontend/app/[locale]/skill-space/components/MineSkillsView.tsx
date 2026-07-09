@@ -19,7 +19,11 @@ import {
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
 import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
-import { AsyncContent, FilterButton, PaginationBar } from "./SkillRepositoryControls";
+import {
+  AsyncContent,
+  FilterButton,
+  PaginationBar,
+} from "./SkillRepositoryControls";
 import {
   formatRepositoryDate,
   getSkillSourceLabel,
@@ -80,9 +84,7 @@ export function MineSkillsView({
     payload: SkillRepositoryListingCreatePayload
   ) => Promise<void>;
   isUpdatingStatus: boolean;
-  onSetNotShared: (
-    repositoryInfo: MySkillRepositoryInfoItem
-  ) => Promise<void>;
+  onSetNotShared: (repositoryInfo: MySkillRepositoryInfoItem) => Promise<void>;
 }) {
   const { message, modal } = App.useApp();
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
@@ -176,9 +178,7 @@ export function MineSkillsView({
       <div className="flex flex-wrap gap-1.5">
         <FilterButton active onClick={() => {}}>
           全部
-          <span className="ml-1 text-xs opacity-80">
-            {counts.all}
-          </span>
+          <span className="ml-1 text-xs opacity-80">{counts.all}</span>
         </FilterButton>
       </div>
 
@@ -245,8 +245,7 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   pending_review:
     "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
-  rejected:
-    "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
+  rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
   shared:
     "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
 };
@@ -366,7 +365,10 @@ function MineSkillCard({
             <span />
           )}
           <span className="inline-flex shrink-0 items-center gap-1.5">
-            <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden />
+            <span
+              className="size-1.5 shrink-0 rounded-full bg-primary"
+              aria-hidden
+            />
             {sourceLabel}
           </span>
         </div>
@@ -395,7 +397,9 @@ function MineSkillCard({
             type={isEnabled ? "default" : "primary"}
             className="min-w-0 flex-1"
             icon={<Power className="size-3.5" aria-hidden />}
-            disabled={!canEdit || isEnabled || repositoryStatus === "pending_review"}
+            disabled={
+              !canEdit || isEnabled || repositoryStatus === "pending_review"
+            }
             onClick={canApplyListing ? onApplyListing : onViewReview}
           >
             {isEnabled ? "已启用" : "启用"}

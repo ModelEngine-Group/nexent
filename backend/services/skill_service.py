@@ -22,7 +22,7 @@ from nexent.skills.skill_loader import SkillLoader
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import ModelConfig
 from consts.const import CONTAINER_SKILLS_PATH, OFFICIAL_SKILLS_ZIP_PATH, ROOT_DIR
-from consts.exceptions import SkillException
+from consts.exceptions import ForbiddenError, SkillException
 from database import skill_db
 from agents.skill_creation_agent import create_skill_from_request
 from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
@@ -1630,6 +1630,8 @@ class SkillService:
             existing = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
             if not existing:
                 raise SkillException(f"Skill not found: {skill_id}")
+            if not user_id or existing.get("created_by") != user_id:
+                raise ForbiddenError("Not authorized to update this skill")
 
             result = skill_db.update_skill_by_id(
                 skill_id,
@@ -1682,6 +1684,13 @@ class SkillService:
                     "files": skill_data.get("files", []),
                 }
                 self.skill_manager.save_skill(local_skill_dict)
+                previous_name = str(existing.get("name") or "").strip()
+                if (
+                    local_skill_name != f"skill_{skill_id}"
+                    and previous_name
+                    and previous_name != local_skill_name
+                ):
+                    self.skill_manager.delete_skill(previous_name)
             except Exception as exc:
                 logger.warning(
                     "Local SKILL.md sync failed after DB update for skill ID %s: %s",
@@ -1690,7 +1699,7 @@ class SkillService:
                 )
 
             return self._enrich_configs_from_yaml(result)
-        except SkillException:
+        except (ForbiddenError, SkillException):
             raise
         except Exception as e:
             logger.error(f"Error updating skill by ID {skill_id}: {e}")

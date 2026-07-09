@@ -5,7 +5,11 @@ import { Alert, Form, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { Skill } from "@/types/agentConfig";
-import type { SkillFileContent, SkillFileNode, SkillFormData } from "@/types/skill";
+import type {
+  SkillFileContent,
+  SkillFileNode,
+  SkillFormData,
+} from "@/types/skill";
 import {
   fetchSkillFileContent,
   fetchSkillFiles,
@@ -23,7 +27,11 @@ interface SkillDetailModalProps {
 
 const OFFICIAL_SOURCES = new Set(["official", "\u5b98\u65b9"]);
 
-export default function SkillDetailModal({ skill, open, onClose }: SkillDetailModalProps) {
+export default function SkillDetailModal({
+  skill,
+  open,
+  onClose,
+}: SkillDetailModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
   const [skillTabs, setSkillTabs] = useState<SkillFileContent[]>([
@@ -52,7 +60,10 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
       setLoading(true);
       try {
         const files = await fetchSkillFiles(skill.name);
-        const flatFiles = flattenSkillFiles(normalizeSkillFiles(files), skill.name);
+        const flatFiles = flattenSkillFiles(
+          normalizeSkillFiles(files),
+          skill.name
+        );
         if (flatFiles.length === 0) {
           return;
         }
@@ -119,7 +130,12 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
       }}
     >
       {fileTreeMessage ? (
-        <Alert type="warning" showIcon message={fileTreeMessage} className="mb-3" />
+        <Alert
+          type="warning"
+          showIcon
+          message={fileTreeMessage}
+          className="mb-3"
+        />
       ) : null}
       <Spin spinning={loading} wrapperClassName="h-full">
         <div className="h-full">
@@ -148,7 +164,8 @@ function formatSource(source: string | undefined, t: (key: string) => string) {
   if (!raw) return "-";
   if (OFFICIAL_SOURCES.has(raw)) return t("skillPool.group.official");
   if (raw === "repository") return "\u4ed3\u5e93";
-  if (raw === "custom" || raw === "\u81ea\u5b9a\u4e49") return t("skillPool.group.custom");
+  if (raw === "custom" || raw === "\u81ea\u5b9a\u4e49")
+    return t("skillPool.group.custom");
   return raw;
 }
 
@@ -157,7 +174,8 @@ function flattenSkillFiles(nodes: SkillFileNode[], skillName: string) {
 
   const walk = (items: SkillFileNode[], parentPath = "") => {
     items.forEach((item) => {
-      const isRootSkillDir = !parentPath && item.type === "directory" && item.name === skillName;
+      const isRootSkillDir =
+        !parentPath && item.type === "directory" && item.name === skillName;
       const path = isRootSkillDir
         ? ""
         : parentPath

@@ -170,6 +170,7 @@ consts_exceptions_mock = types.ModuleType('consts.exceptions')
 class SkillException(Exception):
     pass
 consts_exceptions_mock.SkillException = SkillException
+consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -4828,3 +4829,68 @@ class TestInitSkillListForTenantAsync:
             tenant_id="new-tenant",
             user_id="new-user"
         )
+
+
+class TestSkillServiceUpdateById:
+    def test_rejects_non_creator(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "created_by": "other-user",
+            },
+        )
+
+        with pytest.raises(
+            skill_service.ForbiddenError,
+            match="Not authorized to update this skill",
+        ):
+            service.update_skill_by_id(
+                1,
+                {"description": "updated"},
+                user_id="user-1",
+            )
+
+    def test_rename_removes_previous_local_directory(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        (tmp_path / "Skill A").mkdir()
+
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "description",
+                "content": "content",
+                "tags": [],
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            create=True,
+            return_value={
+                "skill_id": 1,
+                "name": "Skill B",
+                "description": "description",
+                "content": "content",
+                "tags": [],
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=[],
+        )
+        service._enrich_configs_from_yaml = lambda result: result
+
+        service.update_skill_by_id(
+            1,
+            {"name": "Skill B"},
+            user_id="user-1",
+        )
+
+        service.skill_manager.delete_skill.assert_called_once_with("Skill A")

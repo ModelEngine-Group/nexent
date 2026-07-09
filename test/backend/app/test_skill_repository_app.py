@@ -36,7 +36,26 @@ consts_model.SkillRepositoryListingCreateRequest = _SkillRepositoryListingCreate
 consts_model.SkillRepositoryInstallRequest = _SkillRepositoryInstallRequest
 sys.modules["consts.model"] = consts_model
 
-from consts.exceptions import ForbiddenError, SkillDuplicateError
+import consts.exceptions as exceptions_module
+
+
+def _ensure_exception(name):
+    exception = getattr(exceptions_module, name, None)
+    if exception is None:
+        exception = type(name, (Exception,), {})
+        setattr(exceptions_module, name, exception)
+    return exception
+
+
+ForbiddenError = _ensure_exception("ForbiddenError")
+SkillDuplicateError = getattr(exceptions_module, "SkillDuplicateError", None)
+if SkillDuplicateError is None:
+    class SkillDuplicateError(Exception):
+        def __init__(self, duplicate_names):
+            self.duplicate_names = duplicate_names
+            super().__init__(str(duplicate_names))
+
+    exceptions_module.SkillDuplicateError = SkillDuplicateError
 
 from apps.skill_repository_app import skill_repository_router
 

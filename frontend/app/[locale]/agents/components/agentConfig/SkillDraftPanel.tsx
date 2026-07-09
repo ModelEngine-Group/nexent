@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { ChangeEvent, Dispatch, KeyboardEvent, MutableRefObject, SetStateAction } from "react";
+import type {
+  ChangeEvent,
+  Dispatch,
+  KeyboardEvent,
+  MutableRefObject,
+  SetStateAction,
+} from "react";
 import type { FormInstance } from "antd";
 import { Button, Col, Form, Input, Modal, Row, Select, Tooltip } from "antd";
 import { FileText, Folder, Maximize2, Pencil, Plus, X } from "lucide-react";
@@ -49,17 +55,24 @@ export default function SkillDraftPanel({
   const [expandedEditorContent, setExpandedEditorContent] = useState("");
 
   const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
-    tabs.filter((tab, index, self) => self.findIndex((item) => item.path === tab.path) === index);
+    tabs.filter(
+      (tab, index, self) =>
+        self.findIndex((item) => item.path === tab.path) === index
+    );
 
   const visibleSkillTabs = dedupeSkillTabs(skillTabs);
-  const activeFile = visibleSkillTabs.find((tab) => tab.path === activeSkillTab) || visibleSkillTabs[0];
+  const activeFile =
+    visibleSkillTabs.find((tab) => tab.path === activeSkillTab) ||
+    visibleSkillTabs[0];
   const canEditFiles = !readOnly && !isStreaming;
 
   const renameTab = (fromPath: string | null, toPath: string) => {
     if (!fromPath || !toPath.trim()) return;
     const nextPath = toPath.trim();
     setSkillTabs((prev) =>
-      prev.map((tab) => (tab.path === fromPath ? { ...tab, path: nextPath } : tab))
+      prev.map((tab) =>
+        tab.path === fromPath ? { ...tab, path: nextPath } : tab
+      )
     );
     if (activeSkillTab === fromPath) {
       setActiveSkillTab(nextPath);
@@ -148,7 +161,9 @@ export default function SkillDraftPanel({
   };
 
   return (
-    <div className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}>
+    <div
+      className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}
+    >
       <div className="shrink-0 rounded-2xl border border-slate-200 bg-white px-5 pb-2 pt-3 shadow-sm">
         <Form
           form={form}
@@ -167,7 +182,10 @@ export default function SkillDraftPanel({
                 label={t("skillManagement.form.name")}
                 style={{ marginBottom: 10 }}
                 rules={[
-                  { required: true, message: t("skillManagement.form.nameRequired") },
+                  {
+                    required: true,
+                    message: t("skillManagement.form.nameRequired"),
+                  },
                 ]}
               >
                 <Input
@@ -185,7 +203,9 @@ export default function SkillDraftPanel({
                 style={{ marginBottom: 10 }}
               >
                 <Select
-                  options={[{ label: t("skillPool.group.custom"), value: "custom" }]}
+                  options={[
+                    { label: t("skillPool.group.custom"), value: "custom" },
+                  ]}
                 />
               </Form.Item>
             </Col>
@@ -196,7 +216,10 @@ export default function SkillDraftPanel({
             label={t("skillManagement.form.description")}
             style={{ marginBottom: 10 }}
             rules={[
-              { required: true, message: t("skillManagement.form.descriptionRequired") },
+              {
+                required: true,
+                message: t("skillManagement.form.descriptionRequired"),
+              },
             ]}
           >
             <TextArea
@@ -247,7 +270,9 @@ export default function SkillDraftPanel({
         </Form>
       </div>
 
-      <div className={`flex min-h-0 flex-1 flex-col ${readOnly ? "min-h-[300px]" : ""}`}>
+      <div
+        className={`flex min-h-0 flex-1 flex-col ${readOnly ? "min-h-[300px]" : ""}`}
+      >
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
             <div className="flex h-11 items-center justify-between border-b border-slate-200 px-3">
@@ -259,7 +284,10 @@ export default function SkillDraftPanel({
                   icon={<Plus size={14} />}
                   onClick={() => {
                     const newPath = `file_${Date.now()}.md`;
-                    setSkillTabs((prev) => [...prev, { path: newPath, content: "" }]);
+                    setSkillTabs((prev) => [
+                      ...prev,
+                      { path: newPath, content: "" },
+                    ]);
                     setActiveSkillTab(newPath);
                     if (shouldAutoScrollRef) {
                       shouldAutoScrollRef.current[newPath] = true;
@@ -269,30 +297,36 @@ export default function SkillDraftPanel({
               ) : null}
             </div>
             <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto py-2">
-              {visibleSkillTabs.filter((tab) => !tab.path.includes("/")).map((tab) => (
-                <div
-                  key={tab.path}
-                  className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs transition-colors ${
-                    activeSkillTab === tab.path
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                  onClick={() => setActiveSkillTab(tab.path)}
-                >
-                  <FileText size={15} className="shrink-0" />
-                  {renderFileName(tab, tab.path)}
-                  {renderFileActions(tab)}
-                </div>
-              ))}
-              {Array.from(new Set(
-                visibleSkillTabs
-                  .filter((tab) => tab.path.includes("/"))
-                  .map((tab) => tab.path.split("/")[0])
-              )).map((folderName) => (
+              {visibleSkillTabs
+                .filter((tab) => !tab.path.includes("/"))
+                .map((tab) => (
+                  <div
+                    key={tab.path}
+                    className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs transition-colors ${
+                      activeSkillTab === tab.path
+                        ? "bg-blue-50 text-blue-700"
+                        : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                    onClick={() => setActiveSkillTab(tab.path)}
+                  >
+                    <FileText size={15} className="shrink-0" />
+                    {renderFileName(tab, tab.path)}
+                    {renderFileActions(tab)}
+                  </div>
+                ))}
+              {Array.from(
+                new Set(
+                  visibleSkillTabs
+                    .filter((tab) => tab.path.includes("/"))
+                    .map((tab) => tab.path.split("/")[0])
+                )
+              ).map((folderName) => (
                 <div key={folderName}>
                   <div className="mx-2 mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-xs font-normal text-slate-500">
                     <Folder size={15} className="shrink-0 text-amber-500" />
-                    <span className="min-w-0 flex-1 truncate">{folderName}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {folderName}
+                    </span>
                   </div>
                   {visibleSkillTabs
                     .filter((tab) => tab.path.startsWith(`${folderName}/`))
@@ -307,7 +341,10 @@ export default function SkillDraftPanel({
                         onClick={() => setActiveSkillTab(tab.path)}
                       >
                         <FileText size={15} className="shrink-0" />
-                        {renderFileName(tab, tab.path.slice(folderName.length + 1))}
+                        {renderFileName(
+                          tab,
+                          tab.path.slice(folderName.length + 1)
+                        )}
                         {renderFileActions(tab)}
                       </div>
                     ))}
@@ -318,7 +355,9 @@ export default function SkillDraftPanel({
           {activeFile ? (
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 px-4 text-sm font-medium text-slate-700">
-                <span className="min-w-0 flex-1 truncate">{activeFile.path}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {activeFile.path}
+                </span>
                 <Tooltip title="放大查看">
                   <Button
                     type="text"
@@ -341,7 +380,11 @@ export default function SkillDraftPanel({
                 ref={(el) => {
                   if (!textareaRefs) return;
                   textareaRefs.current[activeFile.path] = el;
-                  if (el && shouldAutoScrollRef && shouldAutoScrollRef.current[activeFile.path] === undefined) {
+                  if (
+                    el &&
+                    shouldAutoScrollRef &&
+                    shouldAutoScrollRef.current[activeFile.path] === undefined
+                  ) {
                     shouldAutoScrollRef.current[activeFile.path] = true;
                   }
                 }}
@@ -350,7 +393,9 @@ export default function SkillDraftPanel({
                   if (isStreaming || readOnly) return;
                   setSkillTabs((prev) =>
                     prev.map((tab) =>
-                      tab.path === activeFile.path ? { ...tab, content: e.target.value } : tab
+                      tab.path === activeFile.path
+                        ? { ...tab, content: e.target.value }
+                        : tab
                     )
                   );
                 }}

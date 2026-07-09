@@ -42,8 +42,7 @@ export function SkillReviewStatusModal({
         icon: Clock,
         label: "待审核",
         description: "上架申请已提交，等待管理员审核。",
-        tone:
-          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
+        tone: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
         iconClass: "text-amber-600 dark:text-amber-300",
       }
     : isRejected
@@ -51,16 +50,14 @@ export function SkillReviewStatusModal({
           icon: XCircle,
           label: "已驳回",
           description: "申请被驳回后，可以撤回记录或重新提交。",
-          tone:
-            "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
+          tone: "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
           iconClass: "text-red-600 dark:text-red-300",
         }
       : {
           icon: CheckCircle2,
           label: "已上架",
           description: "该 Skill 当前在仓库中可见，可按需下架。",
-          tone:
-            "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
+          tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
           iconClass: "text-emerald-600 dark:text-emerald-300",
         };
 
@@ -113,9 +110,7 @@ export function SkillReviewStatusModal({
         </div>
       }
     >
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-        {title}
-      </p>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">{title}</p>
 
       <div
         className={`mb-4 flex items-start gap-3 rounded-xl border p-4 ${statusConfig.tone}`}

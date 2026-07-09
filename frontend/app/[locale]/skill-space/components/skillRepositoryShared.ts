@@ -44,7 +44,8 @@ export function pickLatestRepositoryInfo(
 ): MySkillRepositoryInfoItem | null {
   if (!items.length) return null;
   return [...items].sort(
-    (a, b) => parseRepositoryTime(b.create_time) - parseRepositoryTime(a.create_time)
+    (a, b) =>
+      parseRepositoryTime(b.create_time) - parseRepositoryTime(a.create_time)
   )[0];
 }
 

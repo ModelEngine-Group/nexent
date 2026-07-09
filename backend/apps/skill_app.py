@@ -10,7 +10,7 @@ from http import HTTPStatus
 from pydantic import BaseModel, Field
 
 from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
-from consts.exceptions import SkillException, UnauthorizedError
+from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
 from services.skill_service import (
     SkillService,
     skill_creation_task_manager,
@@ -556,6 +556,8 @@ async def update_skill_by_id(
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))

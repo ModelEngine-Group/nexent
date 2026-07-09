@@ -10,6 +10,15 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+_BACKEND_ROOT = _REPO_ROOT / "backend"
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
+for module_name in [
+    name for name in sys.modules
+    if name == "consts" or name.startswith("consts.")
+]:
+    sys.modules.pop(module_name, None)
 
 _skill_repo_db_mock = MagicMock()
 _skill_repo_db_mock.get_skill_repository_by_id_and_publisher = MagicMock()
@@ -67,7 +76,20 @@ _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
 sys.modules["services.skill_service"] = _skill_service_module_mock
 
-from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
+import consts.exceptions as exceptions_module
+
+
+def _ensure_exception(name):
+    exception = getattr(exceptions_module, name, None)
+    if exception is None:
+        exception = type(name, (Exception,), {})
+        setattr(exceptions_module, name, exception)
+    return exception
+
+
+ForbiddenError = _ensure_exception("ForbiddenError")
+SkillDuplicateError = _ensure_exception("SkillDuplicateError")
+SkillException = _ensure_exception("SkillException")
 
 from backend.services import skill_repository_service as srs
 

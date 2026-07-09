@@ -3,10 +3,7 @@
  */
 
 export type SkillRepositoryListingStatus =
-  | "not_shared"
-  | "pending_review"
-  | "rejected"
-  | "shared";
+  "not_shared" | "pending_review" | "rejected" | "shared";
 
 export type MineOwnershipFilter = "all" | "created" | "others";
 
@@ -46,8 +43,7 @@ export interface SkillRepositoryListingListParams {
   sort_by_update_time?: boolean;
 }
 
-export interface SkillRepositoryListingDetail
-  extends SkillRepositoryListingItem {
+export interface SkillRepositoryListingDetail extends SkillRepositoryListingItem {
   skill_info_json?: Record<string, unknown>;
   skill_zip_base64?: string;
   created_at?: string | null;

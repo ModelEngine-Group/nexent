@@ -6,9 +6,16 @@ import { Button, Dropdown, Tag } from "antd";
 import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
 
 import { STATUS_COLORS, STATUS_LABELS } from "./skillRepositoryShared";
-import type { SkillRepositoryListingItem, SkillRepositoryListingStatus } from "@/types/skillRepository";
+import type {
+  SkillRepositoryListingItem,
+  SkillRepositoryListingStatus,
+} from "@/types/skillRepository";
 
-export function StatusTag({ status }: { status: SkillRepositoryListingStatus }) {
+export function StatusTag({
+  status,
+}: {
+  status: SkillRepositoryListingStatus;
+}) {
   return <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status]}</Tag>;
 }
 

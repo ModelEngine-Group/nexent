@@ -89,8 +89,15 @@ export const fetchTools = async () => {
       category: tool.category,
       labels: Array.isArray(tool.labels)
         ? tool.labels
-        : typeof tool.labels === 'string'
-          ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+        : typeof tool.labels === "string"
+          ? (() => {
+              try {
+                const p = JSON.parse(tool.labels);
+                return Array.isArray(p) ? p : [];
+              } catch {
+                return [];
+              }
+            })()
           : [],
       updated_by: tool.updated_by || "",
       inputs: tool.inputs,
@@ -148,7 +155,8 @@ export const fetchAgentList = async (tenantId?: string) => {
       description: agent.description,
       author: agent.author,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
+      model_names:
+        agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -198,7 +206,8 @@ export const fetchPublishedAgentList = async () => {
       description: agent.description,
       author: agent.author,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
+      model_names:
+        agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -250,7 +259,8 @@ export const getCreatingSubAgentId = async () => {
         description: data.description,
         enabledToolIds: data.enable_tool_id_list || [],
         modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames: data.model_names || (data.model_name ? [data.model_name] : []),
+        modelNames:
+          data.model_names || (data.model_name ? [data.model_name] : []),
         maxSteps: data.max_steps,
         requestedOutputTokens: data.requested_output_tokens ?? null,
         businessDescription: data.business_description,
@@ -767,9 +777,14 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
-      model: data.model_name || (Array.isArray(data.model_names) && data.model_names.length > 0 ? data.model_names[0] : ""),
+      model:
+        data.model_name ||
+        (Array.isArray(data.model_names) && data.model_names.length > 0
+          ? data.model_names[0]
+          : ""),
       model_ids: data.model_ids || (data.model_id ? [data.model_id] : []),
-      model_names: data.model_names || (data.model_name ? [data.model_name] : []),
+      model_names:
+        data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
       duty_prompt: data.duty_prompt,
@@ -815,7 +830,14 @@ export const searchAgentInfo = async (
               labels: Array.isArray(tool.labels)
                 ? tool.labels
                 : typeof tool.labels === "string"
-                  ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                  ? (() => {
+                      try {
+                        const p = JSON.parse(tool.labels);
+                        return Array.isArray(p) ? p : [];
+                      } catch {
+                        return [];
+                      }
+                    })()
                   : [],
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
@@ -1393,7 +1415,10 @@ export const updateSkillById = async (
   }
 };
 
-export const fetchSkillById = async (skillId: number, tenantId?: string | null) => {
+export const fetchSkillById = async (
+  skillId: number,
+  tenantId?: string | null
+) => {
   try {
     const url = tenantId
       ? `${API_ENDPOINTS.skills.getById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
@@ -1418,8 +1443,7 @@ export const fetchSkillById = async (skillId: number, tenantId?: string | null) 
     return {
       success: false,
       data: null,
-      message:
-        error instanceof Error ? error.message : "Failed to fetch skill",
+      message: error instanceof Error ? error.message : "Failed to fetch skill",
     };
   }
 };

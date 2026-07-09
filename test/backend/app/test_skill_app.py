@@ -120,6 +120,7 @@ consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 class SkillException(Exception):
     pass
 consts_exceptions_mock.SkillException = SkillException
+consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 
 # Use real Pydantic model for SkillInstanceInfoRequest
@@ -147,6 +148,7 @@ class MockSkillFileData(BaseModel):
     content: str
 
 class MockSkillUpdateRequest(BaseModel):
+    name: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
     tool_ids: Optional[List[int]] = None
@@ -2697,3 +2699,23 @@ class TestBuildModelConfigFromTenant:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+class TestUpdateSkillByIdEndpoint:
+    def test_forbidden_update_returns_403(self):
+        with patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user-1", "tenant-1"),
+        ), patch("backend.apps.skill_app.SkillService") as service_class:
+            service_class.return_value.update_skill_by_id.side_effect = (
+                skill_app.ForbiddenError("Not authorized to update this skill")
+            )
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+            response = client.put(
+                "/skills/1",
+                json={"description": "updated"},
+                headers={"Authorization": "Bearer token"},
+            )
+
+        assert response.status_code == 403

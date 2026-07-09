@@ -66,8 +66,11 @@ export default function SkillRepositoryPage() {
     null
   );
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
-  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(null);
-  const [copyListing, setCopyListing] = useState<SkillRepositoryListingItem | null>(null);
+  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
+    null
+  );
+  const [copyListing, setCopyListing] =
+    useState<SkillRepositoryListingItem | null>(null);
   const [copyTargetName, setCopyTargetName] = useState("");
   const [copyNameError, setCopyNameError] = useState<string | null>(null);
 
@@ -169,10 +172,10 @@ export default function SkillRepositoryPage() {
   const mineTabCount = mineCountData?.counts?.all ?? 0;
   const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
   const updatingRepositoryId = updateStatusMutation.isPending
-    ? updateStatusMutation.variables?.skillRepositoryId ?? null
+    ? (updateStatusMutation.variables?.skillRepositoryId ?? null)
     : null;
   const installingRepositoryId = installMutation.isPending
-    ? installMutation.variables?.skillRepositoryId ?? null
+    ? (installMutation.variables?.skillRepositoryId ?? null)
     : null;
 
   const openDetail = (listing: SkillRepositoryListingItem) => {
@@ -217,9 +220,12 @@ export default function SkillRepositoryPage() {
         "type" in detail &&
         (detail as { type?: unknown }).type === "skill_duplicate"
       ) {
-        const duplicates = (detail as { duplicate_skills?: unknown }).duplicate_skills;
+        const duplicates = (detail as { duplicate_skills?: unknown })
+          .duplicate_skills;
         const duplicateNames = Array.isArray(duplicates)
-          ? duplicates.filter((name): name is string => typeof name === "string")
+          ? duplicates.filter(
+              (name): name is string => typeof name === "string"
+            )
           : [];
         setCopyNameError(
           duplicateNames.length > 0
@@ -272,7 +278,7 @@ export default function SkillRepositoryPage() {
     }
 
     const hasShared = activeInfo.some((info) => info.status === "shared");
-    return new Promise((resolve) => {
+    const confirmed = await new Promise<boolean>((resolve) => {
       modal.confirm({
         title: hasShared ? "保存后将自动下架" : "保存后将撤回审核",
         content: hasShared
@@ -284,25 +290,31 @@ export default function SkillRepositoryPage() {
         onCancel: () => resolve(false),
       });
     });
+    if (!confirmed) {
+      return false;
+    }
+
+    try {
+      await Promise.all(
+        activeInfo.map((info) =>
+          updateStatusMutation.mutateAsync({
+            skillRepositoryId: info.skill_repository_id,
+            status: "not_shared",
+          })
+        )
+      );
+      return true;
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to update listing status"
+      );
+      return false;
+    }
   };
 
   const handleSkillBuildSuccess = async () => {
-    const activeInfo = getActiveRepositoryInfo(editingSkill);
-    if (activeInfo.length > 0) {
-      try {
-        await Promise.all(
-          activeInfo.map((info) =>
-            updateStatusMutation.mutateAsync({
-              skillRepositoryId: info.skill_repository_id,
-              status: "not_shared",
-            })
-          )
-        );
-        message.success("已自动下架，请重新上架");
-      } catch (error) {
-        message.error("Skill 已保存，但自动下架失败，请手动下架");
-      }
-    }
     await refetchMine().catch(() => {});
     setEditingSkill(null);
   };
@@ -470,11 +482,16 @@ export default function SkillRepositoryPage() {
                       });
                       message.success("已提交上架申请");
                     } catch (error) {
-                      if (error instanceof ApiError && Number(error.code) === 403) {
+                      if (
+                        error instanceof ApiError &&
+                        Number(error.code) === 403
+                      ) {
                         message.error("当前账号只能启用自己创建的 Skill");
                         return;
                       }
-                      message.error(error instanceof Error ? error.message : "提交审批失败");
+                      message.error(
+                        error instanceof Error ? error.message : "提交审批失败"
+                      );
                     }
                   }}
                   isUpdatingStatus={updateStatusMutation.isPending}
