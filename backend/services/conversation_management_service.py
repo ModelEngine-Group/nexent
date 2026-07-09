@@ -22,9 +22,8 @@ from database.conversation_db import (
     get_latest_assistant_message,
     get_latest_assistant_message_id,
     get_last_unit_for_message,
-    get_max_run_id_for_conversation,
     get_message_id_by_index,
-    get_message_units_by_run,
+    get_message_units_by_message,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
@@ -49,8 +48,7 @@ logger = logging.getLogger("conversation_management_service")
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
-                  status: str = 'completed',
-                  run_id: Optional[int] = None) -> int:
+                  status: str = 'completed') -> int:
     """
     Insert only the ConversationMessage row for a new message.
 
@@ -101,17 +99,14 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'content': string_content or "",
         'minio_files': message_data.get('minio_files'),
     }
-    return create_conversation_message(message_data_copy, user_id, status=status, run_id=run_id)
+    return create_conversation_message(message_data_copy, user_id, status=status)
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
                       unit_type: str, unit_content: str,
                       user_id: Optional[str] = None,
                       unit_status: str = 'completed',
-                      run_id: Optional[int] = None,
-                      step_id: Optional[int] = None,
-                      tool_call_id: Optional[str] = None,
-                      event_time: Optional[datetime] = None) -> int:
+                      step_index: Optional[int] = None) -> int:
     """
     Insert exactly one ConversationMessageUnit row.
 
@@ -123,6 +118,7 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Identifier of the user creating the unit
         unit_status: Lifecycle status (streaming / completed)
+        step_index: Optional ReAct step sequence number within this message
 
     Returns:
         int: Newly created unit_id
@@ -135,40 +131,23 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content=unit_content,
         user_id=user_id,
         unit_status=unit_status,
-        run_id=run_id,
-        step_id=step_id,
-        tool_call_id=tool_call_id,
-        event_time=event_time,
+        step_index=step_index,
     )
 
 
-def get_message_units_by_run_id(conversation_id: int, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Get all units for a conversation, optionally filtered by run_id.
+def get_message_units_by_message_id(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get all units for a conversation, optionally filtered by message_id.
 
     Used by HistoryProjector to reconstruct ReAct execution timeline.
 
     Args:
         conversation_id: Conversation ID
-        run_id: Optional run ID to filter by
+        message_id: Optional message ID to filter by
 
     Returns:
-        List of unit dictionaries ordered by run_id, step_id, unit_index
+        List of unit dictionaries ordered by message_id, step_index, unit_index
     """
-    return get_message_units_by_run(conversation_id, run_id)
-
-
-def get_max_run_id(conversation_id: int) -> Optional[int]:
-    """Get the maximum run_id for a conversation.
-
-    Returns None if no messages with run_id exist yet.
-
-    Args:
-        conversation_id: Conversation ID
-
-    Returns:
-        Maximum run_id or None
-    """
-    return get_max_run_id_for_conversation(conversation_id)
+    return get_message_units_by_message(conversation_id, message_id)
 
 
 def update_message_status(message_id: int, status: str, user_id: str) -> None:

@@ -2,10 +2,10 @@
 Comprehensive verification test for context module features.
 
 Tests:
-- All 10 handler to_messages() implementations
+- All 9 handler to_messages() implementations
 - ContextProjector with all 7 component types
 - Semantic equivalence between use_context_items=True/False
-- HistoryProjector with all 3 projection purposes
+- HistoryProjector with both projection purposes
 - Integration: Full agent run with all components + history projector
 """
 import os
@@ -44,9 +44,9 @@ from nexent.core.agents.agent_context import ContextManager
 
 
 def test_pr0_handlers():
-    """Handler: Test all 10 handler to_messages() implementations."""
+    """Handler: Test all 9 handler to_messages() implementations."""
     print("\n" + "=" * 70)
-    print("Handler: Testing all 10 handler to_messages() implementations")
+    print("Handler: Testing all 9 handler to_messages() implementations")
     print("=" * 70)
     
     register_all()
@@ -127,27 +127,6 @@ def test_pr0_handlers():
             "ToolCallResultHandler",
             ContextItemType.TOOL_CALL_RESULT,
             {"tool_call": "search('AI')", "execution_result": "Found 10 results"},
-            1,
-            ["user"],
-        ),
-        (
-            "WorkingMemoryHandler (active_goal)",
-            ContextItemType.WORKING_MEMORY,
-            {"type": "active_goal", "text": "Complete the task"},
-            1,
-            ["user"],
-        ),
-        (
-            "WorkingMemoryHandler (pending_tool_call)",
-            ContextItemType.WORKING_MEMORY,
-            {"type": "pending_tool_call", "tool_call_id": "tc_123", "tool_content": "Searching..."},
-            1,
-            ["user"],
-        ),
-        (
-            "WorkingMemoryHandler (default)",
-            ContextItemType.WORKING_MEMORY,
-            {"type": "other", "data": "some data"},
             1,
             ["user"],
         ),
@@ -354,24 +333,23 @@ def test_pr1_semantic_equivalence():
 
 
 def test_pr2_history_projector():
-    """HistoryProjector: Test HistoryProjector with all 3 projection purposes."""
+    """HistoryProjector: Test HistoryProjector with both projection purposes."""
     print("\n" + "=" * 70)
-    print("HistoryProjector: Testing HistoryProjector with all 3 projection purposes")
+    print("HistoryProjector: Testing HistoryProjector with both projection purposes")
     print("=" * 70)
     
     register_all()
     
-    def mock_query_units(conversation_id: int, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def mock_query_units(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
         units = [
-            {"unit_id": 1, "unit_type": "user_input", "unit_content": "What is AI?", "run_id": 1, "step_id": 1, "tool_call_id": None},
-            {"unit_id": 2, "unit_type": "final_answer", "unit_content": "AI is artificial intelligence", "run_id": 1, "step_id": 1, "tool_call_id": None},
-            {"unit_id": 3, "unit_type": "tool", "unit_content": "search('machine learning')", "run_id": 1, "step_id": 2, "tool_call_id": "tc_001"},
-            {"unit_id": 4, "unit_type": "execution_logs", "unit_content": "Found 5 results", "run_id": 1, "step_id": 2, "tool_call_id": "tc_001"},
-            {"unit_id": 5, "unit_type": "model_output_thinking", "unit_content": "Let me think about this...", "run_id": 1, "step_id": 2, "tool_call_id": None},
-            {"unit_id": 6, "unit_type": "user_input", "unit_content": "Tell me more", "run_id": 2, "step_id": 1, "tool_call_id": None},
+            {"unit_id": 1, "unit_type": "user_input", "unit_content": "What is AI?", "message_id": 1, "step_index": 1},
+            {"unit_id": 2, "unit_type": "final_answer", "unit_content": "AI is artificial intelligence", "message_id": 1, "step_index": 1},
+            {"unit_id": 3, "unit_type": "tool_call", "unit_content": '{"tool_call": "search(\'machine learning\')", "execution_result": "Found 5 results"}', "message_id": 1, "step_index": 2},
+            {"unit_id": 4, "unit_type": "model_output_thinking", "unit_content": "Let me think about this...", "message_id": 1, "step_index": 2},
+            {"unit_id": 5, "unit_type": "user_input", "unit_content": "Tell me more", "message_id": 2, "step_index": 1},
         ]
-        if run_id is not None:
-            return [u for u in units if u.get("run_id") == run_id]
+        if message_id is not None:
+            return [u for u in units if u.get("message_id") == message_id]
         return units
     
     projector = HistoryProjector(query_units_fn=mock_query_units)
@@ -398,27 +376,6 @@ def test_pr2_history_projector():
         passed += 1
     else:
         print(f"    ❌ Missing TOOL_CALL_RESULT items")
-        failed += 1
-    
-    if ContextItemType.WORKING_MEMORY not in mc_types:
-        print(f"    ✅ WORKING_MEMORY correctly excluded")
-        passed += 1
-    else:
-        print(f"    ❌ WORKING_MEMORY should not be in model_context")
-        failed += 1
-    
-    print("\n  Testing purpose='resume':")
-    items_resume = projector.project(conversation_id=123, purpose="resume")
-    
-    resume_types = {}
-    for item in items_resume:
-        resume_types[item.item_type] = resume_types.get(item.item_type, 0) + 1
-    
-    if ContextItemType.WORKING_MEMORY in resume_types:
-        print(f"    ✅ WORKING_MEMORY: {resume_types[ContextItemType.WORKING_MEMORY]} item(s)")
-        passed += 1
-    else:
-        print(f"    ❌ Missing WORKING_MEMORY items")
         failed += 1
     
     print("\n  Testing purpose='chat':")
@@ -466,10 +423,10 @@ def test_integration_full_agent():
         from nexent.core.agents.run_agent import agent_run
         from nexent.monitor import agent_monitoring_context, AgentRunMetadata
         
-        def mock_query_units(conversation_id: int, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        def mock_query_units(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
             return [
-                {"unit_id": 1, "unit_type": "user_input", "unit_content": "Previous question", "run_id": 1, "step_id": 1, "tool_call_id": None},
-                {"unit_id": 2, "unit_type": "final_answer", "unit_content": "Previous answer", "run_id": 1, "step_id": 1, "tool_call_id": None},
+                {"unit_id": 1, "unit_type": "user_input", "unit_content": "Previous question", "message_id": 1, "step_index": 1},
+                {"unit_id": 2, "unit_type": "final_answer", "unit_content": "Previous answer", "message_id": 1, "step_index": 1},
             ]
         
         history_projector = HistoryProjector(query_units_fn=mock_query_units)

@@ -91,8 +91,7 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
 
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
-                                 status: str = 'completed',
-                                 run_id: Optional[int] = None) -> int:
+                                 status: str = 'completed') -> int:
     """
     Create a conversation message record
 
@@ -105,7 +104,6 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             - minio_files: JSON string of attachment information
         user_id: Reserved parameter for created_by and updated_by fields
         status: Lifecycle status (pending / streaming / completed / failed / stopped)
-        run_id: Optional agent run ID for history projection
 
     Returns:
         int: Newly created message ID (auto-increment ID)
@@ -126,8 +124,6 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_data['role'],
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N', "status": status}
-        if run_id is not None:
-            data["run_id"] = run_id
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -194,10 +190,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
                         unit_type: str, unit_content: str,
                         user_id: Optional[str] = None,
                         unit_status: str = 'completed',
-                        run_id: Optional[int] = None,
-                        step_id: Optional[int] = None,
-                        tool_call_id: Optional[str] = None,
-                        event_time: Optional[datetime] = None) -> int:
+                        step_index: Optional[int] = None) -> int:
     """
     Insert a single ConversationMessageUnit row.
 
@@ -209,10 +202,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Reserved parameter for created_by and updated_by fields
         unit_status: Lifecycle status (streaming / completed)
-        run_id: Optional agent run ID for history projection
-        step_id: Optional ReAct step ID for history projection
-        tool_call_id: Optional tool call identifier for history projection
-        event_time: Optional event timestamp for history projection
+        step_index: Optional ReAct step sequence number within this message
 
     Returns:
         int: Newly created unit ID (auto-increment ID)
@@ -231,14 +221,8 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "unit_status": unit_status,
             "delete_flag": 'N',
         }
-        if run_id is not None:
-            row_data["run_id"] = run_id
-        if step_id is not None:
-            row_data["step_id"] = step_id
-        if tool_call_id is not None:
-            row_data["tool_call_id"] = tool_call_id
-        if event_time is not None:
-            row_data["event_time"] = event_time
+        if step_index is not None:
+            row_data["step_index"] = step_index
         if user_id:
             row_data["created_by"] = user_id
             row_data["updated_by"] = user_id
@@ -438,17 +422,17 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         return list(map(as_dict, records))
 
 
-def get_message_units_by_run(conversation_id: int, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_message_units_by_message(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Get all units for a conversation, optionally filtered by run_id.
+    Get all units for a conversation, optionally filtered by message_id.
     Used by HistoryProjector to reconstruct ReAct execution timeline.
 
     Args:
         conversation_id: Conversation ID (integer)
-        run_id: Optional run ID to filter by. If None, returns all units.
+        message_id: Optional message ID to filter by. If None, returns all units.
 
     Returns:
-        List[Dict[str, Any]]: List of message units, ordered by run_id, step_id, unit_index
+        List[Dict[str, Any]]: List of message units, ordered by message_id, step_index, unit_index
     """
     with get_db_session() as session:
         conversation_id = int(conversation_id)
@@ -458,36 +442,17 @@ def get_message_units_by_run(conversation_id: int, run_id: Optional[int] = None)
             ConversationMessageUnit.delete_flag == 'N'
         )
 
-        if run_id is not None:
-            stmt = stmt.where(ConversationMessageUnit.run_id == run_id)
+        if message_id is not None:
+            stmt = stmt.where(ConversationMessageUnit.message_id == message_id)
 
         stmt = stmt.order_by(
-            asc(ConversationMessageUnit.run_id),
-            asc(ConversationMessageUnit.step_id),
+            asc(ConversationMessageUnit.message_id),
+            asc(ConversationMessageUnit.step_index),
             asc(ConversationMessageUnit.unit_index)
         )
 
         records = session.scalars(stmt).all()
         return list(map(as_dict, records))
-
-
-def get_max_run_id_for_conversation(conversation_id: int) -> Optional[int]:
-    """Get the maximum run_id from conversation_message_t for a given conversation.
-
-    Args:
-        conversation_id: Conversation ID
-
-    Returns:
-        Maximum run_id value, or None if no messages have run_id set.
-    """
-    with get_db_session() as session:
-        conversation_id = int(conversation_id)
-        stmt = select(func.max(ConversationMessage.run_id)).where(
-            ConversationMessage.conversation_id == conversation_id,
-            ConversationMessage.delete_flag == 'N'
-        )
-        result = session.scalar(stmt)
-        return result
 
 
 def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]:

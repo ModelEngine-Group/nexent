@@ -1394,8 +1394,8 @@ async def create_agent_run_info(
     override_version_no: int | None = None,
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
-    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     conversation_id: Optional[int] = None,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1424,13 +1424,14 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
+        "conversation_id": conversation_id,
     }
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
 
-    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params, conversation_id=conversation_id)
+    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")

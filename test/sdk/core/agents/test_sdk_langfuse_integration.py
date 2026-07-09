@@ -176,23 +176,21 @@ class TestSDKLangFuseIntegration:
         )
         manager = ContextManager(config=config)
 
-        def mock_query_fn(conversation_id, run_id=None):
+        def mock_query_fn(conversation_id, message_id=None):
             return [
                 {
                     "unit_id": 1,
                     "unit_type": "user_input",
                     "unit_content": "What is Python?",
-                    "run_id": 1,
-                    "step_id": 1,
-                    "event_time": "2024-01-01T00:00:00",
+                    "message_id": 1,
+                    "step_index": 1,
                 },
                 {
                     "unit_id": 2,
                     "unit_type": "final_answer",
                     "unit_content": "Python is a programming language.",
-                    "run_id": 1,
-                    "step_id": 2,
-                    "event_time": "2024-01-01T00:00:01",
+                    "message_id": 1,
+                    "step_index": 2,
                 },
             ]
 

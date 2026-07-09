@@ -1,54 +1,37 @@
--- Migration: Add history projection fields for ReAct process persistence
--- Date: 2026-07-03
--- Description: Add run_id, step_id, tool_call_id, event_time columns to
--- conversation_message_unit_t and run_id to conversation_message_t so the
--- frontend can reconstruct ReAct step timelines from persisted history.
+-- Migration: Add step_index for ReAct step tracking
+-- Date: 2026-07-03 (revised 2026-07-09)
+-- Description: Add step_index column to conversation_message_unit_t.
+-- Drops previously added run_id, tool_call_id, event_time columns
+-- that are no longer needed after review.
 
 SET search_path TO nexent;
-
 BEGIN;
 
--- Unit-level: agent run sequence number
+-- Add step_index (renamed from step_id)
 ALTER TABLE nexent.conversation_message_unit_t
-    ADD COLUMN IF NOT EXISTS run_id INTEGER DEFAULT NULL;
+    ADD COLUMN IF NOT EXISTS step_index INTEGER DEFAULT NULL;
 
-COMMENT ON COLUMN nexent.conversation_message_unit_t.run_id IS
-    'Agent run sequence number within this conversation. Increments per new agent invocation.';
+COMMENT ON COLUMN nexent.conversation_message_unit_t.step_index IS
+    'ReAct step sequence number within this message. Increments on step_count chunks.';
 
--- Unit-level: ReAct step sequence number
+-- Drop columns from previous revision (idempotent)
 ALTER TABLE nexent.conversation_message_unit_t
-    ADD COLUMN IF NOT EXISTS step_id INTEGER DEFAULT NULL;
-
-COMMENT ON COLUMN nexent.conversation_message_unit_t.step_id IS
-    'ReAct step sequence number within this run. Increments on step_count chunks.';
-
--- Unit-level: tool call pairing UUID
+    DROP COLUMN IF EXISTS run_id;
 ALTER TABLE nexent.conversation_message_unit_t
-    ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(100) DEFAULT NULL;
-
-COMMENT ON COLUMN nexent.conversation_message_unit_t.tool_call_id IS
-    'UUID pairing tool call with its execution result. NULL for non-tool units.';
-
--- Unit-level: actual event timestamp
+    DROP COLUMN IF EXISTS step_id;
 ALTER TABLE nexent.conversation_message_unit_t
-    ADD COLUMN IF NOT EXISTS event_time TIMESTAMP DEFAULT NULL;
-
-COMMENT ON COLUMN nexent.conversation_message_unit_t.event_time IS
-    'Actual event timestamp when chunk was processed. Not batch insert time.';
-
--- Message-level: agent run sequence number
+    DROP COLUMN IF EXISTS tool_call_id;
+ALTER TABLE nexent.conversation_message_unit_t
+    DROP COLUMN IF EXISTS event_time;
 ALTER TABLE nexent.conversation_message_t
-    ADD COLUMN IF NOT EXISTS run_id INTEGER DEFAULT NULL;
+    DROP COLUMN IF EXISTS run_id;
 
-COMMENT ON COLUMN nexent.conversation_message_t.run_id IS
-    'Agent run sequence number. Matches unit run_id for assistant messages.';
+-- Drop obsolete indexes
+DROP INDEX IF EXISTS nexent.idx_message_unit_conversation_run;
+DROP INDEX IF EXISTS nexent.idx_message_unit_tool_call;
 
--- Index for history projection queries (filter by conversation + run)
-CREATE INDEX IF NOT EXISTS idx_message_unit_conversation_run
-    ON nexent.conversation_message_unit_t (conversation_id, run_id);
-
--- Index for tool call pairing lookups
-CREATE INDEX IF NOT EXISTS idx_message_unit_tool_call
-    ON nexent.conversation_message_unit_t (message_id, tool_call_id);
+-- New index for step-based queries
+CREATE INDEX IF NOT EXISTS idx_message_unit_message_step
+    ON nexent.conversation_message_unit_t (message_id, step_index);
 
 COMMIT;

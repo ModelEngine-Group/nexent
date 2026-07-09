@@ -1,6 +1,5 @@
 import asyncio
 import base64
-from datetime import datetime
 from http import HTTPStatus
 import io
 import json
@@ -94,7 +93,6 @@ from services.conversation_management_service import (
     generate_conversation_title_service,
     get_latest_assistant_message,
     get_last_unit_for_message,
-    get_max_run_id,
     save_conversation_user,
     save_message,
     save_message_unit,
@@ -893,16 +891,6 @@ async def _stream_agent_chunks(
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
 
-    # Compute run_id for history projection BEFORE creating the message,
-    # so it can be persisted on the ConversationMessage row.
-    current_run_id: Optional[int] = None
-    if not agent_request.is_debug:
-        try:
-            max_run = get_max_run_id(agent_request.conversation_id)
-            current_run_id = (max_run or 0) + 1
-        except Exception:
-            logger.warning("Failed to compute run_id, history projection will be unavailable", exc_info=True)
-
     # Persist the parent ConversationMessage row up front with status='streaming'
     # so that units saved incrementally have a valid message_id to reference.
     streaming_message_id: Optional[int] = resume_message_id
@@ -925,7 +913,6 @@ async def _stream_agent_chunks(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 status="streaming",
-                run_id=current_run_id,
             )
         except Exception as msg_exc:
             logger.error(
@@ -933,7 +920,9 @@ async def _stream_agent_chunks(
 
     # History projection tracking state
     current_step_id: int = 0
-    pending_tool_call_id: Optional[str] = None  # UUID for current tool→execution_logs pairing
+    pending_tool_content: Optional[str] = None  # Buffered tool content for merge
+    pending_tool_step: Optional[int] = None  # Step index of buffered tool
+    pending_tool_unit_index: Optional[int] = None  # Unit index assigned to buffered tool
 
     # Tracks the unit currently being accumulated in memory. Each entry is
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
@@ -967,18 +956,8 @@ async def _stream_agent_chunks(
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
 
-                chunk_event_time = datetime.now()
-
                 if chunk_type == ProcessType.STEP_COUNT.value:
                     current_step_id += 1
-
-                chunk_tool_call_id: Optional[str] = None
-                if chunk_type == ProcessType.TOOL.value:
-                    pending_tool_call_id = str(uuid.uuid4())
-                    chunk_tool_call_id = pending_tool_call_id
-                elif chunk_type == ProcessType.EXECUTION_LOGS.value and pending_tool_call_id:
-                    chunk_tool_call_id = pending_tool_call_id
-                    pending_tool_call_id = None
 
                 # Add unit_index to the chunk data for frontend resume skip logic.
                 # This allows frontend to accurately skip chunks that were already persisted.
@@ -1126,9 +1105,7 @@ async def _stream_agent_chunks(
                             unit_content='{"placeholder": true}',
                             user_id=user_id,
                             unit_status="completed",
-                            run_id=current_run_id,
-                            step_id=current_step_id,
-                            event_time=chunk_event_time,
+                            step_index=current_step_id,
                         ).result()
                         try:
                             search_results = json.loads(chunk_content)
@@ -1174,6 +1151,47 @@ async def _stream_agent_chunks(
                         yield f"data: {chunk}\n\n"
                         continue
 
+                    # Handle tool call merging: buffer TOOL, merge with EXECUTION_LOGS
+                    if chunk_type == ProcessType.TOOL.value:
+                        pending_tool_content = chunk_content
+                        pending_tool_step = current_step_id
+                        pending_tool_unit_index = next_unit_index
+                        next_unit_index += 1
+                        await channel.publish(f"data: {chunk}\n\n")
+                        yield f"data: {chunk}\n\n"
+                        continue
+
+                    if chunk_type == ProcessType.EXECUTION_LOGS.value and pending_tool_content is not None:
+                        merged_content = json.dumps({
+                            "tool_call": pending_tool_content,
+                            "execution_result": chunk_content,
+                        })
+                        if streaming_message_id is not None:
+                            new_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=pending_tool_unit_index,
+                                unit_type="tool_call",
+                                unit_content=merged_content,
+                                user_id=user_id,
+                                unit_status="completed",
+                                step_index=pending_tool_step,
+                            ).result()
+                            current_unit = {
+                                "type": "tool_call",
+                                "content": merged_content,
+                                "unit_id": new_unit_id,
+                                "unit_index": pending_tool_unit_index,
+                                "mergeable": False,
+                            }
+                        pending_tool_content = None
+                        pending_tool_step = None
+                        pending_tool_unit_index = None
+                        await channel.publish(f"data: {chunk}\n\n")
+                        yield f"data: {chunk}\n\n"
+                        continue
+
                     # Default path: insert a new unit row with unit_status='streaming'.
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
@@ -1187,10 +1205,7 @@ async def _stream_agent_chunks(
                             unit_content=chunk_content,
                             user_id=user_id,
                             unit_status="streaming",
-                            run_id=current_run_id,
-                            step_id=current_step_id,
-                            tool_call_id=chunk_tool_call_id,
-                            event_time=chunk_event_time,
+                            step_index=current_step_id,
                         ).result()
                         current_unit = {
                             "type": chunk_type,
@@ -1204,6 +1219,21 @@ async def _stream_agent_chunks(
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
+
+        # Flush any buffered tool content that didn't receive execution_logs
+        if pending_tool_content is not None and streaming_message_id is not None:
+            submit(
+                save_message_unit,
+                message_id=streaming_message_id,
+                conversation_id=agent_request.conversation_id,
+                unit_index=pending_tool_unit_index,
+                unit_type="tool",
+                unit_content=pending_tool_content,
+                user_id=user_id,
+                unit_status="completed",
+                step_index=pending_tool_step,
+            ).result()
+            pending_tool_content = None
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
         await channel.publish(_safe_agent_stream_error_chunk())
@@ -2699,10 +2729,10 @@ async def prepare_agent_run(
                         'context_manager_config', None)
     if cm_config and cm_config.enabled:
         from nexent.core.agents.context.history_projector import HistoryProjector
-        from services.conversation_management_service import get_message_units_by_run_id
+        from services.conversation_management_service import get_message_units_by_message_id
 
         cm_config.history_projector = HistoryProjector(
-            query_units_fn=get_message_units_by_run_id
+            query_units_fn=get_message_units_by_message_id
         )
 
         cm = agent_run_manager.get_or_create_context_manager(

@@ -115,7 +115,7 @@ class ContextManagerConfig:
     """Optional HistoryProjector instance for projecting DB conversation history into ContextItems.
     
     When set and use_context_items=True, the projector is called during build_context_messages
-    to produce HISTORY_TURN, TOOL_CALL_RESULT, and WORKING_MEMORY items from persisted
+    to produce HISTORY_TURN and TOOL_CALL_RESULT items from persisted
     conversation history. Must be injected by the backend service layer since the SDK
     cannot import database modules directly.
     """

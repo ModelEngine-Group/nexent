@@ -9,7 +9,6 @@ from .managed_agent_handler import ManagedAgentHandler
 from .external_agent_handler import ExternalAgentHandler
 from .history_turn_handler import HistoryTurnHandler
 from .tool_call_result_handler import ToolCallResultHandler
-from .working_memory_handler import WorkingMemoryHandler
 
 ALL_HANDLERS = [
     SystemPromptHandler,
@@ -21,7 +20,6 @@ ALL_HANDLERS = [
     ExternalAgentHandler,
     HistoryTurnHandler,
     ToolCallResultHandler,
-    WorkingMemoryHandler,
 ]
 
 

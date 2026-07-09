@@ -1,9 +1,10 @@
 """Unit tests for HistoryProjector.
 
 Verifies that HistoryProjector correctly projects conversation history
-units into ContextItem instances for model_context, resume, and chat purposes.
+units into ContextItem instances for model_context and chat purposes.
 """
 
+import json
 import pytest
 from unittest.mock import MagicMock
 
@@ -31,26 +32,44 @@ def make_unit(
     unit_id=1,
     unit_type="user_input",
     unit_content="hello",
-    run_id=1,
-    step_id=1,
-    tool_call_id=None,
+    message_id=1,
+    step_index=1,
 ):
     """Build a minimal unit dict matching the database row shape."""
     return {
         "unit_id": unit_id,
         "unit_type": unit_type,
         "unit_content": unit_content,
-        "run_id": run_id,
-        "step_id": step_id,
-        "tool_call_id": tool_call_id,
+        "message_id": message_id,
+        "step_index": step_index,
+    }
+
+
+def make_tool_call_unit(
+    unit_id=1,
+    tool_call="web_search('AI')",
+    execution_result="result: found AI",
+    message_id=1,
+    step_index=1,
+):
+    """Build a merged tool_call unit with JSON unit_content."""
+    return {
+        "unit_id": unit_id,
+        "unit_type": "tool_call",
+        "unit_content": json.dumps({
+            "tool_call": tool_call,
+            "execution_result": execution_result,
+        }),
+        "message_id": message_id,
+        "step_index": step_index,
     }
 
 
 def make_query_fn(units):
     """Return a query_units_fn closure over a fixed list of units."""
-    def query_fn(conversation_id, run_id=None):
-        if run_id is not None:
-            return [u for u in units if u.get("run_id") == run_id]
+    def query_fn(conversation_id, message_id=None):
+        if message_id is not None:
+            return [u for u in units if u.get("message_id") == message_id]
         return units
     return query_fn
 
@@ -81,8 +100,8 @@ class TestBasicProjection:
     def test_project_model_context_single_turn(self):
         """Single user_input + final_answer produces one HISTORY_TURN."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="What is AI?", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="AI is artificial intelligence.", run_id=1, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="What is AI?", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="AI is artificial intelligence.", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -93,14 +112,14 @@ class TestBasicProjection:
         assert items[0].content["assistant_response"] == "AI is artificial intelligence."
 
     def test_project_model_context_multiple_turns(self):
-        """Multiple runs/steps produce multiple HISTORY_TURNs."""
+        """Multiple messages/steps produce multiple HISTORY_TURNs."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="Q1", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="A1", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="user_input", unit_content="Q2", run_id=1, step_id=2),
-            make_unit(unit_id=4, unit_type="final_answer", unit_content="A2", run_id=1, step_id=2),
-            make_unit(unit_id=5, unit_type="user_input", unit_content="Q3", run_id=2, step_id=1),
-            make_unit(unit_id=6, unit_type="final_answer", unit_content="A3", run_id=2, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="Q1", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="A1", message_id=1, step_index=1),
+            make_unit(unit_id=3, unit_type="user_input", unit_content="Q2", message_id=1, step_index=2),
+            make_unit(unit_id=4, unit_type="final_answer", unit_content="A2", message_id=1, step_index=2),
+            make_unit(unit_id=5, unit_type="user_input", unit_content="Q3", message_id=2, step_index=1),
+            make_unit(unit_id=6, unit_type="final_answer", unit_content="A3", message_id=2, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -111,10 +130,10 @@ class TestBasicProjection:
     def test_project_model_context_excludes_thinking(self):
         """model_output_thinking and model_output_deep_thinking are NOT included in HISTORY_TURN."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="Think hard", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="internal thought", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="model_output_deep_thinking", unit_content="deep thought", run_id=1, step_id=1),
-            make_unit(unit_id=4, unit_type="final_answer", unit_content="The answer.", run_id=1, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="Think hard", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="internal thought", message_id=1, step_index=1),
+            make_unit(unit_id=3, unit_type="model_output_deep_thinking", unit_content="deep thought", message_id=1, step_index=1),
+            make_unit(unit_id=4, unit_type="final_answer", unit_content="The answer.", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -122,7 +141,6 @@ class TestBasicProjection:
         assert len(items) == 1
         turn = items[0]
         assert turn.item_type == ContextItemType.HISTORY_TURN
-        # Content only has user_query and assistant_response, no thinking
         assert "internal thought" not in str(turn.content)
         assert "deep thought" not in str(turn.content)
         assert turn.content["user_query"] == "Think hard"
@@ -140,15 +158,14 @@ class TestBasicProjection:
 # ===================================================================
 
 class TestToolCallResult:
-    """Tests for tool/execution_logs pairing into TOOL_CALL_RESULT items."""
+    """Tests for merged tool_call rows into TOOL_CALL_RESULT items."""
 
-    def test_tool_call_result_pairing(self):
-        """tool + execution_logs with same tool_call_id produces TOOL_CALL_RESULT."""
+    def test_tool_call_result_single(self):
+        """Single merged tool_call row produces one TOOL_CALL_RESULT."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="search", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="done", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="tool", unit_content="web_search('AI')", run_id=1, step_id=1, tool_call_id="tc-1"),
-            make_unit(unit_id=4, unit_type="execution_logs", unit_content="result: found AI", run_id=1, step_id=1, tool_call_id="tc-1"),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="search", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="done", message_id=1, step_index=1),
+            make_tool_call_unit(unit_id=3, tool_call="web_search('AI')", execution_result="result: found AI", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -158,30 +175,34 @@ class TestToolCallResult:
         assert tool_results[0].content["tool_call"] == "web_search('AI')"
         assert tool_results[0].content["execution_result"] == "result: found AI"
 
-    def test_tool_call_result_multiple_pairs(self):
-        """Multiple tool/execution_logs pairs produce multiple TOOL_CALL_RESULTs."""
+    def test_tool_call_result_multiple(self):
+        """Multiple merged tool_call rows produce multiple TOOL_CALL_RESULTs."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="multi", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="done", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="tool", unit_content="tool_a()", run_id=1, step_id=1, tool_call_id="tc-a"),
-            make_unit(unit_id=4, unit_type="execution_logs", unit_content="result_a", run_id=1, step_id=1, tool_call_id="tc-a"),
-            make_unit(unit_id=5, unit_type="tool", unit_content="tool_b()", run_id=1, step_id=1, tool_call_id="tc-b"),
-            make_unit(unit_id=6, unit_type="execution_logs", unit_content="result_b", run_id=1, step_id=1, tool_call_id="tc-b"),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="multi", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="done", message_id=1, step_index=1),
+            make_tool_call_unit(unit_id=3, tool_call="tool_a()", execution_result="result_a", message_id=1, step_index=1),
+            make_tool_call_unit(unit_id=4, tool_call="tool_b()", execution_result="result_b", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
 
         tool_results = [i for i in items if i.item_type == ContextItemType.TOOL_CALL_RESULT]
         assert len(tool_results) == 2
-        tool_call_ids = {i.metadata["tool_call_id"] for i in tool_results}
-        assert tool_call_ids == {"tc-a", "tc-b"}
+        item_ids = {i.item_id for i in tool_results}
+        assert item_ids == {"tool_call_result:3", "tool_call_result:4"}
 
-    def test_tool_call_result_unpaired_tool(self):
-        """tool without execution_logs does NOT produce TOOL_CALL_RESULT."""
+    def test_tool_call_result_invalid_json_skipped(self):
+        """tool_call row with invalid JSON is skipped."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="q", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="tool", unit_content="orphan_tool()", run_id=1, step_id=1, tool_call_id="tc-orphan"),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="q", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", message_id=1, step_index=1),
+            {
+                "unit_id": 3,
+                "unit_type": "tool_call",
+                "unit_content": "not valid json",
+                "message_id": 1,
+                "step_index": 1,
+            },
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -189,26 +210,11 @@ class TestToolCallResult:
         tool_results = [i for i in items if i.item_type == ContextItemType.TOOL_CALL_RESULT]
         assert len(tool_results) == 0
 
-    def test_tool_call_result_unpaired_logs(self):
-        """execution_logs without tool does NOT produce TOOL_CALL_RESULT."""
+    def test_tool_call_result_no_tool_call_units(self):
+        """No tool_call units means no TOOL_CALL_RESULT items."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="q", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="execution_logs", unit_content="orphan logs", run_id=1, step_id=1, tool_call_id="tc-orphan"),
-        ]
-        projector = HistoryProjector(make_query_fn(units))
-        items = projector.project(conversation_id=1, purpose="model_context")
-
-        tool_results = [i for i in items if i.item_type == ContextItemType.TOOL_CALL_RESULT]
-        assert len(tool_results) == 0
-
-    def test_tool_call_result_different_ids(self):
-        """tool and execution_logs with different tool_call_ids do NOT pair."""
-        units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="q", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="tool", unit_content="tool_x()", run_id=1, step_id=1, tool_call_id="tc-x"),
-            make_unit(unit_id=4, unit_type="execution_logs", unit_content="logs_y", run_id=1, step_id=1, tool_call_id="tc-y"),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="q", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -218,65 +224,7 @@ class TestToolCallResult:
 
 
 # ===================================================================
-# 3. Resume Context Tests
-# ===================================================================
-
-class TestResumeContext:
-    """Tests for resume purpose producing WORKING_MEMORY items."""
-
-    def test_resume_context_active_goal(self):
-        """Last user_input produces WORKING_MEMORY with active_goal."""
-        units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="first query", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="first answer", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="user_input", unit_content="latest goal", run_id=2, step_id=1),
-        ]
-        projector = HistoryProjector(make_query_fn(units))
-        items = projector.project(conversation_id=1, purpose="resume")
-
-        goal_items = [i for i in items if i.content.get("type") == "active_goal"]
-        assert len(goal_items) == 1
-        assert goal_items[0].item_type == ContextItemType.WORKING_MEMORY
-        assert goal_items[0].content["text"] == "latest goal"
-        assert goal_items[0].authority_tier == AuthorityTier.USER
-
-    def test_resume_context_incomplete_tools(self):
-        """Tool without execution_logs produces WORKING_MEMORY with pending_tool_call."""
-        units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="do something", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="tool", unit_content="pending_tool()", run_id=1, step_id=1, tool_call_id="tc-pending"),
-        ]
-        projector = HistoryProjector(make_query_fn(units))
-        items = projector.project(conversation_id=1, purpose="resume")
-
-        pending_items = [i for i in items if i.content.get("type") == "pending_tool_call"]
-        assert len(pending_items) == 1
-        assert pending_items[0].item_type == ContextItemType.WORKING_MEMORY
-        assert pending_items[0].content["tool_call_id"] == "tc-pending"
-        assert pending_items[0].content["tool_content"] == "pending_tool()"
-        assert pending_items[0].authority_tier == AuthorityTier.TOOL_RESULT
-
-    def test_resume_context_empty_units(self):
-        """Empty units returns empty items."""
-        projector = HistoryProjector(make_query_fn([]))
-        items = projector.project(conversation_id=1, purpose="resume")
-        assert items == []
-
-    def test_resume_context_no_user_input(self):
-        """No user_input in last step returns no active_goal."""
-        units = [
-            make_unit(unit_id=1, unit_type="tool", unit_content="some_tool()", run_id=1, step_id=1, tool_call_id="tc-1"),
-            make_unit(unit_id=2, unit_type="execution_logs", unit_content="logs", run_id=1, step_id=1, tool_call_id="tc-1"),
-        ]
-        projector = HistoryProjector(make_query_fn(units))
-        items = projector.project(conversation_id=1, purpose="resume")
-
-        goal_items = [i for i in items if i.content.get("type") == "active_goal"]
-        assert len(goal_items) == 0
-
-
-# ===================================================================
-# 4. Chat Context Tests
+# 3. Chat Context Tests
 # ===================================================================
 
 class TestChatContext:
@@ -285,9 +233,9 @@ class TestChatContext:
     def test_chat_context_includes_thinking(self):
         """Chat context includes model_output_thinking units."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="Explain", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="Let me think...", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="final_answer", unit_content="The answer is X.", run_id=1, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="Explain", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="Let me think...", message_id=1, step_index=1),
+            make_unit(unit_id=3, unit_type="final_answer", unit_content="The answer is X.", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="chat")
@@ -295,7 +243,6 @@ class TestChatContext:
         assert len(items) == 1
         turn = items[0]
         assert turn.item_type == ContextItemType.HISTORY_TURN
-        # Chat turn includes all relevant units as a list
         unit_types = [u["type"] for u in turn.content["units"]]
         assert "user_input" in unit_types
         assert "model_output_thinking" in unit_types
@@ -310,41 +257,41 @@ class TestChatContext:
 
 
 # ===================================================================
-# 5. Grouping Tests
+# 4. Grouping Tests
 # ===================================================================
 
 class TestGrouping:
-    """Tests for _group_by_run handling of None/falsy IDs."""
+    """Tests for _group_by_message handling of None/falsy IDs."""
 
-    def test_group_by_run_handles_none_run_id(self):
-        """Units with None run_id are grouped under run_id=0."""
+    def test_group_by_message_handles_none_message_id(self):
+        """Units with None message_id are grouped under message_id=0."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="q", run_id=None, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", run_id=None, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="q", message_id=None, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", message_id=None, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
 
         assert len(items) == 1
         assert items[0].item_id == "history_turn:0:1"
-        assert items[0].metadata["run_id"] == 0
+        assert items[0].metadata["message_id"] == 0
 
-    def test_group_by_run_handles_none_step_id(self):
-        """Units with None step_id are grouped under step_id=0."""
+    def test_group_by_message_handles_none_step_index(self):
+        """Units with None step_index are grouped under step_index=0."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="q", run_id=1, step_id=None),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", run_id=1, step_id=None),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="q", message_id=1, step_index=None),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", message_id=1, step_index=None),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
 
         assert len(items) == 1
         assert items[0].item_id == "history_turn:1:0"
-        assert items[0].metadata["step_id"] == 0
+        assert items[0].metadata["step_index"] == 0
 
 
 # ===================================================================
-# 6. Item Validation Tests
+# 5. Item Validation Tests
 # ===================================================================
 
 class TestItemValidation:
@@ -353,8 +300,8 @@ class TestItemValidation:
     def test_history_turn_item_fields(self):
         """Verify item_id format, item_type, source_refs, authority_tier, content structure."""
         units = [
-            make_unit(unit_id=10, unit_type="user_input", unit_content="query text", run_id=3, step_id=2),
-            make_unit(unit_id=20, unit_type="final_answer", unit_content="answer text", run_id=3, step_id=2),
+            make_unit(unit_id=10, unit_type="user_input", unit_content="query text", message_id=3, step_index=2),
+            make_unit(unit_id=20, unit_type="final_answer", unit_content="answer text", message_id=3, step_index=2),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -373,15 +320,14 @@ class TestItemValidation:
             "assistant_response": "answer text",
         }
         assert item.token_estimate == (len("query text") + len("answer text")) // 4
-        assert item.metadata == {"run_id": 3, "step_id": 2}
+        assert item.metadata == {"message_id": 3, "step_index": 2}
 
     def test_tool_call_result_item_fields(self):
         """Verify item_id format, item_type, source_refs, authority_tier, content structure."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="q", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", run_id=1, step_id=1),
-            make_unit(unit_id=5, unit_type="tool", unit_content="search('x')", run_id=1, step_id=1, tool_call_id="tc-42"),
-            make_unit(unit_id=6, unit_type="execution_logs", unit_content="found: x", run_id=1, step_id=1, tool_call_id="tc-42"),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="q", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="a", message_id=1, step_index=1),
+            make_tool_call_unit(unit_id=5, tool_call="search('x')", execution_result="found: x", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="model_context")
@@ -390,9 +336,9 @@ class TestItemValidation:
         assert len(tool_items) == 1
         item = tool_items[0]
 
-        assert item.item_id == "tool_call_result:tc-42"
+        assert item.item_id == "tool_call_result:5"
         assert item.item_type == ContextItemType.TOOL_CALL_RESULT
-        assert item.source_refs == ["unit:5", "unit:6"]
+        assert item.source_refs == ["unit:5"]
         assert item.authority_tier == AuthorityTier.TOOL_RESULT
         assert item.minimum_fidelity == RepresentationTier.STRUCTURED
         assert item.current_representation == RepresentationTier.FULL
@@ -400,38 +346,14 @@ class TestItemValidation:
             "tool_call": "search('x')",
             "execution_result": "found: x",
         }
-        assert item.token_estimate == (len("search('x')") + len("found: x")) // 4
         assert item.metadata == {
-            "tool_call_id": "tc-42",
-            "run_id": 1,
-            "step_id": 1,
+            "message_id": 1,
+            "step_index": 1,
         }
-
-    def test_working_memory_item_fields(self):
-        """Verify item_id format, item_type, source_refs, authority_tier, content structure."""
-        units = [
-            make_unit(unit_id=7, unit_type="user_input", unit_content="my goal", run_id=5, step_id=3),
-        ]
-        projector = HistoryProjector(make_query_fn(units))
-        items = projector.project(conversation_id=1, purpose="resume")
-
-        goal_items = [i for i in items if i.content.get("type") == "active_goal"]
-        assert len(goal_items) == 1
-        item = goal_items[0]
-
-        assert item.item_id == "working_memory:goal:5:3"
-        assert item.item_type == ContextItemType.WORKING_MEMORY
-        assert item.source_refs == ["unit:7"]
-        assert item.authority_tier == AuthorityTier.USER
-        assert item.minimum_fidelity == RepresentationTier.STRUCTURED
-        assert item.current_representation == RepresentationTier.FULL
-        assert item.content == {"type": "active_goal", "text": "my goal"}
-        assert item.token_estimate == len("my goal") // 4
-        assert item.metadata == {"run_id": 5, "step_id": 3}
 
 
 # ===================================================================
-# 7. Chat Projection Completeness Tests
+# 6. Chat Projection Completeness Tests
 # ===================================================================
 
 class TestChatProjectionCompleteness:
@@ -445,11 +367,11 @@ class TestChatProjectionCompleteness:
         current implementation's relevant_types.
         """
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="Explain recursion", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="Let me reason...", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="model_output_code", unit_content="def recurse(): ...", run_id=1, step_id=1),
-            make_unit(unit_id=4, unit_type="model_output_deep_thinking", unit_content="deep analysis", run_id=1, step_id=1),
-            make_unit(unit_id=5, unit_type="final_answer", unit_content="Recursion is...", run_id=1, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="Explain recursion", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="Let me reason...", message_id=1, step_index=1),
+            make_unit(unit_id=3, unit_type="model_output_code", unit_content="def recurse(): ...", message_id=1, step_index=1),
+            make_unit(unit_id=4, unit_type="model_output_deep_thinking", unit_content="deep analysis", message_id=1, step_index=1),
+            make_unit(unit_id=5, unit_type="final_answer", unit_content="Recursion is...", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="chat")
@@ -467,10 +389,10 @@ class TestChatProjectionCompleteness:
     def test_chat_projection_preserves_unit_ordering(self):
         """Units within a chat turn maintain their original ordering by position."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="Q", run_id=1, step_id=1),
-            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="think first", run_id=1, step_id=1),
-            make_unit(unit_id=3, unit_type="model_output_code", unit_content="code second", run_id=1, step_id=1),
-            make_unit(unit_id=4, unit_type="final_answer", unit_content="answer third", run_id=1, step_id=1),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="Q", message_id=1, step_index=1),
+            make_unit(unit_id=2, unit_type="model_output_thinking", unit_content="think first", message_id=1, step_index=1),
+            make_unit(unit_id=3, unit_type="model_output_code", unit_content="code second", message_id=1, step_index=1),
+            make_unit(unit_id=4, unit_type="final_answer", unit_content="answer third", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="chat")
@@ -487,29 +409,28 @@ class TestChatProjectionCompleteness:
         ]
 
     def test_chat_projection_includes_metadata_for_reconstruction(self):
-        """Metadata contains run_id, step_id, and includes_thinking flag
+        """Metadata contains message_id, step_index, and includes_thinking flag
         needed by any adapter converting to frontend format."""
         units = [
-            make_unit(unit_id=1, unit_type="user_input", unit_content="Q", run_id=7, step_id=3),
-            make_unit(unit_id=2, unit_type="final_answer", unit_content="A", run_id=7, step_id=3),
+            make_unit(unit_id=1, unit_type="user_input", unit_content="Q", message_id=7, step_index=3),
+            make_unit(unit_id=2, unit_type="final_answer", unit_content="A", message_id=7, step_index=3),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="chat")
 
         assert len(items) == 1
         meta = items[0].metadata
-        assert meta["run_id"] == 7
-        assert meta["step_id"] == 3
+        assert meta["message_id"] == 7
+        assert meta["step_index"] == 3
         assert meta["includes_thinking"] is True
 
     def test_chat_projection_source_refs_cover_all_included_units(self):
         """source_refs list contains references to ALL units included in the content."""
         units = [
-            make_unit(unit_id=10, unit_type="user_input", unit_content="Q", run_id=1, step_id=1),
-            make_unit(unit_id=20, unit_type="model_output_thinking", unit_content="think", run_id=1, step_id=1),
-            make_unit(unit_id=30, unit_type="model_output_code", unit_content="code", run_id=1, step_id=1),
-            make_unit(unit_id=40, unit_type="final_answer", unit_content="A", run_id=1, step_id=1),
-            make_unit(unit_id=50, unit_type="tool", unit_content="tool()", run_id=1, step_id=1, tool_call_id="tc-1"),
+            make_unit(unit_id=10, unit_type="user_input", unit_content="Q", message_id=1, step_index=1),
+            make_unit(unit_id=20, unit_type="model_output_thinking", unit_content="think", message_id=1, step_index=1),
+            make_unit(unit_id=30, unit_type="model_output_code", unit_content="code", message_id=1, step_index=1),
+            make_unit(unit_id=40, unit_type="final_answer", unit_content="A", message_id=1, step_index=1),
         ]
         projector = HistoryProjector(make_query_fn(units))
         items = projector.project(conversation_id=1, purpose="chat")
@@ -523,7 +444,7 @@ class TestChatProjectionCompleteness:
 
 
 # ===================================================================
-# 8. End-to-End Integration Tests
+# 7. End-to-End Integration Tests
 # ===================================================================
 
 class MockHistoryProjector:
@@ -533,7 +454,7 @@ class MockHistoryProjector:
         self._items = items or []
         self._should_fail = should_fail
 
-    def project(self, conversation_id, run_id=None, purpose="model_context"):
+    def project(self, conversation_id, message_id=None, purpose="model_context"):
         if self._should_fail:
             raise RuntimeError("Simulated projection failure")
         return self._items
@@ -555,7 +476,7 @@ class TestEndToEndIntegration:
                 current_representation=RepresentationTier.FULL,
                 content={"user_query": "Hello", "assistant_response": "Hi there"},
                 token_estimate=4,
-                metadata={"run_id": 1, "step_id": 1},
+                metadata={"message_id": 1, "step_index": 1},
             ),
         ]
         mock_projector = MockHistoryProjector(items=history_items)
@@ -613,7 +534,7 @@ class TestEndToEndIntegration:
                 current_representation=RepresentationTier.FULL,
                 content={"user_query": "Should not appear"},
                 token_estimate=3,
-                metadata={"run_id": 1, "step_id": 1},
+                metadata={"message_id": 1, "step_index": 1},
             ),
         ]
         mock_projector = MockHistoryProjector(items=history_items)

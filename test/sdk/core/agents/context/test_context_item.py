@@ -24,7 +24,6 @@ class TestContextItemTypeEnum:
             "EXTERNAL_AGENT",
             "HISTORY_TURN",
             "TOOL_CALL_RESULT",
-            "WORKING_MEMORY",
         }
         actual = {member.name for member in ContextItemType}
         assert actual == expected
@@ -51,7 +50,6 @@ class TestAuthorityTierEnum:
             "PLATFORM",
             "TENANT",
             "USER",
-            "WORKING_MEMORY",
             "TOOL_RESULT",
             "RETRIEVED_MEMORY",
             "SUMMARY",

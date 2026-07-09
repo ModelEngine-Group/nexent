@@ -22,7 +22,6 @@ from nexent.core.agents.context.handlers import (
     SystemPromptHandler,
     ToolCallResultHandler,
     ToolHandler,
-    WorkingMemoryHandler,
 )
 
 
@@ -36,10 +35,9 @@ ALL_HANDLERS = [
     ExternalAgentHandler,
     HistoryTurnHandler,
     ToolCallResultHandler,
-    WorkingMemoryHandler,
 ]
 
-MANDATORY_HANDLERS = [SystemPromptHandler, WorkingMemoryHandler]
+MANDATORY_HANDLERS = [SystemPromptHandler]
 
 NON_MANDATORY_HANDLERS = [
     ToolHandler,

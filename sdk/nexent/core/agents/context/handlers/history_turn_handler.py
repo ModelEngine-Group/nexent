@@ -18,7 +18,7 @@ class HistoryTurnHandler(ContextItemHandler):
         #   score = recency * 0.5
         #         + has_pending_action * 0.3
         #         + keyword_overlap * 0.2
-        #   Signals: item.metadata["run_id"], item.metadata["step_id"],
+        #   Signals: item.metadata["message_id"], item.metadata["step_index"],
         #            item.metadata["has_pending_action"]
         return 1.0
 

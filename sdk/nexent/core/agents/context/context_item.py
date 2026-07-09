@@ -17,7 +17,6 @@ class ContextItemType(str, Enum):
     EXTERNAL_AGENT = "external_agent"
     HISTORY_TURN = "history_turn"
     TOOL_CALL_RESULT = "tool_call_result"
-    WORKING_MEMORY = "working_memory"
 
 
 class RepresentationTier(str, Enum):
@@ -35,7 +34,6 @@ class AuthorityTier(str, Enum):
     PLATFORM = "platform"
     TENANT = "tenant"
     USER = "user"
-    WORKING_MEMORY = "working_memory"
     TOOL_RESULT = "tool_result"
     RETRIEVED_MEMORY = "retrieved_memory"
     SUMMARY = "summary"

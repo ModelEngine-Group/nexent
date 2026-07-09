@@ -18,7 +18,7 @@ class ToolCallResultHandler(ContextItemHandler):
         #   score = recency * 0.4
         #         + is_active_tool * 0.4
         #         + result_relevance * 0.2
-        #   Signals: item.metadata["run_id"], item.metadata["tool_name"]
+        #   Signals: item.metadata["message_id"], item.metadata["tool_name"]
         return 1.0
 
     def reduce(

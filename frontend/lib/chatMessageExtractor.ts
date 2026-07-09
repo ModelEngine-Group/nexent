@@ -196,6 +196,50 @@ export function extractAssistantMsgFromResponse(
           break;
         }
 
+        case chatConfig.messageTypes.TOOL_CALL: {
+          // Merged tool_call: JSON with both tool call and execution result
+          const currentStep = getOrCreateCurrentStep(steps, "Tool Call");
+          try {
+            const toolCallData = JSON.parse(msg.content);
+            // Add tool call content
+            const toolContentId = `tool-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: toolContentId,
+              type: "executing",
+              content: toolCallData.tool_call || "",
+              expanded: true,
+              timestamp: Date.now(),
+            });
+            // Add execution result
+            const execContentId = `execution-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: execContentId,
+              type: "execution",
+              content: toolCallData.execution_result || "",
+              expanded: true,
+              timestamp: Date.now(),
+            });
+          } catch {
+            // Fallback: treat as plain text
+            const contentId = `tool-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: contentId,
+              type: "executing",
+              content: msg.content,
+              expanded: true,
+              timestamp: Date.now(),
+            });
+          }
+          resetModelOutputTracking();
+          break;
+        }
+
         case chatConfig.messageTypes.ERROR: {
           const currentStep = getOrCreateCurrentStep(steps, "Error");
           const contentId = `error-${Date.now()}-${Math.random()

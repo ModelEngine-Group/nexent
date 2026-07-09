@@ -383,39 +383,28 @@ def test_history_items_unaffected() -> bool:
     print("Test 5: History items unaffected")
     print("=" * 70)
 
-    def mock_query_units(conversation_id: int, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def mock_query_units(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
         return [
             {
                 "unit_id": 1,
                 "unit_type": "user_input",
                 "unit_content": "What is AI?",
-                "run_id": 1,
-                "step_id": 1,
-                "tool_call_id": None,
+                "message_id": 1,
+                "step_index": 1,
             },
             {
                 "unit_id": 2,
                 "unit_type": "final_answer",
                 "unit_content": "AI is artificial intelligence",
-                "run_id": 1,
-                "step_id": 1,
-                "tool_call_id": None,
+                "message_id": 1,
+                "step_index": 1,
             },
             {
                 "unit_id": 3,
-                "unit_type": "tool",
-                "unit_content": "search('machine learning')",
-                "run_id": 1,
-                "step_id": 2,
-                "tool_call_id": "tc_001",
-            },
-            {
-                "unit_id": 4,
-                "unit_type": "execution_logs",
-                "unit_content": "Found 5 results about ML",
-                "run_id": 1,
-                "step_id": 2,
-                "tool_call_id": "tc_001",
+                "unit_type": "tool_call",
+                "unit_content": '{"tool_call": "search(\'machine learning\')", "execution_result": "Found 5 results about ML"}',
+                "message_id": 1,
+                "step_index": 2,
             },
         ]
 

@@ -520,7 +520,6 @@ class ContextManager:
             stable_messages=tuple(stable_messages),
             dynamic_messages=tuple(dynamic_messages),
             selected_component_types=selected_component_types,
-            components=source_components,
             selected_components=selected_components,
         )
 
@@ -598,7 +597,6 @@ class ContextManager:
                     stable_messages=tuple(stable_from_items),
                     dynamic_messages=tuple(dynamic_from_items),
                     selected_component_types=run_context.selected_component_types,
-                    components=run_context.components,
                     selected_components=run_context.selected_components,
                 )
 

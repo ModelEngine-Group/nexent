@@ -324,10 +324,7 @@ class TestConversationManagementService(unittest.TestCase):
             unit_content="print('hi')",
             user_id=self.user_id,
             unit_status="streaming",
-            run_id=None,
-            step_id=None,
-            tool_call_id=None,
-            event_time=None,
+            step_index=None,
         )
 
     @patch('backend.services.conversation_management_service.create_source_image')

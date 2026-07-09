@@ -22,7 +22,6 @@ from nexent.core.agents.context.handlers import (
     SystemPromptHandler,
     ToolCallResultHandler,
     ToolHandler,
-    WorkingMemoryHandler,
 )
 
 
@@ -72,7 +71,6 @@ class TestItemHandlerRegistry:
             ExternalAgentHandler,
             HistoryTurnHandler,
             ToolCallResultHandler,
-            WorkingMemoryHandler,
         ]
         for handler_cls in all_handler_classes:
             ItemHandlerRegistry.register(handler_cls())
@@ -101,7 +99,6 @@ class TestItemHandlerRegistry:
             ExternalAgentHandler,
             HistoryTurnHandler,
             ToolCallResultHandler,
-            WorkingMemoryHandler,
         ]
         for handler_cls in all_handler_classes:
             ItemHandlerRegistry.register(handler_cls())
@@ -109,5 +106,4 @@ class TestItemHandlerRegistry:
         assert ItemHandlerRegistry.all_types_covered() is True
 
         assert isinstance(ItemHandlerRegistry.get(ContextItemType.SYSTEM_PROMPT), SystemPromptHandler)
-        assert isinstance(ItemHandlerRegistry.get(ContextItemType.WORKING_MEMORY), WorkingMemoryHandler)
         assert isinstance(ItemHandlerRegistry.get(ContextItemType.TOOL), ToolHandler)
