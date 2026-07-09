@@ -58,6 +58,7 @@ if SkillDuplicateError is None:
     exceptions_module.SkillDuplicateError = SkillDuplicateError
 
 from apps.skill_repository_app import skill_repository_router
+import apps.skill_repository_app as app_module
 
 app = FastAPI()
 app.include_router(skill_repository_router)
@@ -210,3 +211,171 @@ def test_get_skill_repository_listing_detail_api_not_found(mocker, mock_auth_hea
     response = client.get("/repository/skill/404", headers=mock_auth_header)
 
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("path", "service_name"),
+    [
+        ("/repository/skill", "list_skill_repository_listings_impl"),
+        ("/repository/skill/mine", "list_my_editable_skills_impl"),
+    ],
+)
+def test_list_apis_map_auth_errors(mocker, mock_auth_header, path, service_name):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        side_effect=app_module.UnauthorizedError("expired"),
+    )
+    service = mocker.patch(f"apps.skill_repository_app.{service_name}")
+
+    response = client.get(path, headers=mock_auth_header)
+
+    assert response.status_code == 401
+    service.assert_not_called()
+
+
+def test_list_repository_api_maps_invalid_filter(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        side_effect=ValueError("invalid status"),
+    )
+
+    response = client.get(
+        "/repository/skill?status=invalid",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+
+
+def test_detail_api_success(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.get_skill_repository_listing_detail_impl",
+        return_value={"skill_repository_id": 7},
+    )
+
+    response = client.get("/repository/skill/7", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json()["skill_repository_id"] == 7
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (app_module.UnauthorizedError("expired"), 401),
+        (ForbiddenError("forbidden"), 403),
+        (ValueError("invalid transition"), 400),
+    ],
+)
+def test_update_status_api_maps_errors(
+    mocker,
+    mock_auth_header,
+    error,
+    expected_status,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.update_skill_repository_status_impl",
+        side_effect=error,
+    )
+
+    response = client.patch(
+        "/repository/skill/7/status",
+        json={"status": "shared"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == expected_status
+
+
+def test_create_listing_api_success(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    create = mocker.patch(
+        "apps.skill_repository_app.create_skill_repository_listing_impl",
+        return_value={"skill_repository_id": 7},
+    )
+
+    response = client.post(
+        "/repository/skill/11",
+        json={"icon": "skill", "tags": ["tag"]},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    create.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (app_module.UnauthorizedError("expired"), 401),
+        (ValueError("invalid payload"), 400),
+    ],
+)
+def test_create_listing_api_maps_errors(
+    mocker,
+    mock_auth_header,
+    error,
+    expected_status,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.create_skill_repository_listing_impl",
+        side_effect=error,
+    )
+
+    response = client.post(
+        "/repository/skill/11",
+        json={},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (app_module.UnauthorizedError("expired"), 401),
+        (ValueError("not found"), 404),
+    ],
+)
+def test_install_api_maps_errors(
+    mocker,
+    mock_auth_header,
+    error,
+    expected_status,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.install_skill_from_repository_impl",
+        side_effect=error,
+    )
+
+    response = client.post(
+        "/repository/skill/7/install",
+        json={},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == expected_status

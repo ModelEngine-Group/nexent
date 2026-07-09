@@ -13,6 +13,7 @@ SCHEMA = "nexent"
 # Shared doc strings for primary key columns
 _PRIMARY_KEY_DOC = "Primary key, auto-increment"
 _TENANT_ID_DOC = "Tenant ID for multi-tenancy isolation"
+_PUBLISHER_USER_ID_DOC = "Publisher user ID"
 
 # Base class for tables without audit fields
 
@@ -672,7 +673,7 @@ class McpCommunityRecord(TableBase):
         doc="Community record ID, unique primary key",
     )
     tenant_id = Column(String(100), doc="Publisher tenant ID")
-    user_id = Column(String(100), doc="Publisher user ID")
+    user_id = Column(String(100), doc=_PUBLISHER_USER_ID_DOC)
     mcp_name = Column(String(100), doc="MCP name")
     mcp_server = Column(String(500), doc="MCP server URL")
     source = Column(String(30), doc="Source type, fixed to community")
@@ -860,7 +861,7 @@ class AgentRepository(TableBase):
     agent_repository_id = Column(BigInteger, Sequence("ag_agent_repository_t_agent_repository_id_seq", schema=SCHEMA),
                                  primary_key=True, nullable=False, doc="Agent repository listing ID, unique primary key")
     publisher_tenant_id = Column(String(100), nullable=False, doc="Publisher tenant ID")
-    publisher_user_id = Column(String(100), nullable=False, doc="Publisher user ID")
+    publisher_user_id = Column(String(100), nullable=False, doc=_PUBLISHER_USER_ID_DOC)
     agent_id = Column(Integer, nullable=False,
                       doc="Root agent ID from ag_tenant_agent_t; upsert key")
     version_no = Column(Integer, nullable=False,
@@ -896,7 +897,7 @@ class SkillRepository(TableBase):
     skill_repository_id = Column(BigInteger, Sequence("ag_skill_repository_t_skill_repository_id_seq", schema=SCHEMA),
                                  primary_key=True, nullable=False, doc="Skill repository listing ID, unique primary key")
     publisher_tenant_id = Column(String(100), nullable=False, doc="Publisher tenant ID")
-    publisher_user_id = Column(String(100), nullable=False, doc="Publisher user ID")
+    publisher_user_id = Column(String(100), nullable=False, doc=_PUBLISHER_USER_ID_DOC)
     skill_id = Column(Integer, nullable=False, doc="Source skill ID from ag_skill_info_t")
     name = Column(String(100), nullable=False, doc="Skill name for display and search")
     description = Column(Text, doc="Skill description")

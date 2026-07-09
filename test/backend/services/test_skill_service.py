@@ -4894,3 +4894,46 @@ class TestSkillServiceUpdateById:
         )
 
         service.skill_manager.delete_skill.assert_called_once_with("Skill A")
+
+    @pytest.mark.parametrize(
+        "unsafe_name",
+        [
+            "../outside",
+            r"..\outside",
+            "/tmp/outside",
+            r"C:\tmp\outside",
+        ],
+    )
+    def test_rejects_unsafe_local_skill_name_before_update(
+        self,
+        mocker,
+        tmp_path,
+        unsafe_name,
+    ):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "created_by": "user-1",
+            },
+        )
+        update_skill = mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            create=True,
+        )
+
+        with pytest.raises(
+            skill_service.SkillException,
+            match="Invalid skill name",
+        ):
+            service.update_skill_by_id(
+                1,
+                {"name": unsafe_name},
+                user_id="user-1",
+            )
+
+        update_skill.assert_not_called()

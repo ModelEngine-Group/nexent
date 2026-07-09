@@ -25,6 +25,7 @@ from services.asset_owner_visibility import can_view_skill
 ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 
 logger = logging.getLogger(__name__)
+_NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
@@ -323,7 +324,7 @@ async def update_skill_from_file(
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
-        if "not found" in str(e).lower():
+        if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -512,11 +513,18 @@ async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(N
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        logger.error(f"Error getting skill by ID {skill_id}: {e}")
+        logger.exception("Error getting skill by ID %s", skill_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{skill_id:int}")
+@router.put(
+    "/{skill_id:int}",
+    responses={
+        400: {"description": "No fields to update or invalid skill data"},
+        403: {"description": "Not authorized to update this skill"},
+        404: {"description": "Skill not found"},
+    },
+)
 async def update_skill_by_id(
     skill_id: int,
     request: SkillUpdateRequest,
@@ -559,7 +567,7 @@ async def update_skill_by_id(
     except ForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
-        if "not found" in str(e).lower():
+        if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -631,7 +639,7 @@ async def update_skill(
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
-        if "not found" in str(e).lower():
+        if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:

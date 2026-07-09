@@ -320,3 +320,169 @@ def test_list_repository_listings_validates_status():
             "tenant-1",
             status="bad_status",
         )
+
+
+def test_listing_tag_and_card_validation():
+    assert srs._normalize_listing_tags([" tag ", "tag", "", "second"]) == [
+        "tag",
+        "second",
+    ]
+    with pytest.raises(ValueError, match="list of strings"):
+        srs._normalize_listing_tags("tag")
+    with pytest.raises(ValueError, match="list of strings"):
+        srs._normalize_listing_tags([1])
+    with pytest.raises(ValueError, match="at most 20"):
+        srs._normalize_listing_tags(["x" * 21])
+    with pytest.raises(ValueError, match="at most 5"):
+        srs._normalize_listing_tags([str(index) for index in range(6)])
+    with pytest.raises(ValueError, match="icon must be at most"):
+        srs._validate_card_fields({"icon": "x" * 33})
+    with pytest.raises(ValueError, match="category_id"):
+        srs._validate_card_fields({"icon": "skill", "category_id": "bad"})
+
+
+def test_create_payload_validation_rejects_invalid_snapshot_fields():
+    with pytest.raises(ValueError, match="Missing required"):
+        srs._validate_create_payload({})
+    with pytest.raises(ValueError, match="non-empty"):
+        srs._validate_create_payload({
+            "skill_id": 1,
+            "name": "",
+            "skill_info_json": {},
+            "skill_zip_base64": "zip",
+        })
+    with pytest.raises(ValueError, match="JSON object"):
+        srs._validate_create_payload({
+            "skill_id": 1,
+            "name": "Skill",
+            "skill_info_json": [],
+            "skill_zip_base64": "zip",
+        })
+    with pytest.raises(ValueError, match="must be a string"):
+        srs._validate_create_payload({
+            "skill_id": 1,
+            "name": "Skill",
+            "skill_info_json": {},
+            "skill_zip_base64": 1,
+        })
+
+
+def test_update_status_validates_input_and_missing_records():
+    with pytest.raises(ValueError, match="Invalid status"):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1,
+            status="invalid",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+    with pytest.raises(ValueError, match="not found"):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1,
+            status="shared",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+
+def test_update_status_rejects_unknown_role_and_invalid_su_transition():
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": "USER",
+    }
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
+        _repository_record(status="not_shared")
+    )
+    with pytest.raises(ForbiddenError):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1,
+            status="pending_review",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": "SU",
+    }
+    with pytest.raises(ValueError, match="Invalid status transition"):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1,
+            status="pending_review",
+            user_id="su-1",
+            tenant_id="tenant-1",
+        )
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        (None, "not found"),
+        (_repository_record(status="pending_review"), "not available"),
+        ({**_repository_record(status="shared"), "skill_zip_base64": ""}, "no skill ZIP"),
+        ({**_repository_record(status="shared"), "skill_zip_base64": "%%%"}, "invalid skill ZIP"),
+    ],
+)
+def test_install_rejects_unavailable_payloads(record, message):
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = record
+
+    with pytest.raises(ValueError, match=message):
+        srs.install_skill_from_repository_impl(
+            skill_repository_id=1,
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+
+def test_install_generates_copy_name_and_tolerates_download_count_failure():
+    encoded_zip = base64.b64encode(b"zip").decode("ascii")
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = {
+        **_repository_record(status="shared"),
+        "skill_zip_base64": encoded_zip,
+    }
+    _skill_db_mock.get_skill_by_name.side_effect = [
+        {"skill_id": 1},
+        None,
+    ]
+    _skill_repo_db_mock.increment_skill_repository_downloads.return_value = 0
+
+    result = srs.install_skill_from_repository_impl(
+        skill_repository_id=1,
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+    assert result["name"] != "Skill A"
+    assert _skill_db_mock.get_skill_by_name.call_count == 2
+
+
+def test_mine_list_validates_ownership_and_supports_padding():
+    with pytest.raises(ValueError, match="Invalid ownership"):
+        srs.list_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            ownership="invalid",
+        )
+
+    result = srs.list_my_editable_skills_impl(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        new_skill_padding=True,
+    )
+    assert result["items"] == [{"new_skill_padding": True}]
+    assert result["pagination"]["total"] == 1
+
+
+def test_repository_list_and_detail_success():
+    _skill_repo_db_mock.list_skill_repository_summaries.return_value = {
+        "items": [_repository_record(status="shared")],
+        "pagination": {"total": 1},
+    }
+    result = srs.list_skill_repository_listings_impl(
+        "tenant-1",
+        status="shared",
+    )
+    assert result["items"][0]["status"] == "shared"
+
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
+        _repository_record(status="shared")
+    )
+    detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+    assert detail["skill_repository_id"] == 1

@@ -32,6 +32,7 @@ from database.user_tenant_db import get_user_tenant_by_user_id
 from services.skill_service import SkillService
 
 logger = logging.getLogger("skill_repository_service")
+_REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
 
 _MY_SKILL_REPOSITORY_STATUSES = frozenset({
     STATUS_SHARED,
@@ -530,7 +531,7 @@ def update_skill_repository_status_impl(
         tenant_id,
     )
     if not record:
-        raise ValueError("Repository listing not found")
+        raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
 
     current_status = record.get("status")
     publisher_updates: Optional[Dict[str, str]] = None
@@ -566,7 +567,7 @@ def update_skill_repository_status_impl(
         submitted_by=submitted_by,
     )
     if rows_affected == 0:
-        raise ValueError("Repository listing not found")
+        raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
 
     updated = get_skill_repository_by_id_and_publisher(
         skill_repository_id,
@@ -625,7 +626,7 @@ def install_skill_from_repository_impl(
         tenant_id,
     )
     if not record:
-        raise ValueError("Repository listing not found")
+        raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
     if record.get("status") != STATUS_SHARED:
         raise ValueError("Repository listing is not available for install")
 
@@ -634,7 +635,7 @@ def install_skill_from_repository_impl(
         raise ValueError("Repository listing has no skill ZIP payload")
 
     try:
-        zip_bytes = base64.b64decode(skill_zip_base64)
+        zip_bytes = base64.b64decode(skill_zip_base64, validate=True)
     except Exception as exc:
         raise ValueError("Repository listing has invalid skill ZIP payload") from exc
 
@@ -824,6 +825,6 @@ def get_skill_repository_listing_detail_impl(
         tenant_id,
     )
     if not record:
-        raise ValueError("Repository listing not found")
+        raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
 
     return _to_detail_item(record)

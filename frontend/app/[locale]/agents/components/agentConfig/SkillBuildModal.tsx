@@ -60,6 +60,56 @@ interface SkillBuildModalProps {
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
 }
 
+interface StreamedFrontmatter {
+  name: string;
+  description: string;
+  tags: string[];
+}
+
+function parseStreamedFrontmatter(content: string): StreamedFrontmatter | null {
+  try {
+    const parsed = yaml.load(content) as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    return {
+      name: typeof parsed.name === "string" ? parsed.name.trim() : "",
+      description:
+        typeof parsed.description === "string" ? parsed.description.trim() : "",
+      tags: Array.isArray(parsed.tags)
+        ? parsed.tags.filter((tag): tag is string => typeof tag === "string")
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeGeneratedSkillTabs(
+  currentTabs: SkillFileContent[],
+  generatedTabs: SkillFileContent[],
+  skillContent: string
+) {
+  const generatedByPath = new Map(
+    generatedTabs.map((tab) => [tab.path, tab.content])
+  );
+  const currentPaths = new Set(currentTabs.map((tab) => tab.path));
+  const updatedTabs = currentTabs.map((tab) => {
+    if (tab.path === "SKILL.md") {
+      return { ...tab, content: skillContent };
+    }
+    const generatedContent = generatedByPath.get(tab.path);
+    return generatedContent ? { ...tab, content: generatedContent } : tab;
+  });
+  const newTabs = generatedTabs.filter((tab) => !currentPaths.has(tab.path));
+  const finalTabs = [...updatedTabs, ...newTabs].sort((a, b) => {
+    if (a.path === "SKILL.md") return -1;
+    if (b.path === "SKILL.md") return 1;
+    return a.path.localeCompare(b.path);
+  });
+  return { updatedTabs, finalTabs };
+}
+
 export default function SkillBuildModal({
   isOpen,
   onCancel,
@@ -544,41 +594,20 @@ export default function SkillBuildModal({
             );
           },
           onFrontmatter: (content) => {
-            // Accumulate frontmatter content as it streams in
-            // Parse frontmatter incrementally as it streams to update form fields
             frontmatterBufferRef.current += content;
-            // Try to parse incrementally for form field updates
-            try {
-              const parsed = yaml.load(frontmatterBufferRef.current) as Record<
-                string,
-                unknown
-              > | null;
-              if (parsed && typeof parsed === "object") {
-                const name =
-                  typeof parsed.name === "string" ? parsed.name.trim() : "";
-                const description =
-                  typeof parsed.description === "string"
-                    ? parsed.description.trim()
-                    : "";
-                const tags = Array.isArray(parsed.tags)
-                  ? parsed.tags.filter(
-                      (t): t is string => typeof t === "string"
-                    )
-                  : [];
-
-                if (name && !isEditMode) {
-                  form.setFieldsValue({ name });
-                  setInteractiveSkillName(name);
-                }
-                if (description) {
-                  form.setFieldsValue({ description });
-                }
-                if (tags.length > 0) {
-                  form.setFieldsValue({ tags });
-                }
-              }
-            } catch {
-              // YAML not complete yet, will parse when skill body starts
+            const parsed = parseStreamedFrontmatter(
+              frontmatterBufferRef.current
+            );
+            if (!parsed) return;
+            if (parsed.name && !isEditMode) {
+              form.setFieldsValue({ name: parsed.name });
+              setInteractiveSkillName(parsed.name);
+            }
+            if (parsed.description) {
+              form.setFieldsValue({ description: parsed.description });
+            }
+            if (parsed.tags.length > 0) {
+              form.setFieldsValue({ tags: parsed.tags });
             }
           },
           onSkillBody: (content) => {
@@ -629,47 +658,23 @@ export default function SkillBuildModal({
               const contentWithoutFrontmatter =
                 skillInfo?.contentWithoutFrontmatter || "";
 
-              // Use the current tabs from ref (avoids stale closure)
               const currentTabs = streamingTabsRef.current;
-
-              // Build updated tabs: start with current tabs, update matching ones from backend
-              const updatedTabs = currentTabs.map((tab) => {
-                const backendTab = result.skillTabs.find(
-                  (t) => t.path === tab.path
-                );
-                if (tab.path === "SKILL.md") {
-                  return { ...tab, content: contentWithoutFrontmatter };
-                }
-                if (backendTab) {
-                  return { ...tab, content: backendTab.content || tab.content };
-                }
-                return tab;
-              });
-
-              // Add any new tabs from backend that don't exist in current tabs
-              const newTabsFromBackend = result.skillTabs.filter(
-                (t) => !currentTabs.find((tab) => tab.path === t.path)
+              const { updatedTabs, finalTabs } = mergeGeneratedSkillTabs(
+                currentTabs,
+                result.skillTabs,
+                contentWithoutFrontmatter
               );
-              const finalTabs = [...updatedTabs, ...newTabsFromBackend];
-
-              // Sort so SKILL.md is always first
-              finalTabs.sort((a, b) => {
-                if (a.path === "SKILL.md") return -1;
-                if (b.path === "SKILL.md") return 1;
-                return a.path.localeCompare(b.path);
-              });
 
               setSkillTabs(finalTabs);
 
-              // Update form fields from parsed skill info
-              if (skillInfo && skillInfo.name && !isEditMode) {
+              if (skillInfo?.name && !isEditMode) {
                 form.setFieldsValue({ name: skillInfo.name });
                 setInteractiveSkillName(skillInfo.name);
               }
-              if (skillInfo && skillInfo.description) {
+              if (skillInfo?.description) {
                 form.setFieldsValue({ description: skillInfo.description });
               }
-              if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
+              if (skillInfo?.tags?.length) {
                 form.setFieldsValue({ tags: skillInfo.tags });
               }
 
