@@ -9,6 +9,7 @@ from smolagents import tool
 
 from ._context import (
     Nl2AgentContext,
+    error_response,
     get_cached_search,
     get_nl2agent_context,
     set_cached_search,
@@ -26,7 +27,6 @@ def get_search_local_resources_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the nl2agent_search_local_resources tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         user_id=user_id,
@@ -56,16 +56,11 @@ def nl2agent_search_local_resources(query: str) -> str:
     """
     ctx = get_nl2agent_context()
     if ctx is None or ctx.tenant_id is None:
-        return json.dumps(
-            {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
-        )
-    # nl2agent_search_local_resources scores resources for the draft target. Use
-    # draft_agent_id when present; fall back to agent_id (older callers).
-    target_agent_id = ctx.draft_agent_id or ctx.agent_id
-    if target_agent_id is None or target_agent_id <= 0:
-        return json.dumps(
-            {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
-        )
+        return error_response("NL2AGENT session context not initialized.")
+
+    target = ctx.target_agent_id
+    if target is None or target <= 0:
+        return error_response("NL2AGENT draft agent_id not set in context.")
 
     cached_result = get_cached_search("nl2agent_search_local_resources", query)
     if cached_result is not None:
@@ -78,14 +73,14 @@ def nl2agent_search_local_resources(query: str) -> str:
         result = asyncio.run(
             recommend_local_resources(
                 query=query,
-                agent_id=target_agent_id,
+                agent_id=target,
                 tenant_id=ctx.tenant_id,
-                model_id=ctx.model_id or 0,
+                model_id=ctx.model_id,
                 top_n=5,
             )
         )
         card_payload = {
-            "agent_id": target_agent_id,
+            "agent_id": target,
             "tools": result.get("tools", []),
             "skills": result.get("skills", []),
         }
@@ -94,4 +89,4 @@ def nl2agent_search_local_resources(query: str) -> str:
         return result_json
     except Exception as exc:
         logger.exception(f"nl2agent_search_local_resources failed: {exc}")
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        return error_response(str(exc))

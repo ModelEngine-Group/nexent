@@ -398,13 +398,6 @@ def _validate_draft_agent_id(agent_id: int) -> None:
         raise AgentRunException("Invalid NL2AGENT draft agent_id.")
 
 
-def _normalize_tool_instance_params(params: Any) -> Dict[str, Any]:
-    """Return persisted tool-instance params, not catalog parameter schemas."""
-    if isinstance(params, dict):
-        return params
-    return {}
-
-
 def _score_candidates_with_llm(
     model_id: int,
     query: str,
@@ -500,7 +493,9 @@ def _parse_scored_json(
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        # Try to find the first '[' ... ']' span.
+        # Extract the first [...] span from the raw (unstripped) response as a
+        # last-ditch fallback when the LLM omits fences or puts them in the
+        # wrong place.
         start = raw.find("[")
         end = raw.rfind("]")
         if start != -1 and end != -1 and end > start:
@@ -629,9 +624,10 @@ async def search_web_mcps(
     if registry_candidates == 0:
         try:
             registry_data = await list_registry_mcp_services(search=None, limit=30)
-            registry_candidates = append_registry_candidates(registry_data)
         except Exception as exc:
             logger.warning(f"Registry MCP fallback listing failed: {exc}")
+        else:
+            registry_candidates = append_registry_candidates(registry_data)
 
     try:
         community_data = await list_community_mcp_services(
@@ -783,7 +779,6 @@ async def apply_local_resources_batch(
 
     bound_tools = 0
     bound_skills = 0
-    bound_skill_ids: List[int] = []
 
     # Bind tools.
     for tool_id in tool_ids or []:
@@ -796,7 +791,7 @@ async def apply_local_resources_batch(
             instance_req = ToolInstanceInfoRequest(
                 tool_id=tool_id,
                 agent_id=agent_id,
-                params=_normalize_tool_instance_params(ti.get("params")),
+                params=ti.get("params") or {},
                 enabled=True,
                 version_no=0,
             )
@@ -839,7 +834,6 @@ async def apply_local_resources_batch(
                 version_no=0,
             )
             bound_skills += 1
-            bound_skill_ids.append(target_skill_id)
         except Exception as exc:
             logger.error(f"Failed to bind skill {skill_id} to agent {agent_id}: {exc}")
 
@@ -847,7 +841,7 @@ async def apply_local_resources_batch(
         "bound_tool_count": bound_tools,
         "bound_skill_count": bound_skills,
         "tool_ids": tool_ids or [],
-        "skill_ids": bound_skill_ids,
+        "skill_ids": skill_ids or [],
     }
 
 

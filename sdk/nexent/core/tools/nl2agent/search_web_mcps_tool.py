@@ -9,6 +9,7 @@ from smolagents import tool
 
 from ._context import (
     Nl2AgentContext,
+    error_response,
     get_cached_search,
     get_nl2agent_context,
     set_cached_search,
@@ -26,7 +27,6 @@ def get_search_web_mcps_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the nl2agent_search_web_mcps tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
@@ -57,14 +57,11 @@ def nl2agent_search_web_mcps(query: str) -> str:
     """
     ctx = get_nl2agent_context()
     if ctx is None or ctx.tenant_id is None:
-        return json.dumps(
-            {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
-        )
-    target_agent_id = ctx.draft_agent_id or ctx.agent_id
-    if target_agent_id is None or target_agent_id <= 0:
-        return json.dumps(
-            {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
-        )
+        return error_response("NL2AGENT session context not initialized.")
+
+    target = ctx.target_agent_id
+    if target is None or target <= 0:
+        return error_response("NL2AGENT draft agent_id not set in context.")
 
     cached_result = get_cached_search("nl2agent_search_web_mcps", query)
     if cached_result is not None:
@@ -78,16 +75,16 @@ def nl2agent_search_web_mcps(query: str) -> str:
             _search(
                 query=query,
                 tenant_id=ctx.tenant_id,
-                model_id=ctx.model_id or 0,
+                model_id=ctx.model_id,
                 top_n=5,
             )
         )
         result_json = json.dumps(
-            {"agent_id": target_agent_id, "items": items or []},
+            {"agent_id": target, "items": items or []},
             ensure_ascii=False,
         )
         set_cached_search("nl2agent_search_web_mcps", query, result_json)
         return result_json
     except Exception as exc:
         logger.exception(f"nl2agent_search_web_mcps failed: {exc}")
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        return error_response(str(exc))

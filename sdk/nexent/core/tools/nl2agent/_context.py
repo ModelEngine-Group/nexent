@@ -1,42 +1,33 @@
-"""Shared session context for NL2AGENT builtin tools.
+"""Shared session context for NL2AGENT builtin tools."""
 
-Each NL2AGENT tool reads its session context (draft agent_id, user_id,
-tenant_id, model_id, language) from this module. The context is injected at
-agent build time via `ToolConfig.metadata` and set by `get_*_tool()` in each
-tool module.
-
-This mirrors the pattern in `read_skill_config_tool.py` where a module-level
-global holds the tool instance.
-"""
-
+import json
 import time
-from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
+
+# Alias for type-annotation clarity in this module.
+_StrStrDict = Dict[str, str]
+
+
+def error_response(message: str) -> str:
+    """Return a consistent JSON error payload used by all NL2AGENT tools."""
+    return json.dumps({"error": message}, ensure_ascii=False)
 
 
 @dataclass
 class Nl2AgentContext:
-    """Session context for an NL2AGENT tool.
+    """Session context for an NL2AGENT tool."""
 
-    Attributes:
-        agent_id: The running NL2AGENT default agent's id (the chat agent).
-        draft_agent_id: The target draft agent being built. Tools that operate
-            on the draft (nl2agent_apply_local_resources,
-            nl2agent_finalize_agent, nl2agent_search_local_resources) read this
-            field. Falls back to agent_id
-            when not set (backward-compat).
-        user_id: The user initiating the session.
-        tenant_id: The tenant ID.
-        model_id: The model ID used for LLM scoring.
-        language: The language code ("zh" or "en").
-    """
     agent_id: Optional[int] = None
     draft_agent_id: Optional[int] = None
-    user_id: Optional[str] = None
     tenant_id: Optional[str] = None
-    model_id: Optional[int] = None
-    language: Optional[str] = None
+    user_id: str = ""
+    model_id: int = 0
+    language: str = "en"
+
+    @property
+    def target_agent_id(self) -> Optional[int]:
+        return self.draft_agent_id or self.agent_id
 
 
 # Module-level context singleton. Set by the `get_*_tool()` initializers.
@@ -56,10 +47,10 @@ def set_nl2agent_context(
     _context = Nl2AgentContext(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
-        user_id=user_id,
         tenant_id=tenant_id,
-        model_id=model_id,
-        language=language,
+        user_id=user_id or "",
+        model_id=model_id or 0,
+        language=language or "en",
     )
     return _context
 
@@ -76,7 +67,9 @@ def get_nl2agent_context() -> Optional[Nl2AgentContext]:
 # concurrent sessions never read each other's results.
 _SEARCH_CACHE_TTL_SECONDS = 600.0
 _SEARCH_CACHE_MAX_ENTRIES = 128
-_search_cache: "OrderedDict[Tuple[Optional[str], Optional[int], str, str], Tuple[float, str]]" = OrderedDict()
+_search_cache: Dict[
+    Tuple[Optional[str], Optional[int], str, str], Tuple[float, str]
+] = {}
 
 
 def _search_cache_key(
@@ -86,8 +79,7 @@ def _search_cache_key(
     ctx = get_nl2agent_context()
     if ctx is None:
         return None
-    target_agent_id = ctx.draft_agent_id or ctx.agent_id
-    return (ctx.tenant_id, target_agent_id, tool_name, query.strip().lower())
+    return (ctx.tenant_id, ctx.target_agent_id, tool_name, query.strip().lower())
 
 
 def get_cached_search(tool_name: str, query: str) -> Optional[str]:
@@ -111,6 +103,7 @@ def set_cached_search(tool_name: str, query: str, result: str) -> None:
     if key is None:
         return
     _search_cache[key] = (time.monotonic(), result)
-    _search_cache.move_to_end(key)
+    # Evict oldest entries when the cache exceeds the size limit.
     while len(_search_cache) > _SEARCH_CACHE_MAX_ENTRIES:
-        _search_cache.popitem(last=False)
+        # In Python 3.7+ dict maintains insertion order; pop the first (oldest) key.
+        _search_cache.pop(next(iter(_search_cache)))

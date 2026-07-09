@@ -9,6 +9,7 @@ from smolagents import tool
 
 from ._context import (
     Nl2AgentContext,
+    error_response,
     get_nl2agent_context,
     set_nl2agent_context,
 )
@@ -24,7 +25,6 @@ def get_install_web_skill_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the nl2agent_install_web_skill tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
@@ -53,9 +53,7 @@ def nl2agent_install_web_skill(skill_id: int = 0, skill_name: str = "") -> str:
     """
     ctx = get_nl2agent_context()
     if ctx is None or ctx.tenant_id is None:
-        return json.dumps(
-            {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
-        )
+        return error_response("NL2AGENT session context not initialized.")
 
     try:
         from services.nl2agent_service import install_web_skill as _install
@@ -65,10 +63,10 @@ def nl2agent_install_web_skill(skill_id: int = 0, skill_name: str = "") -> str:
                 skill_id=skill_id,
                 skill_name=skill_name or None,
                 tenant_id=ctx.tenant_id,
-                user_id=ctx.user_id or "",
+                user_id=ctx.user_id,
             )
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
         logger.exception(f"nl2agent_install_web_skill failed: {exc}")
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        return error_response(str(exc))
