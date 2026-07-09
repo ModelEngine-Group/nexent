@@ -2,7 +2,7 @@ name: monitor
 
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.151.0}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.151.0}
     container_name: nexent-otel-collector
     command: ["--config=/etc/otel-collector-config.yml"]
     environment:
@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
 
   phoenix:
-    image: arizephoenix/phoenix:${PHOENIX_VERSION:-15}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}arizephoenix/phoenix:${PHOENIX_VERSION:-15}
     container_name: nexent-phoenix
     profiles: ["phoenix"]
     environment:
@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 
   tempo:
-    image: grafana/tempo:${TEMPO_VERSION:-2.10.5}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}grafana/tempo:${TEMPO_VERSION:-2.10.5}
     container_name: nexent-tempo
     profiles: ["grafana"]
     command: ["--config.file=/etc/tempo.yml"]
@@ -49,7 +49,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:${GRAFANA_VERSION:-12.4}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}grafana/grafana:${GRAFANA_VERSION:-12.4}
     container_name: nexent-grafana
     profiles: ["grafana"]
     environment:
@@ -71,7 +71,7 @@ services:
     restart: unless-stopped
 
   zipkin:
-    image: openzipkin/zipkin:${ZIPKIN_VERSION:-latest}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}openzipkin/zipkin:${ZIPKIN_VERSION:-latest}
     container_name: nexent-zipkin
     profiles: ["zipkin"]
     ports:
@@ -81,7 +81,7 @@ services:
     restart: unless-stopped
 
   langfuse-worker:
-    image: docker.io/langfuse/langfuse-worker:${LANGFUSE_VERSION:-3}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/langfuse/langfuse-worker:${LANGFUSE_VERSION:-3}
     container_name: nexent-langfuse-worker
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -139,7 +139,7 @@ services:
       - nexent
 
   langfuse-web:
-    image: docker.io/langfuse/langfuse:${LANGFUSE_VERSION:-3}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/langfuse/langfuse:${LANGFUSE_VERSION:-3}
     container_name: nexent-langfuse-web
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -161,7 +161,7 @@ services:
       - nexent
 
   langfuse-clickhouse:
-    image: docker.io/clickhouse/clickhouse-server:${LANGFUSE_CLICKHOUSE_VERSION:-26.3-alpine}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/clickhouse/clickhouse-server:${LANGFUSE_CLICKHOUSE_VERSION:-26.3-alpine}
     container_name: nexent-langfuse-clickhouse
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -186,7 +186,7 @@ services:
       - nexent
 
   langfuse-minio:
-    image: docker.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}
     container_name: nexent-langfuse-minio
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -210,7 +210,7 @@ services:
       - nexent
 
   langfuse-redis:
-    image: docker.io/redis:${LANGFUSE_REDIS_VERSION:-alpine}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/redis:${LANGFUSE_REDIS_VERSION:-alpine}
     container_name: nexent-langfuse-redis
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -230,7 +230,7 @@ services:
       - nexent
 
   langfuse-postgres:
-    image: docker.io/postgres:${LANGFUSE_POSTGRES_VERSION:-15-alpine}
+    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/postgres:${LANGFUSE_POSTGRES_VERSION:-15-alpine}
     container_name: nexent-langfuse-postgres
     profiles: ["langfuse"]
     restart: unless-stopped

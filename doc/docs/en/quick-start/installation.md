@@ -190,7 +190,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+The package directory contains `images/*.tar`, `load-images.sh`, `push-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
 On the target host, the package root `deploy.sh` uses saved `deploy.options` when present, otherwise built-in defaults, and does not open the TUI by default. Add `--config` to open the interactive configuration UI. If the package was built with a custom version, component set, port policy, or image source, pass the same options during deployment or use `--config` to select them interactively:
 
@@ -198,6 +198,14 @@ On the target host, the package root `deploy.sh` uses saved `deploy.options` whe
 cd offline-package
 bash deploy.sh --load-images docker
 ```
+
+To push packaged images to an internal registry and deploy with that prefix:
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
+```
+
+When `--push-images` is used without a prefix, `deploy.sh` prompts for the image registry prefix first. `push-images.sh` then prompts for the registry username and password before pushing.
 
 ## 🔌 Port Mapping
 
