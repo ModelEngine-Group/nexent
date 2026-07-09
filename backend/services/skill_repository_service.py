@@ -826,24 +826,4 @@ def get_skill_repository_listing_detail_impl(
     if not record:
         raise ValueError("Repository listing not found")
 
-    snapshot = _as_dict(record.get("skill_info_json"))
-
-    return {
-        "skill_repository_id": record.get("skill_repository_id"),
-        "skill_id": record.get("skill_id"),
-        "name": record.get("name"),
-        "description": record.get("description"),
-        "source": record.get("source"),
-        "submitted_by": record.get("submitted_by"),
-        "icon": record.get("icon"),
-        "status": record.get("status"),
-        "category_id": record.get("category_id"),
-        "tags": record.get("tags") or _as_list(snapshot.get("tags")),
-        "downloads": record.get("downloads") or 0,
-        "created_at": _serialize_created_at(record.get("create_time")),
-        "updated_at": _serialize_created_at(record.get("update_time")),
-        "content": snapshot.get("content"),
-        "config_schemas": _as_dict(snapshot.get("config_schemas")),
-        "config_values": _as_dict(snapshot.get("config_values")),
-        "tool_ids": _as_list(snapshot.get("tool_ids")),
-    }
+    return _to_detail_item(record)

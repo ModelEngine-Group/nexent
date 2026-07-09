@@ -1,0 +1,193 @@
+"""Unit tests for backend.apps.skill_repository_app module."""
+
+import os
+import sys
+import types
+from typing import Optional
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
+sys.path.insert(0, backend_dir)
+
+sys.modules.setdefault("services.skill_repository_service", MagicMock())
+sys.modules.setdefault("utils.auth_utils", MagicMock())
+
+consts_model = types.ModuleType("consts.model")
+
+
+class _SkillRepositoryListingCreateRequest(BaseModel):
+    icon: Optional[str] = None
+    downloads: Optional[int] = None
+    tags: Optional[list[str]] = None
+    category_id: Optional[int] = None
+
+
+class _SkillRepositoryInstallRequest(BaseModel):
+    target_name: Optional[str] = None
+
+
+consts_model.SkillRepositoryListingCreateRequest = _SkillRepositoryListingCreateRequest
+consts_model.SkillRepositoryInstallRequest = _SkillRepositoryInstallRequest
+sys.modules["consts.model"] = consts_model
+
+from consts.exceptions import ForbiddenError, SkillDuplicateError
+
+from apps.skill_repository_app import skill_repository_router
+
+app = FastAPI()
+app.include_router(skill_repository_router)
+client = TestClient(app)
+
+
+@pytest.fixture
+def mock_auth_header():
+    return {"Authorization": "Bearer test_token"}
+
+
+def test_list_skill_repository_listings_api_passes_filters(mocker, mock_auth_header):
+    mock_get_user_id = mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_list = mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        return_value={"items": [], "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/skill?status=pending_review&skill_id=3&category_id=2"
+        "&page=2&page_size=5&search=excel&sort_by_update_time=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
+    mock_list.assert_called_once_with(
+        "tenant-1",
+        status="pending_review",
+        skill_id=3,
+        category_id=2,
+        page=2,
+        page_size=5,
+        search="excel",
+        sort_by_update_time=True,
+    )
+
+
+def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_list = mocker.patch(
+        "apps.skill_repository_app.list_my_editable_skills_impl",
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/skill/mine?ownership=created&page=2&page_size=6"
+        "&search=report&new_skill_padding=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list.assert_called_once_with(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        ownership="created",
+        page=2,
+        page_size=6,
+        search="report",
+        new_skill_padding=True,
+    )
+
+
+def test_create_skill_repository_listing_api_maps_forbidden(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.create_skill_repository_listing_impl",
+        side_effect=ForbiddenError("not allowed"),
+    )
+
+    response = client.post(
+        "/repository/skill/11",
+        json={"icon": "skill", "tags": ["tag"]},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 403
+
+
+def test_update_skill_repository_status_api_success(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_update = mocker.patch(
+        "apps.skill_repository_app.update_skill_repository_status_impl",
+        return_value={"skill_repository_id": 7, "status": "shared"},
+    )
+
+    response = client.patch(
+        "/repository/skill/7/status",
+        json={"status": "shared"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_update.assert_called_once_with(
+        skill_repository_id=7,
+        status="shared",
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+
+def test_install_skill_from_repository_api_duplicate_returns_conflict(
+    mocker,
+    mock_auth_header,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.install_skill_from_repository_impl",
+        side_effect=SkillDuplicateError(["Skill A"]),
+    )
+
+    response = client.post(
+        "/repository/skill/7/install",
+        json={"target_name": "Skill A"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "type": "skill_duplicate",
+        "duplicate_skills": ["Skill A"],
+    }
+
+
+def test_get_skill_repository_listing_detail_api_not_found(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.get_skill_repository_listing_detail_impl",
+        side_effect=ValueError("Repository listing not found"),
+    )
+
+    response = client.get("/repository/skill/404", headers=mock_auth_header)
+
+    assert response.status_code == 404
