@@ -627,6 +627,7 @@ class ToolInfo(BaseModel):
     usage: Optional[str]
     origin_name: Optional[str] = None
     category: Optional[str] = None
+    labels: Optional[List[str]] = None
 
 
 # used in Knowledge Summary request

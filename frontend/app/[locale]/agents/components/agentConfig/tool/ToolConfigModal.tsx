@@ -77,6 +77,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "datamate_search",
   "idata_search",
   "haotian_search",
+  "ragflow_search",
   "aidp_search",
 ];
 
@@ -84,6 +85,7 @@ const TOOLS_SUPPORTING_RERANK = [
   "knowledge_base_search",
   "dify_search",
   "datamate_search",
+  "ragflow_search",
 ];
 
 const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
@@ -241,6 +243,15 @@ export default function ToolConfigModal({
     apiKey: "",
   });
 
+  // RAGFlow configuration state
+  const [ragflowConfig, setRagflowConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
   // iData configuration state
   const [idataConfig, setIdataConfig] = useState<{
     serverUrl: string;
@@ -289,6 +300,7 @@ export default function ToolConfigModal({
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "ragflow_search"
     | "aidp_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
@@ -297,6 +309,7 @@ export default function ToolConfigModal({
     if (name === "datamate_search") return "datamate_search";
     if (name === "idata_search") return "idata_search";
     if (name === "haotian_search") return "haotian_search";
+    if (name === "ragflow_search") return "ragflow_search";
     if (name === "aidp_search") return "aidp_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
@@ -429,6 +442,28 @@ export default function ToolConfigModal({
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
 
+  // Get RAGFlow configuration from initial params
+  const ragflowServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const ragflowApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  // Initialize RAGFlow config from params
+  useEffect(() => {
+    if (toolKbType === "ragflow_search") {
+      const serverUrl = ragflowServerUrlParam?.value || "";
+      const apiKey = ragflowApiKeyParam?.value || "";
+
+      setRagflowConfig({
+        serverUrl,
+        apiKey,
+      });
+    }
+  }, [toolKbType, ragflowServerUrlParam, ragflowApiKeyParam]);
+
   // Get iData configuration from initial params
   const idataServerUrlParam = useMemo(() => {
     return currentParams.find((param) => param.name === "server_url");
@@ -539,13 +574,22 @@ export default function ToolConfigModal({
         knowledgeSpaceId: idataConfig.knowledgeSpaceId,
       };
     }
-    if (toolKbType === "aidp_search") {
-      return {
-        serverUrl: aidpConfig.serverUrl,
-        apiKey: aidpConfig.apiKey,
-      };
-    }
-    return undefined;
+	    if (toolKbType === "aidp_search") {
+	      return {
+	        serverUrl: aidpConfig.serverUrl,
+	        apiKey: aidpConfig.apiKey,
+	      };
+	    }
+	    if (toolKbType === "ragflow_search") {
+	      if (!ragflowConfig.serverUrl || !ragflowConfig.apiKey) {
+	        return undefined;
+	      }
+	      return {
+	        serverUrl: ragflowConfig.serverUrl,
+	        apiKey: ragflowConfig.apiKey,
+	      };
+	    }
+	    return undefined;
   };
 
   const {
@@ -608,25 +652,35 @@ export default function ToolConfigModal({
     refetchKnowledgeBases();
   }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
 
+  // Resolve the config payload for the knowledge-base config change handler
+  // based on the current tool type, avoiding a deeply-nested ternary expression.
+  const kbHandlerConfig = useMemo(() => {
+    switch (toolKbType) {
+      case "dify_search":
+        return difyConfig;
+      case "ragflow_search":
+        return ragflowConfig;
+      case "datamate_search":
+        return { serverUrl: datamateServerUrl };
+      case "idata_search":
+        return {
+          serverUrl: idataConfig.serverUrl,
+          apiKey: idataConfig.apiKey,
+          userId: idataConfig.userId,
+        };
+      case "aidp_search":
+        return {
+          serverUrl: aidpConfig.serverUrl,
+          apiKey: aidpConfig.apiKey,
+        };
+      default:
+        return undefined;
+    }
+  }, [toolKbType, difyConfig, ragflowConfig, datamateServerUrl, idataConfig, aidpConfig]);
+
   useKnowledgeBaseConfigChangeHandler({
     toolKbType,
-    config:
-      toolKbType === "dify_search"
-        ? difyConfig
-        : toolKbType === "datamate_search"
-          ? { serverUrl: datamateServerUrl }
-          : toolKbType === "idata_search"
-            ? {
-                serverUrl: idataConfig.serverUrl,
-                apiKey: idataConfig.apiKey,
-                userId: idataConfig.userId,
-              }
-            : toolKbType === "aidp_search"
-              ? {
-                  serverUrl: aidpConfig.serverUrl,
-                  apiKey: aidpConfig.apiKey,
-                }
-              : undefined,
+    config: kbHandlerConfig,
     onConfigChange: handleKbConfigChange,
   });
 
@@ -895,7 +949,13 @@ export default function ToolConfigModal({
         }
         if (ids.length > 0) {
           setSelectedKbIds(ids);
+        } else {
+          setSelectedKbIds([]);
+          setSelectedKbDisplayNames([]);
         }
+      } else {
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
       }
       return;
     }
@@ -953,7 +1013,13 @@ export default function ToolConfigModal({
       }
       if (ids.length > 0) {
         setSelectedKbIds(ids);
+      } else {
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
       }
+    } else {
+      setSelectedKbIds([]);
+      setSelectedKbDisplayNames([]);
     }
   }, [
     isOpen,
@@ -1205,6 +1271,10 @@ export default function ToolConfigModal({
         queryClient.invalidateQueries({
           queryKey: ["knowledgeBases", "list", "dify_search"],
         });
+      } else if (toolKbType === "ragflow_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "ragflow_search"],
+        });
       } else if (toolKbType === "datamate_search") {
         queryClient.invalidateQueries({
           queryKey: ["knowledgeBases", "list", "datamate_search"],
@@ -1257,6 +1327,7 @@ export default function ToolConfigModal({
     refetchHaotianSets,
     toolKbType,
     difyConfig,
+    ragflowConfig,
     haotianConfig,
     aidpConfig,
   ]);
@@ -1429,6 +1500,7 @@ export default function ToolConfigModal({
 
       // Update local state only - actual save will happen when user clicks "Save Agent"
       updateTools(newSelectedTools);
+
       message.success(t("toolConfig.message.saveSuccess"));
       handleClose(); // Close modal
 

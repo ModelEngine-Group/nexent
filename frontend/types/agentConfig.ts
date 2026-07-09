@@ -129,6 +129,7 @@ export interface Tool {
   usage?: string;
   inputs?: string;
   category?: string;
+  labels?: string[];
   /**
    * Knowledge base display names associated with this tool.
    * This is populated when the tool (e.g., knowledge_base_search) has knowledge bases configured.

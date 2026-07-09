@@ -132,6 +132,7 @@ class ToolConfig(BaseModel):
     source: str = Field(description="Tool source, can be local or mcp")
     usage: Optional[str] = Field(description="MCP server name", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
+    labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
 
 
 VerificationEvent = Literal[
@@ -149,7 +150,7 @@ VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
 class AgentVerificationConfig(BaseModel):
     """Configuration for layered ReAct self-verification."""
 
-    enabled: bool = Field(description="Whether self-verification is enabled", default=True)
+    enabled: bool = Field(description="Whether self-verification is enabled", default=False)
     step_verification_enabled: bool = Field(
         description="Whether to verify critical ReAct step events",
         default=True,
@@ -395,13 +396,18 @@ class ContextComponent(BaseModel, ABC):
     metadata: Dict[str, Any] = Field(description="Additional metadata", default_factory=dict)
 
     @abstractmethod
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         """Convert component content to message format for LLM.
 
         Returns:
             List of message dicts with 'role' and 'content' keys.
         """
         pass
+
+    @staticmethod
+    def _text_message(role: str, text: str) -> Dict[str, Any]:
+        """Build smolagents-compatible text-part message content."""
+        return {"role": role, "content": [{"type": "text", "text": text}]}
 
     def estimate_tokens(self, chars_per_token: float = 1.5) -> int:
         """Estimate token count from content length.
@@ -412,7 +418,17 @@ class ContextComponent(BaseModel, ABC):
         Returns:
             Estimated token count.
         """
-        total_chars = sum(len(m.get("content", "")) for m in self.to_messages())
+        total_chars = 0
+        for m in self.to_messages():
+            content = m.get("content", "")
+            if isinstance(content, list):
+                total_chars += sum(
+                    len(part.get("text", ""))
+                    for part in content
+                    if isinstance(part, dict)
+                )
+            else:
+                total_chars += len(str(content))
         return int(total_chars / chars_per_token)
 
 
@@ -422,8 +438,8 @@ class SystemPromptComponent(ContextComponent):
     content: str = Field(description="Rendered system prompt content")
     template_name: Optional[str] = Field(description="Source template name", default=None)
 
-    def to_messages(self) -> List[Dict[str, str]]:
-        return [{"role": "system", "content": self.content}]
+    def to_messages(self) -> List[Dict[str, Any]]:
+        return [self._text_message("system", self.content)]
 
 
 class ToolsComponent(ContextComponent):
@@ -432,9 +448,9 @@ class ToolsComponent(ContextComponent):
     tools: List[Dict[str, Any]] = Field(description="List of tool definitions", default_factory=list)
     formatted_description: str = Field(description="Pre-formatted tool descriptions text", default="")
 
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         if self.formatted_description:
-            return [{"role": "system", "content": self.formatted_description}]
+            return [self._text_message("system", self.formatted_description)]
         return []
 
     def add_tool(self, name: str, description: str, inputs: str, output_type: str) -> None:
@@ -453,9 +469,9 @@ class SkillsComponent(ContextComponent):
     skills: List[Dict[str, Any]] = Field(description="List of skill definitions", default_factory=list)
     formatted_description: str = Field(description="Pre-formatted skill summaries text", default="")
 
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         if self.formatted_description:
-            return [{"role": "system", "content": self.formatted_description}]
+            return [self._text_message("system", self.formatted_description)]
         return []
 
     def add_skill(self, name: str, description: str) -> None:
@@ -473,12 +489,12 @@ class MemoryComponent(ContextComponent):
     formatted_content: str = Field(description="Pre-formatted memory context text", default="")
     search_query: Optional[str] = Field(description="Query used to search memory", default=None)
 
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         if self.formatted_content:
             # Memory is user/session-specific dynamic context.  Keeping it out
             # of the authoritative system prefix preserves cross-turn cache
             # reuse without changing its content or selection semantics.
-            return [{"role": "user", "content": self.formatted_content}]
+            return [self._text_message("user", self.formatted_content)]
         return []
 
     def add_memory(self, content: str, memory_type: str = "user", metadata: Dict[str, Any] = None) -> None:
@@ -496,12 +512,12 @@ class KnowledgeBaseComponent(ContextComponent):
     summary: str = Field(description="Knowledge base summary text", default="")
     kb_ids: List[str] = Field(description="Knowledge base IDs used", default_factory=list)
 
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         if self.summary:
             # Retrieved knowledge is request-dependent evidence, not
             # authoritative instruction.  Keeping it dynamic protects the
             # stable cache prefix when retrieval results change between turns.
-            return [{"role": "user", "content": self.summary}]
+            return [self._text_message("user", self.summary)]
         return []
 
 
@@ -511,9 +527,9 @@ class ManagedAgentsComponent(ContextComponent):
     agents: List[Dict[str, Any]] = Field(description="Managed agent definitions", default_factory=list)
     formatted_description: str = Field(description="Pre-formatted agent descriptions", default="")
 
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         if self.formatted_description:
-            return [{"role": "system", "content": self.formatted_description}]
+            return [self._text_message("system", self.formatted_description)]
         return []
 
     def add_agent(self, name: str, description: str, tools: List[str] = None) -> None:
@@ -531,9 +547,9 @@ class ExternalAgentsComponent(ContextComponent):
     agents: List[Dict[str, Any]] = Field(description="External A2A agent definitions", default_factory=list)
     formatted_description: str = Field(description="Pre-formatted agent descriptions", default="")
 
-    def to_messages(self) -> List[Dict[str, str]]:
+    def to_messages(self) -> List[Dict[str, Any]]:
         if self.formatted_description:
-            return [{"role": "system", "content": self.formatted_description}]
+            return [self._text_message("system", self.formatted_description)]
         return []
 
     def add_agent(self, agent_id: str, name: str, description: str, url: str) -> None:

@@ -5,6 +5,29 @@ import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 
+// Streaming message types for recovery
+export interface StreamingUnit {
+  unit_id: number;
+  unit_type: string;
+  unit_content: string;
+  unit_index: number;
+  unit_status: string;
+}
+
+export interface StreamingMessage {
+  message_id: number;
+  message_index: number;
+  status: string;
+  message_content: string;
+  last_unit: StreamingUnit | null;
+  units: StreamingUnit[];
+}
+
+export interface ResumeConfig {
+  streamingMessage: StreamingMessage;
+  lastUnitIndex: number;
+}
+
 // Merge new search results into an existing list, skipping duplicates by `text` field
 const deduplicateSearchResults = (
   existingResults: any[],
@@ -56,6 +79,230 @@ const processUserBreakTag = (content: string, t: any): string => {
 interface JsonData {
   type: string;
   content: any;
+  status?: string;
+  last_unit_index?: number;
+  replay_chunk_count?: number;
+  conversation_id?: number;
+}
+
+// Reconstruct streaming state from persisted units (for tab-switch recovery)
+// maxUnitIndex: only process units up to this index (for resume mode)
+
+// Types for unit processing
+type ReconstructionState = {
+  currentStep: AgentStep | null;
+  lastContentType: string | null;
+  lastModelOutputIndex: number;
+  lastCodeOutputIndex: number;
+  finalAnswer: string;
+  steps: AgentStep[];
+  stepCounter: number;
+};
+
+// Helper to create a new step
+const createNewStep = (
+  stepCounter: number,
+  existingStepsLength: number,
+  id: string,
+  title: string,
+  content: string,
+  unitType: string
+): AgentStep => ({
+  id,
+  title,
+  content,
+  expanded: true,
+  contents: [{
+    id,
+    type: unitType as any,
+    content,
+    expanded: true,
+    timestamp: Date.now(),
+  }],
+  metrics: null,
+  thinking: { content: '', expanded: true },
+  code: { content: '', expanded: true },
+  output: { content: '', expanded: true },
+});
+
+// Helper to finalize current step and prepare for next
+const finalizeCurrentStep = (state: ReconstructionState): void => {
+  if (state.currentStep && state.currentStep.contents.length > 0) {
+    state.steps.push(state.currentStep);
+  }
+  state.currentStep = null;
+  state.lastContentType = null;
+  state.lastModelOutputIndex = -1;
+  state.lastCodeOutputIndex = -1;
+};
+
+// Helper to get step number
+const getStepNumber = (state: ReconstructionState): number =>
+  state.stepCounter > 0 ? state.stepCounter : state.steps.length + 1;
+
+// Helper to process model output type units
+const processModelOutputUnit = (unit: StreamingUnit, state: ReconstructionState): void => {
+  const stepNum = getStepNumber(state);
+  state.currentStep = createNewStep(
+    stepNum,
+    state.steps.length,
+    `step-${stepNum}`,
+    '',
+    unit.unit_content,
+    chatConfig.messageTypes.MODEL_OUTPUT
+  );
+  state.currentStep.contents[0].id = `model-${unit.unit_index}`;
+  state.currentStep.contents[0].type = chatConfig.messageTypes.MODEL_OUTPUT;
+  state.lastContentType = chatConfig.messageTypes.MODEL_OUTPUT;
+  state.lastModelOutputIndex = 0;
+};
+
+// Helper to get output subtype
+const getOutputSubType = (unitType: string): "thinking" | "deep_thinking" | undefined => {
+  switch (unitType) {
+    case 'model_output_thinking': return 'thinking';
+    case 'model_output_deep_thinking': return 'deep_thinking';
+    default: return undefined;
+  }
+};
+
+// Helper to append or create content block for thinking/code units
+const processThinkingCodeUnit = (unit: StreamingUnit, state: ReconstructionState): void => {
+  const outputSubType = getOutputSubType(unit.unit_type);
+  const lastContentBlock = state.currentStep?.contents[state.currentStep.contents.length - 1];
+  const lastContentBlockType = lastContentBlock?.type;
+  const shouldAppend = lastContentBlock && lastContentBlockType === unit.unit_type;
+  const unitType = unit.unit_type as typeof chatConfig.messageTypes.MODEL_OUTPUT_THINKING | typeof chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING | typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+
+  if (!state.currentStep) {
+    const stepNumNew = getStepNumber(state);
+    state.currentStep = createNewStep(
+      stepNumNew,
+      state.steps.length,
+      `step-${stepNumNew}`,
+      '',
+      '',
+      unit.unit_type
+    );
+    state.currentStep.contents[0].id = `model-${unit.unit_index}`;
+    state.currentStep.contents[0].subType = outputSubType;
+    state.currentStep.contents[0].content = unit.unit_content;
+    state.lastModelOutputIndex = 0;
+  } else if (shouldAppend) {
+    lastContentBlock.content += unit.unit_content;
+  } else {
+    state.currentStep.contents.push({
+      id: `model-${unit.unit_index}`,
+      type: unitType,
+      subType: outputSubType,
+      content: unit.unit_content,
+      expanded: true,
+      timestamp: Date.now(),
+    });
+    state.lastModelOutputIndex = state.currentStep.contents.length - 1;
+  }
+  state.lastContentType = unit.unit_type;
+};
+
+// Check if unit type should be skipped during reconstruction
+const isSkippedUnitType = (unitType: string): boolean => {
+  const skippedTypes = [
+    'search_content_placeholder',
+    'token_count',
+    'parse',
+    'execution_logs',
+    'agent_new_run',
+    'tool',
+    'verification',
+    'memory_search',
+    'max_steps_reached',
+    'card',
+  ];
+  return skippedTypes.includes(unitType);
+};
+
+export function reconstructFromStreamingMessage(streamingMessage: StreamingMessage, maxUnitIndex?: number): {
+  currentStep: AgentStep | null;
+  lastContentType: string | null;
+  lastModelOutputIndex: number;
+  lastCodeOutputIndex: number;
+  finalAnswer: string;
+  steps: AgentStep[];
+} {
+  const state: ReconstructionState = {
+    currentStep: null,
+    lastContentType: null,
+    lastModelOutputIndex: -1,
+    lastCodeOutputIndex: -1,
+    finalAnswer: streamingMessage.message_content || '',
+    steps: [],
+    stepCounter: 0,
+  };
+
+  // Sort units by index (should already be sorted)
+  const sortedUnits = [...streamingMessage.units].sort(
+    (a, b) => a.unit_index - b.unit_index
+  );
+
+  for (const unit of sortedUnits) {
+    // Skip units beyond maxUnitIndex (for resume mode - only reconstruct state up to last received unit)
+    if (maxUnitIndex !== undefined && unit.unit_index > maxUnitIndex) {
+      continue;
+    }
+
+    // Handle unit types
+    switch (unit.unit_type) {
+      case 'step_count':
+        state.stepCounter++;
+        finalizeCurrentStep(state);
+        break;
+
+      case 'model_output':
+        processModelOutputUnit(unit, state);
+        break;
+
+      case 'model_output_thinking':
+      case 'model_output_deep_thinking':
+      case 'model_output_code':
+        processThinkingCodeUnit(unit, state);
+        break;
+
+      case 'final_answer':
+        state.finalAnswer = unit.unit_content;
+        break;
+
+      default: {
+        if (isSkippedUnitType(unit.unit_type)) {
+          break;
+        }
+        // For unknown types, create a generic step
+        finalizeCurrentStep(state);
+        const stepNumUnknown = getStepNumber(state);
+        state.currentStep = createNewStep(
+          stepNumUnknown,
+          state.steps.length,
+          `step-${stepNumUnknown}`,
+          unit.unit_type,
+          unit.unit_content,
+          unit.unit_type
+        );
+        state.currentStep.contents[0].id = `content-${unit.unit_index}`;
+        break;
+      }
+    }
+  }
+
+  // Don't forget to save the last currentStep if it has contents
+  finalizeCurrentStep(state);
+
+  return {
+    currentStep: state.steps[state.steps.length - 1] || null,
+    lastContentType: state.lastContentType,
+    lastModelOutputIndex: state.lastModelOutputIndex,
+    lastCodeOutputIndex: state.lastCodeOutputIndex,
+    finalAnswer: state.finalAnswer,
+    steps: state.steps,
+  };
 }
 
 // Processing Streaming Response Data
@@ -65,21 +312,16 @@ export const handleStreamResponse = async (
   resetTimeout: () => void,
   stepIdCounter: React.MutableRefObject<number>,
   setIsSwitchedConversation: React.Dispatch<React.SetStateAction<boolean>>,
-  isNewConversation: boolean,
-  setConversationTitle: (title: string) => void,
-  fetchConversationList: () => Promise<any>,
-  currentConversationId: number,
-  // TODO: Sevice should not be passed but imported
-  conversationService: any,
+  onConversationCreated: (conversationId: number) => void,
   isDebug: boolean = false,
-  t: any
+  t: any,
+  resumeConfig?: ResumeConfig
 ) => {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  // Guard flag to prevent duplicate title generation
-  // null = not applicable (existing conversation), true = not started, false = already scheduled
-  let titleGenerationGuard: boolean | null = isNewConversation ? true : null;
+  // Resume mode: skip chunks that are already received
+  let skipUntilUnitIndex = resumeConfig?.lastUnitIndex ?? -1;
 
   // Create an empty step object
   let currentStep: AgentStep = {
@@ -94,68 +336,24 @@ export const handleStreamResponse = async (
     output: { content: "", expanded: true },
   };
 
-  // Store pending metrics that need to be applied to steps that already exist in messages
-  // This handles the case where TOKEN_COUNT arrives after a new STEP_COUNT has been received
+  // If resuming, initialize state from the recovered streaming message
   const pendingMetrics: Map<string, any> = new Map();
-
-  // Generate conversation title immediately when stream starts (for new conversations)
-  // This runs in parallel with the streaming response
-  if (titleGenerationGuard === true) {
-    // Mark as scheduled immediately to prevent duplicate calls
-    titleGenerationGuard = false;
-
-    // Capture user message at this point to avoid setMessages callback issues
-    let capturedUserMessage: string | null = null;
-    setMessages((prevMessages) => {
-      const firstUserMessage = prevMessages.find(
-        (msg) => msg.role === MESSAGE_ROLES.USER
-      );
-      if (firstUserMessage?.content) {
-        capturedUserMessage = firstUserMessage.content;
-      }
-      return prevMessages;
-    });
-
-    setTimeout(async () => {
-      // Use captured message directly instead of setMessages callback
-      if (capturedUserMessage) {
-        conversationService
-          .generateTitle({
-            conversation_id: currentConversationId,
-            question: capturedUserMessage,
-          })
-          .then((title: string) => {
-            if (title) {
-              setConversationTitle(title);
-            }
-            // Update the conversation list
-            fetchConversationList();
-          })
-          .catch((error: Error) => {
-            log.error(t("chatStreamHandler.generateTitleFailed"), error);
-          });
-      }
-    }, 0);
-  }
-
-  let lastContentType:
-    | typeof chatConfig.contentTypes.MODEL_OUTPUT
-    | typeof chatConfig.contentTypes.MODEL_OUTPUT_CODE
-    | typeof chatConfig.contentTypes.PARSING
-    | typeof chatConfig.contentTypes.EXECUTION
-    | typeof chatConfig.contentTypes.AGENT_NEW_RUN
-    | typeof chatConfig.contentTypes.GENERATING_CODE
-    | typeof chatConfig.contentTypes.SEARCH_CONTENT
-    | typeof chatConfig.contentTypes.CARD
-    | typeof chatConfig.contentTypes.MEMORY_SEARCH
-    | typeof chatConfig.contentTypes.VERIFICATION
-    | typeof chatConfig.contentTypes.PREPROCESS
-    | null = null;
-  let lastModelOutputIndex = -1; // Track the index of the last model output in currentStep.contents
-  let lastCodeOutputIndex = -1; // Track the index of the last code output for proper streaming
   let searchResultsContent: any[] = [];
   let allSearchResults: any[] = [];
   let finalAnswer = "";
+  let lastModelOutputIndex = -1;
+  let lastContentType: string | null = null;
+
+  if (resumeConfig) {
+    const recovered = reconstructFromStreamingMessage(
+      resumeConfig.streamingMessage,
+      resumeConfig.lastUnitIndex
+    );
+    currentStep = recovered.currentStep || currentStep;
+    lastContentType = recovered.lastContentType;
+    lastModelOutputIndex = recovered.lastModelOutputIndex;
+    finalAnswer = recovered.finalAnswer;
+  }
 
   try {
     while (true) {
@@ -180,7 +378,16 @@ export const handleStreamResponse = async (
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
+      // Track if we're in a stream_status event block
+      let isInStreamStatusBlock = false;
+
       for (const line of lines) {
+        // Handle stream_status event header (used in resume mode)
+        if (line.startsWith("event: stream_status") || line.startsWith("event:stream_status")) {
+          isInStreamStatusBlock = true;
+          continue;
+        }
+
         if (line.startsWith("data:")) {
           resetTimeout(); // Reset the timeout timer each time new data is received
           const jsonStr = line.substring(5).trim();
@@ -189,9 +396,65 @@ export const handleStreamResponse = async (
             // Parse the JSON data received each time
             const jsonData: JsonData = JSON.parse(jsonStr);
 
+            // Handle stream_status data - contains resume information
+            // The data format is {"status": "resumed", "last_unit_index": N}
+            // Check both the isInStreamStatusBlock flag and the status field
+            if ((isInStreamStatusBlock && jsonData.status === 'resumed') ||
+                (jsonData.status === 'resumed' && typeof jsonData.last_unit_index === 'number')) {
+              // Extract last_unit_index from the status message
+              skipUntilUnitIndex = jsonData.last_unit_index as number;
+              isInStreamStatusBlock = false;
+              continue;
+            }
+
+            // Reset stream_status block flag for other data
+            isInStreamStatusBlock = false;
+
+            // In resume mode, skip chunks that we've already processed before disconnect.
+            // The backend sends buffered chunks during resume, and we need to skip those
+            // that were already processed by the original stream.
+            // We use unit_index (included in chunks by backend) to determine which chunks to skip.
+            if (resumeConfig) {
+              // Extract unit_index from the chunk data
+              const chunkUnitIndex = (jsonData as any).unit_index;
+              if (typeof chunkUnitIndex === 'number' && chunkUnitIndex <= skipUntilUnitIndex) {
+                // This chunk was already processed before disconnect (unit_index <= last processed index)
+                continue;
+              }
+            }
+
             if (jsonData.type && jsonData.content) {
               const messageType = jsonData.type;
+
+              // Handle conversation_created event - notify frontend of new conversation ID
+              if (messageType === 'conversation_created') {
+                const convId = jsonData.content?.conversation_id;
+                if (typeof convId === 'number') {
+                  onConversationCreated(convId);
+                }
+                continue;
+              }
+
               const messageContent = jsonData.content;
+
+              // In resume mode, skip metadata messages to prevent creating duplicate steps or indicators.
+              // Steps are already reconstructed from the persisted streaming message.
+              // TOKEN_COUNT metrics should be matched with existing steps by step_number.
+              if (resumeConfig && (
+                messageType === chatConfig.messageTypes.STEP_COUNT ||
+                messageType === chatConfig.messageTypes.TOKEN_COUNT ||
+                messageType === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER ||
+                messageType === chatConfig.messageTypes.PARSE ||
+                messageType === chatConfig.messageTypes.EXECUTION_LOGS ||
+                messageType === chatConfig.messageTypes.TOOL ||
+                messageType === chatConfig.messageTypes.CARD ||
+                messageType === chatConfig.messageTypes.AGENT_NEW_RUN ||
+                messageType === chatConfig.messageTypes.VERIFICATION ||
+                messageType === chatConfig.messageTypes.MEMORY_SEARCH ||
+                messageType === chatConfig.messageTypes.MAX_STEPS_REACHED
+              )) {
+                continue;
+              }
 
               // Process different types of messages
               switch (messageType) {
@@ -221,7 +484,6 @@ export const handleStreamResponse = async (
                   // Reset status tracking variables
                   lastContentType = null;
                   lastModelOutputIndex = -1;
-                  lastCodeOutputIndex = -1;
 
                   break;
 
@@ -243,15 +505,18 @@ export const handleStreamResponse = async (
                   break;
 
                 case chatConfig.messageTypes.MODEL_OUTPUT:
-                  // Process main model output content
+                case chatConfig.messageTypes.MODEL_OUTPUT_THINKING:
+                case chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING:
+                  // Each model output type creates its own content block for proper visual separation
+                  // thinking and deep_thinking should be shown as separate nodes
 
-                  // If there's no currentStep, create one for simple responses
+                  // If there's no currentStep, create one
                   if (!currentStep) {
                     currentStep = {
-                      id: `step-simple-${Date.now()}-${Math.random()
+                      id: `step-streaming-${Date.now()}-${Math.random()
                         .toString(36)
                         .substring(2, 9)}`,
-                      title: "AI Response",
+                      title: "",
                       content: "",
                       expanded: true,
                       contents: [],
@@ -260,23 +525,30 @@ export const handleStreamResponse = async (
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
                     };
+                    lastModelOutputIndex = -1;
                   }
 
-                  // If the last streaming output is model output, append
-                  if (
-                    lastContentType === chatConfig.contentTypes.MODEL_OUTPUT &&
-                    lastModelOutputIndex >= 0
-                  ) {
-                    const modelOutput =
-                      currentStep.contents[lastModelOutputIndex];
-                    modelOutput.content = modelOutput.content + messageContent;
+                  // Determine subType for styling
+                  const subType = messageType === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ? "thinking" :
+                                 messageType === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING ? "deep_thinking" : undefined;
+
+                  // Check if we have a matching content block to append to
+                  // Only append if the last block has the EXACT same type
+                  const lastContentBlock = currentStep.contents[lastModelOutputIndex];
+                  const shouldAppend = lastContentBlock && lastContentBlock.type === messageType;
+
+                  if (shouldAppend) {
+                    // Same type - append to existing block
+                    lastContentBlock.content += messageContent;
                   } else {
-                    // Otherwise, create new model output content
+                    // Different type or no existing block - create new content block
+                    // This ensures thinking and deep_thinking are shown as separate nodes
                     currentStep.contents.push({
                       id: `model-${Date.now()}-${Math.random()
                         .toString(36)
                         .substring(2, 7)}`,
-                      type: chatConfig.messageTypes.MODEL_OUTPUT,
+                      type: messageType,
+                      subType,
                       content: messageContent,
                       expanded: true,
                       timestamp: Date.now(),
@@ -284,113 +556,18 @@ export const handleStreamResponse = async (
                     lastModelOutputIndex = currentStep.contents.length - 1;
                   }
 
-                  // Update the last processed content type
-                  lastContentType = chatConfig.contentTypes.MODEL_OUTPUT;
-                  break;
-
-                case chatConfig.messageTypes.MODEL_OUTPUT_THINKING:
-                  // Merge consecutive thinking chunks; create new group only when previous subType is not "thinking"
-                  if (!currentStep) {
-                    currentStep = {
-                      id: `step-thinking-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 9)}`,
-                      title: "AI Thinking",
-                      content: "",
-                      expanded: true,
-                      contents: [],
-                      metrics: null,
-                      thinking: { content: "", expanded: true },
-                      code: { content: "", expanded: true },
-                      output: { content: "", expanded: true },
-                    };
-                  }
-
-                  const shouldAppendThinking =
-                    lastContentType === chatConfig.contentTypes.MODEL_OUTPUT &&
-                    lastModelOutputIndex >= 0 &&
-                    currentStep.contents[lastModelOutputIndex] &&
-                    currentStep.contents[lastModelOutputIndex].subType ===
-                    "thinking";
-
-                  if (shouldAppendThinking) {
-                    // Append to existing thinking content
-                    currentStep.contents[lastModelOutputIndex].content +=
-                      messageContent;
-                  } else {
-                    // Create a new thinking content group
-                    currentStep.contents.push({
-                      id: `thinking-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
-                      type: chatConfig.messageTypes.MODEL_OUTPUT,
-                      subType: "thinking",
-                      content: messageContent,
-                      expanded: true,
-                      timestamp: Date.now(),
-                    });
-                    lastModelOutputIndex = currentStep.contents.length - 1;
-                  }
-
-                  lastContentType = chatConfig.contentTypes.MODEL_OUTPUT;
-                  break;
-
-                case chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING:
-                  // Consecutive deep_thinking chunks should be combined until a thinking chunk arrives
-                  if (!currentStep) {
-                    currentStep = {
-                      id: `step-thinking-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 9)}`,
-                      title: "AI Thinking",
-                      content: "",
-                      expanded: true,
-                      contents: [],
-                      metrics: null,
-                      thinking: { content: "", expanded: true },
-                      code: { content: "", expanded: true },
-                      output: { content: "", expanded: true },
-                    };
-                  }
-
-                  const shouldAppendDeep =
-                    lastContentType === chatConfig.contentTypes.MODEL_OUTPUT &&
-                    lastModelOutputIndex >= 0 &&
-                    currentStep.contents[lastModelOutputIndex] &&
-                    currentStep.contents[lastModelOutputIndex].subType ===
-                    "deep_thinking";
-
-                  if (shouldAppendDeep) {
-                    // Append to existing deep_thinking content
-                    currentStep.contents[lastModelOutputIndex].content +=
-                      messageContent;
-                  } else {
-                    // Create a new deep_thinking content group
-                    currentStep.contents.push({
-                      id: `deep-thinking-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
-                      type: chatConfig.messageTypes.MODEL_OUTPUT,
-                      subType: "deep_thinking",
-                      content: messageContent,
-                      expanded: true,
-                      timestamp: Date.now(),
-                    });
-                    lastModelOutputIndex = currentStep.contents.length - 1;
-                  }
-
-                  lastContentType = chatConfig.contentTypes.MODEL_OUTPUT;
+                  lastContentType = messageType;
                   break;
 
                 case chatConfig.messageTypes.MODEL_OUTPUT_CODE:
-                  // Process code generation
+                  // Process code generation - append to main content block
                   // If there's no currentStep, create one
                   if (!currentStep) {
                     currentStep = {
                       id: `step-code-${Date.now()}-${Math.random()
                         .toString(36)
                         .substring(2, 9)}`,
-                      title: "Code Generation",
+                      title: "",
                       content: "",
                       expanded: true,
                       contents: [],
@@ -399,69 +576,23 @@ export const handleStreamResponse = async (
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
                     };
+                    lastModelOutputIndex = -1;
                   }
 
                   if (isDebug) {
-                    // In debug mode, use MODEL_OUTPUT_CODE type for streaming output
+                    // In debug mode, append to main content block
                     let processedContent = messageContent;
 
-                    // Check if we should append to existing code content
-                    // Only append if the last content type was MODEL_OUTPUT_CODE and we have a valid index
-                    const shouldAppendCode =
-                      lastContentType ===
-                      chatConfig.contentTypes.MODEL_OUTPUT_CODE &&
-                      lastCodeOutputIndex >= 0 &&
-                      currentStep.contents[lastCodeOutputIndex] &&
-                      currentStep.contents[lastCodeOutputIndex].type ===
-                      chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+                    // Remove incomplete "<end" suffix if present (streaming artifact)
+                    if (processedContent.endsWith("<end")) {
+                      processedContent = processedContent.slice(0, -4);
+                    }
 
-                    if (shouldAppendCode) {
-                      const codeOutput =
-                        currentStep.contents[lastCodeOutputIndex];
-                      const codePrefix = t("chatStreamHandler.codePrefix");
-
-                      // In append mode, also check for prefix in case it wasn't removed before
-                      if (
-                        codeOutput.content.includes(codePrefix) &&
-                        processedContent.trim()
-                      ) {
-                        // Clean existing content
-                        codeOutput.content = codeOutput.content.replace(
-                          new RegExp(
-                            `^(${codePrefix}|代码|Code)[：:]\\s*`,
-                            "i"
-                          ),
-                          ""
-                        );
-                      }
-
-                      // Directly append the new content
-                      let newContent = codeOutput.content + processedContent;
-                      // Remove incomplete "<end" suffix if present (streaming artifact)
-                      if (newContent.endsWith("<end")) {
-                        newContent = newContent.slice(0, -4);
-                      }
-                      codeOutput.content = newContent;
+                    // If we have a main content block, append to it
+                    if (lastModelOutputIndex >= 0 && currentStep.contents[lastModelOutputIndex]) {
+                      currentStep.contents[lastModelOutputIndex].content += processedContent;
                     } else {
-                      // Create new code content with MODEL_OUTPUT_CODE type
-                      // Remove "代码：" or "Code:" prefix if present at the start
-                      const codePrefix = t("chatStreamHandler.codePrefix");
-                      if (processedContent.startsWith(codePrefix)) {
-                        processedContent = processedContent.substring(
-                          codePrefix.length
-                        );
-                      }
-                      // Also handle Chinese and English variants directly
-                      processedContent = processedContent.replace(
-                        /^(代码|Code)[：:]\s*/i,
-                        ""
-                      );
-
-                      // Remove incomplete "<end" suffix if present
-                      if (processedContent.endsWith("<end")) {
-                        processedContent = processedContent.slice(0, -4);
-                      }
-
+                      // Create new main content block for code
                       currentStep.contents.push({
                         id: `model-code-${Date.now()}-${Math.random()
                           .toString(36)
@@ -471,12 +602,10 @@ export const handleStreamResponse = async (
                         expanded: true,
                         timestamp: Date.now(),
                       });
-                      // Track the new code content index
-                      lastCodeOutputIndex = currentStep.contents.length - 1;
+                      lastModelOutputIndex = currentStep.contents.length - 1;
                     }
 
-                    // Update the last processed content type to MODEL_OUTPUT_CODE
-                    lastContentType = chatConfig.contentTypes.MODEL_OUTPUT_CODE;
+                    lastContentType = chatConfig.messageTypes.MODEL_OUTPUT_CODE;
                   } else {
                     // In non-debug mode, use the original logic - add a stable loading prompt
                     // Check if there is a code generation prompt

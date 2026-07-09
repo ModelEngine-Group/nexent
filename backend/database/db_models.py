@@ -65,6 +65,9 @@ class ConversationMessage(TableBase):
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
     opinion_flag = Column(String(
         1), doc="User evaluation of the conversation. Enumeration value \"Y\" represents a positive review, \"N\" represents a negative review")
+    status = Column(
+        String(30), default='completed',
+        doc="Lifecycle status: pending / streaming / completed / failed / stopped")
 
 
 class ConversationMessageUnit(TableBase):
@@ -85,6 +88,9 @@ class ConversationMessageUnit(TableBase):
     unit_type = Column(String(100), doc="Type of the smallest answer unit")
     unit_content = Column(
         String, doc="Complete content of the smallest reply unit")
+    unit_status = Column(
+        String(30), default='completed',
+        doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
 
 
 class ConversationSourceImage(TableBase):
@@ -419,6 +425,7 @@ class ToolInfo(TableBase):
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
+    labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
@@ -1392,5 +1399,164 @@ class A2AArtifact(SimpleTableBase):
     extensions = Column(JSON, doc="Extension URI list")
 
     # Timestamp
-    create_time = Column(TIMESTAMP(
-        timezone=False), server_default=func.now(), doc="Artifact creation timestamp")
+    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Artifact creation timestamp")
+
+
+# -----------------------------------------------------------------------------
+# Agent Evaluation (offline) tables
+# -----------------------------------------------------------------------------
+class EvaluationSet(TableBase):
+    """Evaluation set metadata."""
+
+    __tablename__ = "evaluation_set_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    evaluation_set_id = Column(
+        BigInteger,
+        Sequence("evaluation_set_t_evaluation_set_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc=_PRIMARY_KEY_DOC,
+    )
+
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    name = Column(String(255), nullable=False, doc="Evaluation set name")
+    description = Column(Text, doc="Evaluation set description")
+
+    source_filename = Column(String(255), doc="Original uploaded filename")
+    case_count = Column(Integer, default=0, doc="Total number of cases")
+
+    __table_args__ = (
+        Index("ix_eval_set_tenant_id", "tenant_id"),
+        Index("ix_eval_set_name", "tenant_id", "name"),
+        {"schema": SCHEMA},
+    )
+
+
+class EvaluationSetCase(TableBase):
+    """Evaluation cases belonging to a set."""
+
+    __tablename__ = "evaluation_set_case_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    evaluation_set_case_id = Column(
+        BigInteger,
+        Sequence("evaluation_set_case_t_evaluation_set_case_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc=_PRIMARY_KEY_DOC,
+    )
+
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    evaluation_set_id = Column(BigInteger, nullable=False, doc="Evaluation set id")
+
+    case_id = Column(String(128), doc="External case_id from JSONL (optional)")
+
+    inputs = Column(JSONB, nullable=False, doc="Case inputs JSON")
+    label = Column(JSONB, nullable=False, doc="Case label JSON")
+
+    order_no = Column(Integer, default=0, doc="Case order in the set")
+
+    __table_args__ = (
+        Index("ix_eval_set_case_set_id", "evaluation_set_id"),
+        Index("ix_eval_set_case_tenant_id", "tenant_id"),
+        {"schema": SCHEMA},
+    )
+
+
+class AgentEvaluation(TableBase):
+    """An evaluation run for a specific agent and evaluation set."""
+
+    __tablename__ = "agent_evaluation_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    agent_evaluation_id = Column(
+        BigInteger,
+        Sequence("agent_evaluation_t_agent_evaluation_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc=_PRIMARY_KEY_DOC,
+    )
+
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+
+    agent_id = Column(Integer, nullable=False, doc="Agent id")
+    agent_version_no = Column(Integer, nullable=False, doc="Published agent version_no used for evaluation")
+
+    evaluation_set_id = Column(BigInteger, nullable=False, doc="Evaluation set id")
+
+    status = Column(
+        String(30),
+        nullable=False,
+        default="PENDING",
+        doc="Run status: PENDING/RUNNING/COMPLETED/FAILED",
+    )
+
+    progress_total = Column(Integer, default=0, doc="Total cases")
+    progress_done = Column(Integer, default=0, doc="Completed cases")
+
+    judge_model_id = Column(
+        Integer,
+        doc=(
+            "Model id used by the judge. Persisted so the background worker can "
+            "recover it after restart and the frontend can resolve judge_model_name."
+        ),
+    )
+
+    score_overall = Column(Float, doc="Overall score (0-1)")
+
+    error_message = Column(Text, doc="Failure reason")
+
+    __table_args__ = (
+        Index("ix_agent_eval_tenant_id", "tenant_id"),
+        Index("ix_agent_eval_agent_id", "tenant_id", "agent_id"),
+        Index("ix_agent_eval_set_id", "tenant_id", "evaluation_set_id"),
+        Index("ix_agent_eval_judge_model_id", "tenant_id", "judge_model_id"),
+        {"schema": SCHEMA},
+    )
+
+
+class AgentEvaluationCase(TableBase):
+    """Per-case evaluation details within an evaluation run."""
+
+    __tablename__ = "agent_evaluation_case_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    agent_evaluation_case_id = Column(
+        BigInteger,
+        Sequence("agent_evaluation_case_t_agent_evaluation_case_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc=_PRIMARY_KEY_DOC,
+    )
+
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+
+    agent_evaluation_id = Column(BigInteger, nullable=False, doc="Evaluation run id")
+    evaluation_set_case_id = Column(BigInteger, nullable=False, doc="Evaluation set case id")
+
+    inputs = Column(JSONB, nullable=False, doc="Case inputs snapshot (query only for pass cases)")
+    label = Column(JSONB, nullable=False, doc="Case label snapshot (cleared to {answer:''} for pass cases)")
+    predict = Column(JSONB, doc="Predict JSON (answer/raw); NULL for pass cases")
+
+    score = Column(Float, doc="Case score (0-1)")
+    reason = Column(Text, doc="Judge reason; NULL for pass cases")
+    pass_status = Column(
+        String(16),
+        doc="Judge result: pass / fail. Pass cases have predict/reason/label.answer cleared to save space.",
+    )
+
+    status = Column(
+        String(30),
+        nullable=False,
+        default="PENDING",
+        doc="Case status: PENDING/RUNNING/COMPLETED/FAILED",
+    )
+    error_message = Column(Text, doc="Per-case failure reason")
+
+    __table_args__ = (
+        Index("ix_agent_eval_case_eval_id", "agent_evaluation_id"),
+        Index("ix_agent_eval_case_tenant_id", "tenant_id"),
+        Index("ix_agent_eval_case_pass_status", "tenant_id", "agent_evaluation_id", "pass_status"),
+        {"schema": SCHEMA},
+    )

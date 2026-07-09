@@ -816,7 +816,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         onCancel={() => !actionsLocked && setAddModalVisible(false)}
         footer={null}
         width={800}
-        destroyOnClose
+        destroyOnHidden
       >
         <Tabs
           defaultActiveKey="remote"

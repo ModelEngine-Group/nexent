@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Input, Badge, Button } from "antd";
+import { Modal, Input, Badge, Button, Space } from "antd";
 
 export interface ExpandEditModalProps {
   open: boolean;
@@ -53,16 +53,17 @@ export default function ExpandEditModal({
       footer={
         readOnly ? (
           <Button onClick={handleClose}>
-            {t("common.cancel")}
+            {t("common.close")}
           </Button>
         ) : (
-          <button
-            onClick={handleSave}
-            className="px-4 py-1.5 rounded-md text-sm bg-blue-500 text-white hover:bg-blue-600"
-            style={{ border: "none" }}
-          >
-            {t("common.confirm")}
-          </button>
+          <Space>
+            <Button onClick={handleClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="primary" onClick={handleSave}>
+              {t("common.confirm")}
+            </Button>
+          </Space>
         )
       }
       width={1000}

@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 from typing import Any
 
@@ -9,6 +10,15 @@ from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("search_memory_tool")
+
+
+def _run_coroutine(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 class SearchMemoryTool(Tool):
@@ -63,25 +73,34 @@ class SearchMemoryTool(Tool):
         self.running_prompt_en = "Searching memory..."
         self.running_prompt_zh = "搜索记忆中..."
 
+    def _resolve_memory_levels(self) -> list[str]:
+        """Determine which memory levels to search based on user preferences.
+
+        Conservative default: when config is unavailable, assume "never"
+        (no agent-level sharing) to protect user privacy.
+        """
+        levels = ["tenant", "user", "agent", "user_agent"]
+        if not self.memory_user_config or self.memory_user_config.agent_share_option == "never":
+            levels.remove("agent")
+        if self.memory_user_config and self.agent_id in getattr(self.memory_user_config, "disable_agent_ids", []):
+            if "agent" in levels:
+                levels.remove("agent")
+        if self.memory_user_config and self.agent_id in getattr(self.memory_user_config, "disable_user_agent_ids", []):
+            if "user_agent" in levels:
+                levels.remove("user_agent")
+        return levels
+
     def forward(self, query: str, top_k: int = 5) -> str:
         logger.info(f"[ACTIVE MEMORY] SearchMemoryTool invoked: query={query[:200]}, top_k={top_k}, user_id={self.user_id}, agent_id={self.agent_id}")
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
-        memory_levels = ["tenant", "user", "agent", "user_agent"]
-        if self.memory_user_config.agent_share_option == "never":
-            memory_levels.remove("agent")
-        if self.agent_id in getattr(self.memory_user_config, "disable_agent_ids", []):
-            if "agent" in memory_levels:
-                memory_levels.remove("agent")
-        if self.agent_id in getattr(self.memory_user_config, "disable_user_agent_ids", []):
-            if "user_agent" in memory_levels:
-                memory_levels.remove("user_agent")
+        memory_levels = self._resolve_memory_levels()
 
         try:
             from ...memory.memory_service import search_memory_in_levels
-            result = asyncio.run(search_memory_in_levels(
+            result = _run_coroutine(search_memory_in_levels(
                 query_text=query,
                 memory_config=self.memory_config,
                 tenant_id=self.tenant_id,

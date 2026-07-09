@@ -27,6 +27,7 @@ import {
   MAX_FILE_COUNT,
   MAX_FILE_SIZE,
 } from "@/lib/chat/fileIconUtils";
+import { safeUUID } from "@/lib/utils";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
@@ -626,10 +627,11 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
     try {
       // Call agent_run with AbortSignal
+      // Debug mode does NOT pass conversation_id: backend skips auto-create
+      // when is_debug=True, so no conversation row is created for this run.
       const reader = await conversationService.runAgent(
         {
           query: question,
-          conversation_id: -1, // Debug mode uses -1 as conversation ID
           history: messages
             .filter(msg => msg.isComplete !== false) // Only pass completed messages
             .map(msg => {
@@ -666,16 +668,12 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
       // Process stream response
       await handleStreamResponse(
-        reader,
+        reader as ReadableStreamDefaultReader<Uint8Array>,
         setMessages,
         resetTimeout,
         stepIdCounter.current,
         () => {}, // setIsSwitchedConversation - Debug mode does not need
-        false, // isNewConversation - Debug mode does not need
-        () => {}, // setConversationTitle - Debug mode does not need
-        async () => {}, // fetchConversationList - Debug mode does not need
-        -1, // currentConversationId - Debug mode uses -1
-        conversationService,
+        () => {}, // onConversationCreated - Debug mode does not auto-create conversations
         true, // isDebug: true for debug mode
         t
       );
@@ -883,7 +881,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         return;
       }
 
-      const fileId = crypto.randomUUID();
+      const fileId = safeUUID();
       const extension = getFileExtension(file.name);
 
       const isImage = file.type.startsWith("image/") || chatConfig.imageExtensions.includes(extension);

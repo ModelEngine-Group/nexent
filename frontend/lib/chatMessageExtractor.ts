@@ -174,77 +174,73 @@ export function extractAssistantMsgFromResponse(
         }
 
         case chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING: {
+          const currentStep = getOrCreateCurrentStep(steps, "AI Deep Thinking");
+          appendModelOutputContent(currentStep, msg.content, "deep_thinking");
           resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.EXECUTION_LOGS: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `execution-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "execution",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-            resetModelOutputTracking();
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Execution");
+          const contentId = `execution-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "execution",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.ERROR: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `error-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "error",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-            resetModelOutputTracking();
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Error");
+          const contentId = `error-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "error",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            try {
-              const placeholderData = JSON.parse(msg.content);
-              const unitId = placeholderData.unit_id;
+          const currentStep = getOrCreateCurrentStep(steps, "Search Results");
+          try {
+            const placeholderData = JSON.parse(msg.content);
+            const unitId = placeholderData.unit_id;
 
-              if (
-                unitId &&
-                dialog_msg.search_unit_id &&
-                dialog_msg.search_unit_id[unitId.toString()]
-              ) {
-                const unitSearchResults =
-                  dialog_msg.search_unit_id[unitId.toString()];
-                const searchContent = JSON.stringify(unitSearchResults);
+            if (
+              unitId &&
+              dialog_msg.search_unit_id &&
+              dialog_msg.search_unit_id[unitId.toString()]
+            ) {
+              const unitSearchResults =
+                dialog_msg.search_unit_id[unitId.toString()];
+              const searchContent = JSON.stringify(unitSearchResults);
 
-                const contentId = `search-content-${Date.now()}-${Math.random()
-                  .toString(36)
-                  .substring(2, 7)}`;
-                currentStep.contents.push({
-                  id: contentId,
-                  type: "search_content",
-                  content: searchContent,
-                  expanded: true,
-                  timestamp: Date.now(),
-                });
-                resetModelOutputTracking();
-              }
-            } catch (e) {
-              log.error(t("extractMsg.cannotParseSearchPlaceholder"), e);
+              const contentId = `search-content-${Date.now()}-${Math.random()
+                .toString(36)
+                .substring(2, 7)}`;
+              currentStep.contents.push({
+                id: contentId,
+                type: "search_content",
+                content: searchContent,
+                expanded: true,
+                timestamp: Date.now(),
+              });
+              resetModelOutputTracking();
             }
+          } catch (e) {
+            log.error(t("extractMsg.cannotParseSearchPlaceholder"), e);
           }
           break;
         }
@@ -262,38 +258,34 @@ export function extractAssistantMsgFromResponse(
         }
 
         case chatConfig.messageTypes.CARD: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `card-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "card",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-            resetModelOutputTracking();
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Card");
+          const contentId = `card-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "card",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.TOOL: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `tool-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "executing", // use the existing executing type to represent the tool call
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-            resetModelOutputTracking();
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Tool Call");
+          const contentId = `tool-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "executing", // use the existing executing type to represent the tool call
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 

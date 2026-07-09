@@ -762,6 +762,9 @@ async def create_agent_config(
                 "agent_id": memory_context.agent_id,
             }
 
+            memory_tool_names = {"store_memory", "search_memory"}
+            tool_list = [t for t in tool_list if t.name not in memory_tool_names]
+
             store_tool_config = ToolConfig(
                 class_name="StoreMemoryTool",
                 name="store_memory",
@@ -1089,7 +1092,7 @@ async def create_tool_config_list(
                     f"No embedding model found for index '{index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
-        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
+        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None

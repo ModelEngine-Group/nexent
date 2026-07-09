@@ -731,11 +731,29 @@ class SkillManager:
     ) -> Any:
         """Execute a skill script with given parameters.
 
+        The ``script_path`` is always resolved **relative to the skill's root
+        directory** (i.e. ``<local_skills_dir>/<skill_name>``). This applies to
+        every caller - including tools that pass paths extracted from SKILL.md
+        inline backticks/code fences or `<use_script path="..." />` tags. The
+        agent's current working directory and any absolute filesystem paths
+        are intentionally *not* honoured; use the skill-relative path that the
+        skill guide declares verbatim.
+
+        When the requested script cannot be found, the error message lists:
+
+        * every path that was tried (after normalisation),
+        * a search summary (absolute and skill-relative), and
+        * the scripts that *do* exist under the skill so the caller can
+          pick the right one.
+
         Args:
             skill_name: Name of the skill containing the script
-            script_path: Path to script relative to skill directory (e.g., "scripts/analyze.py")
+            script_path: Path to script relative to the skill root directory
+                (e.g. ``scripts/analyze.py`` or ``scripts/sub/run.sh``).
+                Leading ``./`` or ``\\`` and surrounding whitespace are
+                stripped. The path may use forward slashes or backslashes.
             params: Raw command-line argument string to pass to the script.
-                Example: "--target /path/to/file -c --code \"SELECT 1\""
+                Example: ``--target /path/to/file -c --code "SELECT 1"``
             agent_id: Agent ID for DB-based available skills lookup
             tenant_id: Tenant ID for DB-based available skills lookup
             version_no: Version number for DB-based available skills lookup
@@ -751,29 +769,119 @@ class SkillManager:
         if not os.path.isdir(local_skill_dir):
             raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
 
-        normalized_script_path = script_path.replace("/", os.sep).replace("\\", os.sep)
-        full_path = os.path.normpath(os.path.join(local_skill_dir, normalized_script_path))
-        if not os.path.isfile(full_path):
-            # List available scripts directly from local directory (no temp needed)
-            available = []
-            scripts_dir = os.path.join(local_skill_dir, "scripts")
-            if os.path.isdir(scripts_dir):
-                for root, _, files in os.walk(scripts_dir):
-                    for f in files:
-                        if f.endswith((".py", ".sh")):
-                            rel = os.path.relpath(os.path.join(root, f), local_skill_dir)
-                            available.append(rel)
-            raise SkillScriptNotFoundError(
-                f"Script '{script_path}' not found in skill '{skill_name}'. "
-                f"Available scripts: {available if available else 'none'}"
+        # Normalise the incoming path: collapse whitespace, strip a leading
+        # "./" or "/" that the caller may have added by mistake, and convert
+        # backslashes to the platform separator so we can join it cleanly.
+        if script_path is None:
+            normalised_script_path = ""
+        else:
+            normalised_script_path = script_path.strip()
+
+        # Strip surrounding quotes (`"foo.py"` / `'foo.py'`) that sometimes
+        # leak from backtick or code-fence extraction. This is a best-effort
+        # helper for the LLM and does not handle arbitrarily escaped strings.
+        if (
+            len(normalised_script_path) >= 2
+            and normalised_script_path[0] == normalised_script_path[-1]
+            and normalised_script_path[0] in ("'", '"')
+        ):
+            normalised_script_path = normalised_script_path[1:-1].strip()
+
+        normalised_script_path = normalised_script_path.strip()
+        # Drop a leading relative-path marker like "./" so the join below is
+        # robust against callers that prepend "./scripts/foo.py".
+        while normalised_script_path.startswith(("./", ".\\")):
+            normalised_script_path = normalised_script_path[2:]
+        normalised_script_path = normalised_script_path.lstrip("/\\")
+        normalised_script_path = normalised_script_path.replace("/", os.sep).replace("\\", os.sep)
+        # Reject obvious path-traversal attempts: the script must live inside
+        # the skill directory. We do this by checking the absolute resolved
+        # path stays under the skill root after normalisation.
+        full_path = os.path.normpath(os.path.join(local_skill_dir, normalised_script_path))
+
+        # Build the friendly error up-front so we can attach diagnostic info
+        # whether the path is missing or escapes the skill root.
+        available = self._list_available_scripts(local_skill_dir)
+        tries: List[str] = [full_path]
+        tried_reasons: List[str] = []
+
+        def _fail(reason: str) -> "SkillScriptNotFoundError":
+            tried_reasons.append(reason)
+            return SkillScriptNotFoundError(
+                f"Script '{script_path}' not found in skill '{skill_name}'.\n"
+                f"  - reason: {reason}\n"
+                f"  - resolved to: {full_path}\n"
+                f"  - skill root: {local_skill_dir}\n"
+                f"  - tried: {', '.join(tries)}\n"
+                f"  - available scripts: {available if available else 'none'}"
             )
 
-        if script_path.endswith(".py"):
+        # Disallow traversing outside the skill root.
+        skill_root_abs = os.path.abspath(local_skill_dir)
+        full_abs = os.path.abspath(full_path)
+        if not (full_abs == skill_root_abs or full_abs.startswith(skill_root_abs + os.sep)):
+            raise _fail("resolved path escapes the skill root directory")
+
+        if os.path.isfile(full_path):
+            pass
+        else:
+            # Try a couple of common fall-backs so that ``scripts/foo`` finds
+            # ``scripts/foo.py`` and ``scripts/foo.sh`` when the extension is
+            # omitted, but only when the variant stays inside the skill root.
+            base, ext = os.path.splitext(full_path)
+            if not ext:
+                for candidate_ext in (".py", ".sh"):
+                    candidate = base + candidate_ext
+                    candidate_abs = os.path.abspath(candidate)
+                    if (
+                        candidate_abs == skill_root_abs
+                        or candidate_abs.startswith(skill_root_abs + os.sep)
+                    ) and os.path.isfile(candidate):
+                        full_path = candidate
+                        normalised_script_path = normalised_script_path + candidate_ext
+                        tries.append(candidate)
+                        break
+                else:
+                    raise _fail("script file does not exist (and no .py/.sh fall-back matched)")
+            else:
+                raise _fail("script file does not exist")
+
+        if normalised_script_path.endswith(".py"):
             return self._run_python_script(full_path, params)
-        elif script_path.endswith(".sh"):
+        elif normalised_script_path.endswith(".sh"):
             return self._run_shell_script(full_path, params)
         else:
-            raise ValueError(f"Unsupported script type: {script_path}")
+            raise ValueError(f"Unsupported script type: {normalised_script_path}")
+
+    def _list_available_scripts(self, local_skill_dir: str) -> List[str]:
+        """Return script paths (relative to the skill root) that exist on disk.
+
+        Args:
+            local_skill_dir: Absolute path to the skill's local directory.
+
+        Returns:
+            Sorted list of script paths relative to ``local_skill_dir``. An
+            empty list is returned when the directory does not exist.
+        """
+        available: List[str] = []
+        scripts_dir = os.path.join(local_skill_dir, "scripts")
+        for root in (local_skill_dir, scripts_dir):
+            if not os.path.isdir(root):
+                continue
+            for dirpath, _dirs, files in os.walk(root):
+                for f in files:
+                    if f.endswith((".py", ".sh")):
+                        rel = os.path.relpath(os.path.join(dirpath, f), local_skill_dir)
+                        available.append(rel.replace("\\", "/"))
+        # Deduplicate while keeping order.
+        seen = set()
+        unique: List[str] = []
+        for rel in available:
+            if rel in seen:
+                continue
+            seen.add(rel)
+            unique.append(rel)
+        return sorted(unique)
 
     def _run_python_script(self, script_path: str, params: Optional[str]) -> str:
         """Run a Python script with parameters.

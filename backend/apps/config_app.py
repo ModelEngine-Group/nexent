@@ -9,6 +9,7 @@ from apps.datamate_app import router as datamate_router
 from apps.vectordatabase_app import router as vectordatabase_router
 from apps.dify_app import router as dify_router
 from apps.idata_app import router as idata_router
+from apps.ragflow_app import router as ragflow_router
 from apps.file_management_app import (
     file_management_config_router as file_manager_router,
 )
@@ -34,6 +35,8 @@ from apps.a2a_client_app import router as a2a_client_router
 from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
+from apps.evaluation_set_app import router as evaluation_set_router
+from apps.agent_evaluation_app import router as agent_evaluation_router
 from apps.aidp_app import router as aidp_router
 from apps.cas_app import router as cas_router
 from consts.const import IS_SPEED_MODE
@@ -68,6 +71,7 @@ app.include_router(proxy_router)
 app.include_router(tool_config_router)
 app.include_router(dify_router)
 app.include_router(idata_router)
+app.include_router(ragflow_router)
 app.include_router(monitoring_router)
 
 # Choose user management router based on IS_SPEED_MODE
@@ -95,4 +99,6 @@ app.include_router(invitation_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
 app.include_router(haotian_router)
+app.include_router(evaluation_set_router)
+app.include_router(agent_evaluation_router)
 app.include_router(aidp_router)

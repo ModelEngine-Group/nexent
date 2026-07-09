@@ -125,6 +125,7 @@ export const API_ENDPOINTS = {
     openapiServices: `${API_BASE_URL}/tool/openapi_services`,
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
+    labels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -139,6 +140,23 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/prompt_templates/${templateId}`,
     delete: (templateId: number) =>
       `${API_BASE_URL}/prompt_templates/${templateId}`,
+  },
+  evaluationSets: {
+    list: `${API_BASE_URL}/evaluation-sets`,
+    create: `${API_BASE_URL}/evaluation-sets`,
+    detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
+    upload: `${API_BASE_URL}/evaluation-sets/upload`,
+    template: `${API_BASE_URL}/evaluation-sets/template`,
+    delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+  },
+  agentEvaluations: {
+    create: `${API_BASE_URL}/agent-evaluations`,
+    listByAgent: `${API_BASE_URL}/agent-evaluations`,
+    detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
+    delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -268,6 +286,9 @@ export const API_ENDPOINTS = {
   },
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
+  },
+  ragflow: {
+    datasets: `${API_BASE_URL}/ragflow/datasets`,
   },
   idata: {
     knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,

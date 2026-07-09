@@ -105,6 +105,26 @@ export default function AgentGenerateDetail({}) {
 
   // Streaming field values (accumulated from SSE, bypasses Form disabled state)
 
+  // Track form values for modal props to avoid synchronous getFieldValue during render
+  const [watchedPromptTemplateId, setWatchedPromptTemplateId] = useState<number | undefined>(
+    form.getFieldValue("promptTemplateId")
+  );
+  const [watchedBusinessDescription, setWatchedBusinessDescription] = useState<string>(
+    form.getFieldValue("businessDescription") || ""
+  );
+  const [watchedBusinessLogicModelId, setWatchedBusinessLogicModelId] = useState<number | undefined>(
+    form.getFieldValue("businessLogicModelId")
+  );
+  const [watchedDutyPrompt, setWatchedDutyPrompt] = useState<string>(
+    form.getFieldValue("dutyPrompt") || ""
+  );
+  const [watchedConstraintPrompt, setWatchedConstraintPrompt] = useState<string>(
+    form.getFieldValue("constraintPrompt") || ""
+  );
+  const [watchedFewShotsPrompt, setWatchedFewShotsPrompt] = useState<string>(
+    form.getFieldValue("fewShotsPrompt") || ""
+  );
+
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
@@ -116,6 +136,16 @@ export default function AgentGenerateDetail({}) {
   useEffect(() => {
     clearExpiredGenerationCaches();
   }, []);
+
+  // Sync watched form values with state to avoid synchronous getFieldValue during render
+  useEffect(() => {
+    setWatchedPromptTemplateId(form.getFieldValue("promptTemplateId"));
+    setWatchedBusinessDescription(form.getFieldValue("businessDescription") || "");
+    setWatchedBusinessLogicModelId(form.getFieldValue("businessLogicModelId"));
+    setWatchedDutyPrompt(form.getFieldValue("dutyPrompt") || "");
+    setWatchedConstraintPrompt(form.getFieldValue("constraintPrompt") || "");
+    setWatchedFewShotsPrompt(form.getFieldValue("fewShotsPrompt") || "");
+  }, [form]);
 
 
   // (e.g. business_description from a previously edited agent)
@@ -278,6 +308,10 @@ export default function AgentGenerateDetail({}) {
     if (!editable || isGenerating || !modelId) {
       return;
     }
+    // Sync watched values before opening modal to ensure they're available on render
+    setWatchedDutyPrompt(form.getFieldValue("dutyPrompt") || "");
+    setWatchedConstraintPrompt(form.getFieldValue("constraintPrompt") || "");
+    setWatchedFewShotsPrompt(form.getFieldValue("fewShotsPrompt") || "");
     setOptimizeModalType(type);
     setOptimizeModalOpen(true);
   };
@@ -1000,7 +1034,7 @@ export default function AgentGenerateDetail({}) {
                       </Row>
 
                       <Row gutter={16}>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="mainAgentMaxStep"
                             label={t("businessLogic.config.maxSteps")}
@@ -1028,7 +1062,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="provideRunSummary"
                             label={t("agent.provideRunSummary")}
@@ -1046,33 +1080,6 @@ export default function AgentGenerateDetail({}) {
                               ]}
                               onChange={(value) => {
                                 updateAgentConfig({ provide_run_summary: value });
-                              }}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                          <Form.Item
-                            name="verificationEnabled"
-                            label={t("agent.verification")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("agent.verification.error"),
-                              },
-                            ]}
-                          >
-                            <Select
-                              options={[
-                                { value: true, label: t("common.yes") },
-                                { value: false, label: t("common.no") },
-                              ]}
-                              onChange={(value) => {
-                                updateAgentConfig({
-                                  verification_config: {
-                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
-                                    enabled: value,
-                                  },
-                                });
                               }}
                             />
                           </Form.Item>
@@ -1119,6 +1126,33 @@ export default function AgentGenerateDetail({}) {
                                 updateAgentConfig({
                                   requested_output_tokens:
                                     typeof value === "number" ? value : null,
+                                });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            name="verificationEnabled"
+                            label={t("agent.verification")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.verification.error"),
+                              },
+                            ]}
+                          >
+                            <Select
+                              options={[
+                                { value: true, label: t("common.yes") },
+                                { value: false, label: t("common.no") },
+                              ]}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  verification_config: {
+                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+                                    enabled: value,
+                                  },
                                 });
                               }}
                             />
@@ -1253,7 +1287,7 @@ export default function AgentGenerateDetail({}) {
         open={promptTemplateManagerOpen}
         editable={editable}
         templates={promptTemplates}
-        selectedTemplateId={form.getFieldValue("promptTemplateId") || editedAgent.prompt_template_id || 0}
+        selectedTemplateId={watchedPromptTemplateId ?? editedAgent.prompt_template_id ?? 0}
         onClose={() => setPromptTemplateManagerOpen(false)}
         onSelectTemplate={handleSelectPromptTemplate}
         onTemplatesChanged={invalidatePromptTemplates}
@@ -1271,11 +1305,15 @@ export default function AgentGenerateDetail({}) {
           sectionType={
             optimizeModalType === "few-shots" ? "few_shots" : optimizeModalType
           }
-          taskDescription={form.getFieldValue("businessDescription") || editedAgent.business_description || ""}
+          taskDescription={watchedBusinessDescription ?? editedAgent.business_description ?? ""}
           currentContent={
-            form.getFieldValue(getPromptFieldKey(optimizeModalType)) || ""
+            optimizeModalType === "duty"
+              ? watchedDutyPrompt ?? ""
+              : optimizeModalType === "constraint"
+                ? watchedConstraintPrompt ?? ""
+                : watchedFewShotsPrompt ?? ""
           }
-          modelId={form.getFieldValue("businessLogicModelId")}
+          modelId={watchedBusinessLogicModelId ?? 0}
           agentId={currentAgentId ?? 0}
           toolIds={
             Array.isArray(editedAgent.tools)

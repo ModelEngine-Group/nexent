@@ -1,639 +1,285 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import ToolConfigModal from "./tool/ToolConfigModal";
-import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
-import { Tabs, Collapse, message, Tooltip, Badge } from "antd";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
-import { useQueryClient } from "@tanstack/react-query";
-import { useConfirmModal } from "@/hooks/useConfirmModal";
-
-import { Settings, AlertTriangle } from "lucide-react";
+import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
+import type { Tool, ToolParam } from "@/types/agentConfig";
+import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import ToolConfigModal from "./tool/ToolConfigModal";
+import {
+  TOOLS_REQUIRING_KB_SELECTION,
+  TOOLS_REQUIRING_EMBEDDING,
+  TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
+  TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
+  getToolKbType,
+  getToolLabels,
+} from "./tool/utils";
 import log from "@/lib/logger";
 
+// --- Local tool helpers (not in utils) ---
+
+function isToolDisabledDueToVlm(name: string, img: boolean, vid: boolean): boolean {
+  if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name)) return !img;
+  if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name)) return !vid;
+  return false;
+}
+
+function isToolDisabledDueToEmbedding(name: string, emb: boolean): boolean {
+  if (!TOOLS_REQUIRING_EMBEDDING.includes(name)) return false;
+  return !emb;
+}
+
+type SourceKey = "local" | "mcp" | "langchain";
+const SOURCE_META: Record<
+  SourceKey,
+  { sourceValue: string; label: string; dot: string; accentClass: string }
+> = {
+  local: { sourceValue: TOOL_SOURCE_TYPES.LOCAL, label: "toolPool.group.local", dot: "bg-emerald-500", accentClass: "bg-emerald-500/10 text-emerald-600" },
+  mcp: { sourceValue: TOOL_SOURCE_TYPES.MCP, label: "toolPool.group.mcp", dot: "bg-sky-500", accentClass: "bg-sky-500/10 text-sky-600" },
+  langchain: { sourceValue: TOOL_SOURCE_TYPES.LANGCHAIN, label: "toolPool.group.langchain", dot: "bg-violet-500", accentClass: "bg-violet-500/10 text-violet-600" },
+};
+
 interface ToolManagementProps {
-  toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
   currentAgentId?: number;
 }
 
-// Tool types that require knowledge base selection
-const TOOLS_REQUIRING_KB_SELECTION = [
-  "knowledge_base_search",
-  "dify_search",
-  "datamate_search",
-  "idata_search",
-  "haotian_search",
-  "aidp_search",
-];
-
-// Tool types that require Embedding model
-const TOOLS_REQUIRING_EMBEDDING = [
-  "knowledge_base_search",
-];
-
-// Tool types that require the image understanding model
-const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = [
-  "analyze_image",
-];
-
-// Tool types that require the video understanding model
-const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = [
-  "analyze_audio",
-  "analyze_video",
-];
-
-function getToolKbType(
-  toolName: string
-): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | null {
-  if (!TOOLS_REQUIRING_KB_SELECTION.includes(toolName)) return null;
-  if (toolName === "dify_search") return "dify_search";
-  if (toolName === "datamate_search") return "datamate_search";
-  if (toolName === "idata_search") return "idata_search";
-  if (toolName === "haotian_search") return "haotian_search";
-  if (toolName === "aidp_search") return "aidp_search";
-  return "knowledge_base_search";
-}
-
-/**
- * Check if a tool requires VLM model but VLM is not available
- */
-function isToolDisabledDueToVlm(
-  toolName: string,
-  imageUnderstandingAvailable: boolean,
-  videoUnderstandingAvailable: boolean
-): boolean {
-  if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(toolName)) {
-    return !imageUnderstandingAvailable;
-  }
-  if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(toolName)) {
-    return !videoUnderstandingAvailable;
-  }
-  return false;
-}
-
-/**
- * Check if a tool requires Embedding model but Embedding is not available
- */
-function isToolDisabledDueToEmbedding(toolName: string, embeddingAvailable: boolean): boolean {
-  if (!TOOLS_REQUIRING_EMBEDDING.includes(toolName)) return false;
-  return !embeddingAvailable;
-}
-
-/**
- * ToolManagement - Component for displaying tools in tabs
- * Provides a tabbed interface for tool organization
- */
-export default function ToolManagement({
-  toolGroups,
-  isCreatingMode,
-  currentAgentId
-}: ToolManagementProps) {
+/** Display selected tools as grouped, collapsible cards (demo layout). */
+export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolManagementProps) {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
-  const { confirm } = useConfirmModal();
+  const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
+  const { isImageUnderstandingAvailable, isVideoUnderstandingAvailable, isEmbeddingAvailable } = useConfig();
 
-  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-
-  // Get state from store
-  const originalSelectedTools = useAgentConfigStore(
-    (state) => state.editedAgent.tools
-  );
-  const originalSelectedToolIdsSet = new Set(
-    originalSelectedTools.map((tool) => tool.id)
-  );
-
+  const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
   const updateTools = useAgentConfigStore((state) => state.updateTools);
 
-  // Use tool list hook for data management
-  const { availableTools } = useToolList();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [configTool, setConfigTool] = useState<Tool | null>(null);
+  const [configParams, setConfigParams] = useState<ToolParam[]>([]);
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
 
-  const {
-    isImageUnderstandingAvailable,
-    isVideoUnderstandingAvailable,
-    isEmbeddingAvailable,
-  } = useConfig();
+  // Canonical tool list (with `inputs`) — used to backfill any missing
+  // fields on the stored tool object so the tool test panel always
+  // operates in parsed mode and shows the manual-input toggle.
+  const { availableTools } = useToolList({ enabled: true });
 
-  // Prefetch knowledge bases for KB tools
-  const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
+  // --- Group by source → category ---
+  const grouped = groupToolsBySource(selectedTools);
 
-  const [activeTabKey, setActiveTabKey] = useState<string>("");
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set()
-  );
-  const [isToolModalOpen, setIsToolModalOpen] = useState<boolean>(false);
-  const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
-  const [toolParams, setToolParams] = useState<ToolParam[]>([]);
-
-  // Helper function to merge tool parameters with instance parameters
-  const mergeToolParamsWithInstance = async (
-    tool: Tool,
-    defaultTool: Tool,
-    agentId?: number
-  ): Promise<ToolParam[]> => {
-    if (agentId) {
+  const mergeParams = useCallback(
+    async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
+      const params = tool.initParams || [];
+      // If tool already has stored params in the agent config store, the user's
+      // unsaved modifications are already reflected in those params — skip the
+      // API call to avoid overwriting them with stale server data.
+      const hasStoredParams = params.some((p) => p.value !== undefined && p.value !== null && p.value !== "");
+      if (!forceFetch && hasStoredParams) {
+        return params;
+      }
+      if (!currentAgentId) return params;
       try {
-        const { searchToolConfig } =
-          await import("@/services/agentConfigService");
-        const tooInstance = await searchToolConfig(parseInt(tool.id), agentId);
-
-        if (tooInstance.success && tooInstance.data) {
-          // Merge instance params with default params
-          // Only use instance value if it exists and is not null/undefined
-          const mergedParams =
-            defaultTool.initParams?.map((param: ToolParam) => {
-              const instanceValue = tooInstance.data?.params?.[param.name];
-              // Use instance value only if it's not null or undefined
-              const hasValidInstanceValue = instanceValue !== null && instanceValue !== undefined;
-              return {
-                ...param,
-                value: hasValidInstanceValue ? instanceValue : param.value,
-              };
-            }) ||
-            defaultTool.initParams ||
-            [];
-          return mergedParams;
-        } else {
-          return defaultTool.initParams || [];
+        const { searchToolConfig } = await import("@/services/agentConfigService");
+        const instance = await searchToolConfig(parseInt(tool.id), currentAgentId);
+        if (instance.success && instance.data) {
+          return params.map((p) => ({
+            ...p,
+            value: instance.data?.params?.[p.name] !== undefined ? instance.data.params[p.name] : p.value,
+          }));
         }
-      } catch (error) {
-        log.error("Failed to fetch tool instance params:", error);
-        return defaultTool.initParams || [];
-      }
-    } else {
-      return defaultTool.initParams || [];
-    }
-  };
+      } catch (err) { log.error("mergeParams:", err); }
+      return params;
+    },
+    [currentAgentId]
+  );
 
-  // Set default active tab
-  useEffect(() => {
-    if (toolGroups.length > 0 && !activeTabKey) {
-      setActiveTabKey(toolGroups[0].key);
-    }
-  }, [toolGroups, activeTabKey]);
-
-  const handleToolSettingsClick = async (tool: Tool) => {
-    // Prefetch knowledge bases for KB tools
-    const kbType = getToolKbType(tool.name);
-    if (kbType) {
-      prefetchKnowledgeBases(kbType);
-    }
-
-    // Get latest tools directly from store to avoid stale closure issues
-    const currentTools = useAgentConfigStore.getState().editedAgent.tools;
-    const configuredTool = currentTools.find(
-      (t) => parseInt(t.id) === parseInt(tool.id)
-    );
-    // Merge configured tool with original tool to ensure all fields are present
-    const toolToUse = configuredTool ? { ...tool, ...configuredTool, initParams: configuredTool.initParams } : tool;
-
-    // Get merged parameters (for editing mode, merge with instance params)
-    const mergedParams = await mergeToolParamsWithInstance(
-      tool,
-      toolToUse,
-      isCreatingMode ? undefined : currentAgentId
-    );
-
-    setSelectedTool(toolToUse);
-    setToolParams(mergedParams);
-    setIsToolModalOpen(true);
-  };
-
-  const handleToolClick = async (toolId: string) => {
-    const numericId = parseInt(toolId, 10);
-    const tool = availableTools.find((t) => parseInt(t.id) === numericId);
-
-    if (!tool) return;
-
-    // Prefetch knowledge bases for KB tools
-    const kbType = getToolKbType(tool.name);
-    if (kbType) {
-      prefetchKnowledgeBases(kbType);
-    }
-
-    // Get latest tools directly from store to avoid stale closure issues
-    const currentSelectdTools = useAgentConfigStore.getState().editedAgent.tools;
-    const isCurrentlySelected = currentSelectdTools.some(
-      (t) => parseInt(t.id) === numericId
-    );
-
-    if (isCurrentlySelected) {
-      // If already selected, deselect it
-      const newSelectedTools = currentSelectdTools.filter((t) => parseInt(t.id) !== numericId);
-      updateTools(newSelectedTools);
-    } else {
-      // Helper function to proceed with tool selection after duplicate check
-      async function proceedWithToolSelection() {
-        // Get latest tools again to ensure we have the most up-to-date list
-        const currentSelectdTools =
-          useAgentConfigStore.getState().editedAgent.tools;
-
-        // Determine tool params and check if modal is needed
-        const configuredTool = currentSelectdTools.find(
-          (t) => parseInt(t.id) === numericId
-        );
-        // Merge configured tool with original tool to ensure all fields are present
-        const toolToUse = configuredTool
-          ? { ...tool, ...configuredTool, initParams: configuredTool.initParams }
-          : tool;
-
-        // Get merged parameters (for editing mode, merge with instance params)
-        const mergedParams = await mergeToolParamsWithInstance(
-          tool,
-          toolToUse,
-          isCreatingMode ? undefined : currentAgentId!
-        );
-
-        // Check if there are empty required params
-        const hasEmptyRequiredParams = mergedParams.some(
-          (param: ToolParam) =>
-            param.required &&
-            (param.value === undefined ||
-              param.value === "" ||
-              param.value === null)
-        );
-
-        if (hasEmptyRequiredParams) {
-          // Need to configure, open modal
-          setSelectedTool(toolToUse);
-          setToolParams(mergedParams);
-          setIsToolModalOpen(true);
-        } else {
-          // No required params missing, add directly
-          const newSelectedTools = [
-            ...currentSelectdTools,
-            {
-              ...toolToUse,
-              initParams: mergedParams,
-            },
-          ];
-          updateTools(newSelectedTools);
-        }
-      }
-
-      // If not selected, check for duplicate tool names first
-      const duplicateTool = currentSelectdTools.find(
-        (selectedTool) => selectedTool.name === tool.name
+  const openConfig = useCallback(
+    async (tool: Tool) => {
+      const kbType = getToolKbType(tool.name);
+      if (kbType) prefetchKnowledgeBases(kbType);
+      const current = useAgentConfigStore.getState().editedAgent.tools;
+      const configured = current.find((t) => parseInt(t.id) === parseInt(tool.id));
+      const configuredTool = configured
+        ? { ...tool, ...configured, initParams: configured.initParams }
+        : tool;
+      // Backfill fields that may be missing from the stored tool (e.g.
+      // `inputs`, which is required for the tool test panel to enter
+      // parsed mode). The canonical source for these fields is the
+      // tool list returned by /tool/list.
+      const canonical = availableTools.find(
+        (t: any) => parseInt(String(t.id)) === parseInt(tool.id)
       );
+      const toolToUse = canonical
+        ? { ...configuredTool, ...canonical, initParams: configuredTool.initParams }
+        : configuredTool;
+      const merged = await mergeParams(toolToUse);
+      setConfigTool(toolToUse);
+      setConfigParams(merged);
+      setModalOpen(true);
+    },
+    [mergeParams, prefetchKnowledgeBases, availableTools]
+  );
 
-      if (duplicateTool) {
-        // Show confirmation modal for duplicate tool name
-        return new Promise<void>((resolve) => {
-          confirm({
-            title: t("toolPool.duplicateToolName.title"),
-            content: t("toolPool.duplicateToolName.content", {
-              toolName: tool.name,
-            }),
-            okText: t("toolPool.duplicateToolName.confirm"),
-            cancelText: t("toolPool.duplicateToolName.cancel"),
-            danger: true,
-            onOk: async () => {
-              // User confirmed, proceed with tool selection
-              await proceedWithToolSelection();
-              resolve();
-            },
-            onCancel: () => {
-              // User cancelled, do nothing
-              resolve();
-            },
-          });
-        });
-      }
+  const removeTool = useCallback(
+    (toolId: string) => {
+      const current = useAgentConfigStore.getState().editedAgent.tools;
+      updateTools(current.filter((t) => t.id !== toolId));
+    },
+    [updateTools]
+  );
 
-      // No duplicate, proceed with normal tool selection
-      await proceedWithToolSelection();
-    }
-  };
+  const toggleCat = (cat: string) => setCollapsedCats((p) => ({ ...p, [cat]: !p[cat] }));
 
-  // Generate Tabs configuration
-  const tabItems = toolGroups.map((group) => {
-    const label = t(group.label);
-    const selectedCount = group.subGroups
-      ? group.subGroups.reduce(
-          (sum, sg) => sum + sg.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length, 0)
-      : group.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length;
+  if (grouped.length === 0) {
+    return (
+      <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-200 py-10 text-sm text-gray-400">
+        {t("toolPool.noToolsSelected")}
+      </div>
+    );
+  }
 
-    return {
-      key: group.key,
-      label: (
-        <Tooltip title={label} placement="right">
-          <span className="inline-flex items-center gap-1">
-            <span
-              style={{
-                maxWidth: "100px",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {label}
-            </span>
-            {selectedCount > 0 && (
-              <Badge count={selectedCount} size="small" color="blue" />
-            )}
-          </span>
-        </Tooltip>
-      ),
-      children: (
-        <div
-          className="flex h-full flex-col sm:flex-row"
-          style={{
-            height: "100%",
-            overflow: "hidden",
-          }}
-        >
-          {group.subGroups ? (
-            <>
-              {/* Collapsible categories using Ant Design Collapse */}
-              <div className="flex-1 overflow-y-auto p-1">
-                <Collapse
-                  activeKey={Array.from(expandedCategories)}
-                  onChange={(keys) => {
-                    const newSet = new Set(
-                      typeof keys === "string" ? [keys] : keys
-                    );
-                    setExpandedCategories(newSet);
-                  }}
-                  ghost
-                  size="small"
-                  className="tool-categories-collapse mt-1"
-                  items={group.subGroups.map((subGroup, index) => ({
-                    key: subGroup.key,
-                    label: (
-                      <span className="inline-flex items-center gap-1">
-                        <span
-                          className="text-gray-700 font-medium"
-                          style={{
-                            paddingTop: "8px",
-                            paddingBottom: "8px",
-                            minHeight: "36px",
-                            lineHeight: "20px",
-                          }}
-                        >
-                          {subGroup.label}
-                        </span>
-                        {subGroup.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length > 0 && (
-                          <Badge
-                            count={subGroup.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length}
-                            size="small"
-                            color="blue"
-                          />
-                        )}
+  return (
+    <div className="h-full overflow-y-auto pr-1">
+      <div className="mb-3 flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+          {t("toolPool.selectedToolsLabel")}
+          <span className="text-xs text-gray-400">({selectedTools.length})</span>
+        </span>
+      </div>
+
+      <div className="space-y-4">
+        {grouped.map((src) => (
+          <div key={src.key}>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-500">
+              <span className={`size-1.5 rounded-full ${SOURCE_META[src.key].dot}`} />
+              {t(SOURCE_META[src.key].label)}（{src.totalCount}）
+            </div>
+
+            <div className="space-y-3">
+              {src.categories.map((cat) => {
+                const catKey = `${src.key}-${cat.category}`;
+                const isCollapsed = collapsedCats[catKey] ?? false;
+                const accent = SOURCE_META[src.key].accentClass;
+
+                return (
+                  <div key={catKey} className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                    <button
+                      onClick={() => toggleCat(catKey)}
+                      className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-gray-50 ${
+                        !isCollapsed ? "border-b border-gray-100" : ""
+                      }`}
+                    >
+                      <ChevronRight className={`size-3.5 shrink-0 text-gray-400 transition-transform ${!isCollapsed ? "rotate-90" : ""}`} />
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${accent}`}>
+                        {t(cat.category)}
                       </span>
-                    ),
-                    className: `tool-category-panel ${
-                      index === 0 ? "mt-1" : "mt-3"
-                    }`,
-                    children: (
-                      <div className="space-y-3 pt-3">
-                        {subGroup.tools.map((tool) => {
-                          const isSelected = originalSelectedToolIdsSet.has(
-                            tool.id
-                          );
-                          const isDisabledDueToVlm = isToolDisabledDueToVlm(
-                            tool.name,
-                            isImageUnderstandingAvailable,
-                            isVideoUnderstandingAvailable
-                          );
-                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
-                          const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
-                          // Tooltip priority: permission > VLM > Embedding
-                          const tooltipTitle = isDisabledDueToVlm
-                            ? t("toolPool.vlmDisabledTooltip")
-                            : isDisabledDueToEmbedding
-                            ? t("toolPool.embeddingDisabledTooltip")
-                            : undefined;
-                          const toolCard = (
-                            <div
-                              key={tool.id}
-                              className={`border-2 rounded-md p-2 flex items-center justify-between transition-all duration-300 ease-in-out min-h-[52px] shadow-sm ${
-                                isSelected
-                                  ? "bg-blue-100 border-blue-400 shadow-md"
-                                  : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                              } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
-                              onClick={
-                                !isReadOnly && !isDisabled
-                                  ? () => handleToolClick(tool.id)
-                                  : undefined
-                              }
-                            >
-                              <div className="flex items-center gap-2">
-                                <span>{tool.name}</span>
-                                {isDisabledDueToVlm && (
-                                  <Tooltip
-                                    title={t("toolPool.vlmDisabledTooltip")}
-                                    color="#ffffff"
-                                    styles={{
-                                      root: {
-                                        backgroundColor: "#ffffff",
-                                        border: "1px solid #e5e7eb",
-                                        borderRadius: "6px",
-                                        boxShadow:
-                                          "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-                                        maxWidth: "800px",
-                                      },
-                                    }}
-                                  >
-                                    <AlertTriangle size={14} className="text-orange-500 cursor-help flex-shrink-0" />
-                                  </Tooltip>
-                                )}
-                                {isDisabledDueToEmbedding && (
-                                  <Tooltip
-                                    title={t("toolPool.embeddingDisabledTooltip")}
-                                    color="#ffffff"
-                                    styles={{
-                                      root: {
-                                        backgroundColor: "#ffffff",
-                                        border: "1px solid #e5e7eb",
-                                        borderRadius: "6px",
-                                        boxShadow:
-                                          "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-                                        maxWidth: "800px",
-                                      },
-                                    }}
-                                  >
-                                    <AlertTriangle size={14} className="text-orange-500 cursor-help flex-shrink-0" />
-                                  </Tooltip>
-                                )}
+                      <span className="text-[10px] text-gray-400">
+                        {cat.tools.length}
+                      </span>
+                    </button>
+
+                    {!isCollapsed && (
+                      <div className="divide-y divide-gray-100">
+                        {cat.tools.map((tool) => {
+                          const labels = getToolLabels(tool);
+                          const disabled =
+                            isToolDisabledDueToVlm(tool.name, isImageUnderstandingAvailable, isVideoUnderstandingAvailable) ||
+                            isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
+
+                          return (
+                            <div key={tool.id} className="group flex items-center gap-2 px-3 py-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate font-mono text-xs font-medium text-gray-800">
+                                    {tool.name}
+                                  </span>
+                                  {labels.slice(0, 2).map((l) => (
+                                    <span key={l} className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">
+                                      {l}
+                                    </span>
+                                  ))}
+                                  {labels.length > 2 && (
+                                    <Tooltip title={labels.slice(2).join(", ")}>
+                                      <span className="shrink-0 cursor-help rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                                        +{labels.length - 2}
+                                      </span>
+                                    </Tooltip>
+                                  )}
+                                  {disabled && <AlertTriangle size={14} className="shrink-0 text-orange-400" />}
+                                </div>
                               </div>
-                              <Settings
-                                size={16}
-                                className={`${!isReadOnly && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
-                                onClick={
-                                  !isReadOnly && !isDisabled
-                                    ? (e) => {
-                                        e.stopPropagation();
-                                        handleToolSettingsClick(tool);
-                                      }
-                                    : undefined
-                                }
-                              />
+
+                              <button
+                                onClick={() => openConfig(tool)}
+                                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                title={t("toolPool.configure")}
+                              >
+                                <Settings className="size-4" />
+                              </button>
+
+                              <button
+                                onClick={() => removeTool(tool.id)}
+                                className="flex size-7 shrink-0 items-center justify-center rounded-md text-transparent transition-colors hover:bg-red-50 hover:text-red-500 group-hover:text-gray-400"
+                                title={t("toolPool.remove")}
+                              >
+                                <X className="size-4" />
+                              </button>
                             </div>
-                          );
-                          return tooltipTitle ? (
-                            <Tooltip key={tool.id} title={tooltipTitle}>
-                              {toolCard}
-                            </Tooltip>
-                          ) : (
-                            toolCard
                           );
                         })}
                       </div>
-                    ),
-                  }))}
-                />
-              </div>
-            </>
-          ) : (
-            // Regular layout for non-local tools
-            <div
-              className="flex flex-col gap-3 pr-2 flex-1"
-              style={{
-                height: "100%",
-                overflowY: "auto",
-                padding: "8px 0",
-                maxHeight: "100%",
-              }}
-            >
-              {group.tools.map((tool) => {
-                const isSelected = originalSelectedToolIdsSet.has(tool.id);
-                const isDisabledDueToVlm = isToolDisabledDueToVlm(
-                  tool.name,
-                  isImageUnderstandingAvailable,
-                  isVideoUnderstandingAvailable
-                );
-                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
-                const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
-                // Tooltip priority: permission > VLM > Embedding
-                const tooltipTitle = isDisabledDueToVlm
-                  ? t("toolPool.vlmDisabledTooltip")
-                  : isDisabledDueToEmbedding
-                  ? t("toolPool.embeddingDisabledTooltip")
-                  : undefined;
-                const toolCard = (
-                  <div
-                    key={tool.id}
-                    className={`border-2 rounded-md p-2 flex items-center justify-between transition-all duration-300 ease-in-out min-h-[52px] shadow-sm ${
-                        isSelected
-                          ? "bg-blue-100 border-blue-400 shadow-md"
-                          : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                      } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
-                    onClick={
-                      !isReadOnly && !isDisabled ? () => handleToolClick(tool.id) : undefined
-                    }
-                  >
-                    <div className="flex items-center gap-2">
-                      <span>{tool.name}</span>
-                      {isDisabledDueToVlm && (
-                        <Tooltip
-                          title={t("toolPool.vlmDisabledTooltip")}
-                          color="#ffffff"
-                          styles={{
-                            root: {
-                              backgroundColor: "#ffffff",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "6px",
-                              boxShadow:
-                                "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-                              maxWidth: "800px",
-                            },
-                          }}
-                        >
-                          <AlertTriangle size={14} className="text-orange-500 cursor-help flex-shrink-0" />
-                        </Tooltip>
-                      )}
-                      {isDisabledDueToEmbedding && (
-                        <Tooltip
-                          title={t("toolPool.embeddingDisabledTooltip")}
-                          color="#ffffff"
-                          styles={{
-                            root: {
-                              backgroundColor: "#ffffff",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "6px",
-                              boxShadow:
-                                "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-                              maxWidth: "800px",
-                            },
-                          }}
-                        >
-                          <AlertTriangle size={14} className="text-orange-500 cursor-help flex-shrink-0" />
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Settings
-                      size={16}
-                      className={`${!isReadOnly && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
-                      onClick={
-                        !isReadOnly && !isDisabled
-                          ? (e) => {
-                              e.stopPropagation();
-                              handleToolSettingsClick(tool);
-                            }
-                          : undefined
-                      }
-                    />
+                    )}
                   </div>
-                );
-                return tooltipTitle ? (
-                  <Tooltip key={tool.id} title={tooltipTitle}>
-                    {toolCard}
-                  </Tooltip>
-                ) : (
-                  toolCard
                 );
               })}
             </div>
-          )}
-        </div>
-      ),
-    };
-  });
+          </div>
+        ))}
+      </div>
 
-  return (
-    <div className="h-full">
-      {toolGroups.length === 0 ? (
-        <div className="flex items-center justify-center h-full">
-          <span className="text-gray-500">{t("toolPool.noTools")}</span>
-        </div>
-      ) : (
-        <Tabs
-          tabPlacement="start"
-          activeKey={activeTabKey}
-          onChange={setActiveTabKey}
-          items={tabItems}
-          className="h-full tool-pool-tabs"
-          style={{
-            height: "100%",
-          }}
-          tabBarStyle={{
-            minWidth: "120px",
-            maxWidth: "120px",
-            padding: "4px 0",
-            margin: 0,
-          }}
-        />
-      )}
-
-      {isToolModalOpen && (
+      {modalOpen && (
         <ToolConfigModal
-          isOpen={isToolModalOpen}
-          onCancel={() => {
-            setIsToolModalOpen(false);
-            setSelectedTool(null);
-            setToolParams([]);
-          }}
-          tool={selectedTool!}
-          initialParams={toolParams}
-          selectedTool={selectedTool}
+          isOpen={modalOpen}
+          onCancel={() => { setModalOpen(false); setConfigTool(null); setConfigParams([]); }}
+          tool={configTool!}
+          initialParams={configParams}
+          selectedTool={configTool}
           isCreatingMode={isCreatingMode}
           currentAgentId={currentAgentId}
         />
       )}
     </div>
   );
+}
+
+// ─── Pure helper ─────────────────────────────────────────────────────────────
+
+interface CatGroup { category: string; tools: Tool[] }
+interface SourceGroup { key: SourceKey; categories: CatGroup[]; totalCount: number }
+
+function groupToolsBySource(tools: Tool[]): SourceGroup[] {
+  const result: SourceGroup[] = [];
+  for (const [key, meta] of Object.entries(SOURCE_META) as [SourceKey, typeof SOURCE_META[SourceKey]][]) {
+    const srcTools = tools.filter((t: any) => t.source === meta.sourceValue);
+    if (srcTools.length === 0) continue;
+    const catMap = new Map<string, Tool[]>();
+    for (const tool of srcTools) {
+      const cat = (tool as any).category?.trim() || "toolPool.category.other";
+      if (!catMap.has(cat)) catMap.set(cat, []);
+      catMap.get(cat)!.push(tool);
+    }
+    const categories = Array.from(catMap.entries())
+      .map(([cat, ts]) => ({ category: cat, tools: ts }))
+      .sort((a, b) => {
+        if (a.category === "toolPool.category.other") return 1;
+        if (b.category === "toolPool.category.other") return -1;
+        return a.category.localeCompare(b.category);
+      });
+    result.push({ key, categories, totalCount: srcTools.length });
+  }
+  return result;
 }
