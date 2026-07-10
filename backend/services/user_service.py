@@ -13,9 +13,6 @@ from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
 from utils.auth_utils import get_supabase_admin_client
-from utils.memory_utils import build_memory_config
-
-from nexent.memory.memory_service import clear_memory
 
 logger = logging.getLogger(__name__)
 
@@ -156,25 +153,10 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
         except Exception as e:
             logger.error(f"Failed deleting conversations for user {user_id}: {e}")
 
-        # 4) Clear memory records
-        try:
-            memory_config = build_memory_config(tenant_id)
-            await clear_memory(
-                memory_level="user",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-            await clear_memory(
-                memory_level="user_agent",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-            logger.debug("\tUser memories cleared.")
-        except Exception as e:
-            logger.error(f"Failed clearing memory for user {user_id}: {e}")
-
+        # 4) Memory record cleanup: in the new Memory system this is performed
+        # by ``MemoryService.forget_user`` (PG + ES purge). The legacy
+        # mem0-era ``clear_memory`` path has been removed; the new path will
+        # be wired in once the storage layer lands in Phase 2.
         # 5) Soft-delete OAuth account bindings
         try:
             deleted_oauth = soft_delete_all_oauth_accounts_by_user_id(user_id, user_id)

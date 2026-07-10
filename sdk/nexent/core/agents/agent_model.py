@@ -285,7 +285,6 @@ class AgentRunInfo(BaseModel):
 
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
-    memory_config: Dict[str, Any] = Field(description="Memory llm/embedder/vectorstore configuration")
     tenant_id: str = Field(description="Tenant id")
     user_id: str = Field(description="User id")
     agent_id: str = Field(description="Agent id")
@@ -487,7 +486,7 @@ class SkillsComponent(ContextComponent):
 
 
 class MemoryComponent(ContextComponent):
-    """Memory context component - long-term memory (mem0) search results."""
+    """Memory context component - long-term memory search results."""
     component_type: ComponentType = Field(default="memory")
     memories: List[Dict[str, Any]] = Field(description="Memory search results", default_factory=list)
     formatted_content: str = Field(description="Pre-formatted memory context text", default="")

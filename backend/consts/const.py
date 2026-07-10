@@ -287,6 +287,78 @@ DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
+# ===== New Memory System (Phase 1) =====
+# These constants back the Nexent Memory framework defined in
+# ``sdk/nexent/memory``. They mirror the environment variables catalogued in
+# the implementation plan at
+# ``.cursor/plans/memory_&_dreaming_implementation_*.plan.md`` §Phase 6.
+
+# MMR (Maximal Marginal Relevance) configuration
+MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+MMR_CANDIDATE_TOP_K = int(os.getenv("MMR_CANDIDATE_TOP_K", "30"))
+MMR_FINAL_TOP_K = int(os.getenv("MMR_FINAL_TOP_K", "5"))
+MMR_DUPLICATE_THRESHOLD = float(os.getenv("MMR_DUPLICATE_THRESHOLD", "0.92"))
+
+# Temporal decay (only applied to internal agent short-term memory)
+AGENT_SHORT_TERM_HALF_LIFE_DAYS = int(
+    os.getenv("AGENT_SHORT_TERM_HALF_LIFE_DAYS", "14")
+)
+
+# Score fusion source weights
+W_AGENT_SHORT_TERM = float(os.getenv("W_AGENT_SHORT_TERM", "1.0"))
+W_EXTERNAL = float(os.getenv("W_EXTERNAL", "0.8"))
+
+# Token budget selection
+MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
+
+# Dreaming scheduling
+DREAMING_CRON_EXPR = os.getenv("DREAMING_CRON_EXPR", "0 3 * * *")
+LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
+RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
+DREAMING_RUN_TIMEOUT_SECONDS = int(
+    os.getenv("DREAMING_RUN_TIMEOUT_SECONDS", "1800")
+)
+DREAMING_HEARTBEAT_SECONDS = int(os.getenv("DREAMING_HEARTBEAT_SECONDS", "60"))
+DREAMING_LOCK_WATCHDOG_INTERVAL_SECONDS = int(
+    os.getenv("DREAMING_LOCK_WATCHDOG_INTERVAL_SECONDS", "300")
+)
+ALLOW_DREAMING_WITHOUT_LOCK = (
+    os.getenv("ALLOW_DREAMING_WITHOUT_LOCK", "false").lower() == "true"
+)
+
+# Dreaming promotion thresholds
+MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
+MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
+MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
+
+# External provider retry / timeout
+PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))
+PROVIDER_RETRY_BACKOFF_BASE_SECONDS = int(
+    os.getenv("PROVIDER_RETRY_BACKOFF_BASE_SECONDS", "1")
+)
+PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
+)
+
+# External provider toggles (configured per provider elsewhere; these constants
+# describe protocol-level defaults)
+EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "model_output",
+    "model_output_thinking",
+    "model_output_deep_thinking",
+    "model_output_code",
+    "final_answer",
+    "error",
+    "search_content",
+    "tool",
+    "parse",
+    "execution_logs",
+    "picture_web",
+    "memory_search",
+    "verification",
+    "max_steps_reached",
+)
+
 
 DEFAULT_LLM_MAX_TOKENS = 4096
 

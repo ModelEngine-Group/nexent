@@ -39,9 +39,6 @@ from utils.model_name_utils import (
     split_repo_name,
     sort_models_by_id,
 )
-from utils.memory_utils import build_memory_config as build_memory_config_for_tenant
-from services.vectordatabase_service import get_vector_db_core
-from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
 
@@ -662,31 +659,13 @@ async def delete_model_for_tenant(user_id: str, tenant_id: str, display_name: st
         )
 
         if has_multi_embedding:
-            # Best-effort memory cleanup for embedding models
-            try:
-                vdb_core = get_vector_db_core()
-                base_memory_config = build_memory_config_for_tenant(tenant_id)
-                for m in models:
-                    try:
-                        await clear_model_memories(
-                            vdb_core=vdb_core,
-                            model_repo=m.get("model_repo", ""),
-                            model_name=m.get("model_name", ""),
-                            embedding_dims=int(m.get("max_tokens") or 0),
-                            base_memory_config=base_memory_config,
-                        )
-                    except Exception as cleanup_exc:
-                        logger.warning(
-                            "Best-effort clear_model_memories failed for %s/%s dims=%s: %s",
-                            m.get("model_repo", ""),
-                            m.get("model_name", ""),
-                            m.get("max_tokens"),
-                            cleanup_exc,
-                        )
-            except Exception as outer_cleanup_exc:
-                logger.warning(
-                    "Memory cleanup preparation failed: %s", outer_cleanup_exc)
-
+            # Best-effort memory cleanup for embedding models is performed by
+            # the embedding-model registry / ``VectorIndexService`` in the
+            # new Memory system. The legacy ``clear_model_memories`` call
+            # (mem0-era) has been removed; the new "drop ES indexes for an
+            # embedding model" path will be added once the storage layer
+            # lands.
+            pass
             # Delete all records with the same display_name
             for m in models:
                 delete_model_record(m["model_id"], user_id, tenant_id)

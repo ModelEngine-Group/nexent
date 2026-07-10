@@ -20,7 +20,6 @@ from nexent.core.models.capacity_budget import (
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
-from nexent.memory.memory_service import search_memory_in_levels
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -528,7 +527,7 @@ def _get_skill_script_tools(
     version_no: int = 0
 ) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
-
+[]
     Args:
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
@@ -724,39 +723,20 @@ async def create_agent_config(
     app_description = tenant_config_manager.get_app_config(
         'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
 
-    # Get memory list
-    memory_context = build_memory_context(user_id, tenant_id, agent_id, skip_query=not allow_memory_search)
-    memory_list = []
-    if allow_memory_search and memory_context.user_config.memory_switch:
-        logger.debug("Retrieving memory list...")
-        memory_levels = ["tenant", "agent", "user", "user_agent"]
-        if memory_context.user_config.agent_share_option == "never":
-            memory_levels.remove("agent")
-        if memory_context.agent_id in memory_context.user_config.disable_agent_ids:
-            memory_levels.remove("agent")
-        if memory_context.agent_id in memory_context.user_config.disable_user_agent_ids:
-            memory_levels.remove("user_agent")
-
-        try:
-            search_res = await search_memory_in_levels(
-                query_text=last_user_query,
-                memory_config=memory_context.memory_config,
-                tenant_id=memory_context.tenant_id,
-                user_id=memory_context.user_id,
-                agent_id=memory_context.agent_id,
-                memory_levels=memory_levels,
-            )
-            memory_list = search_res.get("results", [])
-            logger.debug(f"Retrieved memory list: {memory_list}")
-        except Exception as e:
-            # Bubble up to streaming layer so it can emit <MEM_FAILED> and fall back
-            raise Exception(f"Failed to retrieve memory list: {e}")
+    # Memory list population: in the new Memory system this is performed by
+    # the backend's ``memory_context_service`` via the
+    # ``MemoryService.search_memory`` facade. The legacy
+    # ``search_memory_in_levels`` multi-level fan-out has been removed; the
+    # streaming layer and tool wiring below remain in place.
+    memory_list: list = []
+    memory_context = build_memory_context(
+        user_id, tenant_id, agent_id, skip_query=not allow_memory_search
+    )
 
     # Append active memory tools if memory is enabled
-    if memory_context.user_config.memory_switch and memory_context.memory_config:
+    if memory_context.user_config.memory_switch:
         try:
             memory_metadata = {
-                "memory_config": memory_context.memory_config,
                 "memory_user_config": memory_context.user_config,
                 "tenant_id": memory_context.tenant_id,
                 "user_id": memory_context.user_id,
@@ -770,9 +750,9 @@ async def create_agent_config(
                 class_name="StoreMemoryTool",
                 name="store_memory",
                 description=(
-                    "Save important information to long-term memory for future recall. "
+                    "Save important information to the current agent's short-term memory. "
                     "Use this when the user shares personal preferences, facts about themselves, "
-                    "project context, or instructions that should persist across conversations. "
+                    "project context, or instructions that should persist across the current conversation. "
                     "Do NOT store transient information like temporary calculations, information "
                     "already in the knowledge base, or data the user explicitly says to forget."
                 ),
@@ -795,7 +775,7 @@ async def create_agent_config(
                 class_name="SearchMemoryTool",
                 name="search_memory",
                 description=(
-                    "Search long-term memory for relevant information from previous interactions. "
+                    "Search memory for relevant information from previous interactions. "
                     "Use this when you need context about the user's preferences, past decisions, "
                     "or previously discussed topics that aren't in the current conversation. "
                     "The system already provides some memory context automatically -- use this tool "

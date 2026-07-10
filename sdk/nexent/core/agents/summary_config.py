@@ -90,7 +90,7 @@ class ContextManagerConfig:
     """Whether to inject skill summaries into system prompt."""
     
     inject_memory: bool = True
-    """Whether to search and inject long-term memory (mem0) into system prompt."""
+    """Whether to search and inject long-term memory into the system prompt."""
     
     inject_knowledge_base: bool = True
     """Whether to inject knowledge base summaries into system prompt."""

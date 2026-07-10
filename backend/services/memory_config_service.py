@@ -18,7 +18,6 @@ from database.memory_config_db import (
 	update_config_by_id,
 )
 from nexent.core.agents.agent_model import MemoryContext, MemoryUserConfig
-from utils.memory_utils import build_memory_config
 
 logger = logging.getLogger("memory_config_service")
 
@@ -213,7 +212,6 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 		)
 		return MemoryContext(
 			user_config=memory_user_config,
-			memory_config=dict(),
 			tenant_id=tenant_id,
 			user_id=user_id,
 			agent_id=str(agent_id),
@@ -229,7 +227,6 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 	if not memory_user_config.memory_switch:
 		return MemoryContext(
 			user_config=memory_user_config,
-			memory_config=dict(),
 			tenant_id=tenant_id,
 			user_id=user_id,
 			agent_id=str(agent_id),
@@ -237,7 +234,6 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 
 	return MemoryContext(
 		user_config=memory_user_config,
-		memory_config=build_memory_config(tenant_id),
 		tenant_id=tenant_id,
 		user_id=user_id,
 		agent_id=str(agent_id),
