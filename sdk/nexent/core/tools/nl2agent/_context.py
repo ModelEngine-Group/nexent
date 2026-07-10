@@ -2,8 +2,8 @@
 
 import json
 import time
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Alias for type-annotation clarity in this module.
 _StrStrDict = Dict[str, str]
@@ -22,12 +22,88 @@ class Nl2AgentContext:
     draft_agent_id: Optional[int] = None
     tenant_id: Optional[str] = None
     user_id: str = ""
-    model_id: int = 0
     language: str = "en"
+
+    # ── Applied resources state (survive across turns) ───────────────────────
+    # Set when the user clicks "Apply All" on LocalResourcesCard or when the
+    # frontend saves tool/skill configs via ToolConfigModal.
+    applied_tool_ids: Set[int] = field(default_factory=set)
+    applied_skill_ids: Set[int] = field(default_factory=set)
+    applied_mcp_names: Set[str] = field(default_factory=set)  # MCP server names
+    applied_sub_agent_ids: Set[int] = field(default_factory=set)
+
+    # Per-resource config overrides set during the session.
+    # tool_id -> {param_name: value}  (e.g. MCP server_url, api_key)
+    tool_configs: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    # skill_id -> {config_key: value}
+    skill_configs: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+
+    # Tracks which (tool_name, query) combos have been searched this session
+    # so the agent knows "never searched before" vs "already searched".
+    _searched_queries: Dict[str, Set[str]] = field(default_factory=dict)
 
     @property
     def target_agent_id(self) -> Optional[int]:
         return self.draft_agent_id or self.agent_id
+
+    # ── Convenience helpers ─────────────────────────────────────────────────
+
+    def has_applied_tool(self, tool_id: int) -> bool:
+        """Return True if this tool has been applied in the session."""
+        return tool_id in self.applied_tool_ids
+
+    def has_applied_skill(self, skill_id: int) -> bool:
+        """Return True if this skill has been applied in the session."""
+        return skill_id in self.applied_skill_ids
+
+    def has_applied_mcp(self, mcp_name: str) -> bool:
+        """Return True if this MCP server has been installed in the session."""
+        return mcp_name in self.applied_mcp_names
+
+    def mark_tool_applied(
+        self, tool_id: int, params: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Record that a tool has been applied, optionally with config overrides."""
+        self.applied_tool_ids.add(tool_id)
+        if params:
+            self.tool_configs[tool_id] = params
+
+    def mark_skill_applied(
+        self, skill_id: int, config: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Record that a skill has been applied, optionally with config overrides."""
+        self.applied_skill_ids.add(skill_id)
+        if config:
+            self.skill_configs[skill_id] = config
+
+    def mark_mcp_applied(self, mcp_name: str) -> None:
+        """Record that an MCP server has been installed in the session."""
+        self.applied_mcp_names.add(mcp_name)
+
+    def mark_searched(self, tool_name: str, query: str) -> None:
+        """Record that a search tool was called with this query this session."""
+        q = query.strip().lower()
+        self._searched_queries.setdefault(tool_name, set()).add(q)
+
+    def was_searched(self, tool_name: str, query: str) -> bool:
+        """Return True if this search tool was already called with this query."""
+        return query.strip().lower() in self._searched_queries.get(tool_name, set())
+
+    def get_tool_config(self, tool_id: int) -> Dict[str, Any]:
+        """Return the saved config overrides for a tool, or an empty dict."""
+        return self.tool_configs.get(tool_id, {})
+
+    def get_skill_config(self, skill_id: int) -> Dict[str, Any]:
+        """Return the saved config overrides for a skill, or an empty dict."""
+        return self.skill_configs.get(skill_id, {})
+
+    def get_all_applied_tool_ids(self) -> List[int]:
+        """Return sorted list of all applied tool IDs."""
+        return sorted(self.applied_tool_ids)
+
+    def get_all_applied_skill_ids(self) -> List[int]:
+        """Return sorted list of all applied skill IDs."""
+        return sorted(self.applied_skill_ids)
 
 
 # Module-level context singleton. Set by the `get_*_tool()` initializers.
@@ -38,18 +114,21 @@ def set_nl2agent_context(
     agent_id: Optional[int] = None,
     user_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
-    model_id: Optional[int] = None,
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Set the global NL2AGENT session context. Idempotent; overwrites prior values."""
+    """Set the global NL2AGENT session context. Idempotent; overwrites prior values.
+
+    Applied resources state (applied_tool_ids, applied_skill_ids, tool_configs,
+    skill_configs, _searched_queries) is reset on each call so the context always
+    starts fresh for a new conversation turn.
+    """
     global _context
     _context = Nl2AgentContext(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
         tenant_id=tenant_id,
         user_id=user_id or "",
-        model_id=model_id or 0,
         language=language or "en",
     )
     return _context
