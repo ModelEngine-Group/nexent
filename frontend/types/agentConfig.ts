@@ -138,6 +138,11 @@ export interface Tool {
    * Used to pass knowledge base names to prompt generation without requiring database lookup.
    */
   display_names?: string[];
+  /**
+   * Reasons why this tool may be unavailable.
+   * E.g., ["mcp_model_unavailable"] when the selected model has been deleted.
+   */
+  unavailable_reasons?: string[];
 }
 
 export interface ToolParam {

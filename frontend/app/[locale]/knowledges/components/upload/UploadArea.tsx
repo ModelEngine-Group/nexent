@@ -29,6 +29,7 @@ interface UploadAreaProps {
   indexName?: string;
   newKnowledgeBaseName?: string;
   modelMismatch?: boolean;
+  onNameStatusChange?: (status: string) => void;
 }
 
 export interface UploadAreaRef {
@@ -48,6 +49,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       newKnowledgeBaseName = "",
       selectedFiles = [],
       modelMismatch = false,
+      onNameStatusChange,
     },
     ref
   ) => {
@@ -65,13 +67,18 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       prevFileListRef.current = fileList;
     }, [fileList]);
 
+    const updateNameStatus = useCallback((status: string) => {
+      setNameStatus(status);
+      onNameStatusChange?.(status);
+    }, [onNameStatusChange]);
+
     // Function to reset all states
     const resetAllStates = useCallback(() => {
       setFileList([]);
-      setNameStatus("available");
+      updateNameStatus("available");
       setIsLoading(true);
       setIsKnowledgeBaseReady(false);
-    }, []);
+    }, [updateNameStatus]);
 
     // Listen for knowledge base changes, reset file list and get knowledge base info
     useEffect(() => {
@@ -140,17 +147,17 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     // Check if knowledge base name already exists
     useEffect(() => {
       if (!isCreatingMode || !newKnowledgeBaseName) {
-        setNameStatus("available");
+        updateNameStatus("available");
         return;
       }
 
       const checkName = async () => {
         try {
           const result = await checkKnowledgeBaseName(newKnowledgeBaseName, t);
-          setNameStatus(result.status);
+          updateNameStatus(result.status);
         } catch (error) {
           log.error(t("knowledgeBase.error.checkName"), error);
-          setNameStatus(NAME_CHECK_STATUS.CHECK_FAILED); // Handle check failure
+          updateNameStatus(NAME_CHECK_STATUS.CHECK_FAILED); // Handle check failure
         }
       };
 

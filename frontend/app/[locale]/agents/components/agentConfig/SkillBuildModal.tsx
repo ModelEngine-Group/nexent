@@ -237,7 +237,6 @@ export default function SkillBuildModal({
       }
       // Reset task ID
       taskIdRef.current = "";
-      form.resetFields();
       setActiveTab("interactive");
       setUploadFile(null);
       setChatMessages([]);
@@ -256,7 +255,7 @@ export default function SkillBuildModal({
       currentAssistantIdRef.current = "";
       setAccumulatedDraft(null);
     }
-  }, [isOpen, form]);
+  }, [isOpen]);
 
   // Track component mount status for async callback safety
   useEffect(() => {
@@ -344,9 +343,14 @@ export default function SkillBuildModal({
     }
   };
 
+  const closeModal = () => {
+    form.resetFields();
+    onCancel();
+  };
+
   // Cleanup when modal is closed
   const handleModalClose = () => {
-    onCancel();
+    closeModal();
   };
 
   const handleManualSubmit = async () => {
@@ -378,7 +382,7 @@ export default function SkillBuildModal({
         } as SkillData,
         allSkills,
         onSuccess,
-        onCancel,
+        closeModal,
         t,
         isEditMode && editingSkill?.skill_id
           ? { mode: "edit", skillId: editingSkill.skill_id }
@@ -420,7 +424,7 @@ export default function SkillBuildModal({
         uploadFile,
         allSkills,
         onSuccess,
-        onCancel,
+        closeModal,
         t
       );
     } finally {

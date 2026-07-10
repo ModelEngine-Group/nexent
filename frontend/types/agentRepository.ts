@@ -21,7 +21,6 @@ export interface AgentRepositoryListingItem {
   tool_count?: number | null;
   version_label?: string | null;
   downloads?: number;
-  category_id?: number | null;
   submitted_by?: string | null;
 }
 
@@ -40,17 +39,9 @@ export interface AgentRepositoryListingListResponse {
 export interface AgentRepositoryListingListParams {
   status?: AgentRepositoryListingStatus;
   agent_id?: number;
-  category_id?: number;
   page?: number;
   page_size?: number;
   search?: string;
-}
-
-export interface AgentRepositoryCategoryItem {
-  id: number;
-  key: string;
-  /** Legacy fallback when resolving labels from old API payloads. */
-  name?: string;
 }
 
 export interface AgentRepositoryListingDetail {
@@ -140,7 +131,6 @@ export interface MyEditableAgentListResponse {
 
 export interface AgentRepositoryListingCreatePayload {
   icon: string;
-  category_id: number;
   tags: string[];
 }
 
