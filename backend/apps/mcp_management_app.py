@@ -7,6 +7,7 @@ from http import HTTPStatus
 
 from consts.exceptions import (
     MCPConnectionError,
+    McpNameConflictError,
     McpNotFoundError,
     McpValidationError,
     UnauthorizedError,
@@ -281,6 +282,8 @@ async def publish_community_mcp_service_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except McpValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except McpNameConflictError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -326,6 +329,8 @@ async def update_community_mcp_service_api(
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except McpValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except McpNameConflictError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except UnauthorizedError as exc:
         raise HTTPException(

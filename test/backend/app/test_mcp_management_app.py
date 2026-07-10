@@ -1,7 +1,8 @@
 """
 Unit tests for backend/apps/mcp_management_app.py
 
-Tests community/registry management REST API endpoints.
+Tests community/registry management REST API endpoints including the review
+workflow, tenant isolation, and download tracking.
 """
 
 import sys
@@ -25,7 +26,7 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 from backend.consts.exceptions import (
-    McpNotFoundError, McpValidationError, UnauthorizedError,
+    McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError,
 )
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -36,6 +37,7 @@ from apps.mcp_management_app import router
 import apps.mcp_management_app as mgmt_app
 mgmt_app.McpNotFoundError = McpNotFoundError
 mgmt_app.McpValidationError = McpValidationError
+mgmt_app.McpNameConflictError = McpNameConflictError
 mgmt_app.UnauthorizedError = UnauthorizedError
 
 app = FastAPI()
@@ -82,12 +84,16 @@ class TestCommunityList:
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.list_community_mcp_services')
     def test_list_success(self, mock_list, mock_auth):
-        """Test successful community list retrieval."""
+        """Test successful community list retrieval (tenant-scoped)."""
         mock_auth.return_value = ("uid", "tid", "en")
         mock_list.return_value = {"count": 1, "nextCursor": None, "items": []}
         resp = client.get("/mcp-tools/community/list", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
+        mock_list.assert_called_once_with(
+            tenant_id="tid", search=None, tag=None,
+            transport_type=None, cursor=None, limit=30,
+        )
 
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.list_community_mcp_services')
@@ -95,7 +101,10 @@ class TestCommunityList:
         """Test community list with tag and transport type filters."""
         mock_auth.return_value = ("uid", "tid", "en")
         mock_list.return_value = {"count": 0, "nextCursor": None, "items": []}
-        resp = client.get("/mcp-tools/community/list?tag=python&transport_type=url", headers=AUTH_HEADER)
+        resp = client.get(
+            "/mcp-tools/community/list?tag=python&transport_type=url",
+            headers=AUTH_HEADER,
+        )
         assert resp.status_code == HTTPStatus.OK
 
 
@@ -109,12 +118,114 @@ class TestCommunityTagStats:
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.list_community_mcp_tag_stats')
     def test_tag_stats(self, mock_stats, mock_auth):
-        """Test community tag statistics retrieval."""
+        """Test community tag statistics retrieval (tenant-scoped)."""
         mock_auth.return_value = ("uid", "tid", "en")
         mock_stats.return_value = [{"tag": "python", "count": 10}]
         resp = client.get("/mcp-tools/community/tags/stats", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["data"][0]["tag"] == "python"
+        mock_stats.assert_called_once_with(tenant_id="tid")
+
+
+# ============================================================================
+# GET /mcp-tools/community/review/list
+# ============================================================================
+
+class TestCommunityReviewList:
+    """Test GET /mcp-tools/community/review/list"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    def test_list_reviews(self, mock_list, mock_auth):
+        """Test listing review submissions."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.return_value = {"count": 1, "nextCursor": None, "items": []}
+        resp = client.get("/mcp-tools/community/review/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    def test_list_reviews_with_status_filter(self, mock_list, mock_auth):
+        """Test listing reviews filtered by status."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.return_value = {"count": 0, "nextCursor": None, "items": []}
+        resp = client.get(
+            "/mcp-tools/community/review/list?status=pending",
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.OK
+
+
+# ============================================================================
+# POST /mcp-tools/community/review/approve
+# ============================================================================
+
+class TestCommunityReviewApprove:
+    """Test POST /mcp-tools/community/review/approve"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    def test_approve_success(self, mock_approve, mock_auth):
+        """Test successful review approval."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post(
+            "/mcp-tools/community/review/approve",
+            json={"review_id": 1},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+        mock_approve.assert_called_once_with(
+            tenant_id="tid", user_id="uid", review_id=1,
+        )
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    def test_approve_not_found(self, mock_approve, mock_auth):
+        """Test approval fails when review is not found."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_approve.side_effect = McpNotFoundError("not found")
+        resp = client.post(
+            "/mcp-tools/community/review/approve",
+            json={"review_id": 999},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+
+# ============================================================================
+# POST /mcp-tools/community/review/reject
+# ============================================================================
+
+class TestCommunityReviewReject:
+    """Test POST /mcp-tools/community/review/reject"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    def test_reject_success(self, mock_reject, mock_auth):
+        """Test successful review rejection."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post(
+            "/mcp-tools/community/review/reject",
+            json={"review_id": 1},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    def test_reject_not_found(self, mock_reject, mock_auth):
+        """Test rejection fails when review is not found."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_reject.side_effect = McpNotFoundError("not found")
+        resp = client.post(
+            "/mcp-tools/community/review/reject",
+            json={"review_id": 999},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.NOT_FOUND
 
 
 # ============================================================================
@@ -127,16 +238,16 @@ class TestCommunityPublish:
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.publish_community_mcp_service')
     def test_publish_success(self, mock_publish, mock_auth):
-        """Test successful publishing of a community MCP service."""
+        """Test successful publishing creates a review and returns review_id."""
         mock_auth.return_value = ("uid", "tid", "en")
         mock_publish.return_value = 42
         resp = client.post("/mcp-tools/community/publish", json={
             "mcp_id": 1, "name": "svc", "description": "desc",
-            "version": "1.0", "tags": ["a"],
+            "tags": ["a"],
             "mcp_server": "http://srv", "config_json": None,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
-        assert resp.json()["data"]["community_id"] == 42
+        assert resp.json()["data"]["review_id"] == 42
 
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.publish_community_mcp_service')
@@ -146,10 +257,23 @@ class TestCommunityPublish:
         mock_publish.side_effect = McpNotFoundError("not found")
         resp = client.post("/mcp-tools/community/publish", json={
             "mcp_id": 999, "name": "x", "description": "d",
-            "version": "1.0", "tags": [],
+            "tags": [],
             "mcp_server": "http://srv", "config_json": None,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_publish_name_conflict(self, mock_publish, mock_auth):
+        """Test publishing fails on name conflict."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = McpNameConflictError("name exists")
+        resp = client.post("/mcp-tools/community/publish", json={
+            "mcp_id": 1, "name": "taken", "description": "d",
+            "tags": [],
+            "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
 
 
 # ============================================================================
@@ -162,11 +286,11 @@ class TestCommunityUpdate:
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.update_community_mcp_service')
     def test_update_success(self, mock_update, mock_auth):
-        """Test successful community MCP service update."""
+        """Test successful community MCP service update (using market_id)."""
         mock_auth.return_value = ("uid", "tid", "en")
         resp = client.put("/mcp-tools/community/update", json={
-            "community_id": 1, "name": "new-name",
-            "description": "desc", "tags": [], "version": "2.0",
+            "market_id": 1, "name": "new-name",
+            "description": "desc", "tags": [],
             "registry_json": None,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
@@ -174,12 +298,12 @@ class TestCommunityUpdate:
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.update_community_mcp_service')
     def test_update_not_found(self, mock_update, mock_auth):
-        """Test update fails when community record is not found."""
+        """Test update fails when market record is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
         mock_update.side_effect = McpNotFoundError("not found")
         resp = client.put("/mcp-tools/community/update", json={
-            "community_id": 999, "name": "x",
-            "description": "d", "tags": [], "version": "1.0",
+            "market_id": 999, "name": "x",
+            "description": "d", "tags": [],
             "registry_json": None,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
@@ -195,18 +319,18 @@ class TestCommunityDelete:
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.delete_community_mcp_service')
     def test_delete_success(self, mock_delete, mock_auth):
-        """Test successful deletion of a community MCP service."""
+        """Test successful deletion of a market MCP service."""
         mock_auth.return_value = ("uid", "tid", "en")
-        resp = client.delete("/mcp-tools/community/delete?community_id=1", headers=AUTH_HEADER)
+        resp = client.delete("/mcp-tools/community/delete?market_id=1", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
 
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.delete_community_mcp_service')
     def test_delete_not_found(self, mock_delete, mock_auth):
-        """Test deletion fails when community record is not found."""
+        """Test deletion fails when record is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
         mock_delete.side_effect = McpNotFoundError("not found")
-        resp = client.delete("/mcp-tools/community/delete?community_id=999", headers=AUTH_HEADER)
+        resp = client.delete("/mcp-tools/community/delete?market_id=999", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
 
@@ -226,6 +350,25 @@ class TestCommunityMine:
         resp = client.get("/mcp-tools/community/mine", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
+        mock_list.assert_called_once_with(tenant_id="tid", user_id="uid")
+
+
+# ============================================================================
+# POST /mcp-tools/community/{market_id}/download
+# ============================================================================
+
+class TestCommunityDownload:
+    """Test POST /mcp-tools/community/{market_id}/download"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    def test_download_success(self, mock_inc, mock_auth):
+        """Test successful download count increment."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp-tools/community/1/download", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+        mock_inc.assert_called_once_with(1)
 
 
 if __name__ == "__main__":
