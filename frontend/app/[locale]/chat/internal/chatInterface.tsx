@@ -19,6 +19,7 @@ import {
   convertImageUrlToApiUrl,
 } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -39,6 +40,7 @@ import {
   ApiConversationDetail,
   HistoryItem,
 } from "@/types/chat";
+import type { Agent } from "@/types/agentConfig";
 import { ChatMessageType } from "@/types/chat";
 import {
   handleStreamResponse,
@@ -216,25 +218,87 @@ export function ChatInterface() {
   const [agentModelIds, setAgentModelIds] = useState<number[]>([]);
   const [agentModelNames, setAgentModelNames] = useState<string[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+  const { agents: publishedAgents = [] } = usePublishedAgentList() as {
+    agents: Agent[];
+  };
 
   useEffect(() => {
     sessionMessagesRef.current = sessionMessages;
   }, [sessionMessages]);
 
-  const handleAgentSelectWithGreeting = (
-    agentId: string | null,
-    greeting?: string,
-    exampleQuestions?: string[],
-    modelIds?: number[],
-    modelNames?: string[]
-  ) => {
-    setSelectedAgentId(agentId);
-    setAgentGreeting(greeting || null);
-    setAgentExampleQuestions(exampleQuestions || []);
-    setAgentModelIds(modelIds || []);
-    setAgentModelNames(modelNames || []);
-    setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
-  };
+  const handleAgentSelectWithGreeting = useCallback(
+    (
+      agentId: string | null,
+      greeting?: string,
+      exampleQuestions?: string[],
+      modelIds?: number[],
+      modelNames?: string[]
+    ) => {
+      setSelectedAgentId(agentId);
+      setAgentGreeting(greeting || null);
+      setAgentExampleQuestions(exampleQuestions || []);
+      setAgentModelIds(modelIds || []);
+      setAgentModelNames(modelNames || []);
+      setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
+    },
+    []
+  );
+
+  const restoreConversationAgent = useCallback(
+    (agentId?: number | string | null) => {
+      if (agentId === undefined || agentId === null) {
+        handleAgentSelectWithGreeting(null);
+        return;
+      }
+
+      const normalizedAgentId = String(agentId);
+      const agent = publishedAgents.find((item) => item.id === normalizedAgentId);
+
+      if (!agent && publishedAgents.length === 0) {
+        setSelectedAgentId(normalizedAgentId);
+        setAgentGreeting(null);
+        setAgentExampleQuestions([]);
+        setAgentModelIds([]);
+        setAgentModelNames([]);
+        setSelectedModelId(null);
+        return;
+      }
+
+      if (!agent || agent.is_available === false) {
+        handleAgentSelectWithGreeting(null);
+        return;
+      }
+
+      handleAgentSelectWithGreeting(
+        normalizedAgentId,
+        agent.greeting_message,
+        agent.example_questions,
+        agent.model_ids,
+        agent.model_names
+      );
+    },
+    [handleAgentSelectWithGreeting, publishedAgents]
+  );
+
+  useEffect(() => {
+    if (!selectedAgentId || publishedAgents.length === 0) {
+      return;
+    }
+
+    const agent = publishedAgents.find((item) => item.id === selectedAgentId);
+    if (!agent || agent.is_available === false) {
+      handleAgentSelectWithGreeting(null);
+      return;
+    }
+
+    setAgentGreeting(agent.greeting_message || null);
+    setAgentExampleQuestions(agent.example_questions || []);
+    setAgentModelIds(agent.model_ids || []);
+    setAgentModelNames(agent.model_names || []);
+    setSelectedModelId(
+      agent.model_ids && agent.model_ids.length > 0 ? agent.model_ids[0] : null
+    );
+  }, [handleAgentSelectWithGreeting, publishedAgents, selectedAgentId]);
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
@@ -523,6 +587,8 @@ export function ChatInterface() {
       }
 
       // Send request to backend API, add signal parameter
+      const agentIdForRun =
+        selectedAgentId !== null ? Number(selectedAgentId) : null;
       const runAgentParams: any = {
         query: finalQuery, // Use preprocessed query or original query
         history: currentMessages
@@ -579,8 +645,8 @@ export function ChatInterface() {
       }
 
       // Only add agent_id if it's not null
-      if (selectedAgentId !== null) {
-        runAgentParams.agent_id = Number(selectedAgentId);
+      if (agentIdForRun !== null) {
+        runAgentParams.agent_id = agentIdForRun;
       }
 
       // Add selected model_id for agent run
@@ -592,6 +658,13 @@ export function ChatInterface() {
         runAgentParams,
         currentController.signal
       );
+
+      if (currentConversationId != null) {
+        conversationManagement.updateConversationAgentId(
+          currentConversationId,
+          agentIdForRun
+        );
+      }
 
       if (!reader) throw new Error("Response body is null");
 
@@ -710,7 +783,8 @@ export function ChatInterface() {
           // appear in the conversation list during streaming (not only after stream ends)
           conversationManagement.prependConversation(
             conversationId,
-            t("chatInterface.newConversation")
+            t("chatInterface.newConversation"),
+            agentIdForRun
           );
         },
         false, // isDebug: false for normal chat mode
@@ -1075,6 +1149,7 @@ export function ChatInterface() {
 
     // Use conversation management hook
     conversationManagement.handleConversationSelect(dialog);
+    restoreConversationAgent(dialog.agent_id ?? null);
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
 
@@ -1138,6 +1213,9 @@ export function ChatInterface() {
 
           if (data.code === 0 && data.data && data.data.length > 0) {
             const conversationData = data.data[0] as ApiConversationDetail;
+            restoreConversationAgent(
+              conversationData.agent_id ?? dialog.agent_id ?? null
+            );
             const formattedMessages =
               formatConversationMessagesFromResponse(conversationData, t);
 
@@ -1258,6 +1336,9 @@ export function ChatInterface() {
 
         if (data.code === 0 && data.data && data.data.length > 0) {
           const conversationData = data.data[0] as ApiConversationDetail;
+          restoreConversationAgent(
+            conversationData.agent_id ?? dialog.agent_id ?? null
+          );
           const formattedMessages =
             formatConversationMessagesFromResponse(conversationData, t);
 
