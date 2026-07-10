@@ -1,4 +1,4 @@
-﻿import json
+import json
 import threading
 import logging
 from typing import Any, Dict, List, Optional
@@ -981,21 +981,16 @@ async def create_agent_config(
         model_info.get("model_name") if model_info else model_name,
     )
 
-    # Inject session context metadata into NL2AGENT builtin tools. The 6 NL2AGENT
-    # builtin tools read agent_id/user_id/tenant_id/model_id/language from
-    # ToolConfig.metadata at runtime (see sdk/nexent/core/tools/nl2agent/_context.py).
-    # `agent_id` here is the NL2AGENT default agent running the chat. The draft
-    # target agent_id is passed separately via `draft_agent_id` (populated from
-    # AgentRequest.draft_agent_id by create_agent_run_info). Tools that operate
-    # on the draft (apply_local_resources, finalize_agent, search_local_resources)
-    # read `draft_agent_id` from metadata and act on that target.
+    # Inject session context metadata into NL2AGENT builtin tools. The 3 NL2AGENT
+    # builtin tools read agent_id/user_id/tenant_id/language from ToolConfig.metadata
+    # at runtime (see sdk/nexent/core/tools/nl2agent/_context.py). The draft target
+    # agent_id is passed separately via `draft_agent_id` (populated from
+    # AgentRequest.draft_agent_id by create_agent_run_info). Catalogs are also
+    # injected here so the tools can score candidates without calling backend services.
     _NL2AGENT_TOOL_CLASS_NAMES = {
         "NL2AgentSearchLocalResourcesTool",
         "NL2AgentSearchWebMcpsTool",
         "NL2AgentSearchWebSkillsTool",
-        "NL2AgentApplyLocalResourcesTool",
-        "NL2AgentInstallWebSkillTool",
-        "NL2AgentFinalizeAgentTool",
     }
     for tool_cfg in tool_list:
         try:

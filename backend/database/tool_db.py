@@ -465,7 +465,7 @@ NL2AGENT_BUILTIN_TOOL_DEFINITIONS = [
         "name": "nl2agent_search_local_resources",
         "origin_name": "search_local_resources",
         "class_name": "NL2AgentSearchLocalResourcesTool",
-        "description": "Search local tools (SDK + locally-installed MCP + LangChain) and local skills matching the user's intent. Returns a JSON object with `tools` and `skills` arrays, each containing up to 5 items with score (0-10) and reason.",
+        "description": "Search local tools (SDK + locally-installed MCP + LangChain) and local skills matching the user's intent. Returns a JSON object with `tools` and `skills` arrays, each containing up to 5 items with score (0-1) and reason.",
         "source": ToolSourceEnum.BUILTIN.value,
         "category": "nl2agent",
         "usage": "",
@@ -478,7 +478,7 @@ NL2AGENT_BUILTIN_TOOL_DEFINITIONS = [
         "name": "nl2agent_search_web_mcps",
         "origin_name": "search_web_mcps",
         "class_name": "NL2AgentSearchWebMcpsTool",
-        "description": "Search web MCP marketplaces (official registry + community) for servers matching the user's intent. Returns a JSON array of up to 5 MCP server cards with score (0-10) and reason. Each card is rendered individually with an Install button.",
+        "description": "Search web MCP marketplaces (official registry + community) for servers matching the user's intent. Returns a JSON array of up to 5 MCP server cards with score (0-1) and reason. Each card is rendered individually with an Install button.",
         "source": ToolSourceEnum.BUILTIN.value,
         "category": "nl2agent",
         "usage": "",
@@ -491,7 +491,7 @@ NL2AGENT_BUILTIN_TOOL_DEFINITIONS = [
         "name": "nl2agent_search_web_skills",
         "origin_name": "search_web_skills",
         "class_name": "NL2AgentSearchWebSkillsTool",
-        "description": "Search the official/web skills marketplace for skills matching the user's intent. Returns a JSON array of up to 5 skill cards with score (0-10) and reason. Each card is rendered individually with an Install button.",
+        "description": "Search the official/web skills marketplace for skills matching the user's intent. Returns a JSON array of up to 5 skill cards with score (0-1) and reason. Each card is rendered individually with an Install button.",
         "source": ToolSourceEnum.BUILTIN.value,
         "category": "nl2agent",
         "usage": "",
@@ -500,61 +500,22 @@ NL2AGENT_BUILTIN_TOOL_DEFINITIONS = [
         "output_type": "string",
         "labels": ["nl2agent"],
     },
-    {
-        "name": "nl2agent_apply_local_resources",
-        "origin_name": "apply_local_resources",
-        "class_name": "NL2AgentApplyLocalResourcesTool",
-        "description": "Bind the selected local tools and skills to the draft agent in one batch (the Apply All action). Accepts JSON-encoded lists of tool_ids and skill_ids. Returns bound_tool_count and bound_skill_count.",
-        "source": ToolSourceEnum.BUILTIN.value,
-        "category": "nl2agent",
-        "usage": "",
-        "params": [],
-        "inputs": '{"tool_ids": "string (JSON list)", "skill_ids": "string (JSON list)"}',
-        "output_type": "string",
-        "labels": ["nl2agent"],
-    },
-    {
-        "name": "nl2agent_install_web_skill",
-        "origin_name": "install_web_skill",
-        "class_name": "NL2AgentInstallWebSkillTool",
-        "description": "Install a single official/web skill into the tenant. Use skill_name for ZIP-backed official skills when skill_id is missing or 0. Each web skill is installed individually.",
-        "source": ToolSourceEnum.BUILTIN.value,
-        "category": "nl2agent",
-        "usage": "",
-        "params": [],
-        "inputs": '{"skill_id": "int (optional, default 0)", "skill_name": "string (optional)"}',
-        "output_type": "string",
-        "labels": ["nl2agent"],
-    },
-    {
-        "name": "nl2agent_finalize_agent",
-        "origin_name": "finalize_agent",
-        "class_name": "NL2AgentFinalizeAgentTool",
-        "description": "Finalize the draft agent by generating its full prompt set (duty, constraint, few_shots, greeting, example questions, name, display_name, description). Call this when the user confirms they're done. Accepts a task_description and JSON-encoded lists of tool_ids, skill_ids, sub_agent_ids, and knowledge_base_names. Use [] for any list with no selected items.",
-        "source": ToolSourceEnum.BUILTIN.value,
-        "category": "nl2agent",
-        "usage": "",
-        "params": [],
-        "inputs": '{"task_description": "string", "tool_ids": "string (JSON list, default [])", "skill_ids": "string (JSON list, default [])", "sub_agent_ids": "string (JSON list, default [])", "knowledge_base_names": "string (JSON list, default [])"}',
-        "output_type": "string",
-        "labels": ["nl2agent"],
-    },
 ]
 
 
 def seed_nl2agent_builtin_tools(tenant_id: str, user_id: str) -> List[int]:
-    """Idempotently insert the 6 NL2AGENT builtin tool catalog rows for a tenant.
+    """Idempotently insert the 3 NL2AGENT builtin tool catalog rows for a tenant.
 
     Matches existing rows by (name, source). If a row exists, it is updated in
     place (preserving tool_id). If not, a new row is inserted. Returns the
-    list of tool_ids for the 6 NL2AGENT builtin tools in definition order.
+    list of tool_ids for the 3 NL2AGENT builtin tools in definition order.
 
     Args:
         tenant_id: Tenant ID to scope the catalog rows.
         user_id: User ID for created_by/updated_by audit fields.
 
     Returns:
-        List of 6 tool_ids corresponding to NL2AGENT_BUILTIN_TOOL_DEFINITIONS.
+        List of 3 tool_ids corresponding to NL2AGENT_BUILTIN_TOOL_DEFINITIONS.
     """
     tool_ids: List[int] = []
     with get_db_session() as session:

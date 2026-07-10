@@ -67,42 +67,6 @@
       "usage": null,
       "metadata": null,
       "labels": ["nl2agent"]
-    },
-    {
-      "class_name": "NL2AgentApplyLocalResourcesTool",
-      "name": "nl2agent_apply_local_resources",
-      "description": "Bind the selected local tools and skills to the draft agent in one batch (Apply All).",
-      "inputs": "{\"tool_ids\": \"string (JSON list)\", \"skill_ids\": \"string (JSON list)\"}",
-      "output_type": "string",
-      "params": {},
-      "source": "builtin",
-      "usage": null,
-      "metadata": null,
-      "labels": ["nl2agent"]
-    },
-    {
-      "class_name": "NL2AgentInstallWebSkillTool",
-      "name": "nl2agent_install_web_skill",
-      "description": "Install a single official/web skill into the tenant.",
-      "inputs": "{\"skill_id\": \"int\"}",
-      "output_type": "string",
-      "params": {},
-      "source": "builtin",
-      "usage": null,
-      "metadata": null,
-      "labels": ["nl2agent"]
-    },
-    {
-      "class_name": "NL2AgentFinalizeAgentTool",
-      "name": "nl2agent_finalize_agent",
-      "description": "Finalize the draft agent by generating its full prompt set. Use [] for list arguments when no resources were selected.",
-      "inputs": "{\"task_description\": \"string\", \"tool_ids\": \"string (JSON list, default [])\", \"skill_ids\": \"string (JSON list, default [])\", \"sub_agent_ids\": \"string (JSON list, default [])\", \"knowledge_base_names\": \"string (JSON list, default [])\"}",
-      "output_type": "string",
-      "params": {},
-      "source": "builtin",
-      "usage": null,
-      "metadata": null,
-      "labels": ["nl2agent"]
     }
   ],
   "managed_agents": [],
