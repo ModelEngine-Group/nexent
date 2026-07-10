@@ -1,7 +1,8 @@
 import json
 import sys
-import types
 from pathlib import Path
+
+import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -9,408 +10,248 @@ SDK_SOURCE_ROOT = PROJECT_ROOT / "sdk"
 if str(SDK_SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SDK_SOURCE_ROOT))
 
+from nexent.core.tools.nl2agent import _context as context_module
+from nexent.core.tools.nl2agent import search_local_resources_tool as local_tool_module
+from nexent.core.tools.nl2agent.search_local_resources_tool import (
+    get_search_local_resources_tool,
+    nl2agent_search_local_resources,
+)
+from nexent.core.tools.nl2agent.search_web_mcps_tool import (
+    get_search_web_mcps_tool,
+    nl2agent_search_web_mcps,
+)
+from nexent.core.tools.nl2agent.search_web_skills_tool import (
+    get_search_web_skills_tool,
+    nl2agent_search_web_skills,
+)
 
-def _reset_nl2agent_modules(monkeypatch):
-    for module_name in list(sys.modules):
-        if (
-            module_name == "nexent"
-            or module_name.startswith("nexent.core")
-            or module_name == "smolagents"
-            or module_name.startswith("smolagents.")
-        ):
-            monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+@pytest.fixture(autouse=True)
+def reset_nl2agent_state():
+    context_module._context = None
+    context_module._search_cache.clear()
+    yield
+    context_module._context = None
+    context_module._search_cache.clear()
 
 
-def _install_fake_nl2agent_service(monkeypatch, **handlers):
-    services_module = types.ModuleType("services")
-    services_module.__path__ = []
-    nl2agent_service_module = types.ModuleType("services.nl2agent_service")
-    for name, handler in handlers.items():
-        setattr(nl2agent_service_module, name, handler)
-    services_module.nl2agent_service = nl2agent_service_module
+def _loads(raw_result):
+    return json.loads(raw_result)
 
-    monkeypatch.setitem(sys.modules, "services", services_module)
-    monkeypatch.setitem(
-        sys.modules, "services.nl2agent_service", nl2agent_service_module
+
+@pytest.mark.parametrize(
+    ("initializer", "tool_func", "catalog_kwargs", "query"),
+    [
+        (
+            get_search_local_resources_tool,
+            nl2agent_search_local_resources,
+            {"tool_catalog": [], "skill_catalog": []},
+            "web search",
+        ),
+        (
+            get_search_web_mcps_tool,
+            nl2agent_search_web_mcps,
+            {"registry_results": [], "community_results": []},
+            "github",
+        ),
+        (
+            get_search_web_skills_tool,
+            nl2agent_search_web_skills,
+            {"official_skills": []},
+            "code review",
+        ),
+    ],
+)
+def test_nl2agent_search_tools_require_tenant_context(initializer, tool_func, catalog_kwargs, query):
+    initializer(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id=None,
+        language="en",
+        **catalog_kwargs,
     )
 
+    assert _loads(tool_func(query=query)) == {"error": "NL2AGENT session context not initialized."}
 
-def test_nl2agent_search_local_resources_returns_card_payload_with_draft_agent_id(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
 
-    from nexent.core.tools.nl2agent.search_local_resources_tool import (
-        get_search_local_resources_tool,
-        nl2agent_search_local_resources,
-    )
-
-    calls = []
-
-    async def fake_recommend_local_resources(**kwargs):
-        calls.append(kwargs)
-        return {
-            "tools": [{"tool_id": 1, "name": "Search"}],
-            "skills": [{"skill_id": 7, "name": "Summarize"}],
-        }
-
-    _install_fake_nl2agent_service(
-        monkeypatch, recommend_local_resources=fake_recommend_local_resources
-    )
-
+def test_nl2agent_search_local_resources_returns_empty_results_for_empty_catalogs():
     get_search_local_resources_tool(
         agent_id=101,
         draft_agent_id=202,
         user_id="user_1",
         tenant_id="tenant_1",
-        model_id=7,
         language="en",
+        tool_catalog=[],
+        skill_catalog=[],
     )
 
-    raw_result = nl2agent_search_local_resources(query="search and summarize")
-
-    assert json.loads(raw_result) == {
+    assert _loads(nl2agent_search_local_resources(query="web search")) == {
         "agent_id": 202,
-        "tools": [{"tool_id": 1, "name": "Search"}],
-        "skills": [{"skill_id": 7, "name": "Summarize"}],
-    }
-    assert calls[0]["agent_id"] == 202
-    assert calls[0]["tenant_id"] == "tenant_1"
-    assert calls[0]["model_id"] == 7
-
-
-def test_nl2agent_search_local_resources_rejects_invalid_draft_agent_id(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_local_resources_tool import (
-        get_search_local_resources_tool,
-        nl2agent_search_local_resources,
-    )
-
-    get_search_local_resources_tool(
-        agent_id=0,
-        draft_agent_id=0,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-
-    raw_result = nl2agent_search_local_resources(query="search")
-
-    assert json.loads(raw_result) == {
-        "error": "NL2AGENT draft agent_id not set in context."
+        "tools": [],
+        "skills": [],
     }
 
 
-def test_nl2agent_search_web_mcps_returns_card_payload_with_draft_agent_id(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_web_mcps_tool import (
-        get_search_web_mcps_tool,
-        nl2agent_search_web_mcps,
-    )
-
-    calls = []
-
-    async def fake_search_web_mcps(**kwargs):
-        calls.append(kwargs)
-        return [{"name": "GitHub MCP", "source": "community"}]
-
-    _install_fake_nl2agent_service(monkeypatch, search_web_mcps=fake_search_web_mcps)
-
+def test_nl2agent_search_web_mcps_returns_empty_results_for_empty_catalogs():
     get_search_web_mcps_tool(
         agent_id=101,
         draft_agent_id=202,
         user_id="user_1",
         tenant_id="tenant_1",
-        model_id=7,
         language="en",
+        registry_results=[],
+        community_results=[],
     )
 
-    raw_result = nl2agent_search_web_mcps(query="repository automation")
-
-    assert json.loads(raw_result) == {
-        "agent_id": 202,
-        "items": [{"name": "GitHub MCP", "source": "community"}],
-    }
-    assert calls[0]["tenant_id"] == "tenant_1"
-    assert calls[0]["model_id"] == 7
+    assert _loads(nl2agent_search_web_mcps(query="github")) == {"agent_id": 202, "items": []}
 
 
-def test_nl2agent_search_web_mcps_rejects_invalid_draft_agent_id(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_web_mcps_tool import (
-        get_search_web_mcps_tool,
-        nl2agent_search_web_mcps,
-    )
-
-    get_search_web_mcps_tool(
-        agent_id=0,
-        draft_agent_id=0,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-
-    raw_result = nl2agent_search_web_mcps(query="repository automation")
-
-    assert json.loads(raw_result) == {
-        "error": "NL2AGENT draft agent_id not set in context."
-    }
-
-
-def test_nl2agent_search_web_skills_returns_card_payload_with_draft_agent_id(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_web_skills_tool import (
-        get_search_web_skills_tool,
-        nl2agent_search_web_skills,
-    )
-
-    calls = []
-
-    async def fake_search_web_skills(**kwargs):
-        calls.append(kwargs)
-        return [{"skill_id": 12, "name": "doc-review"}]
-
-    _install_fake_nl2agent_service(
-        monkeypatch, search_web_skills=fake_search_web_skills
-    )
-
+def test_nl2agent_search_web_skills_returns_empty_results_for_empty_catalog():
     get_search_web_skills_tool(
         agent_id=101,
         draft_agent_id=202,
         user_id="user_1",
         tenant_id="tenant_1",
-        model_id=7,
         language="en",
+        official_skills=[],
     )
 
-    raw_result = nl2agent_search_web_skills(query="review documents")
-
-    assert json.loads(raw_result) == {
-        "agent_id": 202,
-        "items": [{"skill_id": 12, "name": "doc-review"}],
-    }
-    assert calls[0]["tenant_id"] == "tenant_1"
-    assert calls[0]["model_id"] == 7
+    assert _loads(nl2agent_search_web_skills(query="code review")) == {"agent_id": 202, "items": []}
 
 
-def test_nl2agent_search_web_skills_rejects_invalid_draft_agent_id(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_web_skills_tool import (
-        get_search_web_skills_tool,
-        nl2agent_search_web_skills,
-    )
-
-    get_search_web_skills_tool(
-        agent_id=0,
-        draft_agent_id=0,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-
-    raw_result = nl2agent_search_web_skills(query="review documents")
-
-    assert json.loads(raw_result) == {
-        "error": "NL2AGENT draft agent_id not set in context."
-    }
-
-
-def test_nl2agent_install_web_skill_passes_skill_name(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.install_web_skill_tool import (
-        get_install_web_skill_tool,
-        nl2agent_install_web_skill,
-    )
-
-    calls = []
-
-    async def fake_install_web_skill(**kwargs):
-        calls.append(kwargs)
-        return {
-            "skill_id": 0,
-            "skill_name": "search-web-tavily",
-            "installed": True,
-            "installed_ids": [],
-            "installed_names": ["search-web-tavily"],
-        }
-
-    _install_fake_nl2agent_service(
-        monkeypatch, install_web_skill=fake_install_web_skill
-    )
-
-    get_install_web_skill_tool(
-        agent_id=101,
-        draft_agent_id=202,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-
-    raw_result = nl2agent_install_web_skill(
-        skill_id=0, skill_name="search-web-tavily"
-    )
-
-    assert json.loads(raw_result) == {
-        "skill_id": 0,
-        "skill_name": "search-web-tavily",
-        "installed": True,
-        "installed_ids": [],
-        "installed_names": ["search-web-tavily"],
-    }
-    assert calls[0]["skill_id"] == 0
-    assert calls[0]["skill_name"] == "search-web-tavily"
-    assert calls[0]["tenant_id"] == "tenant_1"
-    assert calls[0]["user_id"] == "user_1"
-
-
-def test_nl2agent_search_local_resources_caches_repeat_query(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_local_resources_tool import (
-        get_search_local_resources_tool,
-        nl2agent_search_local_resources,
-    )
-
-    calls = []
-
-    async def fake_recommend_local_resources(**kwargs):
-        calls.append(kwargs)
-        return {"tools": [{"tool_id": 1, "name": "Search"}], "skills": []}
-
-    _install_fake_nl2agent_service(
-        monkeypatch, recommend_local_resources=fake_recommend_local_resources
-    )
-
+def test_nl2agent_search_local_resources_scores_and_ranks_catalog_candidates():
     get_search_local_resources_tool(
         agent_id=101,
         draft_agent_id=202,
         user_id="user_1",
         tenant_id="tenant_1",
-        model_id=7,
         language="en",
+        tool_catalog=[
+            {
+                "tool_id": 1,
+                "name": "Email Sender",
+                "description": "Send SMTP messages and notification emails.",
+            },
+            {
+                "tool_id": 2,
+                "name": "Web Search",
+                "description": "Search web pages and retrieve relevant results.",
+            },
+            {
+                "tool_id": 3,
+                "name": "Database Query",
+                "description": "Run SQL queries against business databases.",
+            },
+        ],
+        skill_catalog=[
+            {
+                "skill_id": 10,
+                "name": "document-summary",
+                "description": "Summarize PDF documents and long reports.",
+            },
+            {
+                "skill_id": 11,
+                "name": "web-research-brief",
+                "description": "Research web pages and produce a concise brief.",
+            },
+        ],
+    )
+
+    payload = _loads(nl2agent_search_local_resources(query="web search"))
+
+    assert payload["agent_id"] == 202
+    assert [item["tool_id"] for item in payload["tools"]][:2] == [2, 1]
+    assert payload["skills"][0]["skill_id"] == 11
+    assert all("score" in item and "reason" in item for item in payload["tools"])
+    assert payload["tools"][0]["score"] >= payload["tools"][1]["score"]
+
+
+def test_nl2agent_search_web_mcps_scores_registry_and_community_catalogs():
+    get_search_web_mcps_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        language="en",
+        registry_results=[
+            {
+                "name": "GitHub Repository MCP",
+                "description": "Manage issues, pull requests, and repository automation.",
+                "url": "https://example.com/github",
+                "transport": "stdio",
+            }
+        ],
+        community_results=[
+            {
+                "name": "Calendar MCP",
+                "description": "Read and update calendar events.",
+                "url": "https://example.com/calendar",
+                "transport": "sse",
+            }
+        ],
+    )
+
+    payload = _loads(nl2agent_search_web_mcps(query="github repository"))
+
+    assert payload["agent_id"] == 202
+    assert payload["items"][0]["name"] == "GitHub Repository MCP"
+    assert payload["items"][0]["source"] == "registry"
+    assert payload["items"][0]["score"] >= payload["items"][1]["score"]
+
+
+def test_nl2agent_search_web_skills_scores_skill_name_candidates():
+    get_search_web_skills_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        language="en",
+        official_skills=[
+            {
+                "skill_id": 12,
+                "skill_name": "code-review",
+                "name": "Code Review",
+                "description": "Review pull requests and source changes.",
+                "tags": ["code", "review"],
+            },
+            {
+                "skill_id": 13,
+                "skill_name": "invoice-reader",
+                "name": "Invoice Reader",
+                "description": "Extract totals from invoices.",
+                "tags": ["finance"],
+            },
+        ],
+    )
+
+    payload = _loads(nl2agent_search_web_skills(query="code review"))
+
+    assert payload["agent_id"] == 202
+    assert payload["items"][0]["skill_id"] == 12
+    assert payload["items"][0]["score"] >= payload["items"][1]["score"]
+
+
+def test_nl2agent_search_local_resources_cache_hit_returns_without_rescoring(monkeypatch):
+    score_calls = []
+
+    def fake_score_candidates(candidates, query, name_field, score_field="score"):
+        score_calls.append((query, name_field))
+        return [{**candidate, score_field: 1.0, "reason": "matched"} for candidate in candidates]
+
+    monkeypatch.setattr(local_tool_module, "_score_candidates", fake_score_candidates)
+    get_search_local_resources_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        language="en",
+        tool_catalog=[{"tool_id": 1, "name": "Web Search", "description": "Search the web."}],
+        skill_catalog=[{"skill_id": 7, "name": "web-research", "description": "Research web pages."}],
     )
 
     first = nl2agent_search_local_resources(query="web search")
-    # Same query modulo whitespace/case normalization: served from cache.
     second = nl2agent_search_local_resources(query="  Web Search  ")
-    # A different query bypasses the cache.
-    third = nl2agent_search_local_resources(query="database query")
 
     assert first == second
-    assert json.loads(third)["tools"] == [{"tool_id": 1, "name": "Search"}]
-    assert len(calls) == 2
-
-
-def test_nl2agent_search_web_mcps_cache_survives_context_reset(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_web_mcps_tool import (
-        get_search_web_mcps_tool,
-        nl2agent_search_web_mcps,
-    )
-
-    calls = []
-
-    async def fake_search_web_mcps(**kwargs):
-        calls.append(kwargs)
-        return [{"name": "GitHub MCP", "source": "community"}]
-
-    _install_fake_nl2agent_service(monkeypatch, search_web_mcps=fake_search_web_mcps)
-
-    context_kwargs = dict(
-        agent_id=101,
-        draft_agent_id=202,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-    get_search_web_mcps_tool(**context_kwargs)
-    first = nl2agent_search_web_mcps(query="github")
-
-    # A new chat message rebuilds the agent and re-runs the tool initializer;
-    # the cache must survive that context reset to deduplicate across turns.
-    get_search_web_mcps_tool(**context_kwargs)
-    second = nl2agent_search_web_mcps(query="github")
-
-    assert first == second
-    assert len(calls) == 1
-
-
-def test_nl2agent_search_web_skills_caches_repeat_query(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_web_skills_tool import (
-        get_search_web_skills_tool,
-        nl2agent_search_web_skills,
-    )
-
-    calls = []
-
-    async def fake_search_web_skills(**kwargs):
-        calls.append(kwargs)
-        return [{"skill_id": 12, "name": "doc-review"}]
-
-    _install_fake_nl2agent_service(
-        monkeypatch, search_web_skills=fake_search_web_skills
-    )
-
-    get_search_web_skills_tool(
-        agent_id=101,
-        draft_agent_id=202,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-
-    first = nl2agent_search_web_skills(query="code review")
-    second = nl2agent_search_web_skills(query="code review")
-
-    assert first == second
-    assert len(calls) == 1
-
-
-def test_nl2agent_search_local_resources_does_not_cache_errors(monkeypatch):
-    _reset_nl2agent_modules(monkeypatch)
-
-    from nexent.core.tools.nl2agent.search_local_resources_tool import (
-        get_search_local_resources_tool,
-        nl2agent_search_local_resources,
-    )
-
-    attempts = []
-
-    async def flaky_recommend_local_resources(**kwargs):
-        attempts.append(kwargs)
-        if len(attempts) == 1:
-            raise RuntimeError("backend down")
-        return {"tools": [], "skills": []}
-
-    _install_fake_nl2agent_service(
-        monkeypatch, recommend_local_resources=flaky_recommend_local_resources
-    )
-
-    get_search_local_resources_tool(
-        agent_id=101,
-        draft_agent_id=202,
-        user_id="user_1",
-        tenant_id="tenant_1",
-        model_id=7,
-        language="en",
-    )
-
-    first = nl2agent_search_local_resources(query="web search")
-    second = nl2agent_search_local_resources(query="web search")
-
-    assert json.loads(first) == {"error": "backend down"}
-    assert json.loads(second) == {"agent_id": 202, "tools": [], "skills": []}
-    assert len(attempts) == 2
+    assert len(score_calls) == 2
