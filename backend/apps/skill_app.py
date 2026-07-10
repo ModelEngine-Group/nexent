@@ -38,6 +38,25 @@ def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], ten
     return None
 
 
+def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
+    update_data: Dict[str, Any] = {}
+    for field_name in (
+        "name",
+        "description",
+        "content",
+        "tags",
+        "source",
+        "config_schemas",
+        "config_values",
+    ):
+        value = getattr(request, field_name)
+        if value is not None:
+            update_data[field_name] = value
+    if request.files is not None:
+        update_data["files"] = [f.model_dump() for f in request.files]
+    return update_data
+
+
 # List routes first (no path parameters)
 @router.get("")
 async def list_skills(
@@ -536,23 +555,7 @@ async def update_skill_by_id(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService(tenant_id=tenant_id)
-        update_data = {}
-        if request.name is not None:
-            update_data["name"] = request.name
-        if request.description is not None:
-            update_data["description"] = request.description
-        if request.content is not None:
-            update_data["content"] = request.content
-        if request.tags is not None:
-            update_data["tags"] = request.tags
-        if request.source is not None:
-            update_data["source"] = request.source
-        if request.config_schemas is not None:
-            update_data["config_schemas"] = request.config_schemas
-        if request.config_values is not None:
-            update_data["config_values"] = request.config_values
-        if request.files is not None:
-            update_data["files"] = [f.model_dump() for f in request.files]
+        update_data = _build_skill_update_data(request)
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -575,7 +578,7 @@ async def update_skill_by_id(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating skill by ID {skill_id}: {e}")
+        logger.exception("Error updating skill by ID %s", skill_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

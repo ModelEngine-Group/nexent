@@ -447,6 +447,17 @@ export default function SkillBuildModal({
     }
   };
 
+  const ensureStreamingTab = (tabPath: string) => {
+    setSkillTabs((prev) => {
+      const newTabs = prev.find((tab) => tab.path === tabPath)
+        ? prev
+        : [...prev, { path: tabPath, content: "" }];
+      streamingTabsRef.current = newTabs;
+      shouldAutoScrollRef.current[tabPath] = true;
+      return newTabs;
+    });
+  };
+
   // Assemble skill files into XML-like format for agent consumption
   const assembleSkillContent = (tabs: SkillFileContent[]): string => {
     const parts: string[] = [];
@@ -614,15 +625,7 @@ export default function SkillBuildModal({
             if (isStreamingCompleteRef.current) return;
 
             if (isNewFile) {
-              // New file detected, create a new tab
-              setSkillTabs((prev) => {
-                const newTabs = prev.find((t) => t.path === path)
-                  ? prev
-                  : [...prev, { path, content: "" }];
-                streamingTabsRef.current = newTabs;
-                shouldAutoScrollRef.current[path] = true;
-                return newTabs;
-              });
+              ensureStreamingTab(path);
             }
 
             updateTabContent(path, content);

@@ -178,6 +178,26 @@ export default function SkillRepositoryPage() {
     ? (installMutation.variables?.skillRepositoryId ?? null)
     : null;
 
+  const getDuplicateSkillNames = (error: unknown): string[] | null => {
+    const detail =
+      error instanceof Error && "detail" in error
+        ? (error as { detail?: unknown }).detail
+        : null;
+    if (
+      typeof detail !== "object" ||
+      detail == null ||
+      !("type" in detail) ||
+      (detail as { type?: unknown }).type !== "skill_duplicate"
+    ) {
+      return null;
+    }
+    const duplicates = (detail as { duplicate_skills?: unknown })
+      .duplicate_skills;
+    return Array.isArray(duplicates)
+      ? duplicates.filter((name): name is string => typeof name === "string")
+      : [];
+  };
+
   const openDetail = (listing: SkillRepositoryListingItem) => {
     setDetailRepositoryId(listing.skill_repository_id);
   };
@@ -210,23 +230,8 @@ export default function SkillRepositoryPage() {
       setCopyListing(null);
       setCopyTargetName("");
     } catch (error) {
-      const detail =
-        error instanceof Error && "detail" in error
-          ? (error as { detail?: unknown }).detail
-          : null;
-      if (
-        typeof detail === "object" &&
-        detail != null &&
-        "type" in detail &&
-        (detail as { type?: unknown }).type === "skill_duplicate"
-      ) {
-        const duplicates = (detail as { duplicate_skills?: unknown })
-          .duplicate_skills;
-        const duplicateNames = Array.isArray(duplicates)
-          ? duplicates.filter(
-              (name): name is string => typeof name === "string"
-            )
-          : [];
+      const duplicateNames = getDuplicateSkillNames(error);
+      if (duplicateNames) {
         setCopyNameError(
           duplicateNames.length > 0
             ? `当前租户已存在同名 Skill：${duplicateNames.join("、")}`
