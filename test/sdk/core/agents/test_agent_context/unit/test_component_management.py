@@ -163,10 +163,10 @@ class TestGetRegisteredComponents:
 class TestGetStrategy:
     """Tests for _get_strategy() method."""
 
-    def test_default_returns_token_budget_strategy(self):
+    def test_default_returns_full_strategy(self):
         cm = ContextManager()
         strategy = cm._get_strategy()
-        assert strategy.get_strategy_name() == "token_budget"
+        assert strategy.get_strategy_name() == "full"
 
     def test_full_strategy(self):
         config = ContextManagerConfig(strategy="full")
@@ -187,11 +187,11 @@ class TestGetStrategy:
         strategy = cm._get_strategy()
         assert strategy.get_strategy_name() == "priority"
 
-    def test_unknown_strategy_defaults_to_token_budget(self):
+    def test_unknown_strategy_defaults_to_full(self):
         config = ContextManagerConfig(strategy="unknown")
         cm = ContextManager(config)
         strategy = cm._get_strategy()
-        assert strategy.get_strategy_name() == "token_budget"
+        assert strategy.get_strategy_name() == "full"
 
 
 class TestBuildSystemPrompt:

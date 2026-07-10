@@ -43,6 +43,7 @@ class ConversationRecord(TableBase):
     conversation_id = Column(Integer, Sequence(
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
+    agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
 
 
 class ConversationMessage(TableBase):
@@ -871,7 +872,6 @@ class AgentRepository(TableBase):
     description = Column(Text, doc="Root agent description")
     author = Column(String(100), doc="Agent author")
     submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
-    category_id = Column(Integer, doc="Optional marketplace category ID")
     tags = Column(ARRAY(Text), doc="Marketplace tags")
     tool_count = Column(Integer,
                         doc="Total tool count across all agents in the bundle (display only)")

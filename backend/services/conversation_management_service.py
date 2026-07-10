@@ -28,6 +28,7 @@ from database.conversation_db import (
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    update_conversation_agent_id,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -290,19 +291,20 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     return success
 
 
-def create_new_conversation(title: str, user_id: str) -> Dict[str, Any]:
+def create_new_conversation(title: str, user_id: str, agent_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Create a new conversation
 
     Args:
         title: Conversation title
         user_id: User ID
+        agent_id: Agent used by the latest run in this conversation
 
     Returns:
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(title, user_id)
+        conversation_data = create_conversation(title, user_id, agent_id=agent_id)
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -321,6 +323,20 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         return conversations
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
+        raise Exception(str(e))
+
+
+def update_conversation_agent_id_service(conversation_id: int, agent_id: int, user_id: str) -> bool:
+    """
+    Update the latest agent associated with a conversation.
+    """
+    try:
+        success = update_conversation_agent_id(conversation_id, agent_id, user_id)
+        if not success:
+            raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to update conversation agent: {str(e)}")
         raise Exception(str(e))
 
 
@@ -560,6 +576,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
         formatted_history = {
             # Convert to string
             'conversation_id': str(history_data['conversation_id']),
+            'agent_id': history_data.get('agent_id'),
             'create_time': history_data['create_time'],
             'message': messages
         }

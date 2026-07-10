@@ -186,15 +186,18 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                       <div className="divide-y divide-gray-100">
                         {cat.tools.map((tool) => {
                           const labels = getToolLabels(tool);
+                          const toolUnavailableReasons = tool.unavailable_reasons || [];
+                          const isModelUnavailable = toolUnavailableReasons.includes("mcp_model_unavailable");
                           const disabled =
                             isToolDisabledDueToVlm(tool.name, isImageUnderstandingAvailable, isVideoUnderstandingAvailable) ||
-                            isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
+                            isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable) ||
+                            isModelUnavailable;
 
                           return (
                             <div key={tool.id} className="group flex items-center gap-2 px-3 py-2">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="truncate font-mono text-xs font-medium text-gray-800">
+                                  <span className={`truncate font-mono text-xs font-medium ${isModelUnavailable ? "text-gray-400" : "text-gray-800"}`}>
                                     {tool.name}
                                   </span>
                                   {labels.slice(0, 2).map((l) => (
@@ -209,7 +212,12 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                                       </span>
                                     </Tooltip>
                                   )}
-                                  {disabled && <AlertTriangle size={14} className="shrink-0 text-orange-400" />}
+                                  {isModelUnavailable && (
+                                    <Tooltip title={t("toolPool.mcpModelUnavailableTooltip")}>
+                                      <AlertTriangle size={14} className="shrink-0 text-orange-400" />
+                                    </Tooltip>
+                                  )}
+                                  {disabled && !isModelUnavailable && <AlertTriangle size={14} className="shrink-0 text-orange-400" />}
                                 </div>
                               </div>
 

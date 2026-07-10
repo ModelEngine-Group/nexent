@@ -62,7 +62,7 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
+from database.model_management_db import get_model_by_model_id, get_model_by_model_id_ignore_delete, get_model_id_by_display_name, get_valid_model_ids
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -99,6 +99,7 @@ from services.conversation_management_service import (
     save_source_image,
     save_source_search,
     save_skill_files_to_conversation,
+    update_conversation_agent_id_service,
     update_message_content,
     update_message_status,
     update_unit_content,
@@ -1376,6 +1377,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     try:
         tool_info = search_tools_for_sub_agent(
             agent_id=agent_id, tenant_id=tenant_id)
+        # Check if selected_model_id in tool params points to a deleted model
+        for tool in tool_info:
+            unavailable_reasons: List[str] = []
+            params = tool.get("params") or []
+            if isinstance(params, list):
+                for param_def in params:
+                    if not isinstance(param_def, dict):
+                        continue
+                    if param_def.get("name") == "selected_model_id":
+                        selected_model_id = param_def.get("default")
+                        if selected_model_id is not None:
+                            model_record = get_model_by_model_id_ignore_delete(selected_model_id, tenant_id)
+                            if model_record is not None and model_record.get("delete_flag") == "Y":
+                                unavailable_reasons.append(AgentUnavailableReason.MCP_MODEL_UNAVAILABLE)
+                        break
+            tool["unavailable_reasons"] = unavailable_reasons
         agent_info["tools"] = tool_info
     except Exception as e:
         logger.error(f"Failed to get agent tools: {str(e)}")
@@ -1412,19 +1429,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["external_sub_agent_id_list"] = []
 
     # Get model names from model_ids array
-    model_ids = agent_info.get("model_ids")
+    # Filter out deleted models (delete_flag='Y' in model_record_t)
+    model_ids = agent_info.get("model_ids") or []
+    valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
+    agent_info["model_ids"] = valid_model_ids
+
     model_names: List[str] = []
-    if model_ids and len(model_ids) > 0:
-        for mid in model_ids:
-            model_info = get_model_by_model_id(mid)
-            if model_info:
-                display_name = model_info.get("display_name")
-                if display_name:
-                    model_names.append(display_name)
+    for mid in valid_model_ids:
+        model_info = get_model_by_model_id(mid)
+        if model_info:
+            display_name = model_info.get("display_name")
+            if display_name:
+                model_names.append(display_name)
     agent_info["model_names"] = model_names
-    # Always derive model_name from model_ids so the API contract is consistent.
-    if model_ids and len(model_ids) > 0:
-        first_model_info = get_model_by_model_id(model_ids[0])
+    # Always derive model_name from valid_model_ids so the API contract is consistent.
+    if valid_model_ids:
+        first_model_info = get_model_by_model_id(valid_model_ids[0])
         agent_info["model_name"] = first_model_info.get(
             "display_name", None) if first_model_info is not None else None
     else:
@@ -2383,6 +2403,11 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
 
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent["model_ids"] = valid_model_ids
+
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(
                 agent_id=agent["agent_id"],
@@ -2578,6 +2603,22 @@ def check_agent_availability(
         tool_statuses = check_tool_is_available(tool_id_list)
         if not all(tool_statuses):
             unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
+
+    # Check if any tool has a selected_model_id pointing to a deleted model
+    for tool in tool_info:
+        params = tool.get("params") or []
+        if isinstance(params, list):
+            for param_def in params:
+                if not isinstance(param_def, dict):
+                    continue
+                if param_def.get("name") == "selected_model_id":
+                    selected_model_id = param_def.get("default")
+                    if selected_model_id is not None:
+                        model_record = get_model_by_model_id_ignore_delete(
+                            selected_model_id, tenant_id)
+                        if model_record is not None and model_record.get("delete_flag") == "Y":
+                            unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
+                    break
 
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
@@ -2949,6 +2990,7 @@ async def run_agent_stream(
         conversation_data = create_new_conversation(
             title=default_title,
             user_id=resolved_user_id,
+            agent_id=agent_request.agent_id,
         )
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -2956,6 +2998,19 @@ async def run_agent_stream(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
             resolved_user_id,
+        )
+
+    if (
+        not agent_request.is_debug
+        and not resume
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+        and agent_request.agent_id is not None
+    ):
+        update_conversation_agent_id_service(
+            conversation_id=agent_request.conversation_id,
+            agent_id=agent_request.agent_id,
+            user_id=resolved_user_id,
         )
 
     # Resume mode: check for existing streaming message

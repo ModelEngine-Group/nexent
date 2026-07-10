@@ -215,7 +215,6 @@ export default function SkillBuildModal({
       }
       // Reset task ID
       taskIdRef.current = "";
-      form.resetFields();
       setActiveTab("interactive");
       setSelectedSkillName("");
       setUploadFile(null);
@@ -242,7 +241,7 @@ export default function SkillBuildModal({
       setEditingTabKey(null);
       setEditingTabName("");
     }
-  }, [isOpen, form]);
+  }, [isOpen]);
 
   // Track component mount status for async callback safety
   useEffect(() => {
@@ -375,9 +374,14 @@ export default function SkillBuildModal({
     }, 200);
   };
 
+  const closeModal = () => {
+    form.resetFields();
+    onCancel();
+  };
+
   // Cleanup when modal is closed
   const handleModalClose = () => {
-    onCancel();
+    closeModal();
   };
 
   const handleManualSubmit = async () => {
@@ -399,7 +403,7 @@ export default function SkillBuildModal({
         { ...values, content, files: extraFiles.length > 0 ? extraFiles : undefined } as SkillData,
         allSkills,
         onSuccess,
-        onCancel,
+        closeModal,
         t
       );
     } catch (error) {
@@ -427,7 +431,7 @@ export default function SkillBuildModal({
         uploadFile,
         allSkills,
         onSuccess,
-        onCancel,
+        closeModal,
         t
       );
     } finally {

@@ -105,25 +105,13 @@ export default function AgentGenerateDetail({}) {
 
   // Streaming field values (accumulated from SSE, bypasses Form disabled state)
 
-  // Track form values for modal props to avoid synchronous getFieldValue during render
-  const [watchedPromptTemplateId, setWatchedPromptTemplateId] = useState<number | undefined>(
-    form.getFieldValue("promptTemplateId")
-  );
-  const [watchedBusinessDescription, setWatchedBusinessDescription] = useState<string>(
-    form.getFieldValue("businessDescription") || ""
-  );
-  const [watchedBusinessLogicModelId, setWatchedBusinessLogicModelId] = useState<number | undefined>(
-    form.getFieldValue("businessLogicModelId")
-  );
-  const [watchedDutyPrompt, setWatchedDutyPrompt] = useState<string>(
-    form.getFieldValue("dutyPrompt") || ""
-  );
-  const [watchedConstraintPrompt, setWatchedConstraintPrompt] = useState<string>(
-    form.getFieldValue("constraintPrompt") || ""
-  );
-  const [watchedFewShotsPrompt, setWatchedFewShotsPrompt] = useState<string>(
-    form.getFieldValue("fewShotsPrompt") || ""
-  );
+  // Track form values for modal props (synced after Form mounts / setFieldsValue)
+  const [watchedPromptTemplateId, setWatchedPromptTemplateId] = useState<number | undefined>();
+  const [watchedBusinessDescription, setWatchedBusinessDescription] = useState<string>("");
+  const [watchedBusinessLogicModelId, setWatchedBusinessLogicModelId] = useState<number | undefined>();
+  const [watchedDutyPrompt, setWatchedDutyPrompt] = useState<string>("");
+  const [watchedConstraintPrompt, setWatchedConstraintPrompt] = useState<string>("");
+  const [watchedFewShotsPrompt, setWatchedFewShotsPrompt] = useState<string>("");
 
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
@@ -137,23 +125,13 @@ export default function AgentGenerateDetail({}) {
     clearExpiredGenerationCaches();
   }, []);
 
-  // Sync watched form values with state to avoid synchronous getFieldValue during render
-  useEffect(() => {
-    setWatchedPromptTemplateId(form.getFieldValue("promptTemplateId"));
-    setWatchedBusinessDescription(form.getFieldValue("businessDescription") || "");
-    setWatchedBusinessLogicModelId(form.getFieldValue("businessLogicModelId"));
-    setWatchedDutyPrompt(form.getFieldValue("dutyPrompt") || "");
-    setWatchedConstraintPrompt(form.getFieldValue("constraintPrompt") || "");
-    setWatchedFewShotsPrompt(form.getFieldValue("fewShotsPrompt") || "");
-  }, [form]);
-
-
   // (e.g. business_description from a previously edited agent)
   useEffect(() => {
-    if (isCreatingMode) {
+    if (!isCreatingMode) return;
+    queueMicrotask(() => {
       form.resetFields();
-    }
-  }, [isCreatingMode]);
+    });
+  }, [isCreatingMode, form]);
 
   // Use agent generation hook
   const { handleGenerateAgent } = useAgentGeneration({
@@ -223,10 +201,22 @@ export default function AgentGenerateDetail({}) {
       }
     }
 
+    const defaultAuthor =
+      editedAgent.author?.trim() ||
+      user?.email ||
+      (isSpeedMode ? "Default User" : "");
+
+    if (!editedAgent.author?.trim()) {
+      const resolvedAuthor = user?.email || (isSpeedMode ? "Default User" : "");
+      if (resolvedAuthor) {
+        updateAgentConfig({ author: resolvedAuthor });
+      }
+    }
+
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
-      agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
+      agentAuthor: defaultAuthor,
       mainAgentModels: mainAgentModels,
       mainAgentModelIds: mainAgentModelIds,
       mainAgentMaxStep: editedAgent.max_step || 15,
@@ -245,17 +235,27 @@ export default function AgentGenerateDetail({}) {
       promptTemplateId: editedAgent.prompt_template_id,
       promptTemplateName: editedAgent.prompt_template_name || "system_default",
     };
-    form.setFieldsValue(initialAgentInfo);
+    queueMicrotask(() => {
+      form.setFieldsValue(initialAgentInfo);
+      setWatchedPromptTemplateId(initialAgentInfo.promptTemplateId);
+      setWatchedBusinessDescription(initialAgentInfo.businessDescription || "");
+      setWatchedBusinessLogicModelId(initialAgentInfo.businessLogicModelId);
+      setWatchedDutyPrompt(initialAgentInfo.dutyPrompt || "");
+      setWatchedConstraintPrompt(initialAgentInfo.constraintPrompt || "");
+      setWatchedFewShotsPrompt(initialAgentInfo.fewShotsPrompt || "");
+    });
 
-  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels]);
+  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels, user?.email, isSpeedMode, updateAgentConfig]);
 
   // Re-validate requested output tokens when the selected model's max changes,
   // so switching to a model with a lower cap surfaces the violation immediately
   // instead of waiting until save.
   useEffect(() => {
-    if (form.getFieldValue("requestedOutputTokens") != null) {
-      form.validateFields(["requestedOutputTokens"]).catch(() => {});
-    }
+    queueMicrotask(() => {
+      if (form.getFieldValue("requestedOutputTokens") != null) {
+        form.validateFields(["requestedOutputTokens"]).catch(() => {});
+      }
+    });
   }, [form, selectedMainAgentModel?.maxOutputTokens]);
 
   // Handle business description change
