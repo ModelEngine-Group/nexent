@@ -14,6 +14,54 @@ def error_response(message: str) -> str:
     return json.dumps({"error": message}, ensure_ascii=False)
 
 
+def _score_candidates(
+    candidates: List[Dict[str, Any]],
+    query: str,
+    name_field: str,
+    score_field: str = "score",
+) -> List[Dict[str, Any]]:
+    """Relevance scoring via fuzzy string matching over name + description.
+
+    Combines three signals:
+    1. Token-overlap score: fraction of query words found in name + description.
+    2. Substring containment bonus: +0.3 if the full query appears as a substring in name.
+    3. Edit-distance fuzzy score: rapidfuzz.partial_ratio (or difflib fallback).
+
+    Blended: 40% token-overlap + 30% substring + 30% fuzzy.
+    rapidfuzz is an optional dependency (add to sdk/pyproject.toml);
+    difflib is the zero-dependency fallback.
+    """
+    query_lower = query.lower()
+    query_words = query_lower.split()
+    scored = []
+    for c in candidates:
+        name = c.get(name_field, "").lower()
+        description = c.get("description", "").lower()
+        combined = name + " " + description
+
+        # Signal 1: token-overlap
+        overlap = sum(1 for w in query_words if w in combined) / max(len(query_words), 1)
+
+        # Signal 2: substring containment bonus
+        substring_bonus = 0.3 if query_lower in name else 0.0
+
+        # Signal 3: fuzzy match
+        try:
+            from rapidfuzz import fuzz
+
+            fuzzy_score = fuzz.partial_ratio(query_lower, combined) / 100.0
+        except ImportError:
+            from difflib import SequenceMatcher
+
+            fuzzy_score = SequenceMatcher(None, query_lower, combined).ratio()
+
+        # Blend
+        composite = 0.4 * overlap + 0.3 * substring_bonus + 0.3 * fuzzy_score
+        scored.append({**c, score_field: round(composite, 4), "reason": ""})
+    scored.sort(key=lambda x: x[score_field], reverse=True)
+    return scored
+
+
 @dataclass
 class Nl2AgentContext:
     """Session context for an NL2AGENT tool."""
@@ -24,22 +72,24 @@ class Nl2AgentContext:
     user_id: str = ""
     language: str = "en"
 
-    # ── Applied resources state (survive across turns) ───────────────────────
-    # Set when the user clicks "Apply All" on LocalResourcesCard or when the
-    # frontend saves tool/skill configs via ToolConfigModal.
+    # Pre-fetched catalogs injected by backend (all optional — tools guard on None)
+    tool_catalog: Optional[List[Dict[str, Any]]] = None
+    skill_catalog: Optional[List[Dict[str, Any]]] = None
+    registry_results: Optional[List[Dict[str, Any]]] = None
+    community_results: Optional[List[Dict[str, Any]]] = None
+    official_skills: Optional[List[Dict[str, Any]]] = None
+
+    # Applied resources state (survive across turns)
     applied_tool_ids: Set[int] = field(default_factory=set)
     applied_skill_ids: Set[int] = field(default_factory=set)
-    applied_mcp_names: Set[str] = field(default_factory=set)  # MCP server names
+    applied_mcp_names: Set[str] = field(default_factory=set)
     applied_sub_agent_ids: Set[int] = field(default_factory=set)
 
     # Per-resource config overrides set during the session.
-    # tool_id -> {param_name: value}  (e.g. MCP server_url, api_key)
     tool_configs: Dict[int, Dict[str, Any]] = field(default_factory=dict)
-    # skill_id -> {config_key: value}
     skill_configs: Dict[int, Dict[str, Any]] = field(default_factory=dict)
 
-    # Tracks which (tool_name, query) combos have been searched this session
-    # so the agent knows "never searched before" vs "already searched".
+    # Tracks which (tool_name, query) combos have been searched this session.
     _searched_queries: Dict[str, Set[str]] = field(default_factory=dict)
 
     @property
@@ -49,21 +99,17 @@ class Nl2AgentContext:
     # ── Convenience helpers ─────────────────────────────────────────────────
 
     def has_applied_tool(self, tool_id: int) -> bool:
-        """Return True if this tool has been applied in the session."""
         return tool_id in self.applied_tool_ids
 
     def has_applied_skill(self, skill_id: int) -> bool:
-        """Return True if this skill has been applied in the session."""
         return skill_id in self.applied_skill_ids
 
     def has_applied_mcp(self, mcp_name: str) -> bool:
-        """Return True if this MCP server has been installed in the session."""
         return mcp_name in self.applied_mcp_names
 
     def mark_tool_applied(
         self, tool_id: int, params: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Record that a tool has been applied, optionally with config overrides."""
         self.applied_tool_ids.add(tool_id)
         if params:
             self.tool_configs[tool_id] = params
@@ -71,38 +117,29 @@ class Nl2AgentContext:
     def mark_skill_applied(
         self, skill_id: int, config: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Record that a skill has been applied, optionally with config overrides."""
         self.applied_skill_ids.add(skill_id)
         if config:
             self.skill_configs[skill_id] = config
 
     def mark_mcp_applied(self, mcp_name: str) -> None:
-        """Record that an MCP server has been installed in the session."""
         self.applied_mcp_names.add(mcp_name)
 
     def mark_searched(self, tool_name: str, query: str) -> None:
-        """Record that a search tool was called with this query this session."""
-        q = query.strip().lower()
-        self._searched_queries.setdefault(tool_name, set()).add(q)
+        self._searched_queries.setdefault(tool_name, set()).add(query.strip().lower())
 
     def was_searched(self, tool_name: str, query: str) -> bool:
-        """Return True if this search tool was already called with this query."""
         return query.strip().lower() in self._searched_queries.get(tool_name, set())
 
     def get_tool_config(self, tool_id: int) -> Dict[str, Any]:
-        """Return the saved config overrides for a tool, or an empty dict."""
         return self.tool_configs.get(tool_id, {})
 
     def get_skill_config(self, skill_id: int) -> Dict[str, Any]:
-        """Return the saved config overrides for a skill, or an empty dict."""
         return self.skill_configs.get(skill_id, {})
 
     def get_all_applied_tool_ids(self) -> List[int]:
-        """Return sorted list of all applied tool IDs."""
         return sorted(self.applied_tool_ids)
 
     def get_all_applied_skill_ids(self) -> List[int]:
-        """Return sorted list of all applied skill IDs."""
         return sorted(self.applied_skill_ids)
 
 
@@ -116,12 +153,16 @@ def set_nl2agent_context(
     tenant_id: Optional[str] = None,
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
+    tool_catalog: Optional[List[Dict[str, Any]]] = None,
+    skill_catalog: Optional[List[Dict[str, Any]]] = None,
+    registry_results: Optional[List[Dict[str, Any]]] = None,
+    community_results: Optional[List[Dict[str, Any]]] = None,
+    official_skills: Optional[List[Dict[str, Any]]] = None,
 ) -> Nl2AgentContext:
     """Set the global NL2AGENT session context. Idempotent; overwrites prior values.
 
-    Applied resources state (applied_tool_ids, applied_skill_ids, tool_configs,
-    skill_configs, _searched_queries) is reset on each call so the context always
-    starts fresh for a new conversation turn.
+    Applied resources state is reset on each call so the context always starts
+    fresh for a new conversation turn.
     """
     global _context
     _context = Nl2AgentContext(
@@ -130,6 +171,11 @@ def set_nl2agent_context(
         tenant_id=tenant_id,
         user_id=user_id or "",
         language=language or "en",
+        tool_catalog=tool_catalog,
+        skill_catalog=skill_catalog,
+        registry_results=registry_results,
+        community_results=community_results,
+        official_skills=official_skills,
     )
     return _context
 
@@ -182,7 +228,5 @@ def set_cached_search(tool_name: str, query: str, result: str) -> None:
     if key is None:
         return
     _search_cache[key] = (time.monotonic(), result)
-    # Evict oldest entries when the cache exceeds the size limit.
     while len(_search_cache) > _SEARCH_CACHE_MAX_ENTRIES:
-        # In Python 3.7+ dict maintains insertion order; pop the first (oldest) key.
         _search_cache.pop(next(iter(_search_cache)))

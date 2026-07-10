@@ -390,8 +390,9 @@ class NexentAgent:
                 draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
-                model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
+                tool_catalog=metadata.get("tool_catalog"),
+                skill_catalog=metadata.get("skill_catalog"),
             )
             from ..tools.nl2agent.search_local_resources_tool import (
                 nl2agent_search_local_resources,
@@ -408,8 +409,9 @@ class NexentAgent:
                 draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
-                model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
+                registry_results=metadata.get("registry_results"),
+                community_results=metadata.get("community_results"),
             )
             from ..tools.nl2agent.search_web_mcps_tool import nl2agent_search_web_mcps
             return nl2agent_search_web_mcps
@@ -424,65 +426,13 @@ class NexentAgent:
                 draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
-                model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
+                official_skills=metadata.get("official_skills"),
             )
             from ..tools.nl2agent.search_web_skills_tool import (
                 nl2agent_search_web_skills,
             )
             return nl2agent_search_web_skills
-        elif class_name == "NL2AgentApplyLocalResourcesTool":
-            from ..tools.nl2agent.apply_local_resources_tool import (
-                get_apply_local_resources_tool,
-            )
-            metadata = tool_config.metadata or {}
-            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
-            get_apply_local_resources_tool(
-                agent_id=metadata.get("agent_id"),
-                draft_agent_id=draft_agent_id,
-                user_id=metadata.get("user_id"),
-                tenant_id=metadata.get("tenant_id"),
-                model_id=metadata.get("model_id"),
-                language=metadata.get("language"),
-            )
-            from ..tools.nl2agent.apply_local_resources_tool import (
-                nl2agent_apply_local_resources,
-            )
-            return nl2agent_apply_local_resources
-        elif class_name == "NL2AgentInstallWebSkillTool":
-            from ..tools.nl2agent.install_web_skill_tool import (
-                get_install_web_skill_tool,
-            )
-            metadata = tool_config.metadata or {}
-            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
-            get_install_web_skill_tool(
-                agent_id=metadata.get("agent_id"),
-                draft_agent_id=draft_agent_id,
-                user_id=metadata.get("user_id"),
-                tenant_id=metadata.get("tenant_id"),
-                model_id=metadata.get("model_id"),
-                language=metadata.get("language"),
-            )
-            from ..tools.nl2agent.install_web_skill_tool import (
-                nl2agent_install_web_skill,
-            )
-            return nl2agent_install_web_skill
-        elif class_name == "NL2AgentFinalizeAgentTool":
-            from ..tools.nl2agent.finalize_agent_tool import (
-                get_finalize_agent_tool,
-            )
-            metadata = tool_config.metadata or {}
-            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
-            get_finalize_agent_tool(
-                agent_id=metadata.get("agent_id"),
-                draft_agent_id=draft_agent_id,
-                user_id=metadata.get("user_id"),
-                tenant_id=metadata.get("tenant_id"),
-                model_id=metadata.get("model_id"),
-                language=metadata.get("language"),
-            )
-            from ..tools.nl2agent.finalize_agent_tool import nl2agent_finalize_agent
-            return nl2agent_finalize_agent
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

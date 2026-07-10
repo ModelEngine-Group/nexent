@@ -1,14 +1,14 @@
 """NL2AGENT tool: search local tools and skills matching the user's intent."""
 
-import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from smolagents import tool
 
 from ._context import (
     Nl2AgentContext,
+    _score_candidates,
     error_response,
     get_cached_search,
     get_nl2agent_context,
@@ -23,17 +23,19 @@ def get_search_local_resources_tool(
     agent_id: Optional[int] = None,
     user_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
-    model_id: Optional[int] = None,
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
+    tool_catalog: Optional[List[Dict[str, Any]]] = None,
+    skill_catalog: Optional[List[Dict[str, Any]]] = None,
 ) -> Nl2AgentContext:
     return set_nl2agent_context(
         agent_id=agent_id,
         user_id=user_id,
         tenant_id=tenant_id,
-        model_id=model_id,
         language=language,
         draft_agent_id=draft_agent_id,
+        tool_catalog=tool_catalog,
+        skill_catalog=skill_catalog,
     )
 
 
@@ -45,48 +47,54 @@ def nl2agent_search_local_resources(query: str) -> str:
     user's stated goal. Returns a frontend card JSON string with ``agent_id``,
     ``tools``, and ``skills``. The ``agent_id`` is the draft agent being built.
 
+    Only searches when the query has not been searched before in this session.
+    Applied resources from prior searches are preserved in context.
+
     Args:
-        query: Concise search keywords (2-6 words) for one capability, e.g. "web search" or "PDF summarization". Never a full sentence.
+        query: Concise search keywords (2-6 words) for one capability,
+            e.g. "web search" or "PDF summarization". Never a full sentence.
 
     Returns:
         JSON string ``{"agent_id": 123, "tools": [...], "skills": [...]}``.
         Tools include a ``tool_id`` field; skills include a ``skill_id`` field.
-        Both include a ``score`` (0-10) and ``reason``. The frontend renders
+        Both include a ``score`` (0-1) and ``reason``. The frontend renders
         these as cards with an "Apply All" button.
     """
     ctx = get_nl2agent_context()
     if ctx is None or ctx.tenant_id is None:
         return error_response("NL2AGENT session context not initialized.")
+    if ctx.tool_catalog is None or ctx.skill_catalog is None:
+        return error_response("tool/skill catalog not available in context")
 
-    target = ctx.target_agent_id
-    if target is None or target <= 0:
-        return error_response("NL2AGENT draft agent_id not set in context.")
+    q = query.lower().strip()
+    cache_key = ("nl2agent_search_local_resources", q)
 
-    cached_result = get_cached_search("nl2agent_search_local_resources", query)
-    if cached_result is not None:
+    if (cached := get_cached_search(*cache_key)):
         logger.info(f"nl2agent_search_local_resources cache hit for query: {query}")
-        return cached_result
+        return cached
 
-    try:
-        from services.nl2agent_service import recommend_local_resources
+    # Guard: do not re-search if already searched this session.
+    if ctx.was_searched("nl2agent_search_local_resources", query):
+        tools = _score_candidates(ctx.tool_catalog, query, "name")[:5]
+        skills = _score_candidates(ctx.skill_catalog, query, "name")[:5]
+        result = json.dumps({
+            "agent_id": ctx.target_agent_id,
+            "tools": tools,
+            "skills": skills,
+            "already_searched": True,
+            "applied_tool_ids": list(ctx.applied_tool_ids),
+            "applied_skill_ids": list(ctx.applied_skill_ids),
+        }, ensure_ascii=False)
+        set_cached_search(*cache_key, result)
+        return result
 
-        result = asyncio.run(
-            recommend_local_resources(
-                query=query,
-                agent_id=target,
-                tenant_id=ctx.tenant_id,
-                model_id=ctx.model_id,
-                top_n=5,
-            )
-        )
-        card_payload = {
-            "agent_id": target,
-            "tools": result.get("tools", []),
-            "skills": result.get("skills", []),
-        }
-        result_json = json.dumps(card_payload, ensure_ascii=False)
-        set_cached_search("nl2agent_search_local_resources", query, result_json)
-        return result_json
-    except Exception as exc:
-        logger.exception(f"nl2agent_search_local_resources failed: {exc}")
-        return error_response(str(exc))
+    tools = _score_candidates(ctx.tool_catalog, query, "name")[:5]
+    skills = _score_candidates(ctx.skill_catalog, query, "name")[:5]
+    result = json.dumps({
+        "agent_id": ctx.target_agent_id,
+        "tools": tools,
+        "skills": skills,
+    }, ensure_ascii=False)
+    set_cached_search(*cache_key, result)
+    ctx.mark_searched("nl2agent_search_local_resources", query)
+    return result
