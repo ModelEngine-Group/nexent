@@ -194,6 +194,7 @@ if memory_pkg is not None:
     if real_memory_service is not None:
         sys.modules["nexent.memory.memory_service"] = real_memory_service
 sys.modules['nexent.vector_database.datamate_core'] = MagicMock()
+sys.modules['nexent.vector_database.qdrant_core'] = MagicMock()
 # Mock nexent.storage module and its submodules before any imports
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
 storage_factory_module = types.ModuleType('nexent.storage.storage_client_factory')
@@ -4725,6 +4726,24 @@ class TestRethrowOrPlain(unittest.TestCase):
             DATAMATE_URL, tenant_id="test-tenant")
         mock_datamate_core.assert_called_once_with(
             base_url="https://datamate.example.com")
+
+    @patch('backend.services.vectordatabase_service.QdrantCore')
+    def test_get_vector_db_core_qdrant_type(self, mock_qdrant_core):
+        """QDRANT selects QdrantCore."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import QDRANT_API_KEY, QDRANT_TIMEOUT, QDRANT_URL, VectorDatabaseType
+
+        mock_qdrant_instance = MagicMock()
+        mock_qdrant_core.return_value = mock_qdrant_instance
+
+        result = get_vector_db_core(db_type=VectorDatabaseType.QDRANT)
+
+        self.assertEqual(result, mock_qdrant_instance)
+        mock_qdrant_core.assert_called_once_with(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            timeout=QDRANT_TIMEOUT,
+        )
 
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):

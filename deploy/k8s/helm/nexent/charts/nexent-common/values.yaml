@@ -42,12 +42,17 @@ config:
     endpoint: "http://nexent-minio:9000"
     region: "cn-north-1"
     defaultBucket: "nexent"
+  vectorDatabase:
+    type: "elasticsearch"
   elasticsearch:
     host: "http://nexent-elasticsearch:9200"
     javaOpts: "-Xms2g -Xmx2g"
     diskWatermarkLow: "85%"
     diskWatermarkHigh: "90%"
     diskWatermarkFloodStage: "95%"
+  qdrant:
+    url: "http://nexent-qdrant:6333"
+    timeout: "20"
   skipProxy: "true"
   umask: "0022"
   isDeployedByKubernetes: "true"
@@ -175,6 +180,7 @@ config:
 secrets:
   elasticPassword: "nexent@2025"
   elasticsearchApiKey: ""
+  qdrantApiKey: ""
   postgresPassword: "nexent@4321"
   minio:
     rootUser: "nexent"

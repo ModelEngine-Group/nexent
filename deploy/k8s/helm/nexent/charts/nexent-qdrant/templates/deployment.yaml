@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-qdrant
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-qdrant
+  annotations:
+    "helm.sh/hook-weight": "-1"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-qdrant
+  template:
+    metadata:
+      labels:
+        app: nexent-qdrant
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: qdrant
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 6333
+              name: http
+          volumeMounts:
+            - name: qdrant-data
+              mountPath: /qdrant/storage
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu }}
+          livenessProbe:
+            tcpSocket:
+              port: 6333
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 6333
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: qdrant-data
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-qdrant" .Values.persistence.existingClaim }}

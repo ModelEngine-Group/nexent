@@ -1,0 +1,30 @@
+replicaCount: 1
+
+image:
+  repository: qdrant/qdrant
+  tag: v1.18.2
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 500m
+  limits:
+    memory: 2Gi
+    cpu: 2
+
+storage:
+  size: 20Gi
+
+persistence:
+  mode: local
+  storageClassName: nexent-local
+  accessModes:
+    - ReadWriteOnce
+  localPath: "/var/lib/nexent-data/nexent-qdrant"
+  existingClaim: ""
+
+service:
+  type: ClusterIP
+  nodePorts:
+    http: ""

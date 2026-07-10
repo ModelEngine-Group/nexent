@@ -82,6 +82,8 @@ nexent-common:
 
 nexent-elasticsearch:
   enabled: true
+nexent-qdrant:
+  enabled: true
 nexent-postgresql:
   enabled: true
 nexent-redis:
