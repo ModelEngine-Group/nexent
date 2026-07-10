@@ -2241,9 +2241,9 @@ async def import_agent_by_agent_id(
                                                  enabled=True,
                                                  params=tool.params))
     # check the validity of the agent parameters
-    if import_agent_info.max_steps <= 0 or import_agent_info.max_steps > 30:
+    if import_agent_info.max_steps <= 0:
         raise ValueError(
-            f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0 and less than 30.")
+            f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0.")
     if not import_agent_info.name.isidentifier():
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
