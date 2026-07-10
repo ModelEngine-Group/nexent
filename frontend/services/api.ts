@@ -283,6 +283,9 @@ export const API_ENDPOINTS = {
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
   },
+  ragflow: {
+    datasets: `${API_BASE_URL}/ragflow/datasets`,
+  },
   idata: {
     knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,
     datasets: `${API_BASE_URL}/idata/datasets`,
@@ -437,9 +440,6 @@ export const API_ENDPOINTS = {
       if (params?.status) queryParams.append("status", params.status);
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
-      }
-      if (params?.category_id != null) {
-        queryParams.append("category_id", String(params.category_id));
       }
       if (params?.page != null) {
         queryParams.append("page", String(params.page));

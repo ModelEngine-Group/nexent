@@ -668,11 +668,7 @@ export function useCompareStream({
           resetCompareTimeout,
           params.stepIdCounterRef,
           () => {},
-          false,
-          () => {},
-          async () => {},
-          params.conversationId,
-          conversationService,
+          () => {}, // onConversationCreated - compare mode does not auto-create
           true,
           t
         );

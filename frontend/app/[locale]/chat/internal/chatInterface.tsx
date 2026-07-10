@@ -156,10 +156,12 @@ export function ChatInterface() {
   );
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
-  // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content
+  // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content.
+  // For pending new conversations (placeholder key -1), show messages even though no
+  // real conversation_id has been returned yet from the backend.
   const currentMessages = conversationManagement.selectedConversationId
     ? sessionMessages[conversationManagement.selectedConversationId] || []
-    : [];
+    : sessionMessages[-1] || [];
 
   // Monitor changes in currentMessages
   // Calculate if the current conversation is streaming
@@ -168,7 +170,7 @@ export function ChatInterface() {
       ? streamingConversations.has(
           conversationManagement.selectedConversationId
         )
-      : false;
+      : streamingConversations.has(-1);
 
   const [viewingImage, setViewingImage] = useState<string | null>(null);
 
@@ -354,13 +356,6 @@ export function ChatInterface() {
     // Flag to track if we should reset button states in finally block
     let shouldResetButtonStates = true;
 
-    // If in new conversation state, switch to conversation state after sending message
-    // Save the value to local variable before state update for title generation logic
-    let shouldGenerateTitle = conversationManagement.isNewConversation;
-    if (conversationManagement.isNewConversation) {
-      conversationManagement.setIsNewConversation(false);
-    }
-
     // Ensure right sidebar doesn't auto-expand when sending new message
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
@@ -454,59 +449,13 @@ export function ChatInterface() {
     const currentController = new AbortController();
 
     try {
-      // Check if need to create new conversation
-      if (currentConversationId == null) {
-        // No conversation selected: create new conversation first
-        try {
-          const createData = await conversationService.create(
-            t("chatInterface.newConversation")
-          );
-          currentConversationId = createData.conversation_id;
-
-          // Update current session state
-          conversationManagement.setSelectedConversationId(
-            currentConversationId
-          );
-          conversationManagement.setConversationTitle(
-            createData.conversation_title || t("chatInterface.newConversation")
-          );
-
-          // After creating new conversation, add it to streaming list
-          setStreamingConversations((prev) => {
-            const newSet = new Set(prev).add(createData.conversation_id);
-            return newSet;
-          });
-
-          // Refresh conversation list
-          try {
-            const dialogList =
-              await conversationManagement.fetchConversationList();
-            const newDialog = dialogList.find(
-              (dialog) => dialog.conversation_id === currentConversationId
-            );
-            if (newDialog) {
-              conversationManagement.setSelectedConversationId(
-                currentConversationId
-              );
-            }
-          } catch (error) {
-            log.error(
-              t("chatInterface.refreshDialogListFailedButContinue"),
-              error
-            );
-          }
-        } catch (error) {
-          log.error(t("chatInterface.createDialogFailedButContinue"), error);
-          // Reset button states when conversation creation fails
-          setIsLoading(false);
-          setIsStreaming(false);
-          return;
-        }
-      }
-
-      // Type guard: we have a number here (either from selection or from create above)
-      if (currentConversationId == null) return;
-      const id = currentConversationId;
+      // For new conversations, the backend will auto-create the conversation and emit
+      // a conversation_created SSE event with the real conversation_id. Until that
+      // happens, store messages under a placeholder key (-1) so the UI can render them.
+      // Once the SSE event arrives, the onConversationCreated callback migrates the
+      // session messages from -1 to the real conversation_id.
+      const placeholderId = -1;
+      const id = currentConversationId ?? placeholderId;
       cid = id;
 
       // Register controller and streaming state for this conversation
@@ -566,7 +515,7 @@ export function ChatInterface() {
           currentController.signal,
           () => {}, // Empty progress callback - won't be called
           t,
-          currentConversationId
+          currentConversationId ?? undefined
         );
 
         finalQuery = result.finalQuery;
@@ -576,7 +525,6 @@ export function ChatInterface() {
       // Send request to backend API, add signal parameter
       const runAgentParams: any = {
         query: finalQuery, // Use preprocessed query or original query
-        conversation_id: id,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
           .map((msg) => {
@@ -624,6 +572,12 @@ export function ChatInterface() {
             : undefined, // Use complete attachment object structure
       };
 
+      // Only include conversation_id for existing conversations; omit for new ones
+      // so backend can auto-create the conversation and emit conversation_created.
+      if (currentConversationId != null) {
+        runAgentParams.conversation_id = currentConversationId;
+      }
+
       // Only add agent_id if it's not null
       if (selectedAgentId !== null) {
         runAgentParams.agent_id = Number(selectedAgentId);
@@ -642,14 +596,20 @@ export function ChatInterface() {
       if (!reader) throw new Error("Response body is null");
 
       // Create dynamic setCurrentSessionMessages in handleSend function
-      // setCurrentSessionMessages factory function
+      // setCurrentSessionMessages factory function. Once the backend emits a real
+      // conversation_id via the conversation_created SSE event, subsequent writes
+      // must be redirected to that conversation_id instead of the placeholder key.
+      let resolvedTargetConversationId: number = id;
       const setCurrentSessionMessagesFactory =
         (
           targetConversationId: number
         ): React.Dispatch<React.SetStateAction<ChatMessageType[]>> =>
         (valueOrUpdater) => {
           setSessionMessages((prev) => {
-            const prevArr = prev[targetConversationId] || [];
+            const realId = resolvedTargetConversationId;
+            // If the target is the placeholder, also pull existing messages from
+            // any real conversation_id we have migrated to.
+            let prevArr = prev[realId] || [];
             let nextArr: ChatMessageType[];
             if (typeof valueOrUpdater === "function") {
               nextArr = (
@@ -658,11 +618,12 @@ export function ChatInterface() {
             } else {
               nextArr = valueOrUpdater;
             }
-            // Ensure new reference
-            return {
-              ...prev,
-              [targetConversationId]: [...nextArr],
-            };
+            const nextState = { ...prev };
+            nextState[realId] = [...nextArr];
+            if (targetConversationId !== realId) {
+              delete nextState[targetConversationId];
+            }
+            return nextState;
           });
         };
 
@@ -713,45 +674,101 @@ export function ChatInterface() {
         resetTimeout,
         stepIdCounter,
         setIsSwitchedConversation,
-        shouldGenerateTitle,
-        conversationManagement.setConversationTitle,
-        conversationManagement.fetchConversationList,
-        id,
-        conversationService,
+        (conversationId: number) => {
+          // Backend auto-created a new conversation - migrate messages from the
+          // placeholder to the real conversation ID and update frontend state.
+          if (id !== conversationId) {
+            resolvedTargetConversationId = conversationId;
+            setSessionMessages((prev) => {
+              const placeholderMessages = prev[id] || [];
+              const { [id]: _, ...rest } = prev;
+              return {
+                ...rest,
+                [conversationId]: placeholderMessages,
+              };
+            });
+            conversationControllersRef.current.delete(id);
+            conversationControllersRef.current.set(conversationId, currentController);
+            // Clear the old timeout (which was bound to the placeholder key);
+            // the active stream's resetTimeout() will re-create one as new chunks arrive.
+            const oldTimeout = conversationTimeoutsRef.current.get(id);
+            if (oldTimeout) {
+              clearTimeout(oldTimeout);
+              conversationTimeoutsRef.current.delete(id);
+            }
+            setStreamingConversations((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(id);
+              newSet.add(conversationId);
+              return newSet;
+            });
+            cid = conversationId;
+          }
+          conversationManagement.setSelectedConversationId(conversationId);
+          conversationManagement.setConversationTitle(t("chatInterface.newConversation"));
+          // Add the new conversation to the sidebar immediately so users see it
+          // appear in the conversation list during streaming (not only after stream ends)
+          conversationManagement.prependConversation(
+            conversationId,
+            t("chatInterface.newConversation")
+          );
+        },
         false, // isDebug: false for normal chat mode
         t
       );
 
-      await hydrateConversationMessageIds(id);
+      // Use the resolved conversation ID (may have changed via conversation_created event)
+      const finalId = cid ?? id;
+
+      await hydrateConversationMessageIds(finalId);
 
       // Reset all related states
       setIsLoading(false);
       setIsStreaming(false);
 
       // Clean up controller and timeout for current conversation
-      conversationControllersRef.current.delete(id);
-      const timeout = conversationTimeoutsRef.current.get(id);
+      conversationControllersRef.current.delete(finalId);
+      const timeout = conversationTimeoutsRef.current.get(finalId);
       if (timeout) {
         clearTimeout(timeout);
-        conversationTimeoutsRef.current.delete(id);
+        conversationTimeoutsRef.current.delete(finalId);
       }
 
       // Remove from streaming list when we have a valid conversation id
       setStreamingConversations((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(id);
+        newSet.delete(finalId);
         return newSet;
       });
 
       // When conversation is completed, only add to completed conversation list when user is not in current conversation interface
       const currentUserConversation =
         conversationManagement.selectedConversationId;
-      if (currentUserConversation !== id) {
+      if (currentUserConversation !== finalId) {
         setCompletedConversations((prev) => {
           const newSet = new Set(prev);
-          newSet.add(id);
+          newSet.add(finalId);
           return newSet;
         });
+      }
+
+      // For new conversations, refresh the conversation list after the stream to fetch
+      // the auto-generated title created by the backend.
+      if (currentConversationId == null) {
+        try {
+          const refreshed =
+            await conversationManagement.fetchConversationList();
+          const newDialog = refreshed.find(
+            (dialog) => dialog.conversation_id === finalId
+          );
+          if (newDialog) {
+            conversationManagement.setConversationTitle(
+              newDialog.conversation_title || t("chatInterface.newConversation")
+            );
+          }
+        } catch (error) {
+          log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
+        }
       }
 
       // Note: Save operation is already implemented in agent run API, no need to save again in frontend
@@ -1024,11 +1041,7 @@ export function ChatInterface() {
           () => startResumeTimeout(conversationId),
           stepIdCounter,
           setIsSwitchedConversation,
-          false,
-          conversationManagement.setConversationTitle,
-          conversationManagement.fetchConversationList,
-          conversationId,
-          conversationService,
+          () => {}, // onConversationCreated: no-op for resume mode
           false,
           t,
           resumeConfig

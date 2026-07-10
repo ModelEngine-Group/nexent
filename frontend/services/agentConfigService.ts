@@ -806,6 +806,9 @@ export const searchAgentInfo = async (
               is_available: tool.is_available,
               usage: tool.usage,
               category: tool.category,
+              unavailable_reasons: Array.isArray(tool.unavailable_reasons)
+                ? tool.unavailable_reasons
+                : [],
               // Pass through `inputs` so the ToolTestPanel can parse runtime
               // input parameters when reopening a tool from the selected
               // tools list. Without this, the test panel falls back to

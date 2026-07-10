@@ -21,7 +21,7 @@ spec:
       labels:
         app: nexent-supabase-db
       annotations:
-        checksum/nexent-supabase: {{ dig "rolloutChecksums" "supabase" "" .Values.global | quote }}
+        checksum/nexent-supabase-secret: {{ dig "rolloutChecksums" "supabaseSecret" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
       initContainers:
@@ -41,6 +41,8 @@ spec:
               cp /custom-supabase-sql/realtime.sql /initdb.d/migrations/99-realtime.sql
               cp /custom-supabase-sql/_supabase.sql /initdb.d/migrations/97-_supabase.sql
               cp /custom-supabase-sql/pooler.sql /initdb.d/migrations/99-pooler.sql
+
+              chmod 755 -R /initdb.d/
 
               echo "Initialization scripts are ready"
           volumeMounts:

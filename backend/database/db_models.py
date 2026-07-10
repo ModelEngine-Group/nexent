@@ -930,7 +930,6 @@ class AgentRepository(TableBase):
     description = Column(Text, doc="Root agent description")
     author = Column(String(100), doc="Agent author")
     submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
-    category_id = Column(Integer, doc="Optional marketplace category ID")
     tags = Column(ARRAY(Text), doc="Marketplace tags")
     tool_count = Column(Integer,
                         doc="Total tool count across all agents in the bundle (display only)")

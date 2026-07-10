@@ -18,6 +18,7 @@ WITH label_map AS (
         "search_memory": "search", "knowledge_base_search": "search",
         "dify_search": "knowledge-base", "datamate_search": "knowledge-base",
         "idata_search": "knowledge-base", "haotian_search": "knowledge-base",
+        "ragflow_search": "knowledge-base",
         "aidp_search": "knowledge-base",
         "analyze_image": "multimodal", "analyze_audio": "multimodal",
         "analyze_video": "multimodal", "analyze_text_file": "multimodal",
