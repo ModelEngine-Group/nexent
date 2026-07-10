@@ -56,6 +56,12 @@ def create_app(
     # Register exception handlers
     register_exception_handlers(app)
 
+    # Initialize the deployment-selected agent runtime early so invalid
+    # runtime provider configuration fails during service startup.
+    from services.agent_runtime.registry import get_configured_agent_runtime
+    runtime = get_configured_agent_runtime()
+    logger.info("Initialized agent runtime provider: %s", runtime.name)
+
     # Initialize monitoring if enabled
     if enable_monitoring:
         try:

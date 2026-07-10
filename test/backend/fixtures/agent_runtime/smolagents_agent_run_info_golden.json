@@ -1,0 +1,123 @@
+{
+  "query": "hello",
+  "models": [
+    {
+      "cite_name": "gpt-4o",
+      "model_name": "openai/gpt-4o",
+      "url": "https://api.example",
+      "model_factory": "openai",
+      "max_output_tokens": 4096,
+      "context_window_tokens": 128000
+    }
+  ],
+  "agent": {
+    "name": "root",
+    "description": "Root agent",
+    "model_name": "gpt-4o",
+    "max_steps": 8,
+    "prompt_templates": {
+      "planning": {
+        "enabled": true
+      },
+      "system_prompt": "You are the root agent."
+    },
+    "tools": [
+      {
+        "name": "search",
+        "class_name": "KnowledgeBaseSearchTool",
+        "source": "knowledge",
+        "usage": null,
+        "inputs": "{\"query\": {\"type\": \"string\"}}",
+        "params": {
+          "top_k": 3
+        },
+        "metadata": {
+          "display_name_to_index_map": {
+            "Docs": "idx"
+          }
+        }
+      }
+    ],
+    "managed_agents": [
+      {
+        "name": "researcher",
+        "description": "Research",
+        "model_name": "sub_model",
+        "max_steps": 3,
+        "prompt_templates": {
+          "system_prompt": "Research facts."
+        },
+        "tools": [],
+        "managed_agents": [],
+        "external_a2a_agents": [],
+        "context_manager_config": {
+          "enabled": false,
+          "token_threshold": 10000,
+          "soft_input_budget_tokens": 0,
+          "hard_input_budget_tokens": 0,
+          "keep_recent_steps": 4
+        },
+        "context_components": [],
+        "capacity_snapshot": null,
+        "safe_input_budget_snapshot": null,
+        "verification_config": {
+          "enabled": false,
+          "max_final_rounds": 2
+        }
+      }
+    ],
+    "external_a2a_agents": [
+      {
+        "agent_id": "remote-1",
+        "name": "remote",
+        "description": "Remote helper",
+        "url": "https://remote.example/a2a"
+      }
+    ],
+    "context_manager_config": {
+      "enabled": true,
+      "token_threshold": 32000,
+      "soft_input_budget_tokens": 28000,
+      "hard_input_budget_tokens": 30000,
+      "keep_recent_steps": 6
+    },
+    "context_components": [
+      {
+        "type": "agent_profile"
+      }
+    ],
+    "capacity_snapshot": {
+      "context_window_tokens": 128000
+    },
+    "safe_input_budget_snapshot": {
+      "soft_input_budget_tokens": 28000,
+      "hard_input_budget_tokens": 30000
+    },
+    "verification_config": {
+      "enabled": true,
+      "max_final_rounds": 2
+    }
+  },
+  "mcp_host": [
+    {
+      "url": "https://mcp.example/sse",
+      "transport": "sse",
+      "headers": {
+        "Authorization": "Bearer token"
+      }
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "previous\n[Attached files]:\n  - doc.txt: s3://nexent/tenant/doc.txt"
+    }
+  ],
+  "capacity_snapshot": {
+    "context_window_tokens": 128000
+  },
+  "safe_input_budget_snapshot": {
+    "soft_input_budget_tokens": 28000,
+    "hard_input_budget_tokens": 30000
+  }
+}

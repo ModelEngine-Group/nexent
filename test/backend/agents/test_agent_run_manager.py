@@ -11,6 +11,7 @@ class TestAgentRunManager:
         self.manager = AgentRunManager()
         # Clear any existing state
         self.manager.agent_runs.clear()
+        self.manager.active_run_handles.clear()
 
     def test_singleton_pattern(self):
         """Test that AgentRunManager is a singleton"""
@@ -294,4 +295,104 @@ class TestAgentRunManager:
         # Should have the second run info
         retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id)
         assert retrieved_info == mock_run_info2
-        assert retrieved_info != mock_run_info1 
+        assert retrieved_info != mock_run_info1
+
+    def test_register_agent_run_creates_active_run_handle(self):
+        conversation_id = 123
+        user_id = "user1"
+        request_id = "req-1"
+        mock_run_info = Mock()
+        mock_run_info.stop_event = threading.Event()
+
+        self.manager.register_agent_run(
+            conversation_id,
+            mock_run_info,
+            user_id,
+            request_id=request_id,
+            runtime_provider="smolagents",
+        )
+
+        handle = self.manager.get_active_run_handle(conversation_id, user_id)
+        assert handle is not None
+        assert handle.request_id == request_id
+        assert handle.runtime_provider == "smolagents"
+        assert handle.legacy_agent_run_info is mock_run_info
+        assert self.manager.get_active_run_handle(None, user_id, request_id=request_id) is handle
+
+    def test_stop_agent_run_cancels_active_run_handle(self):
+        conversation_id = 123
+        user_id = "user1"
+        mock_run_info = Mock()
+        mock_run_info.stop_event = threading.Event()
+
+        self.manager.register_agent_run(
+            conversation_id,
+            mock_run_info,
+            user_id,
+            request_id="req-1",
+            runtime_provider="smolagents",
+        )
+
+        result = self.manager.stop_agent_run(conversation_id, user_id)
+
+        assert result is True
+        handle = self.manager.get_active_run_handle(conversation_id, user_id)
+        assert handle.run_control.is_cancelled() is True
+        assert mock_run_info.stop_event.is_set() is True
+
+    def test_unregister_agent_run_clears_active_run_handle(self):
+        conversation_id = 123
+        user_id = "user1"
+        mock_run_info = Mock()
+        mock_run_info.stop_event = threading.Event()
+
+        self.manager.register_agent_run(
+            conversation_id,
+            mock_run_info,
+            user_id,
+            request_id="req-1",
+            runtime_provider="smolagents",
+        )
+
+        assert self.manager.get_active_run_handle(conversation_id, user_id) is not None
+
+        self.manager.unregister_agent_run(
+            conversation_id,
+            user_id,
+            status="completed",
+            request_id="req-1",
+        )
+
+        assert self.manager.get_agent_run_info(conversation_id, user_id) is None
+        assert self.manager.get_active_run_handle(conversation_id, user_id) is None
+        assert self.manager.get_active_run_handle(None, user_id, request_id="req-1") is None
+
+    def test_request_scoped_debug_run_uses_request_key(self):
+        user_id = "user1"
+        mock_run_info1 = Mock()
+        mock_run_info1.stop_event = threading.Event()
+        mock_run_info2 = Mock()
+        mock_run_info2.stop_event = threading.Event()
+
+        self.manager.register_agent_run(
+            None,
+            mock_run_info1,
+            user_id,
+            request_id="req-1",
+            runtime_provider="smolagents",
+        )
+        self.manager.register_agent_run(
+            None,
+            mock_run_info2,
+            user_id,
+            request_id="req-2",
+            runtime_provider="smolagents",
+        )
+
+        assert self.manager.get_agent_run_info(None, user_id, request_id="req-1") is mock_run_info1
+        assert self.manager.get_agent_run_info(None, user_id, request_id="req-2") is mock_run_info2
+
+        self.manager.stop_agent_run(None, user_id, request_id="req-1")
+
+        assert mock_run_info1.stop_event.is_set() is True
+        assert mock_run_info2.stop_event.is_set() is False

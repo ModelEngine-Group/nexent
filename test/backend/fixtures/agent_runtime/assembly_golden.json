@@ -1,0 +1,111 @@
+{
+  "ordinary": {
+    "root_name": "root",
+    "model_name": "gpt-4o",
+    "context_mode": "legacy",
+    "tool_names": [],
+    "prompt_fragments": {
+      "APP_NAME": "Nexent",
+      "constraint": "Be precise.",
+      "duty": "Answer questions.",
+      "few_shots": ""
+    },
+    "mcp_connections": [],
+    "managed_agent_names": [],
+    "external_a2a_count": 0
+  },
+  "with_tool": {
+    "root_name": "root",
+    "model_name": "gpt-4o",
+    "context_mode": "legacy",
+    "tool_names": ["echo"],
+    "tool_params": {
+      "echo": {
+        "style": "short"
+      }
+    },
+    "prompt_fragments": {
+      "APP_NAME": "Nexent",
+      "constraint": "Be precise.",
+      "duty": "Answer questions.",
+      "few_shots": ""
+    },
+    "mcp_connections": [],
+    "managed_agent_names": [],
+    "external_a2a_count": 0
+  },
+  "with_skill": {
+    "root_name": "root",
+    "model_name": "gpt-4o",
+    "context_mode": "legacy",
+    "tool_names": ["read_skill_md"],
+    "prompt_fragments": {
+      "APP_NAME": "Nexent",
+      "constraint": "Be precise.",
+      "duty": "Answer questions.",
+      "few_shots": "",
+      "skills": [
+        {
+          "description": "Create project reports",
+          "name": "report-writer"
+        }
+      ]
+    },
+    "mcp_connections": [],
+    "managed_agent_names": [],
+    "external_a2a_count": 0
+  },
+  "with_mcp": {
+    "root_name": "root",
+    "model_name": "gpt-4o",
+    "context_mode": "legacy",
+    "tool_names": ["docs_search"],
+    "prompt_fragments": {
+      "APP_NAME": "Nexent",
+      "constraint": "Be precise.",
+      "duty": "Answer questions.",
+      "few_shots": ""
+    },
+    "mcp_connections": [
+      {
+        "name": "docs",
+        "transport": "streamable-http",
+        "url": "http://mcp.example/mcp"
+      }
+    ],
+    "managed_agent_names": [],
+    "external_a2a_count": 0
+  },
+  "with_knowledge": {
+    "root_name": "root",
+    "model_name": "gpt-4o",
+    "context_mode": "legacy",
+    "tool_names": ["knowledge_base_search"],
+    "prompt_fragments": {
+      "APP_NAME": "Nexent",
+      "constraint": "Be precise.",
+      "duty": "Answer questions.",
+      "few_shots": "",
+      "knowledge_base_summary": "**Handbook**: Product facts"
+    },
+    "mcp_connections": [],
+    "managed_agent_names": [],
+    "external_a2a_count": 0
+  },
+  "with_memory": {
+    "root_name": "root",
+    "model_name": "gpt-4o",
+    "context_mode": "legacy",
+    "tool_names": ["search_memory"],
+    "prompt_fragments": {
+      "APP_NAME": "Nexent",
+      "constraint": "Be precise.",
+      "duty": "Answer questions.",
+      "few_shots": "",
+      "memory_list": "[{\"content\": \"likes concise answers\"}]"
+    },
+    "mcp_connections": [],
+    "managed_agent_names": [],
+    "external_a2a_count": 0
+  }
+}

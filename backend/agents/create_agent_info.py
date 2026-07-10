@@ -26,9 +26,6 @@ from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
-    ElasticSearchService,
-    get_vector_db_core,
-    get_embedding_model_by_index_name,
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
@@ -44,13 +41,19 @@ from database.agent_db import (
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
-from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
+from consts.const import (
+    AGENT_RUNTIME_PROVIDER_SMOLAGENTS,
+    LOCAL_MCP_SERVER,
+    MODEL_CONFIG_MAPPING,
+    LANGUAGE,
+    DATA_PROCESS_SERVICE,
+    MINIO_DEFAULT_BUCKET,
+)
 from consts.model import AgentToolParamsRequest, ToolParamsRequest
 from consts.exceptions import ValidationError
 
@@ -656,6 +659,179 @@ async def create_model_config_list(tenant_id):
     return model_list
 
 
+def _enhance_legacy_knowledge_capability(
+    *,
+    tool_list: List[ToolConfig],
+    agent_name: str,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    language: str,
+    version_no: int,
+    last_user_query: str | None,
+) -> tuple[List[ToolConfig], str, List[str]]:
+    knowledge_positions: List[int] = []
+    knowledge_tool_configs: List[ToolConfig] = []
+    knowledge_specs = []
+    try:
+        for index, tool_config in enumerate(tool_list):
+            if getattr(tool_config, "class_name", None) != "KnowledgeBaseSearchTool":
+                continue
+            knowledge_positions.append(index)
+            knowledge_tool_configs.append(tool_config)
+    except Exception as exc:
+        logger.error(f"Failed to build knowledge base summary: {exc}")
+        return tool_list, "", []
+
+    if not knowledge_tool_configs:
+        return tool_list, "", []
+
+    provider = _build_legacy_knowledge_provider()
+    try:
+        AgentRunRequestContext, AssemblyState, tool_spec_from_legacy_tool_config = (
+            _load_agent_runtime_knowledge_types(provider)
+        )
+        knowledge_specs = [
+            tool_spec_from_legacy_tool_config(tool_config)
+            for tool_config in knowledge_tool_configs
+        ]
+    except Exception as exc:
+        logger.error(f"Failed to build knowledge base summary: {exc}")
+        return tool_list, "", []
+
+    request_context = AgentRunRequestContext(
+        request_id=f"legacy-knowledge-{agent_id}-{version_no}",
+        runtime_provider=_smolagents_runtime_provider_name(),
+        agent_id=_coerce_runtime_agent_id(agent_id),
+        conversation_id=None,
+        query=last_user_query or "",
+        history=[],
+        minio_files=[],
+        user_id=user_id,
+        tenant_id=tenant_id,
+        language=language,
+        is_debug=version_no == 0,
+        version_no=version_no,
+    )
+    contribution = provider.contribute(
+        request_context,
+            AssemblyState(
+                agent_record={"name": agent_name},
+                version_no=version_no,
+                tools_by_agent={
+                    agent_name: [
+                        spec.model_dump() if hasattr(spec, "model_dump") else spec
+                        for spec in knowledge_specs
+                    ]
+                },
+            ),
+        )
+    enhanced_specs = list(contribution.tools_by_agent.get(agent_name, []))
+    if len(enhanced_specs) != len(knowledge_positions):
+        raise ValueError("KnowledgeProvider did not return all enhanced knowledge tools.")
+
+    enhanced_tools = list(tool_list)
+    for position, enhanced_spec in zip(knowledge_positions, enhanced_specs):
+        enhanced_tools[position] = _legacy_tool_config_from_tool_spec(
+            enhanced_spec,
+            source=getattr(enhanced_tools[position], "source", "local"),
+        )
+
+    for warning in contribution.warnings:
+        logger.warning(warning.message)
+
+    return (
+        enhanced_tools,
+        str(contribution.prompt_fragments.get("knowledge_base_summary") or ""),
+        list(contribution.runtime_resources.get("knowledge.kb_ids") or []),
+    )
+
+
+def _load_agent_runtime_knowledge_types(provider: Any | None = None):
+    if provider is not None:
+        import importlib
+
+        try:
+            runtime_package = provider.__class__.__module__.rsplit(".", 1)[0]
+            models_module = importlib.import_module(f"{runtime_package}.models")
+            tool_schema_module = importlib.import_module(f"{runtime_package}.tool_schema")
+            return (
+                models_module.AgentRunRequestContext,
+                models_module.AssemblyState,
+                tool_schema_module.tool_spec_from_legacy_tool_config,
+            )
+        except ImportError:
+            pass
+
+    try:
+        from services.agent_runtime.models import AgentRunRequestContext, AssemblyState
+        from services.agent_runtime.tool_schema import tool_spec_from_legacy_tool_config
+    except ImportError:
+        from backend.services.agent_runtime.models import AgentRunRequestContext, AssemblyState
+        from backend.services.agent_runtime.tool_schema import tool_spec_from_legacy_tool_config
+
+    return AgentRunRequestContext, AssemblyState, tool_spec_from_legacy_tool_config
+
+
+def _build_legacy_knowledge_provider():
+    try:
+        from database.knowledge_db import get_knowledge_name_map_by_index_names
+        from services.agent_runtime.providers import KnowledgeProvider
+        from services.vectordatabase_service import (
+            ElasticSearchService,
+            get_embedding_model_by_index_name,
+            get_vector_db_core,
+        )
+    except ImportError:
+        from backend.database.knowledge_db import get_knowledge_name_map_by_index_names
+        from backend.services.agent_runtime.providers import KnowledgeProvider
+        from backend.services.vectordatabase_service import (
+            ElasticSearchService,
+            get_embedding_model_by_index_name,
+            get_vector_db_core,
+        )
+
+    return KnowledgeProvider(
+        embedding_model_resolver=get_embedding_model_by_index_name,
+        rerank_model_resolver=get_rerank_model,
+        vector_db_resolver=get_vector_db_core,
+        knowledge_name_map_resolver=get_knowledge_name_map_by_index_names,
+        knowledge_summary_resolver=lambda index_name: ElasticSearchService().get_summary(
+            index_name=index_name
+        ),
+    )
+
+
+def _legacy_tool_config_from_tool_spec(tool_spec: Any, *, source: str) -> ToolConfig:
+    inputs = tool_spec.raw_inputs
+    if inputs is None:
+        inputs = json.dumps(tool_spec.input_schema or {}, ensure_ascii=False)
+    return ToolConfig(
+        class_name=tool_spec.class_name or tool_spec.name,
+        name=tool_spec.name,
+        description=tool_spec.description,
+        inputs=inputs,
+        output_type=tool_spec.output_type,
+        params=dict(tool_spec.params),
+        source=source,
+        usage=tool_spec.usage,
+        metadata=dict(tool_spec.metadata or {}),
+    )
+
+
+def _coerce_runtime_agent_id(agent_id: Any) -> int:
+    try:
+        return int(agent_id)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _smolagents_runtime_provider_name() -> str:
+    if isinstance(AGENT_RUNTIME_PROVIDER_SMOLAGENTS, str):
+        return AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    return "smolagents"
+
+
 async def create_agent_config(
     agent_id,
     tenant_id,
@@ -825,33 +1001,16 @@ async def create_agent_config(
         except Exception as e:
             logger.warning(f"Failed to append active memory tools: {e}")
 
-    # Build knowledge base summary
-    knowledge_base_summary = ""
-    kb_ids = []
-    try:
-        for tool in tool_list:
-            if "KnowledgeBaseSearchTool" == tool.class_name:
-                index_names = tool.params.get("index_names")
-                if index_names:
-                    # Reuse the index_name -> display_name mapping from tool.metadata
-                    # (already computed in create_tool_config_list to avoid redundant DB query)
-                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
-                    for index_name in index_names:
-                        try:
-                            display_name = index_name_to_display_map.get(index_name, index_name)
-                            message = ElasticSearchService().get_summary(index_name=index_name)
-                            summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
-                            kb_ids.append(index_name)
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to get summary for knowledge base {index_name}: {e}")
-                else:
-                    # TODO: Prompt should be refactored to yaml file
-                    knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
-                break  # Only process the first KnowledgeBaseSearchTool found
-    except Exception as e:
-        logger.error(f"Failed to build knowledge base summary: {e}")
+    tool_list, knowledge_base_summary, kb_ids = _enhance_legacy_knowledge_capability(
+        tool_list=tool_list,
+        agent_name=agent_info.get("name") or "root",
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        language=language,
+        version_no=version_no,
+        last_user_query=last_user_query,
+    )
 
     # Select the context path once.  Managed assembly receives raw components
     # and must never consume a Jinja-rendered legacy prompt.
@@ -1039,60 +1198,8 @@ async def create_tool_config_list(
                     tool_config.metadata = langchain_tool
                     break
 
-        # Extract document_paths for KnowledgeBaseSearchTool (internal access control, not in DB schema)
-        document_paths = None
-        if override_params and "document_paths" in override_params:
-            document_paths = override_params.get("document_paths")
-        # Also check using the tool name as key
-        if not document_paths:
-            kb_overrides = agent_tool_overrides.get("knowledge_base_search")
-            if kb_overrides and "document_paths" in kb_overrides:
-                document_paths = kb_overrides.get("document_paths")
-
-        # special logic for search tools that may use reranking models
-        if tool_config.class_name == "KnowledgeBaseSearchTool":
-            rerank = tool_config.params.get("rerank", False)
-            rerank_model_name = tool_config.params.get("rerank_model_name", "")
-            rerank_model = None
-            if rerank and rerank_model_name:
-                rerank_model = get_rerank_model(
-                    tenant_id=tenant_id, model_name=rerank_model_name
-                )
-
-            # Build display_name to index_name mapping for LLM parameter conversion
-            # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            index_names = tool_config.params.get("index_names", [])
-            display_name_to_index_map = {}
-            index_name_to_display_map = {}
-            if index_names:
-                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
-                # Reverse the mapping: display_name (knowledge_name) -> index_name
-                for idx_name, kb_name in knowledge_name_map.items():
-                    display_name_to_index_map[kb_name] = idx_name
-                    index_name_to_display_map[idx_name] = kb_name
-
-            tool_config.metadata = {
-                "vdb_core": get_vector_db_core(),
-                "embedding_model": None,
-                "rerank_model": rerank_model,
-                "display_name_to_index_map": display_name_to_index_map,
-                "index_name_to_display_map": index_name_to_display_map,
-                # Internal access control: restrict results to specific document paths (path_or_urls)
-                "document_paths": document_paths,
-            }
-
-            if not index_names:
-                raise ValidationError(
-                    f"[{agent_name or agent_id}] knowledge_base_search tool requires index_names, "
-                    f"but it is not configured in the agent and not provided via tool_params.")
-
-            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
-            if not embedding_model:
-                raise ValidationError(
-                    f"No embedding model found for index '{index_names[0]}'. "
-                    f"Please configure an embedding model for this knowledge base.")
-            tool_config.metadata["embedding_model"] = embedding_model
-        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
+        # Special logic for search tools that may use reranking models.
+        if tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None

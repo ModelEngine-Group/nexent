@@ -2,13 +2,14 @@ import asyncio
 import base64
 from http import HTTPStatus
 import io
+import inspect
 import json
 import logging
 import os
 import uuid
 import zipfile
 from collections import deque
-from typing import Any, Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict, List, Sequence
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -17,7 +18,7 @@ from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
-from agents.create_agent_info import create_agent_run_info, create_tool_config_list
+from agents.create_agent_info import create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
@@ -104,9 +105,33 @@ from services.conversation_management_service import (
     update_unit_content,
     update_unit_status,
 )
-from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
+from services.agent_runtime.config import resolve_agent_runtime_provider_for_request
+from services.agent_runtime.events import (
+    RuntimeDeliveryItem,
+    RuntimeEvent,
+    RuntimeEventSink,
+    RuntimeEventType,
+    runtime_event_from_legacy_observer_message,
+    runtime_event_to_process_payload,
+    runtime_events_to_delivery_items,
+)
+from services.agent_runtime.models import AgentRunRequestContext, OperatorSpec
+from services.agent_runtime.operators import (
+    OperatorContext,
+    OperatorRegistry,
+    OperatorResult,
+    OperatorRunner,
+    OperatorStageResult,
+    SkillFileUploadOperator,
+    UnknownOperatorError,
+    default_operator_registry,
+)
+from services.agent_runtime.run_preparation import (
+    prepare_runtime_agent_run,
+    preview_runtime_memory,
+)
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.memory_utils import build_memory_config
@@ -122,6 +147,117 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+
+
+def _build_agent_run_request_context(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str,
+    request_id: str | None = None,
+) -> AgentRunRequestContext:
+    """Build the framework-neutral run request context at the API boundary."""
+    return AgentRunRequestContext(
+        request_id=request_id or str(uuid.uuid4()),
+        runtime_provider=resolve_agent_runtime_provider_for_request(),
+        agent_id=_optional_int(agent_request.agent_id) or 0,
+        conversation_id=_optional_int(agent_request.conversation_id),
+        query=_optional_str(agent_request.query),
+        history=_optional_list(agent_request.history),
+        minio_files=_optional_list(agent_request.minio_files),
+        user_id=_optional_str(user_id),
+        tenant_id=_optional_str(tenant_id),
+        language=_optional_str(language),
+        is_debug=bool(agent_request.is_debug),
+        version_no=_optional_int(agent_request.version_no),
+        override_model_id=_optional_int(agent_request.model_id),
+        requested_output_tokens=_optional_int(agent_request.requested_output_tokens),
+        tool_params=agent_request.tool_params,
+    )
+
+
+def _optional_str(value: Any) -> str:
+    """Convert request-bound optional values to a stable string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    """Return an int only when a request value is explicitly numeric."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value)
+    return None
+
+
+def _optional_list(value: Any) -> list[Any] | None:
+    """Return list-like request payloads without coercing arbitrary mocks."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    return None
+
+
+def _runtime_memory_enabled(preview: Any) -> bool:
+    """Return memory enabled state from runtime preparation preview objects."""
+    explicit_enabled = getattr(preview, "__dict__", {}).get("enabled")
+    if isinstance(explicit_enabled, bool):
+        return explicit_enabled
+    user_config = getattr(preview, "user_config", None)
+    return bool(getattr(user_config, "memory_switch", False))
+
+
+def _runtime_memory_metadata(preview: Any) -> dict[str, Any]:
+    """Return memory metadata from runtime preparation preview objects."""
+    metadata = getattr(preview, "metadata", None)
+    if isinstance(metadata, dict):
+        return metadata
+    user_config = getattr(preview, "user_config", None)
+    return {
+        "agent_share_option": getattr(user_config, "agent_share_option", "unknown"),
+        "disable_agent_ids": list(getattr(user_config, "disable_agent_ids", []) or []),
+        "disable_user_agent_ids": list(
+            getattr(user_config, "disable_user_agent_ids", []) or []
+        ),
+    }
+
+
+class _UserMessageSaveOperator:
+    """API-layer before_run hook preserving current user message persistence."""
+
+    def __init__(self, spec: OperatorSpec):
+        self.spec = spec
+
+    def supports(self, context: OperatorContext) -> bool:
+        """Run only for non-debug runs that are allowed to persist user messages."""
+        agent_request = context.metadata.get("agent_request")
+        if agent_request is None:
+            return False
+        if context.metadata.get("skip_user_save"):
+            return False
+        return not bool(getattr(agent_request, "is_debug", False))
+
+    async def execute(self, context: OperatorContext):
+        """Persist the user-side conversation message before runtime execution."""
+        agent_request = context.metadata["agent_request"]
+        result = save_messages(
+            agent_request,
+            target=MESSAGE_ROLE["USER"],
+            user_id=context.metadata.get("user_id"),
+            tenant_id=context.metadata.get("tenant_id"),
+        )
+        if inspect.isawaitable(result):
+            await result
+        return OperatorResult.ok()
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -161,139 +297,491 @@ async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, tas
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
-def _extract_json_objects_from_text(text: str) -> list[dict]:
-    """Extract all JSON objects embedded in a text blob."""
-    if not text:
-        return []
-
-    decoder = json.JSONDecoder()
-    results: list[dict] = []
-    index = 0
-
-    while index < len(text):
-        start_index = text.find("{", index)
-        if start_index < 0:
-            break
-
-        try:
-            payload, end_index = decoder.raw_decode(text, start_index)
-        except json.JSONDecodeError:
-            index = start_index + 1
-            continue
-
-        if isinstance(payload, dict):
-            results.append(payload)
-        index = max(end_index, start_index + 1)
-
-    return results
-
-
-def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
-    """Extract JSON payloads containing absolute_path from streamed tool output."""
-    payloads: list[dict] = []
-    for payload in _extract_json_objects_from_text(content):
-        if payload.get("absolute_path"):
-            payloads.append(payload)
-    return payloads
-
-
-def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
-    """
-    Transform skill file upload results to match the frontend attachment format.
-
-    Skill upload format:
-        {file_name, absolute_path, object_name, preview_url, url, presigned_url, mime_type, file_size, status}
-    Frontend format:
-        {object_name, name, type, size, url, presigned_url, description}
-    """
-    frontend_files = []
-    for result in upload_results:
-        frontend_files.append({
-            "object_name": result.get("object_name", ""),
-            "name": result.get("file_name", result.get("name", "")),
-            "type": "file",
-            "size": result.get("file_size", result.get("size", 0)),
-            "url": result.get("url", ""),
-            "presigned_url": result.get("presigned_url", result.get("preview_url", "")),
-            "description": "",
-        })
-    return frontend_files
-
-
 async def _process_skill_file_uploads(
     content: str,
     user_id: str,
     tenant_id: str,
 ) -> list[dict]:
     """Upload generated skill files to storage and return upload metadata."""
+    artifact_events = await _process_skill_file_upload_events(
+        [
+            RuntimeEvent(
+                type=RuntimeEventType.LEGACY_PROCESS,
+                compat_process_type="execution_logs",
+                content=content,
+            )
+        ],
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    return [
+        event.artifact
+        for event in artifact_events
+        if event.artifact
+    ]
 
-    upload_results: list[dict] = []
-    for payload in _extract_skill_file_upload_payloads(content):
-        absolute_path = str(payload.get("absolute_path") or "").strip()
-        file_name = str(
-            payload.get("file_name")
-            or payload.get("file_path")
-            or os.path.basename(absolute_path)
+
+async def _process_skill_file_upload_events(
+    runtime_events: list[RuntimeEvent],
+    *,
+    user_id: str,
+    tenant_id: str,
+    run_request_context: AgentRunRequestContext | None = None,
+) -> list[RuntimeEvent]:
+    """Run skill artifact upload through the runtime operator contract."""
+    if not runtime_events:
+        return []
+
+    registry = OperatorRegistry({
+        "skill_file_upload": lambda spec: SkillFileUploadOperator(spec)
+    })
+    context = OperatorContext(
+        stage="after_run",
+        request=run_request_context,
+        runtime_events=list(runtime_events),
+        metadata={
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+        },
+    )
+    await OperatorRunner(registry).run_stage(
+        "after_run",
+        context,
+        [
+            OperatorSpec(
+                name="skill_file_upload",
+                stages={"after_run"},
+                required=False,
+                config={
+                    "uploader": upload_fileobj,
+                    "path_checker": is_allowed_skill_upload_path,
+                },
+            )
+        ],
+    )
+    original_event_count = len(runtime_events)
+    return [
+        event
+        for event in context.runtime_events[original_event_count:]
+        if event.type == RuntimeEventType.ARTIFACT_CREATED
+    ]
+
+
+def _runtime_api_operator_specs(
+    operator_specs: Sequence[OperatorSpec] | None,
+    *,
+    include_skill_file_upload: bool = False,
+) -> list[OperatorSpec]:
+    """Return API-layer operator specs with runtime-bound defaults injected."""
+    specs = [
+        spec.model_copy(deep=True) if hasattr(spec, "model_copy") else spec
+        for spec in (operator_specs or [])
+    ]
+    if not include_skill_file_upload:
+        return specs
+
+    default_config = {
+        "uploader": upload_fileobj,
+        "path_checker": is_allowed_skill_upload_path,
+    }
+    for index, spec in enumerate(specs):
+        if spec.name == "skill_file_upload" and "after_run" in spec.stages:
+            specs[index] = spec.model_copy(
+                update={"config": {**default_config, **dict(spec.config or {})}},
+                deep=True,
+            )
+            break
+    else:
+        specs.append(
+            OperatorSpec(
+                name="skill_file_upload",
+                stages={"after_run"},
+                required=False,
+                config=default_config,
+            )
         )
-        mime_type = str(payload.get("mime_type") or payload.get("content_type") or "application/octet-stream")
-        if not absolute_path:
-            continue
+    return specs
 
-        if not is_allowed_skill_upload_path(absolute_path):
-            logger.warning(
-                "[skill-file] rejected unsafe path absolute_path=%s",
-                absolute_path,
+
+class _RuntimeApiOperatorRegistry:
+    """Resolve request-provided operator factories before built-in factories."""
+
+    def __init__(self, primary: OperatorRegistry | None):
+        self.primary = primary
+        self.fallback = default_operator_registry()
+
+    def create(self, spec: OperatorSpec):
+        """Create an operator from the primary registry or built-in fallback."""
+        if self.primary is not None:
+            try:
+                return self.primary.create(spec)
+            except UnknownOperatorError:
+                pass
+        return self.fallback.create(spec)
+
+
+async def _run_runtime_api_operator_stage(
+    stage: str,
+    *,
+    run_request_context: AgentRunRequestContext | None,
+    operator_specs: Sequence[OperatorSpec] | None,
+    operator_registry: OperatorRegistry | None = None,
+    runtime_events: Sequence[RuntimeEvent] | None = None,
+    final_answer: Any | None = None,
+    error: Any | None = None,
+    runtime_resources: dict[str, Any] | None = None,
+    monitoring_metadata: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> OperatorStageResult:
+    """Run API-layer lifecycle operators without changing the external API."""
+    context = OperatorContext(
+        stage=stage,
+        request=_runtime_model_payload(run_request_context),
+        runtime_events=[
+            _runtime_model_payload(event)
+            for event in (runtime_events or [])
+        ],
+        final_answer=final_answer,
+        error=error,
+        runtime_resources=dict(runtime_resources or {}),
+        monitoring_metadata=dict(monitoring_metadata or {}),
+        metadata=dict(metadata or {}),
+    )
+    registry = _RuntimeApiOperatorRegistry(operator_registry)
+    return await OperatorRunner(registry).run_stage(
+        stage,
+        context,
+        operator_specs or [],
+    )
+
+
+async def _run_before_run_user_message_hook(
+    *,
+    agent_request: AgentRequest,
+    run_request_context: AgentRunRequestContext,
+    user_id: str,
+    tenant_id: str,
+    skip_user_save: bool,
+) -> OperatorStageResult:
+    """Run API-layer before_run persistence hooks before runtime preparation."""
+    return await _run_runtime_api_operator_stage(
+        "before_run",
+        run_request_context=run_request_context,
+        operator_specs=[
+            OperatorSpec(
+                name="user_message_save",
+                stages={"before_run"},
+                priority=-100,
+                required=True,
             )
-            continue
+        ],
+        operator_registry=OperatorRegistry(
+            {"user_message_save": lambda spec: _UserMessageSaveOperator(spec)}
+        ),
+        metadata={
+            "agent_request": agent_request,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "skip_user_save": skip_user_save,
+        },
+    )
 
-        if not file_name:
-            file_name = os.path.basename(absolute_path)
 
-        if not os.path.exists(absolute_path):
-            continue
+def _runtime_model_payload(value: Any) -> Any:
+    """Return model payloads that validate across duplicated import paths."""
+    if value is None:
+        return None
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump()
+    return value
 
-        try:
-            file_size = os.path.getsize(absolute_path)
-            actual_prefix = f"skill-files/{user_id}" if user_id else "skill-files"
-            with open(absolute_path, "rb") as file_obj:
-                upload_result = upload_fileobj(
-                    file_obj=file_obj,
-                    file_name=file_name,
-                    prefix=actual_prefix,
-                    generate_presigned_url=True,
-                    file_size=file_size,
-                )
 
-            if upload_result.get("success"):
-                upload_results.append(
-                    {
-                        "status": "success",
-                        "file_name": file_name,
-                        "absolute_path": absolute_path,
-                        "object_name": upload_result.get("object_name"),
-                        "preview_url": upload_result.get("presigned_url") or upload_result.get("url"),
-                        "url": upload_result.get("url"),
-                        "presigned_url": upload_result.get("presigned_url"),
-                        "mime_type": mime_type,
-                        "file_size": upload_result.get("file_size", file_size),
-                    }
-                )
-            else:
-                error_message = upload_result.get("error") or "Upload failed"
-                logger.warning(
-                    "[skill-file] upload failed file_name=%s absolute_path=%s error=%s",
-                    file_name,
-                    absolute_path,
-                    error_message,
-                )
-        except Exception as exc:
-            logger.exception(
-                "[skill-file] failed to upload file file_name=%s absolute_path=%s",
-                file_name,
-                absolute_path,
+async def _publish_runtime_events(
+    runtime_events: Sequence[RuntimeEvent],
+    *,
+    channel: Any | None,
+) -> list[str]:
+    """Map runtime events to SSE chunks and publish them to the active channel."""
+    chunks: list[str] = []
+    for delivery_item in runtime_events_to_delivery_items(list(runtime_events)):
+        chunk = f"data: {json.dumps(delivery_item.sse_payload, ensure_ascii=False)}\n\n"
+        chunks.append(chunk)
+        if channel is not None:
+            await channel.publish(chunk)
+    return chunks
+
+
+def _runtime_delivery_item_for_stream_event(
+    event: RuntimeEvent,
+    *,
+    current_unit: Optional[Dict[str, Any]],
+    next_unit_index: int,
+) -> RuntimeDeliveryItem:
+    """Prepare one stream event for SSE and persistence with legacy merge state."""
+    process_payload = runtime_event_to_process_payload(event)
+    unit_index = next_unit_index
+    if (
+        current_unit is not None
+        and process_payload.unit_merge_key
+        and current_unit.get("unit_merge_key") == process_payload.unit_merge_key
+    ):
+        unit_index = current_unit["unit_index"]
+    message_unit = None
+    if process_payload.process_type != "skill_files":
+        message_unit = {
+            "type": process_payload.process_type,
+            "content": process_payload.content,
+            "unit_index": unit_index,
+            "unit_merge_key": process_payload.unit_merge_key,
+        }
+    return RuntimeDeliveryItem(
+        event=event,
+        process_payload=process_payload,
+        sse_payload=process_payload.to_sse_payload(),
+        message_unit=message_unit,
+        monitoring_metadata={
+            "runtime_event_type": event.type.value,
+            "runtime_event_sequence": event.sequence,
+            "runtime_request_id": event.request_id,
+            **event.metadata,
+        },
+    )
+
+
+def _stream_chunk_with_unit_index(
+    data: dict[str, Any],
+    delivery_item: RuntimeDeliveryItem,
+) -> str:
+    """Serialize the legacy SSE chunk after assigning its message unit index."""
+    if delivery_item.message_unit is not None:
+        data["unit_index"] = delivery_item.message_unit["unit_index"]
+    return json.dumps(data)
+
+
+def _create_streaming_assistant_message(
+    *,
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+) -> int | None:
+    """Create the assistant parent message for event-driven unit persistence."""
+    user_role_count = sum(
+        1
+        for item in getattr(agent_request, "history", [])
+        if getattr(item, "role", None) == MESSAGE_ROLE["USER"]
+    )
+    assistant_message_req = MessageRequest(
+        conversation_id=agent_request.conversation_id,
+        message_idx=user_role_count * 2 + 1,
+        role=MESSAGE_ROLE["ASSISTANT"],
+        message=[],
+        minio_files=None,
+    )
+    try:
+        return save_message(
+            assistant_message_req,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            status="streaming",
+        )
+    except Exception as msg_exc:
+        logger.error(
+            "Failed to create streaming message row: %r",
+            msg_exc,
+            exc_info=True,
+        )
+        return None
+
+
+def _persist_runtime_delivery_item(
+    delivery_item: RuntimeDeliveryItem,
+    *,
+    streaming_message_id: int | None,
+    conversation_id: int,
+    user_id: str,
+    current_unit: Optional[Dict[str, Any]],
+    next_unit_index: int,
+) -> tuple[Optional[Dict[str, Any]], int, bool]:
+    """Persist one RuntimeEvent delivery item using existing message unit semantics."""
+    if streaming_message_id is None or delivery_item.message_unit is None:
+        return current_unit, next_unit_index, False
+
+    process_type = delivery_item.process_payload.process_type
+    unit_content = _delivery_content_to_storage_text(
+        delivery_item.process_payload.content
+    )
+    unit_merge_key = delivery_item.process_payload.unit_merge_key
+    is_continuation = (
+        current_unit is not None
+        and unit_merge_key is not None
+        and current_unit.get("unit_merge_key") == unit_merge_key
+    )
+
+    if is_continuation:
+        current_unit["content"] += unit_content
+        update_unit_content(
+            current_unit["unit_id"],
+            current_unit["content"],
+            user_id,
+        )
+        return current_unit, next_unit_index, False
+
+    if current_unit is not None:
+        submit(
+            update_unit_status,
+            current_unit["unit_id"],
+            "completed",
+            user_id,
+        )
+
+    if process_type == "final_answer":
+        submit(
+            update_message_content,
+            streaming_message_id,
+            unit_content,
+            user_id,
+        )
+
+    if process_type == "picture_web":
+        _persist_picture_web_sources(
+            unit_content,
+            streaming_message_id=streaming_message_id,
+            conversation_id=conversation_id,
+        )
+
+    if process_type == "search_content":
+        placeholder_unit_id = submit(
+            save_message_unit,
+            message_id=streaming_message_id,
+            conversation_id=conversation_id,
+            unit_index=next_unit_index,
+            unit_type="search_content_placeholder",
+            unit_content='{"placeholder": true}',
+            user_id=user_id,
+            unit_status="completed",
+        ).result()
+        _persist_search_content_sources(
+            unit_content,
+            message_id=streaming_message_id,
+            conversation_id=conversation_id,
+            unit_id=placeholder_unit_id,
+            user_id=user_id,
+        )
+        return None, next_unit_index + 1, True
+
+    new_unit_id = submit(
+        save_message_unit,
+        message_id=streaming_message_id,
+        conversation_id=conversation_id,
+        unit_index=next_unit_index,
+        unit_type=process_type,
+        unit_content=unit_content,
+        user_id=user_id,
+        unit_status="streaming",
+    ).result()
+    return {
+        "type": process_type,
+        "content": unit_content,
+        "unit_id": new_unit_id,
+        "unit_index": next_unit_index,
+        "unit_merge_key": unit_merge_key,
+        "mergeable": unit_merge_key is not None,
+    }, next_unit_index + 1, False
+
+
+def _delivery_content_to_storage_text(content: Any) -> str:
+    """Convert delivery content to the existing message unit storage format."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
+def _persist_picture_web_sources(
+    content: str,
+    *,
+    streaming_message_id: int,
+    conversation_id: int,
+) -> None:
+    """Persist picture_web source rows from a RuntimeEvent delivery item."""
+    try:
+        content_json = json.loads(content)
+        if isinstance(content_json, list):
+            image_urls = content_json
+        elif isinstance(content_json, dict):
+            image_urls = content_json.get("images_url", [])
+        else:
+            image_urls = []
+        seen_urls: set[str] = set()
+        unique_urls: list[str] = []
+        for image_url in image_urls:
+            if image_url not in seen_urls:
+                seen_urls.add(image_url)
+                unique_urls.append(image_url)
+        for image_url in unique_urls:
+            submit(
+                save_source_image,
+                {
+                    "message_id": streaming_message_id,
+                    "conversation_id": conversation_id,
+                    "image_url": image_url,
+                },
             )
+    except Exception as img_exc:
+        logger.error(
+            "Failed to persist picture_web unit: %r", img_exc, exc_info=True
+        )
 
-    return upload_results
+
+def _persist_search_content_sources(
+    content: str,
+    *,
+    message_id: int,
+    conversation_id: int,
+    unit_id: int,
+    user_id: str,
+) -> None:
+    """Persist search_content source rows from a RuntimeEvent delivery item."""
+    try:
+        search_results = json.loads(content)
+        if not isinstance(search_results, list):
+            search_results = [search_results]
+        for result in search_results:
+            search_data = {
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "unit_id": unit_id,
+                "source_type": result.get("source_type", ""),
+                "source_title": result.get("title", ""),
+                "source_location": result.get("url", ""),
+                "source_content": result.get("text", ""),
+                "score_overall": float(result.get("score"))
+                if result.get("score") not in (None, "")
+                else None,
+                "score_accuracy": float(result.get("score_details", {}).get("accuracy"))
+                if result.get("score_details", {}).get("accuracy") not in (None, "")
+                else None,
+                "score_semantic": float(result.get("score_details", {}).get("semantic"))
+                if result.get("score_details", {}).get("semantic") not in (None, "")
+                else None,
+                "published_date": result.get("published_date")
+                if result.get("published_date") not in (None, "")
+                else None,
+                "cite_index": result.get("cite_index")
+                if result.get("cite_index") != ""
+                else None,
+                "search_type": result.get("search_type")
+                if result.get("search_type")
+                else None,
+                "tool_sign": result.get("tool_sign", ""),
+            }
+            submit(save_source_search, search_data, user_id)
+    except Exception as src_exc:
+        logger.error(
+            "Failed to persist search_content unit: %r", src_exc, exc_info=True
+        )
 
 
 def _safe_agent_stream_error_chunk() -> str:
@@ -893,6 +1381,11 @@ async def _stream_agent_chunks(
     resume_from_unit_index: int = 0,
     resume_message_id: Optional[int] = None,
     channel: Optional[Any] = None,
+    run_request_context: AgentRunRequestContext | None = None,
+    operator_specs: Sequence[OperatorSpec] | None = None,
+    operator_registry: OperatorRegistry | None = None,
+    operator_runtime_resources: dict[str, Any] | None = None,
+    operator_monitoring_metadata: dict[str, Any] | None = None,
 ):
     """
     Yield SSE chunks from agent_run while persisting messages incrementally.
@@ -914,37 +1407,17 @@ async def _stream_agent_chunks(
     }
 
     captured_final_answer = None
-    captured_skill_files: dict[str, dict] = {}
-    skill_file_uploads: list[dict] = []
+    runtime_event_sink = RuntimeEventSink(
+        request_id=run_request_context.request_id
+        if run_request_context is not None
+        else None
+    )
+    runtime_events_for_after_run: list[RuntimeEvent] = []
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
 
-    # Persist the parent ConversationMessage row up front with status='streaming'
-    # so that units saved incrementally have a valid message_id to reference.
     streaming_message_id: Optional[int] = resume_message_id
-    if not is_resume_mode and not agent_request.is_debug:
-        user_role_count = sum(
-            1 for item in getattr(agent_request, "history", [])
-            if item.role == MESSAGE_ROLE["USER"]
-        )
-        assistant_message_req = MessageRequest(
-            conversation_id=agent_request.conversation_id,
-            message_idx=user_role_count * 2 + 1,
-            role=MESSAGE_ROLE["ASSISTANT"],
-            message=[],
-            minio_files=None,
-        )
-        try:
-            streaming_message_id = save_message(
-                assistant_message_req,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                status="streaming",
-            )
-        except Exception as msg_exc:
-            logger.error(
-                "Failed to create streaming message row: %r", msg_exc, exc_info=True)
 
     # Tracks the unit currently being accumulated in memory. Each entry is
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
@@ -970,6 +1443,62 @@ async def _stream_agent_chunks(
         )
     )
 
+    api_operator_specs = _runtime_api_operator_specs(
+        operator_specs,
+        include_skill_file_upload=False,
+    )
+    operator_specs_were_provided = bool(api_operator_specs)
+
+    if api_operator_specs and not is_resume_mode:
+        before_run_result = await _run_runtime_api_operator_stage(
+            "before_run",
+            run_request_context=run_request_context,
+            operator_specs=api_operator_specs,
+            operator_registry=operator_registry,
+            runtime_resources=operator_runtime_resources,
+            monitoring_metadata=operator_monitoring_metadata,
+            metadata={
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "conversation_id": agent_request.conversation_id,
+            },
+        )
+        for output_chunk in await _publish_runtime_events(
+            before_run_result.context.runtime_events,
+            channel=channel,
+        ):
+            yield output_chunk
+        if before_run_result.status == "blocking_failure":
+            await channel.publish(_safe_agent_stream_error_chunk())
+            yield _safe_agent_stream_error_chunk()
+            if streaming_message_id is not None:
+                try:
+                    update_message_status(streaming_message_id, "failed", user_id)
+                except Exception:
+                    logger.exception("Failed to mark assistant message as failed")
+            if not cancel_poll_task.done():
+                cancel_poll_task.cancel()
+            if run_request_context is not None:
+                agent_run_manager.unregister_agent_run(
+                    agent_request.conversation_id,
+                    user_id,
+                    status="failed",
+                    request_id=run_request_context.request_id,
+                )
+            else:
+                agent_run_manager.unregister_agent_run(
+                    agent_request.conversation_id,
+                    user_id,
+                    status="failed",
+                )
+            if channel is not None:
+                await streaming_channel_manager.complete_channel(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=user_id,
+                    status="failed",
+                )
+            return
+
     # In resume mode, emit a status event first
     if is_resume_mode:
         await channel.publish(STREAM_STATUS_EVENT)
@@ -985,22 +1514,6 @@ async def _stream_agent_chunks(
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
-
-                # Add unit_index to the chunk data for frontend resume skip logic.
-                # This allows frontend to accurately skip chunks that were already persisted.
-                # For mergeable types (continuing chunks), use the current unit's index.
-                # For new units, use the next_unit_index that will be assigned.
-                if streaming_message_id is not None and chunk_type:
-                    mergeable = chunk_type in _MERGEABLE_TYPES
-                    if current_unit is not None and mergeable and current_unit.get("type") == chunk_type:
-                        # Continuing chunk - use current unit's index
-                        data["unit_index"] = current_unit["unit_index"]
-                    elif chunk_type not in ("search_content_placeholder",):
-                        # New unit - this will be the next index after assignment
-                        data["unit_index"] = next_unit_index
-                    # Re-serialize the chunk with unit_index for accurate frontend skip
-                    chunk = json.dumps(data)
-                    logger.debug(f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}")
             except Exception:
                 # Malformed chunk: emit as-is and skip persistence bookkeeping.
                 await channel.publish(f"data: {chunk}\n\n")
@@ -1010,201 +1523,77 @@ async def _stream_agent_chunks(
             if chunk_type == "final_answer":
                 captured_final_answer = chunk_content
 
-            should_parse_skill_file = (
-                chunk_type in {"execution_logs", "parse"}
-                or data.get("role") == "tool-response"
+            runtime_event_sink.emit(
+                runtime_event_from_legacy_observer_message(data)
             )
-            if should_parse_skill_file:
-                extracted_payload_count = 0
-                content_value = data.get("content")
-                if isinstance(content_value, list):
-                    content_items = content_value
-                elif content_value:
-                    content_items = [{"type": "text", "text": str(content_value)}]
-                else:
-                    content_items = []
+            stream_events = runtime_event_sink.drain()
+            runtime_events_for_after_run.extend(stream_events)
+            delivery_item = _runtime_delivery_item_for_stream_event(
+                stream_events[-1],
+                current_unit=current_unit,
+                next_unit_index=next_unit_index,
+            )
 
-                for item in content_items:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        text_value = item.get("text")
-                        if text_value:
-                            extracted_payloads = _extract_json_objects_from_text(text_value)
-                            for payload in extracted_payloads:
-                                absolute_path = str(payload.get("absolute_path") or "").strip()
-                                if not absolute_path:
-                                    continue
-                                if absolute_path in captured_skill_files:
-                                    continue
-                                if not os.path.exists(absolute_path):
-                                    continue
-                                captured_skill_files[absolute_path] = payload
-                                extracted_payload_count += 1
-                if extracted_payload_count:
-                    logger.info(
-                        "[skill-file] captured payloads count=%s current_total=%s",
-                        extracted_payload_count,
-                        len(captured_skill_files),
-                    )
-
-            # Incremental unit persistence: when a new chunk belongs to a different
-            # unit than the one currently being buffered, flush the previous unit
-            # and insert a fresh row for the new chunk.
-            if streaming_message_id is not None and chunk_type:
-                mergeable = chunk_type in _MERGEABLE_TYPES
-                is_continuation = (
-                    current_unit is not None
-                    and mergeable
-                    and current_unit.get("type") == chunk_type
+            if (
+                streaming_message_id is None
+                and not is_resume_mode
+                and not agent_request.is_debug
+                and chunk_type
+                and delivery_item.message_unit is not None
+            ):
+                streaming_message_id = _create_streaming_assistant_message(
+                    agent_request=agent_request,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
                 )
 
-                if is_continuation:
-                    # Same mergeable unit: append to the in-memory buffer and
-                    # update the DB row to keep content in sync.
-                    # Use synchronous write to prevent race condition: the async submit()
-                    # approach has a critical bug where concurrent submits can read stale
-                    # content and overwrite the DB with incomplete data. Since the main
-                    # loop is async but the DB operations are I/O-bound with network
-                    # latency, synchronous writes here are acceptably fast and guarantee
-                    # that each chunk is fully persisted before the next chunk arrives.
-                    old_len = len(current_unit["content"])
-                    current_unit["content"] += chunk_content
-                    new_len = len(current_unit["content"])
-                    update_unit_content(
-                        current_unit["unit_id"],
-                        current_unit["content"],
-                        user_id,
-                    )
-                else:
-                    # Boundary detected: close the previous unit (if any) and
-                    # open a new one for this chunk.
-                    if current_unit is not None:
-                        submit(
-                            update_unit_status,
-                            current_unit["unit_id"],
-                            "completed",
-                            user_id,
-                        )
-
-                    # Special-case: final_answer also updates message_content
-                    if chunk_type == "final_answer":
-                        submit(
-                            update_message_content,
-                            streaming_message_id,
-                            chunk_content,
-                            user_id,
-                        )
-
-                    # Special-case: picture_web saves image source references
-                    if chunk_type == "picture_web":
-                        try:
-                            content_json = json.loads(chunk_content)
-                            if isinstance(content_json, dict) and "images_url" in content_json:
-                                seen_urls: set[str] = set()
-                                unique_urls: list[str] = []
-                                for image_url in content_json["images_url"]:
-                                    if image_url not in seen_urls:
-                                        seen_urls.add(image_url)
-                                        unique_urls.append(image_url)
-                                for image_url in unique_urls:
-                                    submit(
-                                        save_source_image,
-                                        {
-                                            "message_id": streaming_message_id,
-                                            "conversation_id": agent_request.conversation_id,
-                                            "image_url": image_url,
-                                        },
-                                    )
-                        except Exception as img_exc:
-                            logger.error(
-                                "Failed to persist picture_web unit: %r", img_exc, exc_info=True
-                            )
-
-                    # Special-case: search_content creates a placeholder unit
-                    # and inserts each search result as a source_search row
-                    # linked back to the unit_id we just created.
-                    if chunk_type == "search_content":
-                        placeholder_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type="search_content_placeholder",
-                            unit_content='{"placeholder": true}',
-                            user_id=user_id,
-                            unit_status="completed",
-                        ).result()
-                        try:
-                            search_results = json.loads(chunk_content)
-                            if not isinstance(search_results, list):
-                                search_results = [search_results]
-                            for result in search_results:
-                                search_data = {
-                                    "message_id": streaming_message_id,
-                                    "conversation_id": agent_request.conversation_id,
-                                    "unit_id": placeholder_unit_id,
-                                    "source_type": result.get("source_type", ""),
-                                    "source_title": result.get("title", ""),
-                                    "source_location": result.get("url", ""),
-                                    "source_content": result.get("text", ""),
-                                    "score_overall": float(result.get("score"))
-                                    if result.get("score") not in (None, "")
-                                    else None,
-                                    "score_accuracy": float(result.get("score_details", {}).get("accuracy"))
-                                    if result.get("score_details", {}).get("accuracy") not in (None, "")
-                                    else None,
-                                    "score_semantic": float(result.get("score_details", {}).get("semantic"))
-                                    if result.get("score_details", {}).get("semantic") not in (None, "")
-                                    else None,
-                                    "published_date": result.get("published_date")
-                                    if result.get("published_date") not in (None, "")
-                                    else None,
-                                    "cite_index": result.get("cite_index")
-                                    if result.get("cite_index") != ""
-                                    else None,
-                                    "search_type": result.get("search_type")
-                                    if result.get("search_type")
-                                    else None,
-                                    "tool_sign": result.get("tool_sign", ""),
-                                }
-                                submit(save_source_search, search_data, user_id)
-                        except Exception as src_exc:
-                            logger.error(
-                                "Failed to persist search_content unit: %r", src_exc, exc_info=True
-                            )
-                        current_unit = None
-                        next_unit_index += 1
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
-                    # Default path: insert a new unit row with unit_status='streaming'.
-                    if streaming_message_id is not None and chunk_type not in (
-                        "search_content_placeholder",
-                    ):
-                        new_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type=chunk_type,
-                            unit_content=chunk_content,
-                            user_id=user_id,
-                            unit_status="streaming",
-                        ).result()
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": chunk_content,
-                            "unit_id": new_unit_id,
-                            "unit_index": next_unit_index,
-                            "mergeable": mergeable,
-                        }
-                        next_unit_index += 1
+            if streaming_message_id is not None and chunk_type:
+                chunk = _stream_chunk_with_unit_index(data, delivery_item)
+                logger.debug(
+                    "[resume-debug] Added unit_index to chunk: type=%s, unit_index=%s",
+                    chunk_type,
+                    data.get("unit_index"),
+                )
+                current_unit, next_unit_index, _ = _persist_runtime_delivery_item(
+                    delivery_item,
+                    streaming_message_id=streaming_message_id,
+                    conversation_id=agent_request.conversation_id,
+                    user_id=user_id,
+                    current_unit=current_unit,
+                    next_unit_index=next_unit_index,
+                )
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
+        if api_operator_specs:
+            try:
+                on_error_result = await _run_runtime_api_operator_stage(
+                    "on_error",
+                    run_request_context=run_request_context,
+                    operator_specs=api_operator_specs,
+                    operator_registry=operator_registry,
+                    runtime_events=runtime_events_for_after_run,
+                    final_answer=captured_final_answer,
+                    error=run_exc,
+                    runtime_resources=operator_runtime_resources,
+                    monitoring_metadata=operator_monitoring_metadata,
+                    metadata={
+                        "user_id": user_id,
+                        "tenant_id": tenant_id,
+                        "conversation_id": agent_request.conversation_id,
+                    },
+                )
+                original_event_count = len(runtime_events_for_after_run)
+                for output_chunk in await _publish_runtime_events(
+                    on_error_result.context.runtime_events[original_event_count:],
+                    channel=channel,
+                ):
+                    yield output_chunk
+            except Exception:
+                logger.exception("Runtime API on_error operators failed")
         await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
@@ -1249,8 +1638,16 @@ async def _stream_agent_chunks(
         was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
         terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
 
-        agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id, status=terminal_status)
+        if run_request_context is not None:
+            agent_run_manager.unregister_agent_run(
+                agent_request.conversation_id,
+                user_id,
+                status=terminal_status,
+                request_id=run_request_context.request_id,
+            )
+        else:
+            agent_run_manager.unregister_agent_run(
+                agent_request.conversation_id, user_id, status=terminal_status)
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
@@ -1268,40 +1665,65 @@ async def _stream_agent_chunks(
             )
 
         try:
-            skill_file_content_local = "\n".join(
-                json.dumps(payload, ensure_ascii=False)
-                for payload in captured_skill_files.values()
-            )
-            if skill_file_content_local:
-                skill_file_uploads = await _process_skill_file_uploads(
-                    content=skill_file_content_local,
+            artifact_events: list[RuntimeEvent]
+            after_run_events: list[RuntimeEvent]
+            if operator_specs_were_provided:
+                after_run_specs = _runtime_api_operator_specs(
+                    api_operator_specs,
+                    include_skill_file_upload=True,
+                )
+                after_run_result = await _run_runtime_api_operator_stage(
+                    "after_run",
+                    run_request_context=run_request_context,
+                    operator_specs=after_run_specs,
+                    operator_registry=operator_registry,
+                    runtime_events=runtime_events_for_after_run,
+                    final_answer=captured_final_answer,
+                    runtime_resources=operator_runtime_resources,
+                    monitoring_metadata=operator_monitoring_metadata,
+                    metadata={
+                        "user_id": user_id,
+                        "tenant_id": tenant_id,
+                        "conversation_id": agent_request.conversation_id,
+                    },
+                )
+                original_event_count = len(runtime_events_for_after_run)
+                after_run_events = after_run_result.context.runtime_events[original_event_count:]
+                artifact_events = [
+                    event
+                    for event in after_run_events
+                    if event.type == RuntimeEventType.ARTIFACT_CREATED
+                ]
+            else:
+                artifact_events = await _process_skill_file_upload_events(
+                    runtime_events_for_after_run,
                     user_id=user_id,
                     tenant_id=tenant_id,
+                    run_request_context=run_request_context,
                 )
+                after_run_events = artifact_events
+            for delivery_item in runtime_events_to_delivery_items(after_run_events):
+                skill_file_uploads = delivery_item.skill_file_uploads
                 logger.info(
                     "[skill-file] upload finished conversation=%s result_count=%s results=%s",
                     agent_request.conversation_id,
                     len(skill_file_uploads), skill_file_uploads
                 )
-                if skill_file_uploads:
-                    # Keep original format for real-time SSE display
-                    skill_files_payload = json.dumps(
-                        {"skill_file_uploads": skill_file_uploads},
-                        ensure_ascii=False,
-                    )
+                should_emit_delivery = operator_specs_were_provided or bool(skill_file_uploads)
+                if should_emit_delivery:
                     try:
-                        yield f"data: {json.dumps({'type': 'skill_files', 'content': skill_files_payload}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps(delivery_item.sse_payload, ensure_ascii=False)}\n\n"
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
+                if skill_file_uploads:
                     # Persist skill file uploads to the conversation history so they
                     # appear in subsequent GET /conversation/{id} calls.
                     # Transform to frontend attachment format (object_name, name, type, size, etc.)
                     try:
-                        frontend_files = _transform_skill_files_to_standard_format(skill_file_uploads)
                         save_skill_files_to_conversation(
                             conversation_id=agent_request.conversation_id,
-                            skill_file_uploads=frontend_files,
+                            skill_file_uploads=delivery_item.skill_file_attachments,
                             user_id=user_id,
                         )
                     except Exception:
@@ -2675,43 +3097,21 @@ async def prepare_agent_run(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
+    run_request_context: AgentRunRequestContext | None = None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
     """
 
-    memory_context = build_memory_context(
-        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
-    agent_run_info = await create_agent_run_info(
-        agent_id=agent_request.agent_id,
-        minio_files=agent_request.minio_files,
-        query=agent_request.query,
-        history=agent_request.history,
-        tenant_id=tenant_id,
+    preparation = await prepare_runtime_agent_run(
+        agent_request=agent_request,
         user_id=user_id,
+        tenant_id=tenant_id,
         language=language,
         allow_memory_search=allow_memory_search,
-        is_debug=agent_request.is_debug,
-        override_version_no=agent_request.version_no,
-        override_model_id=agent_request.model_id,
-        requested_output_tokens=agent_request.requested_output_tokens,
-        tool_params=agent_request.tool_params,
+        run_request_context=run_request_context,
     )
-
-    # Mount conversation-level reusable ContextManager if enabled
-    cm_config = getattr(agent_run_info.agent_config,
-                        'context_manager_config', None)
-    if cm_config and cm_config.enabled:
-        cm = agent_run_manager.get_or_create_context_manager(
-            conversation_id=str(agent_request.conversation_id),
-            config=cm_config,
-            max_steps=agent_run_info.agent_config.max_steps
-        )
-        agent_run_info.context_manager = cm
-
-    agent_run_manager.register_agent_run(
-        agent_request.conversation_id, agent_run_info, user_id)
-    return agent_run_info, memory_context
+    return preparation.agent_run_info, preparation.memory_context
 
 
 # Helper function for run_agent_stream, used to save the user-side message
@@ -2740,6 +3140,7 @@ async def generate_stream_with_memory(
     user_id: str,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    run_request_context: AgentRunRequestContext | None = None,
 ):
     # Prepare preprocess task tracking (simulate preprocess flow)
     task_id = str(uuid.uuid4())
@@ -2780,17 +3181,19 @@ async def generate_stream_with_memory(
 
     memory_enabled = False
     try:
-        memory_context_preview = build_memory_context(
-            user_id, tenant_id, agent_request.agent_id
+        memory_context_preview = preview_runtime_memory(
+            user_id,
+            tenant_id,
+            agent_request.agent_id,
         )
-        memory_enabled = bool(memory_context_preview.user_config.memory_switch)
+        memory_enabled = _runtime_memory_enabled(memory_context_preview)
 
         if memory_enabled:
             # Emit start token before memory retrieval
             await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
             yield f"data: {_memory_token(msg_start)}\n\n"
 
-        # Prepare run (will execute memory retrieval inside create_agent_run_info)
+        # Prepare run through the runtime preparation boundary.
         try:
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
@@ -2798,6 +3201,7 @@ async def generate_stream_with_memory(
                 tenant_id=tenant_id,
                 language=language,
                 allow_memory_search=True,
+                run_request_context=run_request_context,
             )
         except Exception as prep_err:
             # Normalize any preparation error to MemoryPreparationException
@@ -2815,6 +3219,7 @@ async def generate_stream_with_memory(
             agent_run_info=agent_run_info,
             memory_ctx=memory_context,
             channel=channel,
+            run_request_context=run_request_context,
         ):
             yield data_chunk
 
@@ -2831,6 +3236,7 @@ async def generate_stream_with_memory(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 channel=channel,
+                run_request_context=run_request_context,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -2865,6 +3271,7 @@ async def generate_stream_no_memory(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     channel: Optional[Any] = None,
+    run_request_context: AgentRunRequestContext | None = None,
 ):
     """Stream agent responses without any memory preprocessing tokens or fallback logic."""
 
@@ -2875,6 +3282,7 @@ async def generate_stream_no_memory(
         tenant_id=tenant_id,
         language=language,
         allow_memory_search=False,
+        run_request_context=run_request_context,
     )
 
     async for data_chunk in _stream_agent_chunks(
@@ -2884,6 +3292,7 @@ async def generate_stream_no_memory(
         agent_run_info=agent_run_info,
         memory_ctx=memory_context,
         channel=channel,
+        run_request_context=run_request_context,
     ):
         yield data_chunk
 
@@ -3007,6 +3416,13 @@ async def run_agent_stream(
             agent_request.conversation_id,
             resolved_user_id,
         )
+
+    run_request_context = _build_agent_run_request_context(
+        agent_request=agent_request,
+        user_id=resolved_user_id,
+        tenant_id=resolved_tenant_id,
+        language=language,
+    )
 
     # Resume mode: check for existing streaming message
     if resume:
@@ -3181,18 +3597,22 @@ async def run_agent_stream(
         conversation_id=agent_request.conversation_id,
     )
 
-    if not agent_request.is_debug and not skip_user_save:
-        save_messages(
-            agent_request,
-            target=MESSAGE_ROLE["USER"],
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-        )
-
-    memory_ctx_preview = build_memory_context(
-        resolved_user_id, resolved_tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
+    await _run_before_run_user_message_hook(
+        agent_request=agent_request,
+        run_request_context=run_request_context,
+        user_id=resolved_user_id,
+        tenant_id=resolved_tenant_id,
+        skip_user_save=skip_user_save,
     )
-    memory_enabled = memory_ctx_preview.user_config.memory_switch
+
+    memory_ctx_preview = preview_runtime_memory(
+        resolved_user_id,
+        resolved_tenant_id,
+        agent_request.agent_id,
+        skip_query=agent_request.is_debug,
+    )
+    memory_enabled = _runtime_memory_enabled(memory_ctx_preview)
+    memory_metadata = _runtime_memory_metadata(memory_ctx_preview)
 
     agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
         agent_id=agent_request.agent_id,
@@ -3208,14 +3628,12 @@ async def run_agent_stream(
         minio_files_count=len(
             agent_request.minio_files) if agent_request.minio_files else 0,
         extra_metadata={
-            "agent_share_option": getattr(
-                memory_ctx_preview.user_config,
-                "agent_share_option",
-                "unknown",
-            ),
+            "agent_share_option": memory_metadata.get("agent_share_option", "unknown"),
             "skip_user_save": skip_user_save,
             "has_override_user_id": user_id is not None,
             "has_override_tenant_id": tenant_id is not None,
+            "request_id": run_request_context.request_id,
+            "runtime_provider": run_request_context.runtime_provider,
         },
     ))
 
@@ -3227,6 +3645,7 @@ async def run_agent_stream(
             user_id=resolved_user_id,
             tenant_id=resolved_tenant_id,
             language=language,
+            run_request_context=run_request_context,
         )
     else:
         stream_gen = generate_stream_no_memory(
@@ -3234,6 +3653,7 @@ async def run_agent_stream(
             user_id=resolved_user_id,
             tenant_id=resolved_tenant_id,
             language=language,
+            run_request_context=run_request_context,
         )
 
     async def stream_with_agent_context():

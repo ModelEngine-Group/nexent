@@ -251,6 +251,31 @@ ENABLE_UPLOAD_IMAGE = os.getenv(
     "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 ENABLE_JIUWEN_SDK = os.getenv("NEXENT_ENABLE_JIUWEN_SDK", "true").lower() == "true"
 
+# Agent runtime provider selection. This is deployment-level only; request,
+# agent, version, tenant, and debug metadata must not override it.
+AGENT_RUNTIME_PROVIDER_SMOLAGENTS = "smolagents"
+AGENT_RUNTIME_PROVIDER_OPENJIUWEN = "openjiuwen"
+SUPPORTED_AGENT_RUNTIME_PROVIDERS = frozenset({
+    AGENT_RUNTIME_PROVIDER_SMOLAGENTS,
+    AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
+})
+
+
+def normalize_agent_runtime_provider(value: str | None) -> str:
+    """Normalize and validate the deployment-level agent runtime provider."""
+    provider = (value or AGENT_RUNTIME_PROVIDER_SMOLAGENTS).strip().lower()
+    if provider not in SUPPORTED_AGENT_RUNTIME_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_AGENT_RUNTIME_PROVIDERS))
+        raise ValueError(
+            f"Unsupported AGENT_RUNTIME_PROVIDER '{provider}'. Supported values: {supported}."
+        )
+    return provider
+
+
+AGENT_RUNTIME_PROVIDER = normalize_agent_runtime_provider(
+    os.getenv("AGENT_RUNTIME_PROVIDER", AGENT_RUNTIME_PROVIDER_SMOLAGENTS)
+)
+
 
 # Celery Configuration
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(
