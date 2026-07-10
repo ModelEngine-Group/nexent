@@ -109,7 +109,10 @@ export const tryRenderNl2AgentCard = (
       );
     }
     case "nl2agent-finalize": {
-      return <FinalizeCard agentId={agentId} status={parsed.status} />;
+      // Forward the full agent spec to FinalizeCard so it can display
+      // all fields and call the finalize endpoint on "Publish".
+      const { agent_id, ...rest } = parsed;
+      return <FinalizeCard data={{ agent_id, ...rest } as any} />;
     }
     default:
       return null;

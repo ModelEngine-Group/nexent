@@ -46,12 +46,41 @@ export interface Nl2AgentInstallWebSkillPayload {
 }
 
 export interface Nl2AgentFinalizePayload {
-  model_id: number;
-  task_description: string;
-  tool_ids: number[];
-  skill_ids: number[];
-  sub_agent_ids: number[];
-  knowledge_base_display_names: string[];
+  // Identity
+  name?: string;
+  display_name?: string;
+  description?: string;
+
+  // LLM models
+  business_logic_model_id?: number;
+  model_ids?: number[];
+
+  // Task & template
+  business_description?: string;
+  prompt_template_id?: number;
+  duty_prompt?: string;
+  constraint_prompt?: string;
+  few_shots_prompt?: string;
+
+  // UI
+  greeting_message?: string;
+  example_questions?: string[];
+
+  // Runtime
+  max_steps?: number;
+  requested_output_tokens?: number;
+  provide_run_summary?: boolean;
+  verification_config?: { enabled: boolean; mode?: string };
+  enable_context_manager?: boolean;
+
+  // Resources
+  tool_ids?: number[];
+  skill_ids?: number[];
+  sub_agent_ids?: number[];
+
+  // Per-agent config overrides
+  tool_configs?: Record<string, Record<string, unknown>>;
+  skill_configs?: Record<string, Record<string, unknown>>;
 }
 
 export interface Nl2AgentFinalizeResponse {
