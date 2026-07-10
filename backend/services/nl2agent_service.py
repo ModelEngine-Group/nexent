@@ -18,6 +18,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 
+from agents.nl2agent_session_catalog import set_nl2agent_session_catalogs
 from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import AgentRunException
@@ -399,17 +400,22 @@ async def start_session(
     except Exception as exc:
         logger.warning(f"Failed to pre-fetch official skills: {exc}")
 
+    session_catalogs = {
+        "tool_catalog": tool_catalog,
+        "skill_catalog": skill_catalog,
+        "registry_results": registry_results,
+        "community_results": community_results,
+        "official_skills": official_skills,
+    }
+    set_nl2agent_session_catalogs(tenant_id, draft_agent_id, session_catalogs)
+
     return {
         "nl2agent_agent_id": nl2agent_agent_id,
         "draft_agent_id": draft_agent_id,
         "conversation_id": conversation.get("conversation_id"),
         "draft_name": draft_name,
         # Catalogs for SDK tools
-        "tool_catalog": tool_catalog,
-        "skill_catalog": skill_catalog,
-        "registry_results": registry_results,
-        "community_results": community_results,
-        "official_skills": official_skills,
+        **session_catalogs,
     }
 
 
@@ -437,6 +443,8 @@ async def apply_local_resources_batch(
 
     bound_tools = 0
     bound_skills = 0
+    bound_tool_ids: List[int] = []
+    bound_skill_ids: List[int] = []
 
     # Bind tools.
     for tool_id in tool_ids or []:
@@ -446,10 +454,13 @@ async def apply_local_resources_batch(
                 logger.warning(f"Tool id {tool_id} not found, skipping.")
                 continue
             ti = tool_info[0]
+            params = ti.get("params") or {}
+            if not isinstance(params, dict):
+                params = {}
             instance_req = ToolInstanceInfoRequest(
                 tool_id=tool_id,
                 agent_id=agent_id,
-                params=ti.get("params") or {},
+                params=params,
                 enabled=True,
                 version_no=0,
             )
@@ -460,6 +471,7 @@ async def apply_local_resources_batch(
                 version_no=0,
             )
             bound_tools += 1
+            bound_tool_ids.append(tool_id)
         except Exception as exc:
             logger.error(f"Failed to bind tool {tool_id} to agent {agent_id}: {exc}")
 
@@ -492,14 +504,15 @@ async def apply_local_resources_batch(
                 version_no=0,
             )
             bound_skills += 1
+            bound_skill_ids.append(target_skill_id)
         except Exception as exc:
             logger.error(f"Failed to bind skill {skill_id} to agent {agent_id}: {exc}")
 
     return {
         "bound_tool_count": bound_tools,
         "bound_skill_count": bound_skills,
-        "tool_ids": tool_ids or [],
-        "skill_ids": skill_ids or [],
+        "tool_ids": bound_tool_ids,
+        "skill_ids": bound_skill_ids,
     }
 
 

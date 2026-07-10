@@ -1999,16 +1999,24 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_nl2agent_metadata_uses_business_logic_model_id(self):
-        """NL2AGENT tools need a model id even when no request override is sent."""
-        finalize_tool = types.SimpleNamespace(
-            class_name="NL2AgentFinalizeAgentTool",
-            name="nl2agent_finalize_agent",
+        """NL2AGENT tools receive draft context and cached catalogs."""
+        search_tool = types.SimpleNamespace(
+            class_name="NL2AgentSearchLocalResourcesTool",
+            name="nl2agent_search_local_resources",
             metadata=None,
         )
+        session_catalogs = {
+            "tool_catalog": [{"tool_id": 1, "name": "web_search"}],
+            "skill_catalog": [{"skill_id": 7, "name": "brief-writer"}],
+            "registry_results": [{"name": "github-mcp"}],
+            "community_results": [{"communityId": 55, "name": "browser-mcp"}],
+            "official_skills": [{"skill_id": 12, "skill_name": "code-review"}],
+        }
 
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
                 patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
+                patch('backend.agents.create_agent_info.get_nl2agent_session_catalogs', return_value=session_catalogs) as mock_get_catalogs, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info._load_nl2agent_system_prompt', return_value="NL2AGENT prompt"), \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
@@ -2031,7 +2039,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": False,
                 "enable_context_manager": False,
             }
-            mock_create_tools.return_value = [finalize_tool]
+            mock_create_tools.return_value = [search_tool]
             mock_get_template.return_value = {"system_prompt": "{{duty}}"}
             mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
             mock_build_memory.return_value = Mock(
@@ -2054,13 +2062,14 @@ class TestCreateAgentConfig:
             )
 
             mock_get_model_by_id.assert_called_once_with(77, tenant_id="tenant_1")
-            assert finalize_tool.metadata == {
+            mock_get_catalogs.assert_called_once_with("tenant_1", 202)
+            assert search_tool.metadata == {
                 "agent_id": "agent_1",
                 "user_id": "user_1",
                 "tenant_id": "tenant_1",
-                "model_id": 77,
                 "language": "zh",
                 "draft_agent_id": 202,
+                **session_catalogs,
             }
             assert mock_agent_config.call_args.kwargs["model_name"] == "business_model"
 

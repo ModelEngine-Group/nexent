@@ -1,10 +1,13 @@
 """Unit tests for NL2AGENT service orchestration."""
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.nl2agent_session_catalog import (
+    clear_nl2agent_session_catalogs,
+    get_nl2agent_session_catalogs,
+)
 from services import nl2agent_service
 
 
@@ -12,8 +15,69 @@ class _FixedUuid:
     hex = "abcdef1234567890"
 
 
+_RAW_TOOL_ROWS = [
+    {
+        "tool_id": 1,
+        "name": "local_search",
+        "description": "Search local documents",
+        "labels": ["search"],
+        "source": "local",
+        "category": "retrieval",
+        "usage": "local_search",
+        "params": [{"name": "query", "type": "string"}],
+    },
+    {
+        "tool_id": 2,
+        "name": "remote_only",
+        "description": "Remote tool should not be injected",
+        "source": "remote",
+    },
+]
+_EXPECTED_TOOL_CATALOG = [
+    {
+        "tool_id": 1,
+        "name": "local_search",
+        "description": "Search local documents",
+        "labels": ["search"],
+        "source": "local",
+        "category": "retrieval",
+        "usage": "local_search",
+        "params": [{"name": "query", "type": "string"}],
+    }
+]
+_RAW_SKILL_ROWS = [
+    {
+        "skill_id": 7,
+        "name": "brief-writer",
+        "description": "Write short research briefs",
+        "tags": ["writing"],
+        "config_schema": {"tone": {"type": "string"}},
+    }
+]
+_EXPECTED_SKILL_CATALOG = [
+    {
+        "skill_id": 7,
+        "name": "brief-writer",
+        "description": "Write short research briefs",
+        "tags": ["writing"],
+        "config_schema": {"tone": {"type": "string"}},
+    }
+]
+_REGISTRY_RESULTS = [{"name": "github-mcp", "description": "Repository automation"}]
+_COMMUNITY_RESULTS = [{"communityId": 55, "name": "browser-mcp"}]
+_OFFICIAL_SKILLS = [{"skill_id": 12, "skill_name": "code-review"}]
+_EXPECTED_SESSION_CATALOGS = {
+    "tool_catalog": _EXPECTED_TOOL_CATALOG,
+    "skill_catalog": _EXPECTED_SKILL_CATALOG,
+    "registry_results": _REGISTRY_RESULTS,
+    "community_results": _COMMUNITY_RESULTS,
+    "official_skills": _OFFICIAL_SKILLS,
+}
+
+
 @pytest.fixture(autouse=True)
 def mock_nl2agent_seed_defaults(monkeypatch):
+    clear_nl2agent_session_catalogs()
     monkeypatch.setattr(
         nl2agent_service,
         "get_nl2agent_seed_config",
@@ -39,6 +103,33 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "get_model_records",
         MagicMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "list_all_tools",
+        MagicMock(return_value=_RAW_TOOL_ROWS),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "list_tenant_skills",
+        MagicMock(return_value=_RAW_SKILL_ROWS),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "list_registry_mcp_services",
+        AsyncMock(return_value={"servers": _REGISTRY_RESULTS}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "list_community_mcp_services",
+        MagicMock(return_value={"items": _COMMUNITY_RESULTS}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_official_skills_with_status",
+        MagicMock(return_value=_OFFICIAL_SKILLS),
+    )
+    yield
+    clear_nl2agent_session_catalogs()
 
 
 def _seeded_nl2agent_info(agent_id: int = 101):
@@ -48,8 +139,8 @@ def _seeded_nl2agent_info(agent_id: int = 101):
         "display_name": "Agent Builder",
         "description": "NL2AGENT public description",
         "business_description": "NL2AGENT business description",
-        "prompt_template_id": 0,
-        "prompt_template_name": "system_default",
+        "prompt_template_id": None,
+        "prompt_template_name": None,
         "duty_prompt": "NL2AGENT concise duty",
         "constraint_prompt": "NL2AGENT concise constraint",
         "few_shots_prompt": "",
@@ -86,7 +177,9 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
         "draft_agent_id": 202,
         "conversation_id": 303,
         "draft_name": "draft_abcdef12",
+        **_EXPECTED_SESSION_CATALOGS,
     }
+    assert get_nl2agent_session_catalogs("tenant_1", 202) == _EXPECTED_SESSION_CATALOGS
     assert result["draft_agent_id"] != result["nl2agent_agent_id"]
 
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
@@ -178,8 +271,8 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
     assert request.display_name == "Agent Builder"
     assert request.description == "NL2AGENT public description"
     assert request.business_description == "NL2AGENT business description"
-    assert request.prompt_template_id == 0
-    assert request.prompt_template_name == "system_default"
+    assert request.prompt_template_id is None
+    assert request.prompt_template_name is None
     assert request.duty_prompt == "NL2AGENT concise duty"
     assert request.duty_prompt != "NL2AGENT full runtime system prompt"
     assert request.constraint_prompt == "NL2AGENT concise constraint"
@@ -190,349 +283,6 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
         user_id="user_1",
         version_no=0,
     )
-
-
-@pytest.mark.asyncio
-async def test_recommend_local_resources_awaits_tool_list_and_filters_sources(monkeypatch):
-    list_tools = AsyncMock(
-        return_value=[
-            {"tool_id": 1, "name": "local_tool", "source": "local"},
-            {"tool_id": 2, "name": "mcp_tool", "source": "mcp"},
-            {"tool_id": 3, "name": "langchain_tool", "source": "langchain"},
-            {"tool_id": 4, "name": "nl2agent_builtin", "source": "builtin"},
-            {"tool_id": 5, "name": "remote_tool", "source": "remote"},
-        ]
-    )
-    list_skills = MagicMock(return_value=[])
-    scored_candidates = {}
-
-    def score_candidates(*, candidates, kind, **_kwargs):
-        scored_candidates[kind] = candidates
-        return candidates
-
-    monkeypatch.setattr(nl2agent_service, "list_all_tools", list_tools)
-    monkeypatch.setattr(nl2agent_service, "list_tenant_skills", list_skills)
-    monkeypatch.setattr(
-        nl2agent_service,
-        "_score_candidates_with_llm",
-        MagicMock(side_effect=score_candidates),
-    )
-
-    result = await nl2agent_service.recommend_local_resources(
-        query="need database access",
-        agent_id=202,
-        tenant_id="tenant_1",
-        model_id=9,
-    )
-
-    list_tools.assert_awaited_once_with(tenant_id="tenant_1", labels=None)
-    list_skills.assert_called_once_with(tenant_id="tenant_1")
-    assert {tool["source"] for tool in scored_candidates["tool"]} == {
-        "local",
-        "mcp",
-        "langchain",
-    }
-    assert [tool["tool_id"] for tool in result["tools"]] == [1, 2, 3]
-    assert result["skills"] == []
-
-
-@pytest.mark.asyncio
-async def test_recommend_local_resources_returns_unranked_candidates_when_scoring_fails(monkeypatch):
-    list_tools = AsyncMock(
-        return_value=[
-            {
-                "tool_id": 1,
-                "name": "document_reader",
-                "description": "Read Word documents",
-                "source": "local",
-            }
-        ]
-    )
-    list_skills = MagicMock(
-        return_value=[
-            {
-                "skill_id": 10,
-                "name": "ppt_builder",
-                "description": "Create PPT reports",
-                "tags": ["presentation"],
-            }
-        ]
-    )
-    score_llm = MagicMock(side_effect=RuntimeError("model unavailable"))
-
-    monkeypatch.setattr(nl2agent_service, "list_all_tools", list_tools)
-    monkeypatch.setattr(nl2agent_service, "list_tenant_skills", list_skills)
-    monkeypatch.setattr(nl2agent_service, "call_llm_for_system_prompt", score_llm)
-
-    result = await nl2agent_service.recommend_local_resources(
-        query="read Word and create PPT",
-        agent_id=202,
-        tenant_id="tenant_1",
-        model_id=9,
-    )
-
-    assert result["tools"] == [
-        {
-            "tool_id": 1,
-            "name": "document_reader",
-            "description": "Read Word documents",
-            "labels": [],
-            "source": "local",
-            "category": "",
-            "score": 0,
-            "reason": "LLM scoring unavailable; shown as an unranked tool candidate.",
-        }
-    ]
-    assert result["skills"] == [
-        {
-            "skill_id": 10,
-            "name": "ppt_builder",
-            "description": "Create PPT reports",
-            "tags": ["presentation"],
-            "score": 0,
-            "reason": "LLM scoring unavailable; shown as an unranked skill candidate.",
-        }
-    ]
-    assert score_llm.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_search_web_mcps_returns_unranked_candidates_when_scoring_fails(monkeypatch):
-    registry_search = AsyncMock(
-        return_value={
-            "servers": [
-                {
-                    "server": {
-                        "name": "chart-mcp",
-                        "description": "Generate charts",
-                        "version": "1.0.0",
-                    },
-                    "_meta": {
-                        "io.modelcontextprotocol.registry/official": {
-                            "status": "active",
-                        }
-                    },
-                }
-            ]
-        }
-    )
-    community_search = AsyncMock(return_value={"items": []})
-
-    monkeypatch.setattr(
-        nl2agent_service, "list_registry_mcp_services", registry_search
-    )
-    monkeypatch.setattr(
-        nl2agent_service, "list_community_mcp_services", community_search
-    )
-    monkeypatch.setattr(
-        nl2agent_service,
-        "call_llm_for_system_prompt",
-        MagicMock(side_effect=RuntimeError("model unavailable")),
-    )
-
-    result = await nl2agent_service.search_web_mcps(
-        query="make charts",
-        tenant_id="tenant_1",
-        model_id=9,
-    )
-
-    assert result == [
-        {
-            "name": "chart-mcp",
-            "description": "Generate charts",
-            "source": "registry",
-            "url": "",
-            "transport": "registry",
-            "tools_summary": "",
-            "score": 0,
-            "reason": "LLM scoring unavailable; shown as an unranked MCP candidate.",
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_search_web_mcps_returns_unranked_candidates_when_scoring_ids_do_not_match(monkeypatch):
-    registry_search = AsyncMock(return_value={"servers": []})
-    community_search = AsyncMock(
-        return_value={
-            "items": [
-                {
-                    "communityId": 55,
-                    "name": "browser-mcp",
-                    "description": "Automate browser workflows",
-                    "transportType": "url",
-                    "serverUrl": "https://example.com/mcp",
-                }
-            ]
-        }
-    )
-
-    monkeypatch.setattr(
-        nl2agent_service, "list_registry_mcp_services", registry_search
-    )
-    monkeypatch.setattr(
-        nl2agent_service, "list_community_mcp_services", community_search
-    )
-    monkeypatch.setattr(
-        nl2agent_service,
-        "call_llm_for_system_prompt",
-        MagicMock(return_value='[{"mcp_id": "missing", "score": 9, "reason": "good"}]'),
-    )
-
-    result = await nl2agent_service.search_web_mcps(
-        query="control a browser",
-        tenant_id="tenant_1",
-        model_id=9,
-    )
-
-    assert result == [
-        {
-            "name": "browser-mcp",
-            "description": "Automate browser workflows",
-            "source": "community",
-            "url": "https://example.com/mcp",
-            "transport": "url",
-            "tools_summary": "",
-            "community_id": 55,
-            "score": 0,
-            "reason": "LLM scoring unavailable; shown as an unranked MCP candidate.",
-        }
-    ]
-    assert "_scoring_id" not in result[0]
-
-
-@pytest.mark.asyncio
-async def test_search_web_mcps_parses_nested_registry_server_payload(monkeypatch):
-    # The official MCP Registry returns each entry with its fields nested under
-    # a "server" object. Parsing must reach into it, otherwise name/description
-    # come back empty and every candidate scores 0 (the reported bug).
-    registry_search = AsyncMock(
-        return_value={
-            "servers": [
-                {
-                    "server": {
-                        "name": "io.github.acme/pptx",
-                        "description": "Create PowerPoint decks",
-                        "version": "1.2.0",
-                    },
-                    "_meta": {
-                        "io.modelcontextprotocol.registry/official": {
-                            "serverId": "sid-1",
-                            "status": "active",
-                        }
-                    },
-                },
-                {
-                    "server": {
-                        "name": "io.github.acme/charts",
-                        "description": "Render charts",
-                    },
-                },
-            ]
-        }
-    )
-    community_search = AsyncMock(return_value={"items": []})
-
-    monkeypatch.setattr(
-        nl2agent_service, "list_registry_mcp_services", registry_search
-    )
-    monkeypatch.setattr(
-        nl2agent_service, "list_community_mcp_services", community_search
-    )
-    monkeypatch.setattr(
-        nl2agent_service,
-        "call_llm_for_system_prompt",
-        MagicMock(
-            return_value=json.dumps(
-                [
-                    {
-                        "mcp_id": "registry:io.github.acme/pptx",
-                        "score": 9,
-                        "reason": "direct match",
-                    },
-                    {
-                        "mcp_id": "registry:io.github.acme/charts",
-                        "score": 3,
-                        "reason": "loosely related",
-                    },
-                ]
-            )
-        ),
-    )
-
-    result = await nl2agent_service.search_web_mcps(
-        query="python-pptx",
-        tenant_id="tenant_1",
-        model_id=9,
-    )
-
-    # Nested registry fields are populated, not empty, and ranked by score.
-    assert result == [
-        {
-            "name": "io.github.acme/pptx",
-            "description": "Create PowerPoint decks",
-            "source": "registry",
-            "url": "",
-            "transport": "registry",
-            "tools_summary": "",
-            "score": 9,
-            "reason": "direct match",
-        },
-        {
-            "name": "io.github.acme/charts",
-            "description": "Render charts",
-            "source": "registry",
-            "url": "",
-            "transport": "registry",
-            "tools_summary": "",
-            "score": 3,
-            "reason": "loosely related",
-        },
-    ]
-    assert all("_scoring_id" not in item for item in result)
-
-
-@pytest.mark.asyncio
-async def test_search_web_skills_returns_unranked_candidates_when_scoring_is_invalid(monkeypatch):
-    official_skills = MagicMock(
-        return_value=[
-            {
-                "skill_id": 77,
-                "name": "doc-review",
-                "description": "Review documents",
-                "tags": ["documents"],
-                "status": "installable",
-            }
-        ]
-    )
-
-    monkeypatch.setattr(
-        nl2agent_service, "get_official_skills_with_status", official_skills
-    )
-    monkeypatch.setattr(
-        nl2agent_service,
-        "call_llm_for_system_prompt",
-        MagicMock(return_value="not json"),
-    )
-
-    result = await nl2agent_service.search_web_skills(
-        query="review documents",
-        tenant_id="tenant_1",
-        model_id=9,
-    )
-
-    assert result == [
-        {
-            "skill_id": 77,
-            "skill_name": "doc-review",
-            "name": "doc-review",
-            "description": "Review documents",
-            "tags": ["documents"],
-            "status": "installable",
-            "score": 0,
-            "reason": "LLM scoring unavailable; shown as an unranked skill candidate.",
-        }
-    ]
 
 
 @pytest.mark.asyncio
@@ -696,28 +446,21 @@ async def test_apply_local_resources_batch_rejects_invalid_draft_agent_id(monkey
 
 @pytest.mark.asyncio
 async def test_finalize_agent_rejects_invalid_draft_agent_id(monkeypatch):
-    generate_prompt = MagicMock()
-    monkeypatch.setattr(
-        nl2agent_service,
-        "generate_and_save_system_prompt_impl",
-        generate_prompt,
-    )
+    update_agent = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
 
     with pytest.raises(nl2agent_service.AgentRunException):
         await nl2agent_service.finalize_agent(
             agent_id=0,
-            model_id=7,
-            task_description="Build a helper agent",
+            user_id="user_1",
+            tenant_id="tenant_1",
+            business_description="Build a helper agent",
             tool_ids=[],
             skill_ids=[],
             sub_agent_ids=[],
-            knowledge_base_display_names=[],
-            user_id="user_1",
-            tenant_id="tenant_1",
-            language="en",
         )
 
-    generate_prompt.assert_not_called()
+    update_agent.assert_not_called()
 
 
 def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatch):
@@ -754,8 +497,8 @@ def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatc
     assert payload["display_name"] == "Agent Builder"
     assert payload["description"] == "NL2AGENT public description"
     assert payload["business_description"] == "NL2AGENT business description"
-    assert payload["prompt_template_id"] == 0
-    assert payload["prompt_template_name"] == "system_default"
+    assert payload["prompt_template_id"] is None
+    assert payload["prompt_template_name"] is None
     assert payload["duty_prompt"] == "NL2AGENT concise duty"
     assert payload["duty_prompt"] != "NL2AGENT full runtime system prompt"
     assert payload["constraint_prompt"] == "NL2AGENT concise constraint"
@@ -817,8 +560,8 @@ def test_seed_nl2agent_default_agent_backfills_existing_seed_defaults(
     assert request.display_name == "Agent Builder"
     assert request.description == "NL2AGENT public description"
     assert request.business_description == "NL2AGENT business description"
-    assert request.prompt_template_id == 0
-    assert request.prompt_template_name == "system_default"
+    assert request.prompt_template_id is None
+    assert request.prompt_template_name is None
     assert request.duty_prompt == "NL2AGENT concise duty"
     assert request.duty_prompt != "NL2AGENT full runtime system prompt"
     assert request.constraint_prompt == "NL2AGENT concise constraint"

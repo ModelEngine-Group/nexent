@@ -2143,9 +2143,6 @@ class TestCreateBuiltinTool:
             ("NL2AgentSearchLocalResourcesTool", "nl2agent_search_local_resources"),
             ("NL2AgentSearchWebMcpsTool", "nl2agent_search_web_mcps"),
             ("NL2AgentSearchWebSkillsTool", "nl2agent_search_web_skills"),
-            ("NL2AgentApplyLocalResourcesTool", "nl2agent_apply_local_resources"),
-            ("NL2AgentInstallWebSkillTool", "nl2agent_install_web_skill"),
-            ("NL2AgentFinalizeAgentTool", "nl2agent_finalize_agent"),
         ],
     )
     def test_create_builtin_tool_uses_prefixed_nl2agent_tool_names(

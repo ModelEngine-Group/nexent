@@ -52,6 +52,7 @@ from utils.prompt_template_utils import (
     get_nl2agent_system_prompt,
 )
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from .nl2agent_session_catalog import get_nl2agent_session_catalogs
 from utils.context_utils import build_context_components, build_system_prompt_component
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.model import ToolParamsRequest
@@ -992,6 +993,7 @@ async def create_agent_config(
         "NL2AgentSearchWebMcpsTool",
         "NL2AgentSearchWebSkillsTool",
     }
+    nl2agent_catalogs = get_nl2agent_session_catalogs(tenant_id, draft_agent_id)
     for tool_cfg in tool_list:
         try:
             class_name = tool_cfg.class_name
@@ -1003,9 +1005,9 @@ async def create_agent_config(
                 "agent_id": agent_id,
                 "user_id": user_id,
                 "tenant_id": tenant_id,
-                "model_id": model_id_to_use,
                 "language": language,
                 "draft_agent_id": draft_agent_id,
+                **nl2agent_catalogs,
             }
 
     # Managed context assembly starts from raw sources.  No legacy rendered
