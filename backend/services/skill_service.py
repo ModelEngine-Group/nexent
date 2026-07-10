@@ -1778,7 +1778,7 @@ class SkillService:
         except (ForbiddenError, SkillException):
             raise
         except Exception as e:
-            logger.error(f"Error updating skill by ID {skill_id}: {e}")
+            logger.exception("Error updating skill by ID %s", skill_id)
             raise SkillException(f"Failed to update skill: {str(e)}") from e
 
     def delete_skill(

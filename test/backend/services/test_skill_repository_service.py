@@ -2,6 +2,8 @@
 
 import base64
 import sys
+import types
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,11 +16,40 @@ _BACKEND_ROOT = _REPO_ROOT / "backend"
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
-for module_name in [
-    name for name in sys.modules
-    if name == "consts" or name.startswith("consts.")
-]:
-    sys.modules.pop(module_name, None)
+_consts_package = sys.modules.get("consts")
+if _consts_package is not None and not hasattr(_consts_package, "__path__"):
+    _consts_package.__path__ = []
+
+if "consts.agent_repository" not in sys.modules:
+    consts_agent_repository_mock = types.ModuleType("consts.agent_repository")
+    consts_agent_repository_mock.OWNERSHIP_ALL = "all"
+    consts_agent_repository_mock.OWNERSHIP_CREATED = "created"
+    consts_agent_repository_mock.OWNERSHIP_OTHERS = "others"
+    consts_agent_repository_mock.STATUS_NOT_SHARED = "not_shared"
+    consts_agent_repository_mock.STATUS_PENDING_REVIEW = "pending_review"
+    consts_agent_repository_mock.STATUS_REJECTED = "rejected"
+    consts_agent_repository_mock.STATUS_SHARED = "shared"
+    consts_agent_repository_mock.VALID_OWNERSHIP_FILTERS = {
+        "all",
+        "created",
+        "others",
+    }
+    consts_agent_repository_mock.VALID_REPOSITORY_STATUSES = {
+        "not_shared",
+        "pending_review",
+        "rejected",
+        "shared",
+    }
+    sys.modules["consts.agent_repository"] = consts_agent_repository_mock
+
+consts_const_module = sys.modules.get("consts.const")
+if consts_const_module is not None:
+    if not hasattr(consts_const_module, "CAN_EDIT_ALL_USER_ROLES"):
+        consts_const_module.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
+    if not hasattr(consts_const_module, "PERMISSION_EDIT"):
+        consts_const_module.PERMISSION_EDIT = "edit"
+    if not hasattr(consts_const_module, "PERMISSION_READ"):
+        consts_const_module.PERMISSION_READ = "read"
 
 _skill_repo_db_mock = MagicMock()
 _skill_repo_db_mock.get_skill_repository_by_id_and_publisher = MagicMock()
@@ -88,8 +119,19 @@ def _ensure_exception(name):
 
 
 ForbiddenError = _ensure_exception("ForbiddenError")
-SkillDuplicateError = _ensure_exception("SkillDuplicateError")
 SkillException = _ensure_exception("SkillException")
+SkillDuplicateError = getattr(exceptions_module, "SkillDuplicateError", None)
+try:
+    _has_duplicate_names = hasattr(SkillDuplicateError(["Skill A"]), "duplicate_names")
+except Exception:
+    _has_duplicate_names = False
+if not _has_duplicate_names:
+    class SkillDuplicateError(Exception):
+        def __init__(self, duplicate_names):
+            self.duplicate_names = duplicate_names
+            super().__init__(str(duplicate_names))
+
+    exceptions_module.SkillDuplicateError = SkillDuplicateError
 
 from backend.services import skill_repository_service as srs
 
@@ -486,3 +528,228 @@ def test_repository_list_and_detail_success():
     )
     detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
     assert detail["skill_repository_id"] == 1
+
+
+def test_mapping_and_filter_helpers_cover_edge_branches():
+    created_at = datetime(2026, 1, 1, 12, 0, 0)
+    assert srs._serialize_created_at(created_at) == created_at.isoformat()
+    assert srs._serialize_created_at("already serialized") == "already serialized"
+    assert srs._to_repository_info_item({
+        "skill_repository_id": 9,
+        "status": "shared",
+        "create_time": created_at,
+    }) == {
+        "skill_repository_id": 9,
+        "status": "shared",
+        "create_time": created_at.isoformat(),
+    }
+    assert srs._matches_ownership(
+        {"created_by": "user-1"}, "user-1", srs.OWNERSHIP_OTHERS
+    ) is False
+    assert srs._matches_search({"name": "Any"}, None) is True
+    assert srs._paginate_mine_skills_with_optional_padding([], 1, 10, False) == ([], 0)
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = None
+    assert srs._get_user_role("missing-user") == "USER"
+    assert srs._resolve_mine_skill_permission(
+        skill={"created_by": "someone-else"},
+        user_id="admin-1",
+        user_role="ADMIN",
+    ) == srs.PERMISSION_EDIT
+    assert srs._normalize_listing_tags(None) == []
+    with pytest.raises(ValueError, match="icon is required"):
+        srs._validate_card_fields({"icon": 123})
+
+
+def test_build_repository_payload_rejects_missing_skill_and_blank_name():
+    class MissingSkillService(_SkillServiceMock):
+        def get_skill_by_id(self, skill_id, tenant_id=None):
+            return None
+
+    with patch.object(srs, "SkillService", MissingSkillService):
+        with pytest.raises(ValueError, match="Skill not found"):
+            srs._build_repository_data_from_skill(10, "tenant-1", "user-1")
+
+    class BlankNameSkillService(_SkillServiceMock):
+        def get_skill_by_id(self, skill_id, tenant_id=None):
+            data = super().get_skill_by_id(skill_id, tenant_id)
+            data["name"] = "  "
+            return data
+
+    with patch.object(srs, "SkillService", BlankNameSkillService):
+        with pytest.raises(ValueError, match="Skill name is required"):
+            srs._build_repository_data_from_skill(10, "tenant-1", "user-1")
+
+
+def test_export_skill_zip_and_repository_write_failures():
+    class ExportMissingSkillService(_SkillServiceMock):
+        def export_skills_by_names(self, skill_names, tenant_id=None):
+            return [{"skill_name": skill_names[0], "skill_zip_base64": ""}]
+
+    with patch.object(srs, "SkillService", ExportMissingSkillService):
+        with pytest.raises(ValueError, match="Failed to export skill ZIP"):
+            srs._export_skill_zip_base64(skill_name="Skill A", tenant_id="tenant-1")
+
+    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = (
+        _repository_record(status="rejected")
+    )
+    _skill_repo_db_mock.update_skill_repository_by_id.return_value = 0
+    with pytest.raises(ValueError, match="Failed to update repository listing"):
+        srs.create_skill_repository_listing_impl(
+            skill_id=10,
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = None
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = None
+    with pytest.raises(ValueError, match="Failed to load repository listing"):
+        srs.create_skill_repository_listing_impl(
+            skill_id=10,
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+
+def test_status_transition_edges_and_update_failures():
+    su_record = _repository_record(status="pending_review")
+    assert srs._validate_repository_status_transition(
+        user_role="SU",
+        current_status="pending_review",
+        new_status="shared",
+        record=su_record,
+        user_id="su-1",
+        tenant_id="tenant-1",
+    ) is None
+
+    with pytest.raises(ForbiddenError):
+        srs._validate_repository_status_transition(
+            user_role="ADMIN",
+            current_status="pending_review",
+            new_status="shared",
+            record={**su_record, "publisher_tenant_id": "tenant-2"},
+            user_id="admin-1",
+            tenant_id="tenant-1",
+        )
+
+    publisher_updates = srs._validate_repository_status_transition(
+        user_role="DEV",
+        current_status="rejected",
+        new_status="pending_review",
+        record=_repository_record(status="rejected"),
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+    assert publisher_updates == {
+        "publisher_tenant_id": "tenant-1",
+        "publisher_user_id": "user-1",
+    }
+
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
+        _repository_record(status="rejected")
+    )
+    _skill_repo_db_mock.update_skill_repository_status_by_id.return_value = 0
+    with pytest.raises(ValueError, match="Repository listing not found"):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1,
+            status="pending_review",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+    _skill_repo_db_mock.update_skill_repository_status_by_id.return_value = 1
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(status="rejected"),
+        None,
+    ]
+    with pytest.raises(ValueError, match="Failed to load repository listing"):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1,
+            status="pending_review",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+
+def test_copy_name_and_install_error_edges():
+    assert srs._extract_duplicate_skill_name("plain failure") is None
+    assert srs._truncate_copy_base_name("A" * 120, " suffix") == "A" * 93
+
+    _skill_db_mock.get_skill_by_name.side_effect = None
+    _skill_db_mock.get_skill_by_name.return_value = None
+    assert srs._generate_available_copy_skill_name(
+        base_name="Skill A",
+        tenant_id="tenant-1",
+    ) == "Skill A"
+
+    _skill_db_mock.get_skill_by_name.side_effect = [
+        {"skill_id": 1},
+        {"skill_id": 2},
+        None,
+    ]
+    assert srs._generate_available_copy_skill_name(
+        base_name="Skill A",
+        tenant_id="tenant-1",
+    )
+
+    encoded_zip = base64.b64encode(b"zip").decode("ascii")
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = {
+        **_repository_record(status="shared"),
+        "skill_zip_base64": encoded_zip,
+    }
+
+    with patch.object(srs, "_generate_available_copy_skill_name", return_value=""):
+        with pytest.raises(ValueError, match="Skill name is required"):
+            srs.install_skill_from_repository_impl(
+                skill_repository_id=1,
+                tenant_id="tenant-1",
+                user_id="user-1",
+            )
+
+    class FailingSkillService(_SkillServiceMock):
+        def create_skill_from_zip_bytes(self, **kwargs):
+            raise SkillException("boom")
+
+    with patch.object(srs, "SkillService", FailingSkillService):
+        with pytest.raises(SkillException, match="boom"):
+            srs.install_skill_from_repository_impl(
+                skill_repository_id=1,
+                tenant_id="tenant-1",
+                user_id="user-1",
+                target_name="Skill Copy",
+            )
+
+
+def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows():
+    class ListSkillService(_SkillServiceMock):
+        def list_skills(self, tenant_id=None):
+            return [{
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "source": "custom",
+                "tags": ["tag"],
+                "created_by": "user-1",
+            }]
+
+    _skill_repo_db_mock.list_skill_repository_by_skill_ids.return_value = [
+        {"skill_id": None, "skill_repository_id": 99, "status": "shared"},
+        {"skill_id": 1, "skill_repository_id": 1, "status": "shared"},
+    ]
+    with patch.object(srs, "SkillService", ListSkillService):
+        result = srs.list_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+    assert result["items"][0]["repository_info"] == [{
+        "skill_repository_id": 1,
+        "status": "shared",
+        "create_time": None,
+    }]
+
+
+def test_repository_detail_not_found():
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = None
+
+    with pytest.raises(ValueError, match="Repository listing not found"):
+        srs.get_skill_repository_listing_detail_impl(1, "tenant-1")

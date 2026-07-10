@@ -274,7 +274,7 @@ export default function SkillDraftPanel({
               open={false}
               onInputKeyDown={handleTagInputKeyDown}
               onChange={() => {
-                void form.validateFields(["tags"]).catch(() => {});
+                form.validateFields(["tags"]).catch(() => undefined);
               }}
               style={{ width: "100%" }}
               popupMatchSelectWidth={false}

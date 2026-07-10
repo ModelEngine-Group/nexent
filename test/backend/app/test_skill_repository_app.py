@@ -48,8 +48,13 @@ def _ensure_exception(name):
 
 
 ForbiddenError = _ensure_exception("ForbiddenError")
+UnauthorizedError = _ensure_exception("UnauthorizedError")
 SkillDuplicateError = getattr(exceptions_module, "SkillDuplicateError", None)
-if SkillDuplicateError is None:
+try:
+    _has_duplicate_names = hasattr(SkillDuplicateError(["Skill A"]), "duplicate_names")
+except Exception:
+    _has_duplicate_names = False
+if not _has_duplicate_names:
     class SkillDuplicateError(Exception):
         def __init__(self, duplicate_names):
             self.duplicate_names = duplicate_names

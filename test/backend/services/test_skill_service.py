@@ -162,7 +162,8 @@ sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer_mock
 # Set up consts mocks
 consts_mock = types.ModuleType('consts')
 consts_const_mock = types.ModuleType('consts.const')
-consts_const_mock.CONTAINER_SKILLS_PATH = "/tmp/skills"
+TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp", "skills"))
+consts_const_mock.CONTAINER_SKILLS_PATH = TEST_LOCAL_SKILLS_DIR
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
@@ -350,13 +351,13 @@ from backend.services.skill_service import (
 )
 
 # Create a mock get_skill_manager to avoid calling the real function
-_mock_skill_manager_instance = MockSkillManager(local_skills_dir="/tmp/skills")
+_mock_skill_manager_instance = MockSkillManager(local_skills_dir=TEST_LOCAL_SKILLS_DIR)
 skill_service.get_skill_manager = lambda tenant_id=None: _mock_skill_manager_instance
 
 
 def create_test_service(tenant_id="test-tenant"):
     """Create a SkillService instance with a tenant_id for testing."""
-    _mock_skill_manager_instance.local_skills_dir = "/tmp/skills"
+    _mock_skill_manager_instance.local_skills_dir = TEST_LOCAL_SKILLS_DIR
     service = SkillService(tenant_id=tenant_id)
     service._overlay_params_from_local_config_yaml = lambda x: x
     return service
@@ -5253,8 +5254,7 @@ class TestSkillServiceUpdateById:
             return_value=str(tmp_path / "existing_skill"),
         )
         mocker.patch("os.path.exists", return_value=True)
-        from consts.exceptions import SkillException
-        with pytest.raises(SkillException, match="already exists locally"):
+        with pytest.raises(skill_service.SkillException, match="already exists locally"):
             service.create_skill(
                 {"name": "existing_skill"},
                 tenant_id="tenant-1",
@@ -5271,8 +5271,7 @@ class TestSkillServiceUpdateById:
             "os.path.realpath",
             side_effect=lambda p: outside if "escaped" in p else str(tmp_path) if str(tmp_path) in p else p,
         )
-        from consts.exceptions import SkillException
-        with pytest.raises(SkillException, match="Unsafe local skill path"):
+        with pytest.raises(skill_service.SkillException, match="Unsafe local skill path"):
             skill_service._resolve_local_skill_path(str(tmp_path), "escaped_skill")
 
     def test_resolve_local_skill_path_unsafe_local_root(self, mocker, tmp_path):
@@ -5285,6 +5284,5 @@ class TestSkillServiceUpdateById:
             "os.path.realpath",
             side_effect=lambda p: outside_dir if p == outside_dir else str(tmp_path),
         )
-        from consts.exceptions import SkillException
-        with pytest.raises(SkillException, match="Unsafe local skills directory"):
+        with pytest.raises(skill_service.SkillException, match="Unsafe local skills directory"):
             skill_service._resolve_local_skill_path(outside_dir, "skill1")

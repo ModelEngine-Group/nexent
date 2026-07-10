@@ -464,35 +464,24 @@ export default function SkillBuildModal({
 
   // Parse frontmatter YAML and update form fields
   const parseAndUpdateFrontmatter = (frontmatterYaml: string) => {
-    try {
-      // Parse the frontmatter using js-yaml
-      const parsed = yaml.load(frontmatterYaml) as Record<
-        string,
-        unknown
-      > | null;
-      if (parsed && typeof parsed === "object") {
-        const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-        const description =
-          typeof parsed.description === "string"
-            ? parsed.description.trim()
-            : "";
-        const tags = Array.isArray(parsed.tags)
-          ? parsed.tags.filter((t): t is string => typeof t === "string")
-          : [];
+    const parsed = parseStreamedFrontmatter(frontmatterYaml);
+    if (!parsed) {
+      return;
+    }
 
-        if (name && !isEditMode) {
-          form.setFieldsValue({ name });
-          setInteractiveSkillName(name);
-        }
-        if (description) {
-          form.setFieldsValue({ description });
-        }
-        if (tags.length > 0) {
-          form.setFieldsValue({ tags });
-        }
-      }
-    } catch (e) {
-      log.warn("Failed to parse frontmatter:", e);
+    const updates: Partial<SkillFormData> = {};
+    if (parsed.name && !isEditMode) {
+      updates.name = parsed.name;
+      setInteractiveSkillName(parsed.name);
+    }
+    if (parsed.description) {
+      updates.description = parsed.description;
+    }
+    if (parsed.tags.length > 0) {
+      updates.tags = parsed.tags;
+    }
+    if (Object.keys(updates).length > 0) {
+      form.setFieldsValue(updates);
     }
   };
 

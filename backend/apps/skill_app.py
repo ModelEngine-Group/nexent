@@ -521,8 +521,10 @@ async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(N
     "/{skill_id:int}",
     responses={
         400: {"description": "No fields to update or invalid skill data"},
+        401: {"description": "Unauthorized"},
         403: {"description": "Not authorized to update this skill"},
         404: {"description": "Skill not found"},
+        500: {"description": "Internal server error"},
     },
 )
 async def update_skill_by_id(

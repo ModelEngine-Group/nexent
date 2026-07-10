@@ -463,6 +463,45 @@ def create_skill_repository_listing_impl(
     return _to_detail_item(record, is_updated=is_updated)
 
 
+def _validate_su_status_transition(
+    transition: Tuple[str, str],
+    current_status: str,
+    new_status: str,
+) -> None:
+    if transition not in _SU_STATUS_TRANSITIONS:
+        raise ValueError(
+            f"Invalid status transition from '{current_status}' to '{new_status}'"
+        )
+
+
+def _validate_publisher_status_transition(
+    *,
+    user_role: str,
+    transition: Tuple[str, str],
+    current_status: str,
+    new_status: str,
+    record: Dict[str, Any],
+    user_id: str,
+    tenant_id: str,
+) -> Optional[Dict[str, str]]:
+    if record.get("publisher_tenant_id") != tenant_id:
+        raise ForbiddenError("Not authorized to update this repository listing")
+    if user_role == "DEV" and record.get("publisher_user_id") != user_id:
+        raise ForbiddenError("Not authorized to update this repository listing")
+    if user_role == "ADMIN" and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
+        return None
+    if transition not in _PUBLISHER_STATUS_TRANSITIONS:
+        raise ValueError(
+            f"Invalid status transition from '{current_status}' to '{new_status}'"
+        )
+    if transition in _PUBLISHER_RESUBMIT_TRANSITIONS:
+        return {
+            "publisher_tenant_id": tenant_id,
+            "publisher_user_id": user_id,
+        }
+    return None
+
+
 def _validate_repository_status_transition(
     *,
     user_role: str,
@@ -476,36 +515,19 @@ def _validate_repository_status_transition(
     transition = (current_status, new_status)
 
     if user_role == "SU":
-        if transition not in _SU_STATUS_TRANSITIONS:
-            raise ValueError(
-                f"Invalid status transition from '{current_status}' to '{new_status}'"
-            )
+        _validate_su_status_transition(transition, current_status, new_status)
         return None
 
     if user_role in ("ADMIN", "DEV"):
-        if record.get("publisher_tenant_id") != tenant_id:
-            raise ForbiddenError(
-                "Not authorized to update this repository listing"
-            )
-        if user_role == "DEV" and record.get("publisher_user_id") != user_id:
-            raise ForbiddenError(
-                "Not authorized to update this repository listing"
-            )
-        if (
-            user_role == "ADMIN"
-            and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS
-        ):
-            return None
-        if transition not in _PUBLISHER_STATUS_TRANSITIONS:
-            raise ValueError(
-                f"Invalid status transition from '{current_status}' to '{new_status}'"
-            )
-        if transition in _PUBLISHER_RESUBMIT_TRANSITIONS:
-            return {
-                "publisher_tenant_id": tenant_id,
-                "publisher_user_id": user_id,
-            }
-        return None
+        return _validate_publisher_status_transition(
+            user_role=user_role,
+            transition=transition,
+            current_status=current_status,
+            new_status=new_status,
+            record=record,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
 
     raise ForbiddenError(
         f"User role {user_role} not authorized to update repository status"
@@ -683,6 +705,68 @@ def install_skill_from_repository_impl(
     }
 
 
+def _list_repository_info_by_skill_id(
+    paged_skills: List[Dict[str, Any]],
+    tenant_id: str,
+) -> Dict[int, List[Dict[str, Any]]]:
+    skill_ids = [
+        int(skill["skill_id"])
+        for skill in paged_skills
+        if skill.get("skill_id") is not None
+    ]
+    if not skill_ids:
+        return {}
+
+    repository_by_skill_id: Dict[int, List[Dict[str, Any]]] = {}
+    repository_records = list_skill_repository_by_skill_ids(
+        skill_ids,
+        statuses=_MY_SKILL_REPOSITORY_STATUSES,
+        publisher_tenant_id=tenant_id,
+    )
+    for record in repository_records:
+        skill_id = record.get("skill_id")
+        if skill_id is None:
+            continue
+        repository_by_skill_id.setdefault(int(skill_id), []).append(
+            _to_repository_info_item(record)
+        )
+    return repository_by_skill_id
+
+
+def _to_mine_skill_item(
+    skill: Dict[str, Any],
+    *,
+    user_id: str,
+    user_role: str,
+    repository_by_skill_id: Dict[int, List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    if skill.get("new_skill_padding"):
+        return {"new_skill_padding": True}
+
+    skill_id = skill.get("skill_id")
+    repository_info = (
+        repository_by_skill_id.get(int(skill_id), [])
+        if skill_id is not None
+        else []
+    )
+    return {
+        "skill_id": skill_id,
+        "name": skill.get("name"),
+        "description": skill.get("description"),
+        "source": skill.get("source"),
+        "tags": skill.get("tags") or [],
+        "created_by": skill.get("created_by"),
+        "created_at": skill.get("create_time"),
+        "updated_at": skill.get("update_time"),
+        "permission": _resolve_mine_skill_permission(
+            skill=skill,
+            user_id=user_id,
+            user_role=user_role,
+        ),
+        "repository_info": repository_info,
+    }
+
+
 def list_my_editable_skills_impl(
     tenant_id: str,
     user_id: str,
@@ -725,49 +809,19 @@ def list_my_editable_skills_impl(
         include_padding=include_padding,
     )
 
-    skill_ids = [
-        int(skill["skill_id"])
-        for skill in paged_skills
-        if skill.get("skill_id") is not None
-    ]
-    repository_by_skill_id: Dict[int, List[Dict[str, Any]]] = {}
-    if skill_ids:
-        repository_records = list_skill_repository_by_skill_ids(
-            skill_ids,
-            statuses=_MY_SKILL_REPOSITORY_STATUSES,
-            publisher_tenant_id=tenant_id,
+    repository_by_skill_id = _list_repository_info_by_skill_id(
+        paged_skills,
+        tenant_id,
+    )
+    items = [
+        _to_mine_skill_item(
+            skill,
+            user_id=user_id,
+            user_role=user_role,
+            repository_by_skill_id=repository_by_skill_id,
         )
-        for record in repository_records:
-            skill_id = record.get("skill_id")
-            if skill_id is None:
-                continue
-            repository_by_skill_id.setdefault(int(skill_id), []).append(
-                _to_repository_info_item(record)
-            )
-
-    items = []
-    for skill in paged_skills:
-        if skill.get("new_skill_padding"):
-            items.append({"new_skill_padding": True})
-            continue
-        items.append({
-            "skill_id": skill.get("skill_id"),
-            "name": skill.get("name"),
-            "description": skill.get("description"),
-            "source": skill.get("source"),
-            "tags": skill.get("tags") or [],
-            "created_by": skill.get("created_by"),
-            "created_at": skill.get("create_time"),
-            "updated_at": skill.get("update_time"),
-            "permission": _resolve_mine_skill_permission(
-                skill=skill,
-                user_id=user_id,
-                user_role=user_role,
-            ),
-            "repository_info": repository_by_skill_id.get(int(skill["skill_id"]), [])
-            if skill.get("skill_id") is not None
-            else [],
-        })
+        for skill in paged_skills
+    ]
 
     return {
         "items": items,
