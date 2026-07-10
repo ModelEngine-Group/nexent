@@ -1,37 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "mcp__ide__getDiagnostics",
-      "Bash(node *)",
-      "Bash(npx tsc *)",
-      "Bash(docker exec *)",
-      "Bash(netstat -ano)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/health)",
-      "Bash(curl *)",
-      "Bash(tasklist //FI \"PID eq 7188\")",
-      "Bash(wmic process *)",
-      "Bash(docker cp *)",
-      "Bash(docker restart *)",
-      "Bash(tasklist *)",
-      "Bash(docker run *)",
-      "Bash(docker container *)",
-      "Bash(docker rm *)",
-      "Bash(npm *)",
-      "Bash(git diff *)",
-      "Bash(python *)",
-      "Bash(npx next *)",
-      "WebSearch",
-      "WebFetch(domain:smithery.ai)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:2000]\\)\")",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:3000]\\)\")",
-      "Bash(ls -d /c/Users/HAN/PycharmProjects/nexent/frontend/app/\\\\\\\\[locale\\\\\\\\]/mcp-tools/)",
-      "Bash(python3 -c ' *)",
-      "Bash(.venv/bin/python -c ' *)",
-      "Bash(.venv/Scripts/python.exe -c ' *)",
-      "Bash(docker inspect *)",
-      "Bash(/c/Users/HAN/PycharmProjects/nexent/backend/.venv/Scripts/python.exe -c ' *)",
-      "Bash(docker start *)",
-      "Bash(docker stop *)"
-    ]
+    "allow": []
   }
 }
