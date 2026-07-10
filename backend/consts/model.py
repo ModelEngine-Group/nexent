@@ -547,7 +547,7 @@ class AgentInfoRequest(BaseModel):
     business_description: Optional[str] = None
     author: Optional[str] = None
     model_ids: Optional[List[int]] = None
-    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
+    max_steps: Optional[int] = Field(default=None, ge=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None

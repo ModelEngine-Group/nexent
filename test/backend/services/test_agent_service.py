@@ -10863,7 +10863,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
     mock_agent_info.description = "desc"
     mock_agent_info.business_description = "biz"
     mock_agent_info.author = "author"
-    mock_agent_info.max_steps = 35  # Too high (> 30)
+    mock_agent_info.max_steps = -1  # Invalid: must be > 0
     mock_agent_info.provide_run_summary = True
     mock_agent_info.duty_prompt = "duty"
     mock_agent_info.constraint_prompt = "constraint"
