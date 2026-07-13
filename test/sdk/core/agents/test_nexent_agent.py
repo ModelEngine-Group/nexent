@@ -2190,6 +2190,26 @@ class TestCreateBuiltinTool:
         with pytest.raises(ValueError, match="Unknown builtin tool: UnknownTool"):
             nexent_agent_instance.create_builtin_tool(tool_config)
 
+    def test_create_builtin_tool_does_not_restore_nl2agent_finalize_callable(
+        self, nexent_agent_instance
+    ):
+        """NL2AGENT finalization remains a response card, not a fourth tool."""
+        tool_config = ToolConfig(
+            class_name="NL2AgentFinalizeAgentTool",
+            name="nl2agent_finalize_proposal",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Unknown builtin tool: NL2AgentFinalizeAgentTool",
+        ):
+            nexent_agent_instance.create_builtin_tool(tool_config)
+
     def test_create_builtin_tool_unknown_tool_partial_name(self, nexent_agent_instance):
         """Test create_builtin_tool raises error for similar but unknown tool name."""
         tool_config = ToolConfig(

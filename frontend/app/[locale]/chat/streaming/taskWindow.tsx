@@ -408,15 +408,24 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) =>
       message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
       message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
-    render: (message, _t) => (
+    render: (message, _t, context) => (
       <div
-        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+        className={
+          message.subType === "deep_thinking"
+            ? "deep-thinking-content"
+            : "task-message-content"
+        }
       >
         <MarkdownRenderer
           content={convertToMarkdownCodeFences(message.content)}
-          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+          className={
+            message.subType === "deep_thinking"
+              ? "deep-thinking-content"
+              : "task-message-content"
+          }
           showDiagramToggle={false}
           enableMultimodal={false}
+          nl2AgentDraftAgentId={context?.nl2AgentDraftAgentId}
         />
       </div>
     ),
@@ -1149,15 +1158,24 @@ const messageHandlers: MessageHandler[] = [
   // model_output type processor - model output
   {
     canHandle: (message) => message.type === "model_output",
-    render: (message, _t) => (
+    render: (message, _t, context) => (
       <div
-        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+        className={
+          message.subType === "deep_thinking"
+            ? "deep-thinking-content"
+            : "task-message-content"
+        }
       >
         <MarkdownRenderer
           content={convertToMarkdownCodeFences(message.content)}
-          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+          className={
+            message.subType === "deep_thinking"
+              ? "deep-thinking-content"
+              : "task-message-content"
+          }
           showDiagramToggle={false}
           enableMultimodal={false}
+          nl2AgentDraftAgentId={context?.nl2AgentDraftAgentId}
         />
       </div>
     ),
@@ -1420,7 +1438,7 @@ const messageHandlers: MessageHandler[] = [
   // default processor - should be placed at the end
   {
     canHandle: () => true,
-    render: (message, t) => {
+    render: (message, t, context) => {
       const content = message.content;
       if (typeof content === "string") {
         return (
@@ -1429,6 +1447,7 @@ const messageHandlers: MessageHandler[] = [
             className="task-message-content"
             showDiagramToggle={false}
             enableMultimodal={false}
+            nl2AgentDraftAgentId={context?.nl2AgentDraftAgentId}
           />
         );
       } else {
@@ -1452,12 +1471,14 @@ interface TaskWindowProps {
   messages: TaskMessageType[];
   isStreaming?: boolean;
   defaultExpanded?: boolean;
+  nl2AgentDraftAgentId?: number | null;
 }
 
 function TaskWindowInner({
   messages,
   isStreaming = false,
   defaultExpanded = true,
+  nl2AgentDraftAgentId,
 }: TaskWindowProps) {
   const { t } = useTranslation("common");
   const { appConfig } = useConfig();
@@ -1643,7 +1664,7 @@ function TaskWindowInner({
 
     const handler = messageHandlers.find((h) => h.canHandle(message));
     if (handler) {
-      return handler.render(message, t, { appConfig });
+      return handler.render(message, t, { appConfig, nl2AgentDraftAgentId });
     }
 
     // Fallback processing, normally not executed here
@@ -1834,6 +1855,7 @@ function areEqualTaskWindow(
   next: TaskWindowProps
 ): boolean {
   if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.nl2AgentDraftAgentId !== next.nl2AgentDraftAgentId) return false;
   if (prev.messages.length !== next.messages.length) return false;
   // During streaming the last message grows in content without the array length changing.
   if (prev.messages.length > 0) {

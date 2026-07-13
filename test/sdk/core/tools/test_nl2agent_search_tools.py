@@ -12,6 +12,11 @@ if str(SDK_SOURCE_ROOT) not in sys.path:
 
 from nexent.core.tools.nl2agent import _context as context_module
 from nexent.core.tools.nl2agent import search_local_resources_tool as local_tool_module
+from nexent.core.tools.nl2agent._context import (
+    _score_candidates,
+    canonical_search_query,
+    normalize_search_keywords,
+)
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
@@ -33,6 +38,30 @@ def reset_nl2agent_state():
 
 def _loads(raw_result):
     return json.loads(raw_result)
+
+
+def test_search_keyword_normalization_handles_mixed_text_and_equivalent_order():
+    assert normalize_search_keywords("通过 DOCX，大纲生成 + PPT；docx") == [
+        "docx",
+        "大纲生成",
+        "ppt",
+    ]
+    assert canonical_search_query("PPT, DOCX") == canonical_search_query(" docx ppt ")
+
+
+def test_candidate_scoring_uses_keyword_or_matching_and_filters_weak_results():
+    candidates = [
+        {"name": "DOCX PPT Builder", "description": "Generate presentation slides."},
+        {"name": "DOCX Reader", "description": "Extract document text."},
+        {"name": "Calendar", "description": "Schedule meetings."},
+    ]
+
+    scored = _score_candidates(candidates, "docx, ppt", "name")
+
+    assert [item["name"] for item in scored] == ["DOCX PPT Builder", "DOCX Reader"]
+    assert scored[0]["score"] > scored[1]["score"]
+    assert scored[0]["reason"] == "Matched keywords: docx, ppt"
+    assert _score_candidates(candidates, "quantum", "name") == []
 
 
 @pytest.mark.parametrize(
@@ -84,7 +113,7 @@ def test_nl2agent_search_local_resources_returns_empty_results_for_empty_catalog
     assert first["tools"] == []
     assert first["skills"] == []
     assert first["recommendation_batch_id"].startswith("local_")
-    assert _loads(tool(query="web search"))["recommendation_batch_id"] == first[
+    assert _loads(tool(query="SEARCH, WEB"))["recommendation_batch_id"] == first[
         "recommendation_batch_id"
     ]
 
@@ -157,10 +186,10 @@ def test_nl2agent_search_local_resources_scores_and_ranks_catalog_candidates():
     payload = _loads(tool(query="web search"))
 
     assert payload["agent_id"] == 202
-    assert [item["tool_id"] for item in payload["tools"]][:2] == [2, 1]
+    assert [item["tool_id"] for item in payload["tools"]] == [2]
     assert payload["skills"][0]["skill_id"] == 11
     assert all("score" in item and "reason" in item for item in payload["tools"])
-    assert payload["tools"][0]["score"] >= payload["tools"][1]["score"]
+    assert len(payload["tools"]) + len(payload["skills"]) <= 5
 
 
 def test_nl2agent_search_web_mcps_scores_registry_and_community_catalogs():
@@ -194,7 +223,66 @@ def test_nl2agent_search_web_mcps_scores_registry_and_community_catalogs():
     assert all(item["agent_id"] == 202 for item in payload["items"])
     assert payload["items"][0]["name"] == "GitHub Repository MCP"
     assert payload["items"][0]["source"] == "registry"
-    assert payload["items"][0]["score"] >= payload["items"][1]["score"]
+    assert len(payload["items"]) == 1
+
+
+def test_mcp_search_deduplicates_registry_and_community_names_with_registry_precedence():
+    tool = get_search_web_mcps_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        registry_results=[
+            {"name": "Document Reader", "description": "Read DOCX files."},
+        ],
+        community_results=[
+            {"communityId": 9, "name": " document reader ", "description": "Duplicate."},
+        ],
+    )
+
+    payload = _loads(tool(query="document reader"))
+
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["source"] == "registry"
+
+
+def test_mcp_search_cache_survives_tool_rebuild_for_equivalent_keyword_sets():
+    first = get_search_web_mcps_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        registry_results=[{"name": "DOCX Parser", "description": "Read documents."}],
+        community_results=[],
+    )
+    rebuilt = get_search_web_mcps_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        registry_results=[{"name": "PPT Generator", "description": "Build slides."}],
+        community_results=[],
+    )
+
+    first_result = first(query="docx ppt")
+    rebuilt_result = rebuilt(query="PPT, DOCX")
+
+    assert rebuilt_result == first_result
+
+
+def test_mcp_search_cache_is_isolated_by_tenant_and_draft():
+    first = get_search_web_mcps_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        registry_results=[{"name": "First Document MCP", "description": "Read documents."}],
+        community_results=[],
+    )
+    second = get_search_web_mcps_tool(
+        draft_agent_id=303,
+        tenant_id="tenant_2",
+        registry_results=[{"name": "Second Document MCP", "description": "Read documents."}],
+        community_results=[],
+    )
+
+    first_payload = _loads(first(query="document"))
+    second_payload = _loads(second(query="document"))
+
+    assert first_payload["items"][0]["name"] == "First Document MCP"
+    assert second_payload["items"][0]["name"] == "Second Document MCP"
 
 
 def test_registry_mcp_normalization_preserves_declared_configuration_without_secret_defaults():
@@ -331,7 +419,42 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
 
     assert payload["agent_id"] == 202
     assert payload["items"][0]["skill_id"] == 12
-    assert payload["items"][0]["score"] >= payload["items"][1]["score"]
+    assert len(payload["items"]) == 1
+
+
+def test_local_search_limits_tools_and_skills_to_five_combined():
+    tool = get_search_local_resources_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        tool_catalog=[
+            {"tool_id": index, "name": f"Document Tool {index}", "description": "Document processing."}
+            for index in range(1, 5)
+        ],
+        skill_catalog=[
+            {"skill_id": index, "name": f"Document Skill {index}", "description": "Document processing."}
+            for index in range(10, 14)
+        ],
+    )
+
+    payload = _loads(tool(query="document"))
+
+    assert len(payload["tools"]) + len(payload["skills"]) == 5
+
+
+def test_web_skill_search_deduplicates_ids_and_normalized_names():
+    tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=[
+            {"skill_id": 1, "skill_name": "docx-reader", "description": "Read DOCX."},
+            {"skill_id": 1, "skill_name": "docx-reader-copy", "description": "Duplicate ID."},
+            {"skill_id": 2, "skill_name": "DOCX Reader", "description": "Duplicate name."},
+        ],
+    )
+
+    payload = _loads(tool(query="docx reader"))
+
+    assert len(payload["items"]) == 1
 
 
 def test_nl2agent_search_local_resources_cache_hit_returns_without_rescoring(monkeypatch):

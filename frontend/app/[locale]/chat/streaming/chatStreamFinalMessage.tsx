@@ -57,6 +57,7 @@ interface FinalMessageProps {
   currentConversationId?: number;
   onCitationHover?: () => void;
   onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
+  nl2AgentDraftAgentId?: number | null;
 }
 
 // TTS playback status
@@ -77,6 +78,7 @@ function ChatStreamFinalMessageInner({
   currentConversationId,
   onCitationHover,
   onInstallNl2AgentMcp,
+  nl2AgentDraftAgentId,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
 
@@ -354,6 +356,7 @@ function ChatStreamFinalMessageInner({
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
                 onInstallNl2AgentMcp={onInstallNl2AgentMcp}
+                nl2AgentDraftAgentId={nl2AgentDraftAgentId}
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
@@ -520,7 +523,8 @@ function areEqualFinalMessage(
     prev.hideButtons === next.hideButtons &&
     prev.readOnly === next.readOnly &&
     prev.index === next.index &&
-    prev.currentConversationId === next.currentConversationId
+    prev.currentConversationId === next.currentConversationId &&
+    prev.nl2AgentDraftAgentId === next.nl2AgentDraftAgentId
     // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally
     // excluded: they do not affect rendered output and will be stabilized with useCallback (Phase 1.2).
   );

@@ -10,6 +10,7 @@ from smolagents.tools import Tool
 from ._context import (
     Nl2AgentContext,
     _score_candidates,
+    canonical_search_query,
     create_nl2agent_context,
     error_response,
     get_cached_search,
@@ -26,12 +27,60 @@ def _recommendation_batch_id(
     """Build a stable opaque ID for one draft/query/result combination."""
     identity = {
         "draft_agent_id": draft_agent_id,
-        "query": " ".join(query.lower().split()),
+        "query": canonical_search_query(query),
         "tool_ids": sorted(int(item["tool_id"]) for item in tools if item.get("tool_id") is not None),
         "skill_ids": sorted(int(item["skill_id"]) for item in skills if item.get("skill_id") is not None),
     }
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()
     return f"local_{digest[:24]}"
+
+
+def _deduplicate_local_items(
+    items: List[Dict[str, Any]], id_field: str, name_field: str = "name"
+) -> List[Dict[str, Any]]:
+    """Deduplicate one local resource type by stable ID, then normalized name."""
+    result: List[Dict[str, Any]] = []
+    seen_ids = set()
+    seen_names = set()
+    for item in items:
+        item_id = item.get(id_field)
+        normalized_name = canonical_search_query(str(item.get(name_field) or ""))
+        is_duplicate = (item_id is not None and item_id in seen_ids) or (
+            normalized_name and normalized_name in seen_names
+        )
+        if item_id is not None:
+            seen_ids.add(item_id)
+        if normalized_name:
+            seen_names.add(normalized_name)
+        if is_duplicate:
+            continue
+        result.append(item)
+    return result
+
+
+def _rank_local_resources(
+    context: Nl2AgentContext, query: str
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Return at most five tools and skills combined, ordered by relevance."""
+    tools = _deduplicate_local_items(
+        _score_candidates(context.tool_catalog or [], query, "name"), "tool_id"
+    )
+    skills = _deduplicate_local_items(
+        _score_candidates(context.skill_catalog or [], query, "name"), "skill_id"
+    )
+    combined = [("tool", item) for item in tools] + [("skill", item) for item in skills]
+    combined.sort(
+        key=lambda entry: (
+            -entry[1].get("score", 0.0),
+            0 if entry[0] == "tool" else 1,
+            canonical_search_query(str(entry[1].get("name") or "")),
+        )
+    )
+    selected = combined[:5]
+    return (
+        [item for kind, item in selected if kind == "tool"],
+        [item for kind, item in selected if kind == "skill"],
+    )
 
 
 def get_search_local_resources_tool(
@@ -92,8 +141,7 @@ class NL2AgentSearchLocalResourcesTool(Tool):
         if ctx.tool_catalog is None or ctx.skill_catalog is None:
             return error_response("tool/skill catalog not available in context")
 
-        q = query.lower().strip()
-        cache_key = ("nl2agent_search_local_resources", q)
+        cache_key = ("nl2agent_search_local_resources", query)
 
         if cached := get_cached_search(ctx, *cache_key):
             logger.info(f"nl2agent_search_local_resources cache hit for query: {query}")
@@ -101,8 +149,7 @@ class NL2AgentSearchLocalResourcesTool(Tool):
 
         # Guard: do not re-search if already searched this session.
         if ctx.was_searched("nl2agent_search_local_resources", query):
-            tools = _score_candidates(ctx.tool_catalog, query, "name")[:5]
-            skills = _score_candidates(ctx.skill_catalog, query, "name")[:5]
+            tools, skills = _rank_local_resources(ctx, query)
             result = json.dumps(
                 {
                     "agent_id": ctx.target_agent_id,
@@ -120,8 +167,7 @@ class NL2AgentSearchLocalResourcesTool(Tool):
             set_cached_search(ctx, *cache_key, result)
             return result
 
-        tools = _score_candidates(ctx.tool_catalog, query, "name")[:5]
-        skills = _score_candidates(ctx.skill_catalog, query, "name")[:5]
+        tools, skills = _rank_local_resources(ctx, query)
         result = json.dumps(
             {
                 "agent_id": ctx.target_agent_id,

@@ -35,6 +35,7 @@ interface MarkdownRendererProps {
    */
   resolveS3Media?: boolean;
   onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
+  nl2AgentDraftAgentId?: number | null;
 }
 
 export interface MarkdownHeading {
@@ -1048,6 +1049,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   enableMultimodal = true,
   resolveS3Media = false,
   onInstallNl2AgentMcp,
+  nl2AgentDraftAgentId,
 }) => {
   const { t } = useTranslation("common");
 
@@ -1373,7 +1375,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                       const node = tryRenderNl2AgentCard(
                         match[1],
                         codeContent,
-                        onInstallNl2AgentMcp
+                        onInstallNl2AgentMcp,
+                        nl2AgentDraftAgentId
                       );
                       if (node) {
                         return <>{node}</>;

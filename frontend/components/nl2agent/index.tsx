@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { resolveNl2AgentCardAgentId } from "@/lib/chat/nl2agentDraftContext";
 import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
 import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
 import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
@@ -27,16 +28,26 @@ export interface Nl2AgentCardRendererProps {
   content: string;
   /** Optional handler to open the existing AddMcpServiceModal prefilled. */
   onInstallMcp?: (item: WebMcpCardItem) => void;
+  trustedDraftAgentId?: number | null;
 }
-
-const parseAgentId = (value: unknown): number | null => {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-};
 
 const renderInvalidAgentId = () => (
   <div className="my-2 p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
     Invalid NL2AGENT card JSON: missing draft agent_id.
+  </div>
+);
+
+const renderMismatchedAgentId = () => (
+  <div className="my-2 p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
+    Invalid NL2AGENT card JSON: draft agent_id does not match the active
+    conversation.
+  </div>
+);
+
+const renderInvalidSearchCard = () => (
+  <div className="my-2 p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
+    Invalid NL2AGENT search card: search must be executed by the agent before a
+    result card can be rendered.
   </div>
 );
 
@@ -48,11 +59,15 @@ const renderInvalidAgentId = () => (
 export const tryRenderNl2AgentCard = (
   language: string,
   content: string,
-  onInstallMcp?: (item: WebMcpCardItem) => void
+  onInstallMcp?: (item: WebMcpCardItem) => void,
+  trustedDraftAgentId?: number | null
 ): React.ReactNode | null => {
   const normalizedLanguage = language?.trim().toLowerCase();
   if (!normalizedLanguage || !normalizedLanguage.startsWith("nl2agent-")) {
     return null;
+  }
+  if (normalizedLanguage.startsWith("nl2agent-search-")) {
+    return renderInvalidSearchCard();
   }
 
   let parsed: any;
@@ -66,10 +81,16 @@ export const tryRenderNl2AgentCard = (
     );
   }
 
-  const nestedAgentId = Array.isArray(parsed.items)
-    ? parsed.items.map((item: any) => parseAgentId(item?.agent_id)).find(Boolean)
-    : null;
-  const agentId = parseAgentId(parsed.agent_id) ?? nestedAgentId ?? null;
+  const { agentId, mismatch } = resolveNl2AgentCardAgentId(
+    parsed.agent_id,
+    Array.isArray(parsed.items)
+      ? parsed.items.map((item: any) => item?.agent_id)
+      : [],
+    trustedDraftAgentId
+  );
+  if (mismatch) {
+    return renderMismatchedAgentId();
+  }
   if (agentId == null) {
     return renderInvalidAgentId();
   }
@@ -78,7 +99,16 @@ export const tryRenderNl2AgentCard = (
     case "nl2agent-model-selection":
       return <ModelSelectionCard agentId={agentId} />;
     case "nl2agent-agent-identity":
-      return <AgentIdentityCard agentId={agentId} />;
+      return (
+        <AgentIdentityCard
+          agentId={agentId}
+          suggestedDisplayName={
+            typeof parsed.display_name === "string"
+              ? parsed.display_name
+              : undefined
+          }
+        />
+      );
     case "nl2agent-local-resources": {
       const tools: LocalResourceItem[] = (parsed.tools || []).map((x: any) => ({
         ...x,
@@ -138,7 +168,7 @@ export const tryRenderNl2AgentCard = (
       // Forward the full agent spec to FinalizeCard so it can display
       // all fields and call the finalize endpoint on "Publish".
       const { agent_id, ...rest } = parsed;
-      return <FinalizeCard data={{ agent_id, ...rest } as any} />;
+      return <FinalizeCard data={{ agent_id: agentId, ...rest } as any} />;
     }
     default:
       return null;

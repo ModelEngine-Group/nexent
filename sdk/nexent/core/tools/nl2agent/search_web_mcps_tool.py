@@ -1,6 +1,7 @@
 """NL2AGENT tool: search web MCP marketplaces for individual install."""
 
 import json
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
@@ -9,9 +10,15 @@ from smolagents.tools import Tool
 from ._context import (
     Nl2AgentContext,
     _score_candidates,
+    canonical_search_query,
     create_nl2agent_context,
     error_response,
+    get_cached_search,
+    set_cached_search,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _field_type(spec: Dict[str, Any], name: str) -> str:
@@ -277,6 +284,11 @@ def get_search_web_mcps_tool(
 class NL2AgentSearchWebMcpsTool(Tool):
     """Search web MCP marketplaces (official registry + community) for servers matching the user's intent.
 
+    This is an executable tool, not a frontend card type. Call it with the
+    query, wait for its result, and render that returned JSON with the
+    ``nl2agent-web-mcps`` result-card tag. Never emit a
+    ``nl2agent-search-web-mcps`` block containing the query.
+
     Returns a frontend card JSON string with ``agent_id`` and normalized
     installation options. The card collects declared configuration, installs
     the selected option, discovers its tools, and lets the user bind or skip
@@ -303,6 +315,31 @@ class NL2AgentSearchWebMcpsTool(Tool):
         super().__init__()
         self.context = context
 
+    @staticmethod
+    def _deduplicate_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Deduplicate marketplace entries, preserving registry-first precedence."""
+        result: List[Dict[str, Any]] = []
+        seen_ids = set()
+        seen_names = set()
+        for candidate in candidates:
+            recommendation_id = candidate.get("recommendation_id")
+            normalized_name = canonical_search_query(str(candidate.get("name") or ""))
+            is_duplicate = (recommendation_id and recommendation_id in seen_ids) or (
+                normalized_name and normalized_name in seen_names
+            )
+            if recommendation_id:
+                seen_ids.add(recommendation_id)
+            if normalized_name:
+                seen_names.add(normalized_name)
+            if is_duplicate:
+                continue
+            result.append(candidate)
+        return result
+
+    def _rank_candidates(self, candidates: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+        deduplicated = self._deduplicate_candidates(candidates)
+        return _score_candidates(deduplicated, query, "name")[:5]
+
     def forward(self, query: str) -> str:
         ctx = self.context
         if ctx.tenant_id is None:
@@ -316,9 +353,14 @@ class NL2AgentSearchWebMcpsTool(Tool):
         if ctx.community_results:
             candidates += [normalize_mcp_candidate("community", r) for r in ctx.community_results]
 
+        cache_key = ("nl2agent_search_web_mcps", query)
+        if cached := get_cached_search(ctx, *cache_key):
+            logger.info(f"nl2agent_search_web_mcps cache hit for query: {query}")
+            return cached
+
         # Guard: if already searched, return cached + applied state
         if ctx.was_searched("nl2agent_search_web_mcps", query):
-            scored = _score_candidates(candidates, query, "name")[:5]
+            scored = self._rank_candidates(candidates, query)
             scored = [
                 {**item, "agent_id": ctx.target_agent_id} for item in scored
             ]
@@ -331,12 +373,14 @@ class NL2AgentSearchWebMcpsTool(Tool):
                 },
                 ensure_ascii=False,
             )
+            set_cached_search(ctx, *cache_key, result)
             return result
 
-        scored = _score_candidates(candidates, query, "name")[:5]
+        scored = self._rank_candidates(candidates, query)
         # Keep the draft identity on every recommendation as well as the
         # wrapper. This makes both plural and per-item MCP card rendering safe.
         scored = [{**item, "agent_id": ctx.target_agent_id} for item in scored]
         result = json.dumps({"agent_id": ctx.target_agent_id, "items": scored}, ensure_ascii=False)
+        set_cached_search(ctx, *cache_key, result)
         ctx.mark_searched("nl2agent_search_web_mcps", query)
         return result

@@ -426,6 +426,7 @@ from backend.agents.create_agent_info import (
     _get_agent_tool_overrides,
     _merge_tool_params,
     _resolve_agent_run_model_id,
+    _is_nl2agent_model_selection_confirmed,
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
@@ -447,6 +448,20 @@ def test_resolve_agent_run_model_id_prefers_current_model_fields():
     assert _resolve_agent_run_model_id({"model_ids": [88], "model_id": 99}) == 88
     assert _resolve_agent_run_model_id({"model_id": 99}) == 99
     assert _resolve_agent_run_model_id({"business_logic_model_id": 77}, 66) == 66
+
+
+@pytest.mark.parametrize(
+    ("draft", "expected"),
+    [
+        ({"business_logic_model_id": 7, "model_ids": [7, 8]}, True),
+        ({"business_logic_model_id": "7", "model_ids": ["7"]}, True),
+        ({"business_logic_model_id": 7, "model_ids": [8]}, False),
+        ({"business_logic_model_id": None, "model_ids": [7]}, False),
+        ({"business_logic_model_id": 7, "model_ids": []}, False),
+    ],
+)
+def test_is_nl2agent_model_selection_confirmed(draft, expected):
+    assert _is_nl2agent_model_selection_confirmed(draft) is expected
 ValidationError = sys.modules["consts.exceptions"].ValidationError
 
 # Import ToolParamsRequest for testing
@@ -2073,6 +2088,8 @@ class TestCreateAgentConfig:
                 **session_catalogs,
             }
             assert mock_agent_config.call_args.kwargs["model_name"] == "business_model"
+            runtime_prompt = mock_prepare_templates.call_args.kwargs["system_prompt"]
+            assert "Authoritative model_selection_confirmed is `false`" in runtime_prompt
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):

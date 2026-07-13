@@ -9,6 +9,7 @@ from smolagents.tools import Tool
 from ._context import (
     Nl2AgentContext,
     _score_candidates,
+    canonical_search_query,
     create_nl2agent_context,
     error_response,
     get_cached_search,
@@ -17,6 +18,32 @@ from ._context import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _rank_web_skills(candidates: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    """Score and deduplicate web skills before applying the result limit."""
+    scored = _score_candidates(candidates, query, "skill_name")
+    result: List[Dict[str, Any]] = []
+    seen_ids = set()
+    seen_names = set()
+    for item in scored:
+        skill_id = item.get("skill_id")
+        normalized_name = canonical_search_query(
+            str(item.get("skill_name") or item.get("name") or "")
+        )
+        is_duplicate = (skill_id is not None and skill_id in seen_ids) or (
+            normalized_name and normalized_name in seen_names
+        )
+        if skill_id is not None:
+            seen_ids.add(skill_id)
+        if normalized_name:
+            seen_names.add(normalized_name)
+        if is_duplicate:
+            continue
+        result.append(item)
+        if len(result) == 5:
+            break
+    return result
 
 
 def get_search_web_skills_tool(
@@ -74,8 +101,7 @@ class NL2AgentSearchWebSkillsTool(Tool):
         if ctx.official_skills is None:
             return error_response("skills catalog not available in context")
 
-        q = query.lower().strip()
-        cache_key = ("nl2agent_search_web_skills", q)
+        cache_key = ("nl2agent_search_web_skills", query)
 
         if cached := get_cached_search(ctx, *cache_key):
             logger.info(f"nl2agent_search_web_skills cache hit for query: {query}")
@@ -83,7 +109,7 @@ class NL2AgentSearchWebSkillsTool(Tool):
 
         # Guard: if already searched, return cached + applied state
         if ctx.was_searched("nl2agent_search_web_skills", query):
-            scored = _score_candidates(ctx.official_skills, query, "skill_name")[:5]
+            scored = _rank_web_skills(ctx.official_skills, query)
             result = json.dumps(
                 {
                     "agent_id": ctx.target_agent_id,
@@ -96,7 +122,7 @@ class NL2AgentSearchWebSkillsTool(Tool):
             set_cached_search(ctx, *cache_key, result)
             return result
 
-        scored = _score_candidates(ctx.official_skills, query, "skill_name")[:5]
+        scored = _rank_web_skills(ctx.official_skills, query)
         result = json.dumps({"agent_id": ctx.target_agent_id, "items": scored}, ensure_ascii=False)
         set_cached_search(ctx, *cache_key, result)
         ctx.mark_searched("nl2agent_search_web_skills", query)

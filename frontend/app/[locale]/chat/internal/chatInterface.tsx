@@ -47,6 +47,7 @@ import {
   StreamingMessage,
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
+import { resolveNl2AgentDraftAgentId } from "@/lib/chat/nl2agentDraftContext";
 
 import { Button, Checkbox, Layout, message } from "antd";
 import log from "@/lib/logger";
@@ -711,8 +712,12 @@ export function ChatInterface() {
         runAgentParams.agent_id = Number(selectedAgentId);
       }
 
-      const draftAgentIdForRun =
-        nl2agentDraftAgentId ?? getNl2AgentDraftForConversation(id);
+      const draftAgentIdForRun = resolveNl2AgentDraftAgentId(
+        id,
+        readNl2AgentDraftMap(),
+        nl2agentConversationId,
+        nl2agentDraftAgentId
+      );
       if (draftAgentIdForRun !== null) {
         runAgentParams.draft_agent_id = draftAgentIdForRun;
       }
@@ -1837,6 +1842,13 @@ export function ChatInterface() {
     // Both admin and regular users now use dropdown menus
   };
 
+  const activeNl2AgentDraftAgentId = resolveNl2AgentDraftAgentId(
+    conversationManagement.selectedConversationId,
+    readNl2AgentDraftMap(),
+    nl2agentConversationId,
+    nl2agentDraftAgentId
+  );
+
   return (
     <>
       <Layout hasSider className="flex h-full">
@@ -1926,6 +1938,7 @@ export function ChatInterface() {
                 selectedAgentId={selectedAgentId}
                 onAgentSelect={handleAgentSelectWithGreeting}
                 onCitationHover={clearCompletedIndicator}
+                nl2AgentDraftAgentId={activeNl2AgentDraftAgentId}
                 onScroll={clearCompletedIndicator}
                 agentGreeting={agentGreeting}
                 agentExampleQuestions={agentExampleQuestions}

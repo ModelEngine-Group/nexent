@@ -118,6 +118,24 @@ def _resolve_agent_run_model_id(
 
     return _coerce_model_id(agent_info.get("model_id"))
 
+
+def _is_nl2agent_model_selection_confirmed(
+    draft_agent_info: Dict[str, Any],
+) -> bool:
+    """Return whether a draft has one persisted primary model in its model list."""
+    primary_model_id = _coerce_model_id(
+        draft_agent_info.get("business_logic_model_id")
+    )
+    raw_model_ids = draft_agent_info.get("model_ids") or []
+    if isinstance(raw_model_ids, (str, int)):
+        raw_model_ids = [raw_model_ids]
+    model_ids = {
+        resolved_id
+        for raw_id in raw_model_ids
+        if (resolved_id := _coerce_model_id(raw_id)) is not None
+    }
+    return primary_model_id is not None and primary_model_id in model_ids
+
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
 # Keyed by model_id; cleared only on process restart.
@@ -773,11 +791,23 @@ async def create_agent_config(
     )
     if nl2agent_system_prompt and draft_agent_id is not None:
         resource_state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+        draft_agent_info = search_agent_info_by_agent_id(
+            agent_id=draft_agent_id,
+            tenant_id=tenant_id,
+            version_no=0,
+        )
+        model_selection_confirmed = _is_nl2agent_model_selection_confirmed(
+            draft_agent_info
+        )
         nl2agent_system_prompt += (
             "\n\n### Current Session\n"
             f"The exact draft agent_id is `{int(draft_agent_id)}`. "
-            "Use it in every NL2AGENT card. Model selection is incomplete until "
-            "the model-selection card confirms that it was saved.\n"
+            "Use it in every NL2AGENT card. "
+            "Authoritative model_selection_confirmed is "
+            f"`{str(model_selection_confirmed).lower()}`. "
+            "When false, emit only the required one-sentence instruction followed "
+            "by the model-selection card, then wait. When true, "
+            "do not show or discuss model choices again; continue to resource review.\n"
             "Authoritative local resource review state: "
             f"{json.dumps(resource_state, ensure_ascii=False)}. "
             "Finalization is forbidden until at least one batch exists and every batch is applied or skipped."

@@ -9,8 +9,17 @@ import {
   saveNl2AgentIdentity,
 } from "@/services/nl2agentService";
 
-export const AgentIdentityCard: React.FC<{ agentId: number }> = ({ agentId }) => {
-  const [displayName, setDisplayName] = useState("");
+export interface AgentIdentityCardProps {
+  agentId: number;
+  suggestedDisplayName?: string;
+}
+
+export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
+  agentId,
+  suggestedDisplayName,
+}) => {
+  const normalizedSuggestion = (suggestedDisplayName || "").trim().slice(0, 50);
+  const [displayName, setDisplayName] = useState(normalizedSuggestion);
   const [internalName, setInternalName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
@@ -18,13 +27,19 @@ export const AgentIdentityCard: React.FC<{ agentId: number }> = ({ agentId }) =>
   useEffect(() => {
     void getNl2AgentSessionState(agentId)
       .then((state) => {
-        setDisplayName(state.identity_confirmed ? state.display_name || "" : "");
+        setDisplayName(
+          state.identity_confirmed
+            ? state.display_name || ""
+            : normalizedSuggestion
+        );
         setInternalName(state.identity_confirmed ? state.internal_name : "");
         setSaved(state.identity_confirmed);
       })
-      .catch((error) => message.error(error?.message || "Failed to load agent identity."))
+      .catch((error) =>
+        message.error(error?.message || "Failed to load agent identity.")
+      )
       .finally(() => setLoading(false));
-  }, [agentId]);
+  }, [agentId, normalizedSuggestion]);
 
   const save = async () => {
     const value = displayName.trim();
@@ -49,7 +64,9 @@ export const AgentIdentityCard: React.FC<{ agentId: number }> = ({ agentId }) =>
   return (
     <div className="my-3 rounded-lg border border-gray-200 bg-white p-4">
       <div className="mb-3 text-sm font-medium">Agent Identity</div>
-      <label className="mb-1 block text-xs text-gray-500">Agent Display Name</label>
+      <label className="mb-1 block text-xs text-gray-500">
+        Agent Display Name
+      </label>
       <Input
         value={displayName}
         maxLength={50}
@@ -59,7 +76,8 @@ export const AgentIdentityCard: React.FC<{ agentId: number }> = ({ agentId }) =>
       />
       {internalName ? (
         <div className="mt-2 text-xs text-gray-500">
-          Internal Variable Name: <span className="font-mono">{internalName}</span>
+          Internal Variable Name:{" "}
+          <span className="font-mono">{internalName}</span>
         </div>
       ) : null}
       <Button

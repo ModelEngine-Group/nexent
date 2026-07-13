@@ -1,7 +1,9 @@
 """Shared session context for NL2AGENT builtin tools."""
 
 import json
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -9,10 +11,87 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # Alias for type-annotation clarity in this module.
 _StrStrDict = Dict[str, str]
 
+_SEARCH_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "for",
+    "of",
+    "or",
+    "the",
+    "to",
+    "tool",
+    "tools",
+    "use",
+    "using",
+    "with",
+    "以及",
+    "使用",
+    "和",
+    "实现",
+    "工具",
+    "技能",
+    "用于",
+    "的",
+    "通过",
+    "与",
+}
+_SEARCH_TOKEN_PATTERN = re.compile(r"[a-z0-9]+|[\u3400-\u4dbf\u4e00-\u9fff]+")
+_MIN_KEYWORD_SCORE = 0.62
+
 
 def error_response(message: str) -> str:
     """Return a consistent JSON error payload used by all NL2AGENT tools."""
     return json.dumps({"error": message}, ensure_ascii=False)
+
+
+def normalize_search_keywords(query: str) -> List[str]:
+    """Normalize a search query into distinct atomic Latin or CJK keywords."""
+    normalized = unicodedata.normalize("NFKC", str(query or "")).casefold()
+    keywords: List[str] = []
+    seen: Set[str] = set()
+    for match in _SEARCH_TOKEN_PATTERN.finditer(normalized):
+        keyword = match.group(0)
+        if not keyword or keyword in _SEARCH_STOP_WORDS or keyword in seen:
+            continue
+        seen.add(keyword)
+        keywords.append(keyword)
+    return keywords
+
+
+def canonical_search_query(query: str) -> str:
+    """Return an order-independent signature for an equivalent keyword set."""
+    return "\x1f".join(sorted(normalize_search_keywords(query)))
+
+
+def _searchable_text(value: Any) -> str:
+    """Flatten catalog metadata into normalized searchable text."""
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        value = " ".join(f"{key} {_searchable_text(item)}" for key, item in value.items())
+    elif isinstance(value, (list, tuple, set)):
+        value = " ".join(_searchable_text(item) for item in value)
+    return unicodedata.normalize("NFKC", str(value)).casefold()
+
+
+def _keyword_similarity(keyword: str, text: str) -> float:
+    """Score one keyword against one catalog field."""
+    if not text:
+        return 0.0
+    if keyword in text:
+        return 1.0
+    # Very short fuzzy matches are noisy (for example, "ppt" vs "http").
+    if len(keyword) <= 3:
+        return 0.0
+    try:
+        from rapidfuzz import fuzz
+
+        return fuzz.partial_ratio(keyword, text) / 100.0
+    except ImportError:
+        from difflib import SequenceMatcher
+
+        return SequenceMatcher(None, keyword, text).ratio()
 
 
 def _score_candidates(
@@ -21,45 +100,44 @@ def _score_candidates(
     name_field: str,
     score_field: str = "score",
 ) -> List[Dict[str, Any]]:
-    """Relevance scoring via fuzzy string matching over name + description.
+    """Fuzzy-match each normalized keyword independently with OR semantics."""
+    keywords = normalize_search_keywords(query)
+    if not keywords:
+        return []
 
-    Combines three signals:
-    1. Token-overlap score: fraction of query words found in name + description.
-    2. Substring containment bonus: +0.3 if the full query appears as a substring in name.
-    3. Edit-distance fuzzy score: rapidfuzz.partial_ratio (or difflib fallback).
+    scored: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        name = _searchable_text(candidate.get(name_field, ""))
+        metadata = " ".join(
+            _searchable_text(candidate.get(field)) for field in ("description", "tags")
+        )
+        matches: List[Tuple[str, float]] = []
+        for keyword in keywords:
+            name_score = _keyword_similarity(keyword, name)
+            metadata_score = 0.9 * _keyword_similarity(keyword, metadata)
+            keyword_score = max(name_score, metadata_score)
+            if keyword_score >= _MIN_KEYWORD_SCORE:
+                matches.append((keyword, keyword_score))
 
-    Blended: 40% token-overlap + 30% substring + 30% fuzzy.
-    rapidfuzz is an optional dependency (add to sdk/pyproject.toml);
-    difflib is the zero-dependency fallback.
-    """
-    query_lower = query.lower()
-    query_words = query_lower.split()
-    scored = []
-    for c in candidates:
-        name = c.get(name_field, "").lower()
-        description = c.get("description", "").lower()
-        combined = name + " " + description
-
-        # Signal 1: token-overlap
-        overlap = sum(1 for w in query_words if w in combined) / max(len(query_words), 1)
-
-        # Signal 2: substring containment bonus
-        substring_bonus = 0.3 if query_lower in name else 0.0
-
-        # Signal 3: fuzzy match
-        try:
-            from rapidfuzz import fuzz
-
-            fuzzy_score = fuzz.partial_ratio(query_lower, combined) / 100.0
-        except ImportError:
-            from difflib import SequenceMatcher
-
-            fuzzy_score = SequenceMatcher(None, query_lower, combined).ratio()
-
-        # Blend
-        composite = 0.4 * overlap + 0.3 * substring_bonus + 0.3 * fuzzy_score
-        scored.append({**c, score_field: round(composite, 4), "reason": ""})
-    scored.sort(key=lambda x: x[score_field], reverse=True)
+        if not matches:
+            continue
+        best_score = max(score for _, score in matches)
+        coverage = len(matches) / len(keywords)
+        composite = 0.85 * best_score + 0.15 * coverage
+        matched_keywords = ", ".join(keyword for keyword, _ in matches)
+        scored.append(
+            {
+                **candidate,
+                score_field: round(composite, 4),
+                "reason": f"Matched keywords: {matched_keywords}",
+            }
+        )
+    scored.sort(
+        key=lambda item: (
+            -item[score_field],
+            _searchable_text(item.get(name_field, "")),
+        )
+    )
     return scored
 
 
@@ -122,10 +200,10 @@ class Nl2AgentContext:
         self.applied_mcp_names.add(mcp_name)
 
     def mark_searched(self, tool_name: str, query: str) -> None:
-        self._searched_queries.setdefault(tool_name, set()).add(query.strip().lower())
+        self._searched_queries.setdefault(tool_name, set()).add(canonical_search_query(query))
 
     def was_searched(self, tool_name: str, query: str) -> bool:
-        return query.strip().lower() in self._searched_queries.get(tool_name, set())
+        return canonical_search_query(query) in self._searched_queries.get(tool_name, set())
 
     def get_tool_config(self, tool_id: int) -> Dict[str, Any]:
         return self.tool_configs.get(tool_id, {})
@@ -184,7 +262,7 @@ def _search_cache_key(
         context.tenant_id,
         context.target_agent_id,
         tool_name,
-        query.strip().lower(),
+        canonical_search_query(query),
     )
 
 
