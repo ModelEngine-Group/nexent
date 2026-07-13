@@ -1551,6 +1551,11 @@ class CommunityUpdateRequest(BaseModel):
         return value
 
 
+class CommunityStatusUpdateRequest(BaseModel):
+    """Request model for changing MCP market listing status (PATCH)."""
+    status: str = Field(..., description="New status: shared / rejected / not_shared / pending_review")
+
+
 class DeleteMcpServiceRequest(BaseModel):
     """Request model for deleting an MCP service"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")

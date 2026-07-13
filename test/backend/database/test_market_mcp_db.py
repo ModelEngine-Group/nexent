@@ -73,6 +73,7 @@ for _col in [
     'description', 'tags', 'transport_type', 'download_count',
     'mcp_server', 'registry_json', 'config_json', 'source',
     'created_by', 'updated_by',
+    'review_status', 'submitted_by', 'source_mcp_id',
 ]:
     setattr(_MockMcpMarketRecord, _col, _MockColumn())
 

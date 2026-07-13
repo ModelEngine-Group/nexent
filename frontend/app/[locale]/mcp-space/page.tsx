@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, ConfigProvider, Empty, Modal, Spin, Steps, type StepsProps } from "antd";
+import { App, Button, ConfigProvider, Empty, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { CheckCircle, ChevronLeft, ChevronRight, Clock, CloudUpload, Download, Eye, Inbox, Plus, Puzzle, ShieldCheck, XCircle } from "lucide-react";
@@ -20,6 +20,7 @@ import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAd
 import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
 import {
   approveCommunityMcpTool,
+  cancelCommunityMcpReview,
   deleteCommunityMcpTool,
   deleteMcpToolService,
   publishCommunityMcpTool,
@@ -37,6 +38,7 @@ import {
   FILTER_ALL,
   McpDeploymentType,
   McpSource,
+  MCP_TOOLS_QUERY_KEYS,
   McpToolsServicesTab,
   McpTransportType,
 } from "@/const/mcpTools";
@@ -58,6 +60,7 @@ import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import MineMcpServiceCard, {
   type MineMcpCardItem,
 } from "./components/MineMcpServiceCard";
+import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
 import RepositoryMcpDetailModal from "./components/RepositoryMcpDetailModal";
@@ -218,7 +221,9 @@ export default function McpToolsPage() {
     localList.services,
     myPublished.items
   ).length;
-  const reviewCount = reviewBrowser.services.length;
+  const pendingReviewCount = reviewBrowser.services.filter(
+    (s) => (s.reviewStatus || "pending") === "pending"
+  ).length;
 
   const searchActions = tab === McpToolsServicesTab.MINE ? (
     <></>
@@ -276,7 +281,11 @@ export default function McpToolsPage() {
                     <TabsTrigger value={McpToolsServicesTab.REVIEW} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
                       <ShieldCheck className="size-4" aria-hidden />
                       {t("mcpTools.page.tab.review")}
-                      <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{reviewCount}</span>
+                      {pendingReviewCount > 0 ? (
+                        <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white">
+                          {pendingReviewCount}
+                        </span>
+                      ) : null}
                     </TabsTrigger>
                   ) : null}
                 </TabsList>
@@ -578,7 +587,29 @@ function MineView({
     await Promise.all([localList.refetch(), myPublished.refetch()]);
   };
 
-  const handleSubmitVersionUpdate = async (
+  const handleSubmitVersionUpdate = (
+    item: MineMcpCardItem,
+    onlineService?: CommunityMcpCard
+  ) => {
+    if (item.kind === "community") {
+      // Community items: submit directly
+      doSubmitVersionUpdate(item, onlineService);
+      return;
+    }
+    // Local items: confirm first
+    modal.confirm({
+      title: t("mcpTools.mine.applyForListing"),
+      content: t("mcpTools.mine.confirmApplyListing", {
+        name: item.service.name,
+      }),
+      okText: t("mcpTools.mine.applyForListing"),
+      cancelText: t("common.cancel"),
+      centered: true,
+      onOk: () => doSubmitVersionUpdate(item, onlineService),
+    });
+  };
+
+  const doSubmitVersionUpdate = async (
     item: MineMcpCardItem,
     onlineService?: CommunityMcpCard
   ) => {
@@ -587,20 +618,20 @@ function MineView({
     try {
       if (item.kind === "community") {
         const service = item.service;
-        if (!service.marketId && !service.communityId) return;
+        if (!service.marketId) return;
         await updateCommunityMcpTool({
-          market_id: service.marketId || service.communityId!,
+          market_id: service.marketId,
           name: service.name.trim(),
           description: (service.description || "").trim(),
           version: (service.version || "").trim(),
           tags: service.tags || [],
           registry_json: service.registryJson,
         });
-      } else if (onlineService?.marketId || onlineService?.communityId) {
+      } else if (onlineService?.marketId) {
         const service = item.service;
         const configJson = toMcpContainerConfigPayload(service.configJson);
         await updateCommunityMcpTool({
-          market_id: onlineService.marketId || onlineService.communityId!,
+          market_id: onlineService.marketId,
           name: service.name.trim(),
           description: (service.description || "").trim(),
           version: (service.version || "").trim(),
@@ -626,12 +657,30 @@ function MineView({
         });
       }
       message.success(t("mcpTools.mine.submitVersionUpdateSuccess"));
+      // Optimistically update local cache to show pending status
+      updateLocalReviewStatus(item, "pending");
       await refreshMineData();
     } catch {
       message.error(t("mcpTools.mine.submitVersionUpdateFailed"));
     } finally {
       setPublishingKey(null);
     }
+  };
+
+  const updateLocalReviewStatus = (
+    item: MineMcpCardItem,
+    status: "pending" | "approved" | "rejected"
+  ) => {
+    if (item.kind !== "local") return;
+    queryClient.setQueryData(
+      [...MCP_TOOLS_QUERY_KEYS.services],
+      (old: McpServiceItem[] | undefined) => {
+        if (!old) return old;
+        return old.map((s) =>
+          s.mcpId === item.service.mcpId ? { ...s, reviewStatus: status } : s
+        );
+      }
+    );
   };
 
   const handleUnpublishOnline = (
@@ -710,6 +759,30 @@ function MineView({
     } finally {
       setRefreshingMineKey(null);
     }
+  };
+
+  const handleCancelApply = async (
+    item: MineMcpCardItem,
+    onlineService?: CommunityMcpCard
+  ) => {
+    const communityRecord = item.kind === "community" ? item.service : onlineService;
+    const reviewId = communityRecord?.reviewId;
+    if (!reviewId) return;
+    try {
+      await cancelCommunityMcpReview(reviewId);
+      message.success(t("mcpTools.mine.cancelApplySuccess"));
+      setReviewProgressItem(null);
+      await refreshMineData();
+    } catch {
+      message.error(t("mcpTools.mine.cancelApplyFailed"));
+    }
+  };
+
+  const handleTakeDown = async (
+    item: MineMcpCardItem,
+    onlineService: CommunityMcpCard
+  ) => {
+    handleUnpublishOnline(item, onlineService);
   };
 
   return (
@@ -814,78 +887,15 @@ function MineView({
         );
       })()}
 
-      <ReviewProgressModal
-        item={reviewProgressItem}
+      <MineMcpReviewStatusModal
+        open={Boolean(reviewProgressItem)}
+        item={reviewProgressItem?.item ?? null}
+        onlineService={reviewProgressItem?.onlineService}
         onClose={() => setReviewProgressItem(null)}
-        t={t}
+        onCancelApply={handleCancelApply}
+        onTakeDown={handleTakeDown}
       />
     </div>
-  );
-}
-
-function ReviewProgressModal({
-  item,
-  onClose,
-  t,
-}: {
-  item: { item: MineMcpCardItem; onlineService?: CommunityMcpCard } | null;
-  onClose: () => void;
-  t: (key: string) => string;
-}) {
-  if (!item) return null;
-
-  const { item: cardItem, onlineService } = item;
-  const service = cardItem.service;
-  const communityRecord = cardItem.kind === "community" ? cardItem.service : onlineService;
-  const reviewStatus = communityRecord?.reviewStatus || "pending";
-
-  const isRejected = reviewStatus === "rejected";
-  const isApproved = reviewStatus === "approved";
-
-  const steps: StepsProps["items"] = [
-    { title: t("mcpTools.mine.reviewProgressStepSubmitted"), status: "finish" },
-    {
-      title: isApproved
-        ? t("mcpTools.mine.reviewProgressStepApproved")
-        : isRejected
-          ? t("mcpTools.mine.reviewProgressStepRejected")
-          : t("mcpTools.mine.reviewProgressStepReviewing"),
-      status: isApproved ? "finish" : isRejected ? "error" : "process",
-    },
-  ];
-
-  return (
-    <Modal
-      open
-      centered
-      width={520}
-      footer={null}
-      onCancel={onClose}
-      closable
-    >
-      <div className="py-4">
-        <h3 className="text-lg font-bold text-slate-900">
-          {t("mcpTools.mine.reviewProgressTitle")}
-        </h3>
-
-        <div className="mt-4 space-y-2 text-sm text-slate-600">
-          <p>
-            <span className="font-medium text-slate-700">
-              {t("mcpTools.mine.reviewProgressService")}:
-            </span>{" "}
-            {service.name}
-          </p>
-        </div>
-
-        <div className="mt-6">
-          <Steps
-            direction="vertical"
-            status={isRejected ? "error" : isApproved ? "finish" : "process"}
-            items={steps}
-          />
-        </div>
-      </div>
-    </Modal>
   );
 }
 

@@ -439,6 +439,23 @@ const buildCommunityMcpListUrl = (
   return queryString ? `${endpoint}?${queryString}` : endpoint;
 };
 
+export const cancelCommunityMcpReview = async (reviewId: number) => {
+  try {
+    const response = await fetchWithAuth(
+      `${API_ENDPOINTS.mcpTools.communityDelete}?market_id=${encodeURIComponent(String(reviewId))}`,
+      { method: "DELETE" }
+    );
+    const data = await parseJson<ApiEnvelope>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to cancel community mcp review");
+    }
+    return { success: true, data: null } as McpToolsApiResult<null>;
+  } catch (error) {
+    log.error("cancelCommunityMcpReview failed", error);
+    throw error;
+  }
+};
+
 export const approveCommunityMcpTool = async (reviewId: number) => {
   try {
     const response = await fetchWithAuth(

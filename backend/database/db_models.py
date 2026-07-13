@@ -694,20 +694,20 @@ class McpCommunityRecord(TableBase):
 
 
 class McpMarketRecord(TableBase):
-    """Approved MCP market records (Repository tab) — never disappears during reviews."""
+    """MCP market (community) record — single table covering all listing states."""
 
     __tablename__ = "mcp_market_record_t"
     __table_args__ = {"schema": SCHEMA}
 
     market_id = Column(
-        Integer,
+        BigInteger,
         Sequence("mcp_market_record_t_market_id_seq", schema=SCHEMA),
         primary_key=True,
         nullable=False,
         doc="Market record ID, unique primary key",
     )
-    tenant_id = Column(String(100), doc="Publisher tenant ID")
-    user_id = Column(String(100), doc="Publisher user ID")
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    user_id = Column(String(100), nullable=False, doc="Publisher user ID")
     mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
     mcp_server = Column(String(500), doc="MCP server URL")
     source = Column(String(30), doc="Source type, fixed to community")
@@ -717,35 +717,10 @@ class McpMarketRecord(TableBase):
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
     download_count = Column(Integer, default=0, doc="Cumulative download/install count")
-
-
-class McpMarketReview(TableBase):
-    """MCP market review submissions — one row per review request."""
-
-    __tablename__ = "mcp_market_review_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    review_id = Column(
-        Integer,
-        Sequence("mcp_market_review_t_review_id_seq", schema=SCHEMA),
-        primary_key=True,
-        nullable=False,
-        doc="Review record ID, unique primary key",
-    )
-    market_id = Column(Integer, doc="FK to mcp_market_record_t(market_id), NULL for unapproved initial listings")
-    source_mcp_id = Column(Integer, doc="Local MCP record ID that created this review")
-    tenant_id = Column(String(100), doc="Submitter tenant ID")
-    user_id = Column(String(100), doc="Submitter user ID")
-    mcp_name = Column(String(100), doc="MCP name at submission time")
-    mcp_server = Column(String(500), doc="MCP server URL at submission time")
-    source = Column(String(30), doc="Source type, fixed to community")
-    registry_json = Column(JSONB, doc="Snapshot of MCP metadata at submission time")
-    transport_type = Column(String(30), doc="Transport type: http/sse/container")
-    config_json = Column(JSON, doc="Snapshot of MCP config at submission time")
-    review_status = Column(String(30), default="pending", doc="Review status: pending/approved/rejected")
-    review_type = Column(String(30), default="initial_listing", doc="Review submission type: initial_listing/update")
-    tags = Column(ARRAY(Text), doc="Tags at submission time")
-    description = Column(Text, doc="Description at submission time")
+    review_status = Column(String(30), default="not_shared",
+                           doc="Listing status: not_shared / pending_review / rejected / shared")
+    submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
+    source_mcp_id = Column(Integer, doc="Local MCP record ID that created this market record")
 
 
 class UserTenant(TableBase):

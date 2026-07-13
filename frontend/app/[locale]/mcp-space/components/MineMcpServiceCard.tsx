@@ -1,5 +1,5 @@
 import { Button, Dropdown, type MenuProps } from "antd";
-import { ArrowDownFromLine, Clock, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
+import { ArrowDownFromLine, Clock, Edit3, MoreHorizontal, Power, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpSource } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -8,6 +8,7 @@ import {
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
+import { getMineCardReviewBadge } from "@/lib/mcpToolsMine";
 import TransportIcon from "./shared/TransportIcon";
 
 export type MineMcpCardItem =
@@ -66,6 +67,7 @@ export default function MineMcpServiceCard({
   const isInRepository = isLocal
     ? Boolean(localService?.isListedInRepository)
     : reviewStatus === "approved";
+  const reviewBadge = getMineCardReviewBadge(item, onlineService);
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
 
@@ -176,12 +178,21 @@ export default function MineMcpServiceCard({
                 </span>
               ) : null}
             </div>
-            {isPending ? (
-              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-600">
-                <Hourglass className="h-3.5 w-3.5" />
-                {t("mcpTools.mine.reviewPending")}
-              </span>
-            ) : null}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {reviewBadge ? (
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                    reviewBadge.variant === "pending"
+                      ? "bg-orange-50 text-orange-700"
+                      : reviewBadge.variant === "approved"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {t(reviewBadge.labelKey)}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-1.5">
