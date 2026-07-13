@@ -314,15 +314,18 @@ def get_jwt_expiry_seconds(token: str) -> int:
         if DEBUG_JWT_EXPIRE_SECONDS > 0:
             return DEBUG_JWT_EXPIRE_SECONDS
 
-        # Decode JWT token (without signature verification, only parse content)
-        decoded = jwt.decode(jwt_token, options={"verify_signature": False})
+        # Decode JWT token with signature verification. Expiration validation is
+        # disabled intentionally because callers need the original exp/iat span.
+        decoded = _decode_jwt_token_for_expiry(jwt_token)
 
         # Extract expiration time and issued time from JWT claims
-        exp = decoded.get("exp", 0)
-        iat = decoded.get("iat", 0)
+        exp = int(decoded["exp"])
+        iat = int(decoded["iat"])
 
         # Calculate validity period (seconds)
         expiry_seconds = exp - iat
+        if expiry_seconds <= 0:
+            raise ValueError("JWT exp must be greater than iat")
 
         return expiry_seconds
     except Exception as e:
@@ -346,6 +349,24 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
 
     expiry_seconds = get_jwt_expiry_seconds(token) if token else 3600
     return int((datetime.now() + timedelta(seconds=expiry_seconds)).timestamp())
+
+
+def _decode_jwt_token_for_expiry(token: str) -> dict:
+    """
+    Decode JWT claims for session timing after verifying the token signature.
+
+    Expiration validation is intentionally disabled so callers can compute the
+    original token lifetime even when the token is already expired.
+    """
+    if not SUPABASE_JWT_SECRET:
+        raise UnauthorizedError("JWT verification is not configured")
+
+    return jwt.decode(
+        token,
+        SUPABASE_JWT_SECRET,
+        algorithms=["HS256"],
+        options={"verify_exp": False, "verify_aud": False},
+    )
 
 
 def _decode_jwt_token(authorization: str) -> dict:

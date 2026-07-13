@@ -16,6 +16,7 @@ export function usePublishedAgentList() {
 			return res.data || [];
 		},
 		staleTime: 60_000,
+		refetchOnMount: "always",
 		enabled: true,
 	});
 

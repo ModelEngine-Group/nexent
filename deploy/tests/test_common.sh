@@ -677,11 +677,20 @@ if grep -q 'appVersion' "$LOCAL_CONFIG"; then
 fi
 assert_contains "$(cat "$LOCAL_CONFIG")" 'imageRegistryPrefix: "registry.local/nexent"' "persisted local config should include image registry prefix"
 
+DEPLOY_OPTIONS_FILE="$TMP_DIR/deploy.options"
+deployment_init_defaults
+assert_eq "$TMP_DIR/deploy.options" "$DEPLOYMENT_LOCAL_CONFIG_PATH" "default local config should use deploy.options"
+unset DEPLOY_OPTIONS_FILE
+
 K8S_DEPLOY_OPTIONS_BLOCK="$(awk '/persist_deploy_options\(\) {/,/^}/' "$SCRIPT_DIR/../k8s/deploy.sh")"
-assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "PERSISTENCE_MODE=\"${PERSISTENCE_MODE}\""' "k8s deploy options should persist persistence mode"
-assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "STORAGE_CLASS_NAME=\"${STORAGE_CLASS_NAME}\""' "k8s deploy options should persist storage class"
-assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "LOCAL_PATH=\"${LOCAL_PATH}\""' "k8s deploy options should persist local path"
-assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "EXISTING_CLAIM_PREFIX=\"${EXISTING_CLAIM_PREFIX}\""' "k8s deploy options should persist existing claim prefix"
+K8S_DEPLOY_HEADER="$(sed -n '1,60p' "$SCRIPT_DIR/../k8s/deploy.sh")"
+assert_contains "$K8S_DEPLOY_HEADER" 'DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"' "k8s deploy config should use deploy.options"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'deployment_persist_local_config "$DEPLOY_OPTIONS_FILE"' "k8s deploy options should include shared local config"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "printf 'k8s:\\n'" "k8s deploy options should include a k8s section"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "persistenceMode:" "k8s deploy options should persist persistence mode"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "storageClassName:" "k8s deploy options should persist storage class"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "localPath:" "k8s deploy options should persist local path"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "existingClaimPrefix:" "k8s deploy options should persist existing claim prefix"
 assert_not_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'LOCAL_NODE_NAME=' "k8s deploy options should not persist deprecated local node name"
 assert_not_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'K8S_WAIT_TIMEOUT_SECONDS=' "k8s deploy options should not persist one-time wait timeout"
 if echo "$K8S_DEPLOY_OPTIONS_BLOCK" | grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY'; then

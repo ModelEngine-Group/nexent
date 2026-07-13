@@ -117,6 +117,7 @@ jobs:
           name: ${{ steps.set-vars.outputs.package-name }}
           path: ./offline-output
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
 
       - name: Summary

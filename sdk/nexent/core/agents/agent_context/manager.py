@@ -862,7 +862,7 @@ class ContextManager:
             "buffered": BufferedStrategy,
             "priority": PriorityWeightedStrategy,
         }
-        strategy_class = strategy_map.get(self.config.strategy, TokenBudgetStrategy)
+        strategy_class = strategy_map.get(self.config.strategy, FullStrategy)
 
         if self.config.strategy == "buffered":
             return strategy_class(buffer_size=self.config.buffer_size_per_component)

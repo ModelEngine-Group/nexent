@@ -14,6 +14,8 @@ metadata:
     "helm.sh/hook-weight": "20"
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+{{ toYaml .Values.strategy | indent 4 }}
   selector:
     matchLabels:
       app: nexent-runtime
