@@ -135,7 +135,7 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
         client = Client(transport=transport)
         async with client:
             return client.is_connected()
-    except BaseException as e:
+    except Exception as e:
         logger.debug(f"MCP protocol connect handshake failed: {e}")
         return False
 
@@ -302,6 +302,37 @@ async def add_remote_mcp_server_list(
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
 
+def _build_mcp_headers(
+    authorization_token: str | None,
+    custom_headers: dict | None,
+) -> dict:
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+    return headers
+
+
+async def _check_mcp_connectivity(
+    server_url: str,
+    headers: dict,
+    is_container: bool,
+    name: str,
+) -> list[str] | None:
+    tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
+    if not tool_names:
+        if is_container:
+            logger.warning(
+                "Container MCP service %s is not reachable yet, "
+                "tool count will be unavailable until the next refresh",
+                name,
+            )
+            return None
+        raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
+    return tool_names
+
+
 async def add_mcp_service(
     *,
     tenant_id: str,
@@ -350,26 +381,11 @@ async def add_mcp_service(
         logger.error(f"MCP name already exists: {name}")
         raise MCPNameIllegal("MCP name already exists")
 
-    # Always validate connectivity for URL-based MCP services before saving.
-    # Container-based services are started separately and do not require a
-    # reachable URL here, but we still attempt to fetch tool names for display.
     resolved_registry_json = registry_json or {}
     if server_url:
-        headers = {}
-        if authorization_token:
-            headers["Authorization"] = authorization_token
-        if custom_headers:
-            headers.update(custom_headers)
-        tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
-        if not tool_names:
-            if is_container:
-                logger.warning(
-                    "Container MCP service %s is not reachable yet, "
-                    "tool count will be unavailable until the next refresh", name
-                )
-            else:
-                raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
-        else:
+        headers = _build_mcp_headers(authorization_token, custom_headers)
+        tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+        if tool_names:
             resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:

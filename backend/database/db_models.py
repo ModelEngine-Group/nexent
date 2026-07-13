@@ -15,6 +15,7 @@ _PRIMARY_KEY_DOC = "Primary key, auto-increment"
 _TENANT_ID_DOC = "Tenant ID for multi-tenancy isolation"
 _PUBLISHER_TENANT_ID_DOC = "Publisher tenant ID"
 _PUBLISHER_USER_ID_DOC = "Publisher user ID"
+_MCP_NAME_DOC = "MCP name"
 
 # Base class for tables without audit fields
 
@@ -627,7 +628,7 @@ class McpRecord(TableBase):
                     primary_key=True, nullable=False, doc="MCP record ID, unique primary key")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
-    mcp_name = Column(String(100), doc="MCP name")
+    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
     mcp_server = Column(String(500), doc="MCP server address")
     status = Column(
         Boolean,
@@ -677,7 +678,7 @@ class McpCommunityRecord(TableBase):
     )
     tenant_id = Column(String(100), doc=_PUBLISHER_TENANT_ID_DOC)
     user_id = Column(String(100), doc=_PUBLISHER_USER_ID_DOC)
-    mcp_name = Column(String(100), doc="MCP name")
+    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
     mcp_server = Column(String(500), doc="MCP server URL")
     source = Column(String(30), doc="Source type, fixed to community")
     registry_json = Column(JSONB, doc="Full MCP metadata JSON")
@@ -707,7 +708,7 @@ class McpMarketRecord(TableBase):
     )
     tenant_id = Column(String(100), doc="Publisher tenant ID")
     user_id = Column(String(100), doc="Publisher user ID")
-    mcp_name = Column(String(100), doc="MCP name")
+    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
     mcp_server = Column(String(500), doc="MCP server URL")
     source = Column(String(30), doc="Source type, fixed to community")
     registry_json = Column(JSONB, doc="Full MCP metadata JSON")

@@ -55,6 +55,8 @@ from utils.auth_utils import get_current_user_info
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")
 
+_MCP_SERVICE_ID_DESC = Query(..., description="MCP service ID")
+
 
 # ---------------------------------------------------------------------------
 # Tools Endpoint
@@ -62,7 +64,7 @@ logger = logging.getLogger("remote_mcp_app")
 
 @router.get("/tools")
 async def get_tools_from_mcp(
-    mcp_id: int = Query(..., description="MCP service ID"),
+    mcp_id: int = _MCP_SERVICE_ID_DESC,
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
@@ -106,7 +108,7 @@ async def get_tools_from_mcp(
 
 @router.post("/refresh-tools")
 async def refresh_mcp_tools_endpoint(
-    mcp_id: int = Query(..., description="MCP service ID"),
+    mcp_id: int = _MCP_SERVICE_ID_DESC,
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
@@ -127,7 +129,7 @@ async def refresh_mcp_tools_endpoint(
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except MCPConnectionError as e:
-        logger.error(f"Failed to refresh tool count for mcp_id={mcp_id}: {e}")
+        logger.exception(f"Failed to refresh tool count for mcp_id={mcp_id}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="MCP connection failed"
@@ -608,7 +610,7 @@ async def get_container_logs(
 
 @router.get("/healthcheck")
 async def check_mcp_health(
-    mcp_id: int = Query(..., description="MCP service ID"),
+    mcp_id: int = _MCP_SERVICE_ID_DESC,
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):

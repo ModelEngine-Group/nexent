@@ -128,12 +128,15 @@ class MockQuery:
         return self._return_rows[0] if self._return_rows else None
 
     def update(self, values):
+        # Mock — no real update needed in unit tests
         pass
 
     def add(self, instance):
+        # Mock — no real DB add needed in unit tests
         pass
 
     def flush(self):
+        # Mock — no real DB flush needed in unit tests
         pass
 
     def __getattr__(self, name):
@@ -154,6 +157,7 @@ class MockSession:
         pass
 
     def flush(self):
+        # Mock — no real DB flush needed in unit tests
         pass
 
     def filter(self, *args, **kwargs):

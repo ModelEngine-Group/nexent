@@ -125,6 +125,7 @@ class MockSession:
         return None
 
     def update(self, values):
+        # Mock — no real update needed in unit tests
         pass
 
     def __getattr__(self, name):
