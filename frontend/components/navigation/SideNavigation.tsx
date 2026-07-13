@@ -67,6 +67,12 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 6,
   },
   {
+    path: "/aidp-knowledges",
+    Icon: BookOpen,
+    labelKey: "sidebar.aidpKnowledge",
+    order: 6.5,
+  },
+  {
     path: "/mcp-tools",
     Icon: Puzzle,
     labelKey: "sidebar.mcpToolsManagement",

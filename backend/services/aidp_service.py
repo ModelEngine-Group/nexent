@@ -247,3 +247,459 @@ def fetch_all_aidp_knowledge_bases_impl(
             ErrorCode.AIDP_SERVICE_ERROR,
             f"Failed to parse AIDP API response: {str(e)}",
         )
+
+
+# ==================== New CRUD Service Functions ====================
+
+
+def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
+    """Get total count of knowledge bases by fetching list with page_size=1."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    list_path = f"{_LIST_PATH}?page=1&page_size=1"
+    list_url = urljoin(f"{normalized_url}/", list_path)
+    logger.info("Counting AIDP knowledge bases from %s", list_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = client.get(list_url, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP knowledge base response format",
+            )
+        total_count = result.get("total_count", 0)
+        return int(total_count) if total_count is not None else 0
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def create_aidp_kb_impl(
+    server_url: str,
+    api_key: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Create a new knowledge base via AIDP API."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    create_url = urljoin(f"{normalized_url}/", _LIST_PATH)
+    logger.info("Creating AIDP knowledge base at %s", create_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = client.put(create_url, headers=headers, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP create response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def get_aidp_kb_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> Dict[str, Any]:
+    """Get details of a specific knowledge base."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    get_path = f"{_LIST_PATH}/{kds_id}"
+    get_url = urljoin(f"{normalized_url}/", get_path)
+    logger.info("Getting AIDP knowledge base from %s", get_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = client.get(get_url, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP knowledge base response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def update_aidp_kb_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Update a knowledge base via AIDP API."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    update_path = f"{_LIST_PATH}/{kds_id}"
+    update_url = urljoin(f"{normalized_url}/", update_path)
+    logger.info("Updating AIDP knowledge base at %s", update_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = client.patch(update_url, headers=headers, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP update response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def delete_aidp_kb_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> bool:
+    """Delete a knowledge base via AIDP API."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    delete_path = f"{_LIST_PATH}/{kds_id}"
+    delete_url = urljoin(f"{normalized_url}/", delete_path)
+    logger.info("Deleting AIDP knowledge base at %s", delete_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = client.delete(delete_url, headers=headers)
+        response.raise_for_status()
+        return True
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+
+
+def upload_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    files: List[Any],
+) -> Dict[str, Any]:
+    """Upload documents to a knowledge base via AIDP API."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    upload_path = f"{_LIST_PATH}/{kds_id}/KnowledgeFiles/Upload"
+    upload_url = urljoin(f"{normalized_url}/", upload_path)
+    logger.info("Uploading documents to AIDP knowledge base at %s", upload_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=120.0,
+            verify_ssl=False,
+        )
+        file_tuples = [
+            (f.filename, f.file, f.content_type or "application/octet-stream")
+            for f in files
+        ]
+        response = client.post(upload_url, headers=headers, files=file_tuples)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP upload response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def list_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    page: int = 1,
+    page_size: int = 10,
+) -> Dict[str, Any]:
+    """List documents in a knowledge base via AIDP API."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    list_path = f"{_LIST_PATH}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
+    list_url = urljoin(f"{normalized_url}/", list_path)
+    logger.info("Listing AIDP documents from %s", list_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = client.get(list_url, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP document list response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )

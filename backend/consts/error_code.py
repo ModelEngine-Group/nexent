@@ -194,6 +194,8 @@ class ErrorCode(Enum):
     AIDP_CONFIG_INVALID = "130502"  # Invalid AIDP configuration
     AIDP_CONNECTION_ERROR = "130503"  # AIDP connection error
     AIDP_AUTH_ERROR = "130504"  # AIDP auth error
+    AIDP_RATE_LIMIT = "130505"  # AIDP rate limit
+    AIDP_RESPONSE_ERROR = "130506"  # AIDP response error
 
     # ==================== 14 Northbound / 北向接口 ====================
     # 01 - Request
@@ -264,6 +266,9 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.AIDP_CONFIG_INVALID: 400,
     ErrorCode.AIDP_AUTH_ERROR: 401,
     ErrorCode.AIDP_CONNECTION_ERROR: 502,
+    ErrorCode.AIDP_RATE_LIMIT: 429,
+    ErrorCode.AIDP_RESPONSE_ERROR: 502,
+    ErrorCode.AIDP_SERVICE_ERROR: 502,
     # OAuth (module 16)
     ErrorCode.OAUTH_PROVIDER_NOT_CONFIGURED: 400,
     ErrorCode.OAUTH_PROVIDER_DISABLED: 400,

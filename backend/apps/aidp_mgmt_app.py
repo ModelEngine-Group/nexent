@@ -1,0 +1,257 @@
+"""
+AIDP Management App Layer
+FastAPI endpoints for AIDP knowledge base CRUD and document management proxy.
+"""
+import logging
+from http import HTTPStatus
+from typing import Annotated, List, Optional
+
+from fastapi import APIRouter, File, Path, Query, UploadFile
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
+from services.aidp_service import (
+    count_aidp_kbs_impl,
+    create_aidp_kb_impl,
+    delete_aidp_kb_impl,
+    fetch_aidp_knowledge_bases_impl,
+    get_aidp_kb_impl,
+    list_aidp_docs_impl,
+    update_aidp_kb_impl,
+    upload_aidp_docs_impl,
+)
+
+aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
+logger = logging.getLogger("aidp_mgmt_app")
+
+
+# ==================== Request Models ====================
+
+
+class CreateKbRequest(BaseModel):
+    """Request body for creating a knowledge base."""
+
+    name: str = Field(..., description="Knowledge base name (required)")
+    description: Optional[str] = Field(None, description="Knowledge base description")
+    embedding_model: Optional[str] = Field(None, description="Embedding model identifier")
+    is_multimodal: Optional[bool] = Field(None, description="Whether KB supports multimodal content")
+    vision_model: Optional[str] = Field(None, description="Vision model identifier for multimodal KBs")
+
+
+class UpdateKbRequest(BaseModel):
+    """Request body for updating a knowledge base."""
+
+    name: Optional[str] = Field(None, description="Knowledge base name")
+    description: Optional[str] = Field(None, description="Knowledge base description")
+
+
+# ==================== Route Handlers ====================
+
+
+@aidp_mgmt_router.get("/knowledge-bases")
+async def list_knowledge_bases(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
+) -> JSONResponse:
+    """List knowledge bases from AIDP (paginated)."""
+    try:
+        result = fetch_aidp_knowledge_bases_impl(
+            server_url=server_url,
+            api_key=api_key,
+            page=page,
+            page_size=page_size,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to list AIDP knowledge bases: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to list AIDP knowledge bases: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.get("/knowledge-bases/count")
+async def count_knowledge_bases(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+) -> JSONResponse:
+    """Get total count of knowledge bases from AIDP."""
+    try:
+        total = count_aidp_kbs_impl(
+            server_url=server_url,
+            api_key=api_key,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"total_count": total})
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to count AIDP knowledge bases: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to count AIDP knowledge bases: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.post("/knowledge-bases")
+async def create_knowledge_base(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    body: CreateKbRequest,
+) -> JSONResponse:
+    """Create a new knowledge base via AIDP."""
+    try:
+        payload = body.model_dump(exclude_none=True)
+        result = create_aidp_kb_impl(
+            server_url=server_url,
+            api_key=api_key,
+            payload=payload,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to create AIDP knowledge base: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to create AIDP knowledge base: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}")
+async def get_knowledge_base(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+) -> JSONResponse:
+    """Get details of a specific knowledge base."""
+    try:
+        result = get_aidp_kb_impl(
+            server_url=server_url,
+            api_key=api_key,
+            kds_id=kds_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get AIDP knowledge base: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to get AIDP knowledge base: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.put("/knowledge-bases/{kds_id}")
+async def update_knowledge_base(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: UpdateKbRequest,
+) -> JSONResponse:
+    """Update a knowledge base via AIDP."""
+    try:
+        payload = body.model_dump(exclude_none=True)
+        if not payload:
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                "At least one field (name or description) must be provided for update",
+            )
+        result = update_aidp_kb_impl(
+            server_url=server_url,
+            api_key=api_key,
+            kds_id=kds_id,
+            payload=payload,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update AIDP knowledge base: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to update AIDP knowledge base: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.delete("/knowledge-bases/{kds_id}")
+async def delete_knowledge_base(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+) -> JSONResponse:
+    """Delete a knowledge base via AIDP."""
+    try:
+        success = delete_aidp_kb_impl(
+            server_url=server_url,
+            api_key=api_key,
+            kds_id=kds_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete AIDP knowledge base: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to delete AIDP knowledge base: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents")
+async def upload_documents(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    files: List[UploadFile] = File(..., description="Files to upload"),
+) -> JSONResponse:
+    """Upload documents to a knowledge base via AIDP."""
+    try:
+        result = upload_aidp_docs_impl(
+            server_url=server_url,
+            api_key=api_key,
+            kds_id=kds_id,
+            files=files,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to upload documents to AIDP knowledge base: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to upload documents to AIDP knowledge base: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/documents")
+async def list_documents(
+    server_url: Annotated[str, Query(description="AIDP API server URL")],
+    api_key: Annotated[str, Query(description="AIDP API key")],
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
+) -> JSONResponse:
+    """List documents in a knowledge base via AIDP."""
+    try:
+        result = list_aidp_docs_impl(
+            server_url=server_url,
+            api_key=api_key,
+            kds_id=kds_id,
+            page=page,
+            page_size=page_size,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to list AIDP documents: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to list AIDP documents: {str(e)}",
+        )
