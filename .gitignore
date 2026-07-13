@@ -85,3 +85,4 @@ _doc/
 /deploy/env/.env.bak
 
 agent_repository_frontend
+.omo/
