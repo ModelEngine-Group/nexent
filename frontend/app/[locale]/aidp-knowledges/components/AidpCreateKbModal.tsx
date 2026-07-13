@@ -14,7 +14,7 @@ import {
   Space,
   Divider,
 } from "antd";
-import { InboxOutlined, DeleteOutlined } from "@ant-design/icons";
+import { InboxOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/services/aidpKnowledgeService";
@@ -49,9 +49,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   const existingNames = useMemo(
     () =>
       new Set(
-        (existingKbs || []).map((kb) =>
-          kb.kds_name?.toLowerCase().trim() ?? ""
-        )
+        (existingKbs || [])
+          .map((kb) => kb.kds_name?.toLowerCase().trim())
+          .filter((n): n is string => !!n)
       ),
     [existingKbs]
   );
@@ -79,6 +79,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   };
 
   const handleBack = () => {
+    // Restore formValues into the Form when remounting Step 0,
+    // since antd Form clears field values when the Form is unmounted.
+    form.setFieldsValue(formValues);
     setCurrent(0);
   };
 
