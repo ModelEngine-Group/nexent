@@ -315,6 +315,42 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         )
 
 
+# Default values for AIDP create KB payload, aligned with
+# sdk/nexent/core/knowledge_base/config.py (build_create_payload).
+# Used as defense-in-depth: any client calling create_aidp_kb_impl
+# without these fields will get them filled in automatically.
+_AIDP_CREATE_DEFAULTS: Dict[str, Any] = {
+    "chunk_token_num": 1024,
+    "chunk_overlap_num": 128,
+    "embedding_model": "default",
+    "vlm_model": "",
+    "is_personal": 0,
+    "topk": 10,
+    "similarity": 0.0,
+    "smartsplit": 1,
+    "caption_enable": 0,
+}
+
+
+def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill missing AIDP create-KB fields with reference defaults.
+
+    Defensive layer: if the client omits any of these fields, the backend
+    injects them before forwarding to AIDP. Matches the frontend
+    AIDP_CREATE_DEFAULTS and the SDK build_create_payload defaults exactly.
+
+    Special rule: if payload.is_multimodal is truthy, caption_enable defaults
+    to 1 (matching SDK mapper logic).
+    """
+    result = dict(payload)
+    for key, default in _AIDP_CREATE_DEFAULTS.items():
+        if key not in result:
+            result[key] = default
+    if result.get("is_multimodal") and "caption_enable" not in payload:
+        result["caption_enable"] = 1
+    return result
+
+
 def create_aidp_kb_impl(
     server_url: str,
     api_key: str,
@@ -328,6 +364,9 @@ def create_aidp_kb_impl(
         "Content-Type": "application/json",
     }
 
+    # Fill missing fields with SDK-aligned defaults before forwarding.
+    full_payload = _apply_create_defaults(payload)
+
     create_url = urljoin(f"{normalized_url}/", _LIST_PATH)
     logger.info("Creating AIDP knowledge base at %s", create_url)
 
@@ -337,7 +376,7 @@ def create_aidp_kb_impl(
             timeout=60.0,
             verify_ssl=False,
         )
-        response = client.put(create_url, headers=headers, json=payload)
+        response = client.put(create_url, headers=headers, json=full_payload)
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):

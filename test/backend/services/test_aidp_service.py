@@ -377,3 +377,72 @@ class TestFetchAllAidpKnowledgeBasesImpl:
                 api_key="jwt-token",
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# _apply_create_defaults tests
+# Pure helper, no mocking required -- tests default injection behavior.
+# ---------------------------------------------------------------------------
+class TestApplyCreateDefaults:
+    """Tests for _apply_create_defaults (AIDP create KB payload defaults)."""
+
+    @pytest.fixture
+    def aidp_mod(self, aidp_service_module):
+        return aidp_service_module
+
+    def test_fills_all_defaults_when_payload_is_minimal(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults({"name": "kb-1"})
+        assert result["name"] == "kb-1"
+        assert result["chunk_token_num"] == 1024
+        assert result["chunk_overlap_num"] == 128
+        assert result["embedding_model"] == "default"
+        assert result["vlm_model"] == ""
+        assert result["is_personal"] == 0
+        assert result["topk"] == 10
+        assert result["similarity"] == 0.0
+        assert result["smartsplit"] == 1
+        assert result["caption_enable"] == 0
+
+    def test_preserves_client_supplied_values(self, aidp_mod):
+        payload = {
+            "name": "kb-custom",
+            "description": "my desc",
+            "chunk_token_num": 512,
+            "embedding_model": "bge-m3",
+            "is_personal": 1,
+        }
+        result = aidp_mod._apply_create_defaults(payload)
+        assert result["name"] == "kb-custom"
+        assert result["description"] == "my desc"
+        assert result["chunk_token_num"] == 512
+        assert result["embedding_model"] == "bge-m3"
+        assert result["is_personal"] == 1
+        assert result["chunk_overlap_num"] == 128
+        assert result["vlm_model"] == ""
+        assert result["topk"] == 10
+
+    def test_is_multimodal_enables_caption_when_not_set(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {"name": "kb-mm", "is_multimodal": True}
+        )
+        assert result["is_multimodal"] is True
+        assert result["caption_enable"] == 1
+
+    def test_is_multimodal_respects_explicit_caption(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {"name": "kb-mm", "is_multimodal": True, "caption_enable": 0}
+        )
+        assert result["caption_enable"] == 0
+
+    def test_does_not_mutate_input_payload(self, aidp_mod):
+        original = {"name": "kb-x"}
+        snapshot = dict(original)
+        aidp_mod._apply_create_defaults(original)
+        assert original == snapshot
+
+    def test_false_value_preserved_not_replaced_by_default(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {"name": "kb", "chunk_token_num": 0, "vlm_model": "my-vlm"}
+        )
+        assert result["chunk_token_num"] == 0
+        assert result["vlm_model"] == "my-vlm"

@@ -7,12 +7,14 @@ import {
   Modal,
   Form,
   Input,
+  InputNumber,
   Steps,
   Upload,
   Button,
   message,
   Space,
   Divider,
+  Collapse,
 } from "antd";
 import { InboxOutlined } from "@ant-design/icons";
 
@@ -20,6 +22,27 @@ import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/services/aidpKnowledgeService";
 
 const { Dragger } = Upload;
+
+/**
+ * Default AIDP knowledge base configuration.
+ * Aligned with sdk/nexent/core/knowledge_base/config.py (build_create_payload defaults).
+ *
+ * Required fields per AIDP schema:
+ *   chunk_token_num (> 0), chunk_overlap_num (>= 0)
+ * Reference fills the rest (vlm_model, is_personal, topk, similarity, smartsplit, caption_enable)
+ * so the backend can pass them through unchanged.
+ */
+const AIDP_CREATE_DEFAULTS = {
+  chunk_token_num: 1024,
+  chunk_overlap_num: 128,
+  embedding_model: "default",
+  vlm_model: "",
+  is_personal: "0",
+  topk: 10,
+  similarity: 0.0,
+  smartsplit: 1,
+  caption_enable: 0,
+};
 
 interface AidpCreateKbModalProps {
   open: boolean;
@@ -43,7 +66,17 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   const [current, setCurrent] = useState(0);
   const [loading, setLoading] = useState(false);
   const [fileList, setFileList] = useState<File[]>([]);
-  const [formValues, setFormValues] = useState<{ name: string; description?: string; embedding_model?: string }>({ name: "" });
+  const [formValues, setFormValues] = useState<{
+    name: string;
+    description?: string;
+    embedding_model?: string;
+    chunk_token_num: number;
+    chunk_overlap_num: number;
+  }>({
+    name: "",
+    chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
+    chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+  });
 
   // Duplicate name check against existing KBs
   const existingNames = useMemo(
@@ -71,6 +104,11 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         name,
         description: values.description?.trim() || undefined,
         embedding_model: values.embedding_model?.trim() || undefined,
+        // AIDP requires these chunk fields; fall back to defaults if missing.
+        chunk_token_num:
+          values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num,
+        chunk_overlap_num:
+          values.chunk_overlap_num ?? AIDP_CREATE_DEFAULTS.chunk_overlap_num,
       });
       setCurrent(1);
     } catch {
@@ -97,10 +135,20 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       setLoading(true);
 
       // Step 1: Create KB
+      // Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload
       const created = await aidpKnowledgeService.createKb(serverUrl, apiKey, {
         name: formValues.name.trim(),
-        description: formValues.description,
-        embedding_model: formValues.embedding_model,
+        description: formValues.description || "",
+        chunk_token_num: String(formValues.chunk_token_num),
+        chunk_overlap_num: String(formValues.chunk_overlap_num),
+        embedding_model:
+          formValues.embedding_model || AIDP_CREATE_DEFAULTS.embedding_model,
+        vlm_model: AIDP_CREATE_DEFAULTS.vlm_model,
+        is_personal: AIDP_CREATE_DEFAULTS.is_personal,
+        topk: AIDP_CREATE_DEFAULTS.topk,
+        similarity: AIDP_CREATE_DEFAULTS.similarity,
+        smartsplit: AIDP_CREATE_DEFAULTS.smartsplit,
+        caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
       });
 
       // Step 2: Upload files (if any and not skipped)
@@ -151,7 +199,11 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     form.resetFields();
     setCurrent(0);
     setFileList([]);
-    setFormValues({ name: "" });
+    setFormValues({
+      name: "",
+      chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
+      chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+    });
   };
 
   const handleCancel = () => {
@@ -188,6 +240,59 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         >
           <Input placeholder={t("aidpKnowledge.embeddingModelPlaceholder")} />
         </Form.Item>
+
+        <Collapse
+          ghost
+          size="small"
+          items={[
+            {
+              key: "chunk_config",
+              label: t("aidpKnowledge.createAdvancedOptions"),
+              children: (
+                <>
+                  <Form.Item
+                    name="chunk_token_num"
+                    label={t("aidpKnowledge.createChunkTokenNum")}
+                    initialValue={AIDP_CREATE_DEFAULTS.chunk_token_num}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("aidpKnowledge.createChunkTokenNumRequired"),
+                      },
+                      {
+                        type: "number",
+                        min: 1,
+                        message: t("aidpKnowledge.createChunkTokenNumMin"),
+                      },
+                    ]}
+                  >
+                    <InputNumber style={{ width: "100%" }} min={1} />
+                  </Form.Item>
+                  <Form.Item
+                    name="chunk_overlap_num"
+                    label={t("aidpKnowledge.createChunkOverlapNum")}
+                    initialValue={AIDP_CREATE_DEFAULTS.chunk_overlap_num}
+                    rules={[
+                      {
+                        required: true,
+                        message: t(
+                          "aidpKnowledge.createChunkOverlapNumRequired"
+                        ),
+                      },
+                      {
+                        type: "number",
+                        min: 0,
+                        message: t("aidpKnowledge.createChunkOverlapNumMin"),
+                      },
+                    ]}
+                  >
+                    <InputNumber style={{ width: "100%" }} min={0} />
+                  </Form.Item>
+                </>
+              ),
+            },
+          ]}
+        />
       </Form>
     </>
   );

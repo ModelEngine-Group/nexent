@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Upload, message } from "antd";
-import { UploadOutlined, InboxOutlined } from "@ant-design/icons";
+import { Button, Upload, message, Tooltip } from "antd";
+import { UploadOutlined, InboxOutlined, ReloadOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpDocumentItem } from "@/services/aidpKnowledgeService";
@@ -18,6 +18,7 @@ interface AidpDocumentListProps {
   serverUrl: string;
   apiKey: string;
   onDocsUploaded: () => void;
+  onRefresh: () => void;
 }
 
 const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
@@ -28,6 +29,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   serverUrl,
   apiKey,
   onDocsUploaded,
+  onRefresh,
 }) => {
   const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
@@ -94,13 +96,21 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
               {t("aidpKnowledge.tagDocs", { count: totalDocs })}
             </span>
           </div>
+          <Tooltip title={t("aidpKnowledge.refresh")}>
+            <Button
+              icon={<ReloadOutlined spin={isLoading} />}
+              onClick={onRefresh}
+              size="small"
+              disabled={!activeKb}
+            />
+          </Tooltip>
         </div>
       </div>
 
-      {/* Document table */}
-      <div className="flex-1 overflow-y-auto p-2">
+      {/* Document table — compact; scrolls internally when content overflows. */}
+      <div className="shrink-0 overflow-auto max-h-[50%] p-2 border-b border-gray-200">
         {isLoading ? (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2" />
               <p className="text-sm text-gray-600">
@@ -109,7 +119,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             </div>
           </div>
         ) : documents.length > 0 ? (
-          <div className="overflow-y-auto border border-gray-200 rounded-md h-full">
+          <div className="overflow-hidden border border-gray-200 rounded-md">
             <table className="min-w-full bg-white">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
@@ -153,14 +163,14 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             </table>
           </div>
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+          <div className="flex items-center justify-center py-8 text-gray-500 text-sm">
             {t("aidpKnowledge.noDocuments")}
           </div>
         )}
       </div>
 
-      {/* Upload area */}
-      <div className="p-3 border-t border-gray-200 shrink-0">
+      {/* Upload area — placed directly beneath the table, not stretched to the bottom. */}
+      <div className="shrink-0 p-3">
         <Dragger
           multiple
           showUploadList={false}
@@ -189,6 +199,9 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           </p>
         </Dragger>
       </div>
+
+      {/* Spacer absorbs any remaining column space so the Dragger sits just below content. */}
+      <div className="flex-1 min-h-0" />
     </div>
   );
 };

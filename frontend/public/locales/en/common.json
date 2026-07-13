@@ -3262,6 +3262,7 @@
   "aidpKnowledge.kbNameRequired": "Name is required",
   "aidpKnowledge.kbDescription": "Description",
   "aidpKnowledge.kbDescriptionPlaceholder": "Optional description",
+  "aidpKnowledge.kbDescriptionRequired": "Please enter a description",
   "aidpKnowledge.embeddingModel": "Embedding Model",
   "aidpKnowledge.embeddingModelPlaceholder": "Optional embedding model name",
   "aidpKnowledge.fetchKbsFailed": "Failed to fetch knowledge bases",
@@ -3292,5 +3293,12 @@
   "aidpKnowledge.createCreating": "Creating knowledge base...",
   "aidpKnowledge.createUploading": "Uploading documents...",
   "aidpKnowledge.createSelectedFiles": "{{count}} file(s) selected",
-  "aidpKnowledge.createNoFiles": "No files selected. Click \"Skip Upload\" to create without documents."
+  "aidpKnowledge.createNoFiles": "No files selected. Click \"Skip Upload\" to create without documents.",
+  "aidpKnowledge.createAdvancedOptions": "Advanced Options",
+  "aidpKnowledge.createChunkTokenNum": "Chunk Token Count",
+  "aidpKnowledge.createChunkTokenNumRequired": "Please enter the chunk token count",
+  "aidpKnowledge.createChunkTokenNumMin": "Chunk token count must be greater than 0",
+  "aidpKnowledge.createChunkOverlapNum": "Chunk Overlap Token Count",
+  "aidpKnowledge.createChunkOverlapNumRequired": "Please enter the chunk overlap token count",
+  "aidpKnowledge.createChunkOverlapNumMin": "Chunk overlap token count must be ≥ 0"
 }
