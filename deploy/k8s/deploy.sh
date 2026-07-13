@@ -510,6 +510,7 @@ render_k8s_runtime_config_values() {
     printf '      sessionMaxAgeSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_SESSION_MAX_AGE_SECONDS "3600")")"
     printf '      localSessionMaxAgeSeconds: %s\n' "$(yaml_quote "$(env_or_default LOCAL_SESSION_MAX_AGE_SECONDS "3600")")"
     printf '      renewBeforeSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_BEFORE_SECONDS "300")")"
+    printf '      renewIntervalSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_INTERVAL_SECONDS "300")")"
     printf '      renewTimeoutSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_TIMEOUT_SECONDS "10")")"
     printf '      syntheticEmailDomain: %s\n' "$(yaml_quote "$(env_or_default CAS_SYNTHETIC_EMAIL_DOMAIN "cas.local")")"
     printf '      logoutUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_LOGOUT_URL "")")"

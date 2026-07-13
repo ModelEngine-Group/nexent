@@ -30,6 +30,7 @@ consts_mock.const.CAS_ENABLED = True
 consts_mock.const.CAS_LOGIN_MODE = "button"
 consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300
+consts_mock.const.CAS_RENEW_INTERVAL_SECONDS = 300
 consts_mock.const.CAS_RENEW_TIMEOUT_SECONDS = 10
 consts_mock.const.CAS_ROLE_ATTRIBUTE = "memberOf"
 consts_mock.const.CAS_ROLE_MAP_JSON = '{"cn=admins":"ADMIN"}'
@@ -57,6 +58,7 @@ from services.cas_service import (  # noqa: E402
     CasAuthenticationError,
     build_login_url,
     build_logout_url,
+    get_cas_config,
     parse_logout_request,
     parse_service_validate_response,
     revoke_from_logout_request,
@@ -71,6 +73,20 @@ sys.modules.pop("services.cas_service", None)
 
 
 class TestCasServiceParsing(unittest.TestCase):
+    def test_get_cas_config_returns_active_renewal_interval(self):
+        config = get_cas_config()
+
+        self.assertEqual(config["renew_before_seconds"], 300)
+        self.assertEqual(config["renew_interval_seconds"], 300)
+        self.assertEqual(config["renew_timeout_seconds"], 10)
+
+        original_interval = get_cas_config.__globals__["CAS_RENEW_INTERVAL_SECONDS"]
+        get_cas_config.__globals__["CAS_RENEW_INTERVAL_SECONDS"] = 120
+        try:
+            self.assertEqual(get_cas_config()["renew_interval_seconds"], 120)
+        finally:
+            get_cas_config.__globals__["CAS_RENEW_INTERVAL_SECONDS"] = original_interval
+
     def test_parse_success_response_with_attributes(self):
         xml = """
         <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">

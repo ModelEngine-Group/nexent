@@ -12,13 +12,12 @@ import {
   getSessionFromStorage,
   removeSessionFromStorage,
   checkSessionValid,
-  getTokenExpiresAt,
 } from "@/lib/session";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authFlowState } from "@/lib/authFlow";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
-import { STATUS_CODES } from "@/const/auth";
-import { authEventUtils } from "@/lib/authEvents";
+import { AUTH_EVENTS, STATUS_CODES } from "@/const/auth";
+import { authEvents, authEventUtils } from "@/lib/authEvents";
 import log from "@/lib/logger";
 
 /**
@@ -93,36 +92,15 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   }, [isSpeedMode, isAuthChecking, isAuthenticated]);
 
   useEffect(() => {
-    if (isSpeedMode || !isAuthenticated) return;
+    if (isSpeedMode) return;
 
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let cancelled = false;
-
-    casService.getConfig().then((config) => {
-      if (cancelled || !config.enabled || config.login_mode === "disabled")
-        return;
-      const expiresAt = getTokenExpiresAt();
-      if (!expiresAt) return;
-
-      const renewAtMs = expiresAt * 1000 - config.renew_before_seconds * 1000;
-      const delayMs = Math.max(0, renewAtMs - Date.now());
-      timeoutId = setTimeout(async () => {
-        const ok = await casService.renewInIframe(config.renew_timeout_seconds);
-        if (!ok || cancelled) return;
-        const renewedSession = getSessionFromStorage();
-        if (renewedSession) {
-          setSession(renewedSession);
-          setIsAuthenticated(true);
-          authEventUtils.emitTokenRefreshed();
-        }
-      }, delayMs);
+    return authEvents.on(AUTH_EVENTS.TOKEN_REFRESHED, () => {
+      const renewedSession = getSessionFromStorage();
+      if (!renewedSession) return;
+      setSession(renewedSession);
+      setIsAuthenticated(true);
     });
-
-    return () => {
-      cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [isAuthenticated, session?.expires_at, isSpeedMode]);
+  }, [isSpeedMode]);
 
   const clearLocalSession = useCallback(() => {
     removeSessionFromStorage();

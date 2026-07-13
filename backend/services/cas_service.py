@@ -21,6 +21,7 @@ from consts.const import (
     CAS_LOGIN_MODE,
     CAS_LOGOUT_URL,
     CAS_RENEW_BEFORE_SECONDS,
+    CAS_RENEW_INTERVAL_SECONDS,
     CAS_RENEW_TIMEOUT_SECONDS,
     CAS_ROLE_ATTRIBUTE,
     CAS_ROLE_MAP_JSON,
@@ -79,6 +80,7 @@ def get_cas_config() -> Dict[str, Any]:
         "enabled": enabled,
         "login_mode": mode,
         "renew_before_seconds": CAS_RENEW_BEFORE_SECONDS,
+        "renew_interval_seconds": CAS_RENEW_INTERVAL_SECONDS,
         "renew_timeout_seconds": CAS_RENEW_TIMEOUT_SECONDS,
         "display_name": "CAS",
     }

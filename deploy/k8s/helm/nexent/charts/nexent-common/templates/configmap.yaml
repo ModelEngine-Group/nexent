@@ -181,6 +181,7 @@ data:
   CAS_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.sessionMaxAgeSeconds | quote }}
   LOCAL_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.localSessionMaxAgeSeconds | quote }}
   CAS_RENEW_BEFORE_SECONDS: {{ .Values.config.cas.renewBeforeSeconds | quote }}
+  CAS_RENEW_INTERVAL_SECONDS: {{ .Values.config.cas.renewIntervalSeconds | quote }}
   CAS_RENEW_TIMEOUT_SECONDS: {{ .Values.config.cas.renewTimeoutSeconds | quote }}
   CAS_SYNTHETIC_EMAIL_DOMAIN: {{ .Values.config.cas.syntheticEmailDomain | quote }}
   CAS_LOGOUT_URL: {{ .Values.config.cas.logoutUrl | quote }}

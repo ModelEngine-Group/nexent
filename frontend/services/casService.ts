@@ -5,6 +5,7 @@ export interface CasConfig {
   enabled: boolean;
   login_mode: "button" | "force" | "disabled";
   renew_before_seconds: number;
+  renew_interval_seconds: number;
   renew_timeout_seconds: number;
   display_name: string;
 }
@@ -17,6 +18,7 @@ const disabledConfig: CasConfig = {
   enabled: false,
   login_mode: "disabled",
   renew_before_seconds: 300,
+  renew_interval_seconds: 300,
   renew_timeout_seconds: 10,
   display_name: "CAS",
 };
@@ -27,6 +29,7 @@ const FAILURE_CACHE_TTL_MS = 30 * 1000;
 let cachedConfig: CasConfig | null = null;
 let cacheExpiresAt = 0;
 let inFlightConfigPromise: Promise<CasConfig> | null = null;
+let inFlightRenewPromise: Promise<boolean> | null = null;
 
 const cacheConfig = (config: CasConfig, ttlMs: number) => {
   cachedConfig = config;
@@ -76,8 +79,9 @@ export const casService = {
 
   renewInIframe: (timeoutSeconds: number): Promise<boolean> => {
     if (typeof window === "undefined") return Promise.resolve(false);
+    if (inFlightRenewPromise) return inFlightRenewPromise;
 
-    return new Promise((resolve) => {
+    const renewPromise = new Promise<boolean>((resolve) => {
       const iframe = document.createElement("iframe");
       iframe.src = API_ENDPOINTS.cas.renew;
       iframe.style.display = "none";
@@ -107,5 +111,11 @@ export const casService = {
         Math.max(1, timeoutSeconds) * 1000
       );
     });
+
+    inFlightRenewPromise = renewPromise;
+    void renewPromise.finally(() => {
+      inFlightRenewPromise = null;
+    });
+    return renewPromise;
   },
 };
