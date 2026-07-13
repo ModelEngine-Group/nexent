@@ -45,7 +45,7 @@ from backend.database.community_mcp_db import (
     get_mcp_community_record_by_id_and_tenant,
     update_mcp_community_record_by_id,
     delete_mcp_community_record_by_id,
-    list_mcp_community_records_by_tenant,
+    list_mcp_community_records_by_tenant_and_user,
     get_mcp_community_tag_stats_by_tenant,
 )
 
@@ -321,7 +321,7 @@ def test_delete_community_record(monkeypatch, mock_session):
 
 
 # ============================================================================
-# list_mcp_community_records_by_tenant
+# list_mcp_community_records_by_tenant_and_user
 # ============================================================================
 
 def test_list_community_records_by_tenant(monkeypatch, mock_session):
@@ -345,7 +345,7 @@ def test_list_community_records_by_tenant(monkeypatch, mock_session):
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
-    result = list_mcp_community_records_by_tenant("tid")
+    result = list_mcp_community_records_by_tenant_and_user("tid", "uid")
     assert len(result) == 2
 
 

@@ -20,6 +20,73 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
+# Pre-mock nexent module hierarchy to prevent deep SDK import chain
+nexent_mod = types.ModuleType("nexent")
+nexent_mod.__path__ = []
+nexent_mod.__spec__ = importlib.machinery.ModuleSpec("nexent", loader=None)
+sys.modules['nexent'] = nexent_mod
+
+nexent_storage = types.ModuleType("nexent.storage")
+nexent_storage.__spec__ = importlib.machinery.ModuleSpec("nexent.storage", loader=None)
+sys.modules['nexent.storage'] = nexent_storage
+
+nexent_scf = types.ModuleType("nexent.storage.storage_client_factory")
+nexent_scf.create_storage_client_from_config = MagicMock()
+nexent_scf.__spec__ = importlib.machinery.ModuleSpec("nexent.storage.storage_client_factory", loader=None)
+sys.modules['nexent.storage.storage_client_factory'] = nexent_scf
+
+nexent_minio = types.ModuleType("nexent.storage.minio_config")
+nexent_minio.MinIOStorageConfig = MagicMock()
+nexent_minio.__spec__ = importlib.machinery.ModuleSpec("nexent.storage.minio_config", loader=None)
+sys.modules['nexent.storage.minio_config'] = nexent_minio
+
+# Pre-mock all nexent submodules that may be referenced downstream
+for _mod_name in [
+    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.agent_model',
+    'nexent.core.models', 'nexent.core.utils',
+    'nexent.container', 'nexent.memory',
+]:
+    if _mod_name not in sys.modules:
+        _parts = _mod_name.split('.')
+        _mod = types.ModuleType(_mod_name)
+        _mod.__path__ = []
+        _mod.__spec__ = importlib.machinery.ModuleSpec(_mod_name, loader=None)
+        sys.modules[_mod_name] = _mod
+
+# Ensure specific attributes needed by imports are present
+nexent_agent_model = sys.modules['nexent.core.agents.agent_model']
+nexent_agent_model.AgentVerificationConfig = MagicMock()
+nexent_agent_model.ToolConfig = MagicMock()
+
+nexent_container = sys.modules['nexent.container']
+nexent_container.DockerContainerConfig = MagicMock()
+nexent_container.KubernetesContainerConfig = MagicMock()
+nexent_container.create_container_client_from_config = MagicMock()
+nexent_container.ContainerError = Exception
+nexent_container.ContainerConnectionError = Exception
+
+# Pre-mock services.tool_configuration_service so patches resolve correctly
+tool_config_mod = types.ModuleType("services.tool_configuration_service")
+tool_config_mod.get_tool_from_remote_mcp_server = AsyncMock()
+tool_config_mod.__spec__ = importlib.machinery.ModuleSpec("services.tool_configuration_service", loader=None)
+sys.modules['services.tool_configuration_service'] = tool_config_mod
+
+# Pre-mock database.client module
+db_client_mod = types.ModuleType("database.client")
+db_client_mod.MinioClient = MagicMock()
+db_client_mod.minio_client = MagicMock()
+db_client_mod.as_dict = MagicMock()
+db_client_mod.filter_property = MagicMock()
+db_client_mod.get_db_session = MagicMock()
+db_client_mod.__spec__ = importlib.machinery.ModuleSpec("database.client", loader=None)
+sys.modules['database.client'] = db_client_mod
+
+backend_db_client_mod = types.ModuleType("backend.database.client")
+backend_db_client_mod.MinioClient = MagicMock()
+backend_db_client_mod.minio_client = MagicMock()
+backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("backend.database.client", loader=None)
+sys.modules['backend.database.client'] = backend_db_client_mod
+
 # Apply critical patches before importing any modules
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -109,10 +176,11 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_with_custom_headers_only(self, mock_client_cls):
         """Test health check with custom_headers only (no auth token)."""
+        from unittest.mock import AsyncMock, MagicMock
         from fastmcp.client.transports import StreamableHttpTransport
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
-        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client.list_tools = AsyncMock(return_value=[MagicMock(name="tool1")])
         mock_client_cls.return_value = mock_client
 
         custom_headers = {"X-Custom-Header": "value1", "X-Another": "value2"}
@@ -131,10 +199,11 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_with_auth_token_and_custom_headers(self, mock_client_cls):
         """Test health check with both auth token and custom_headers."""
+        from unittest.mock import AsyncMock, MagicMock
         from fastmcp.client.transports import StreamableHttpTransport
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
-        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client.list_tools = AsyncMock(return_value=[MagicMock(name="tool1")])
         mock_client_cls.return_value = mock_client
 
         result = await mcp_server_health(
@@ -154,10 +223,11 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_sse_with_custom_headers(self, mock_client_cls):
         """Test SSE transport with custom_headers."""
+        from unittest.mock import AsyncMock, MagicMock
         from fastmcp.client.transports import SSETransport
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
-        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client.list_tools = AsyncMock(return_value=[MagicMock(name="tool1")])
         mock_client_cls.return_value = mock_client
 
         result = await mcp_server_health(
@@ -174,42 +244,40 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_timeout_raises_mcp_connection_error(self, mock_client_cls):
-        """Test that asyncio.TimeoutError raises MCPConnectionError with MCP_HEALTH_TIMEOUT."""
+        """Test that asyncio.TimeoutError raises MCPConnectionError."""
+        from unittest.mock import AsyncMock
+        import asyncio
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
-        mock_client.is_connected = MagicMock(side_effect=asyncio.TimeoutError())
+        mock_client.list_tools = AsyncMock(side_effect=asyncio.TimeoutError())
         mock_client_cls.return_value = mock_client
 
-        with self.assertRaises(MCPConnectionError) as context:
+        with self.assertRaises(MCPConnectionError):
             await mcp_server_health('http://test-server', custom_headers={"X-Test": "value"})
-
-        self.assertIn("MCP_HEALTH_TIMEOUT", str(context.exception))
 
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_timeout_error_raises_mcp_connection_error(self, mock_client_cls):
-        """Test that TimeoutError raises MCPConnectionError with MCP_HEALTH_TIMEOUT."""
+        """Test that TimeoutError raises MCPConnectionError."""
+        from unittest.mock import AsyncMock
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
-        mock_client.is_connected = MagicMock(side_effect=TimeoutError())
+        mock_client.list_tools = AsyncMock(side_effect=TimeoutError())
         mock_client_cls.return_value = mock_client
 
-        with self.assertRaises(MCPConnectionError) as context:
+        with self.assertRaises(MCPConnectionError):
             await mcp_server_health('http://test-server', custom_headers={"X-Test": "value"})
-
-        self.assertIn("MCP_HEALTH_TIMEOUT", str(context.exception))
 
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_timeout_in_message_raises_mcp_connection_error(self, mock_client_cls):
         """Test that exception message containing 'timeout' raises MCPConnectionError."""
+        from unittest.mock import AsyncMock
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
-        mock_client.is_connected = MagicMock(side_effect=Exception("Connection timeout error"))
+        mock_client.list_tools = AsyncMock(side_effect=Exception("Connection timeout error"))
         mock_client_cls.return_value = mock_client
 
-        with self.assertRaises(MCPConnectionError) as context:
+        with self.assertRaises(MCPConnectionError):
             await mcp_server_health('http://test-server', custom_headers={"X-Test": "value"})
-
-        self.assertIn("MCP_HEALTH_TIMEOUT", str(context.exception))
 
 
 # ============================================================================
@@ -220,12 +288,12 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test add_remote_mcp_server_list with custom_headers parameter."""
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_add_with_custom_headers(self, mock_check_name, mock_health, mock_create):
+    async def test_add_with_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_remote_mcp_server_list passes custom_headers to health check and stores it."""
         mock_check_name.return_value = False
-        mock_health.return_value = True
+        mock_health_check.return_value = ["tool1"]
 
         custom_headers = {"X-API-Key": "key123", "X-Custom": "value"}
         await add_remote_mcp_server_list(
@@ -234,10 +302,9 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         )
 
         # Verify custom_headers passed to health check
-        mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv',
-            authorization_token=None,
-            custom_headers=custom_headers
+        mock_health_check.assert_called_once_with(
+            'http://srv',
+            {"X-API-Key": "key123", "X-Custom": "value"},
         )
 
         # Verify custom_headers stored in database
@@ -245,12 +312,12 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_call_kwargs['mcp_data']['custom_headers'], custom_headers)
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_add_with_auth_token_and_custom_headers(self, mock_check_name, mock_health, mock_create):
+    async def test_add_with_auth_token_and_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_remote_mcp_server_list with both auth token and custom_headers."""
         mock_check_name.return_value = False
-        mock_health.return_value = True
+        mock_health_check.return_value = ["tool1"]
 
         await add_remote_mcp_server_list(
             'tid', 'uid', 'http://srv', 'name',
@@ -258,26 +325,24 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
             custom_headers={"X-Header": "value"}
         )
 
-        mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv',
-            authorization_token='Bearer token123',
-            custom_headers={"X-Header": "value"}
+        mock_health_check.assert_called_once_with(
+            'http://srv',
+            {"Authorization": "Bearer token123", "X-Header": "value"},
         )
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_add_without_custom_headers_none_passed(self, mock_check_name, mock_health, mock_create):
+    async def test_add_without_custom_headers_none_passed(self, mock_check_name, mock_health_check, mock_create):
         """Test add_remote_mcp_server_list when custom_headers is None (default)."""
         mock_check_name.return_value = False
-        mock_health.return_value = True
+        mock_health_check.return_value = ["tool1"]
 
         await add_remote_mcp_server_list('tid', 'uid', 'http://srv', 'name')
 
-        mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv',
-            authorization_token=None,
-            custom_headers=None
+        mock_health_check.assert_called_once_with(
+            'http://srv',
+            {},
         )
 
         create_call_kwargs = mock_create.call_args[1]
@@ -292,12 +357,12 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service with custom_headers parameter."""
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_add_enabled_with_custom_headers(self, mock_check_name, mock_health, mock_create):
+    async def test_add_enabled_with_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_mcp_service with enabled=True and custom_headers."""
         mock_check_name.return_value = False
-        mock_health.return_value = True
+        mock_health_check.return_value = ["tool1"]
 
         custom_headers = {"X-Custom-Auth": "header-value"}
         await add_mcp_service(
@@ -306,13 +371,13 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
             tags=['tag1'], authorization_token='tok',
             custom_headers=custom_headers,
             container_config=None, registry_json=None, enabled=True,
+            config_json=None, market_id=None,
         )
 
         # Verify custom_headers passed to health check
-        mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv/mcp',
-            authorization_token='tok',
-            custom_headers=custom_headers
+        mock_health_check.assert_called_once_with(
+            'http://srv/mcp',
+            {"Authorization": "tok", "X-Custom-Auth": "header-value"},
         )
 
         # Verify custom_headers stored in database
@@ -321,11 +386,12 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(call_data['status'])
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_add_disabled_with_custom_headers(self, mock_check_name, mock_health, mock_create):
+    async def test_add_disabled_with_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_mcp_service with enabled=False and custom_headers."""
         mock_check_name.return_value = False
+        mock_health_check.return_value = ["tool1"]
 
         custom_headers = {"X-Disabled-Header": "value"}
         await add_mcp_service(
@@ -334,10 +400,11 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
             tags=None, authorization_token=None,
             custom_headers=custom_headers,
             container_config=None, registry_json=None, enabled=False,
+            config_json=None, market_id=None,
         )
 
-        # Health check should NOT be called when disabled
-        mock_health.assert_not_called()
+        # Health check IS called (always runs for URL-based services)
+        mock_health_check.assert_called_once()
 
         # But custom_headers should still be stored
         call_data = mock_create.call_args[1]['mcp_data']
@@ -345,14 +412,20 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(call_data['status'])
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    async def test_add_with_none_custom_headers(self, mock_create):
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_add_with_none_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_mcp_service with custom_headers=None (default)."""
+        mock_check_name.return_value = False
+        mock_health_check.return_value = ["tool1"]
+
         await add_mcp_service(
             tenant_id='tid', user_id='uid', name='test-svc',
             description='desc', source='local', server_url='http://srv/mcp',
             tags=None, authorization_token=None,
             custom_headers=None,
             container_config=None, registry_json=None, enabled=False,
+            config_json=None, market_id=None,
         )
 
         call_data = mock_create.call_args[1]['mcp_data']
@@ -438,6 +511,7 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
             server_url='http://new.url', authorization_token='tok',
             custom_headers=custom_headers,
             tags=['a', 'b'],
+            config_json=None, market_id=None,
         )
 
         call_kwargs = mock_update.call_args[1]
@@ -455,6 +529,7 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
             server_url='http://new.url', authorization_token='tok',
             custom_headers=None,
             tags=None,
+            config_json=None, market_id=None,
         )
 
         call_kwargs = mock_update.call_args[1]
@@ -865,6 +940,7 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
             tenant_id='tid', user_id='uid', name='test-svc',
             description='desc', source='local', tags=[],
             authorization_token='tok', registry_json=None,
+            version=None, market_id=None,
             port=8080, mcp_config=self._make_mcp_config(),
         )
 

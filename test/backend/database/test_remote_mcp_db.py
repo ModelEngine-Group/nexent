@@ -363,6 +363,7 @@ def test_update_mcp_record_manage_fields_by_id_success(monkeypatch, mock_session
         name="new-name", server_url="http://new.url",
         description="desc", tags=["a"], source="local",
         authorization_token="tok", custom_headers=None, config_json={"key": "val"},
+        market_id=None,
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
@@ -389,6 +390,7 @@ def test_update_mcp_record_manage_fields_by_id_none_tags(monkeypatch, mock_sessi
         name="n", server_url="u", description=None,
         tags=None, source="local", authorization_token=None,
         custom_headers=None, config_json=None,
+        market_id=None,
     )
     call_args = mock_update.call_args[0][0]
     assert call_args["tags"] == []
@@ -415,6 +417,7 @@ def test_update_mcp_record_manage_fields_by_id_with_custom_headers(monkeypatch, 
         source="community", authorization_token="new_token",
         custom_headers=custom_headers,
         config_json={"timeout": 30},
+        market_id=None,
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
