@@ -2435,7 +2435,7 @@
   "mcpTools.mine.currentVersion": "Current",
   "mcpTools.mine.onlineVersion": "Online",
   "mcpTools.mine.delete": "Delete",
-  "mcpTools.mine.refreshToolCount": "Refresh Tool Count",
+  "mcpTools.mine.refreshToolCount": "Refresh",
   "mcpTools.mine.refreshToolCountSuccess": "Tool count refreshed successfully",
   "mcpTools.mine.refreshToolCountFailed": "Failed to refresh tool count",
   "mcpTools.mine.addService": "Add MCP Service",

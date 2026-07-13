@@ -3186,7 +3186,7 @@
   "mcpTools.mine.reviewProgressStepReviewing": "等待管理员审核",
   "mcpTools.mine.reviewProgressStepApproved": "审核通过",
   "mcpTools.mine.reviewProgressStepRejected": "审核未通过",
-  "mcpTools.mine.refreshToolCount": "刷新工具数量",
+  "mcpTools.mine.refreshToolCount": "刷新",
   "mcpTools.mine.refreshToolCountSuccess": "工具数量已刷新",
   "mcpTools.mine.refreshToolCountFailed": "刷新工具数量失败",
   "mcpTools.mine.addService": "添加MCP服务",

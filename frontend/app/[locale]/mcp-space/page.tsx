@@ -1118,7 +1118,6 @@ function ReviewTableRow({
   const deploymentType = resolveDeploymentType(service);
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
   const reviewStatus = service.reviewStatus || "pending";
-  const reviewType = service.reviewType || "initial_listing";
   const isPending = reviewStatus === "pending";
   const author =
     service.authorDisplayName || service.authorName || "-";
@@ -1164,17 +1163,6 @@ function ReviewTableRow({
           <div className="min-w-0">
             <div className="text-sm font-medium text-slate-900">
               {service.name}
-            </div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-xs">
-              {reviewType === "version_update" ? (
-                <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
-                  {t("mcpTools.review.type.version_update")}
-                </span>
-              ) : (
-                <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                  {t("mcpTools.review.type.initial_listing")}
-                </span>
-              )}
             </div>
           </div>
         </div>

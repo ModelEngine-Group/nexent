@@ -156,6 +156,24 @@ class TestCommunityReviewList:
         )
         assert resp.status_code == HTTPStatus.OK
 
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    def test_list_reviews_unauthorized(self, mock_list, mock_auth):
+        """Test listing reviews returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp-tools/community/review/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    def test_list_reviews_server_error(self, mock_list, mock_auth):
+        """Test listing reviews returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.side_effect = RuntimeError("unexpected")
+        resp = client.get("/mcp-tools/community/review/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # ============================================================================
 # POST /mcp-tools/community/review/approve
@@ -193,6 +211,32 @@ class TestCommunityReviewApprove:
         )
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    def test_approve_unauthorized(self, mock_approve, mock_auth):
+        """Test approval returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_approve.side_effect = UnauthorizedError("unauthorized")
+        resp = client.post(
+            "/mcp-tools/community/review/approve",
+            json={"review_id": 1},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    def test_approve_server_error(self, mock_approve, mock_auth):
+        """Test approval returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_approve.side_effect = RuntimeError("unexpected")
+        resp = client.post(
+            "/mcp-tools/community/review/approve",
+            json={"review_id": 1},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # ============================================================================
 # POST /mcp-tools/community/review/reject
@@ -226,6 +270,32 @@ class TestCommunityReviewReject:
             headers=AUTH_HEADER,
         )
         assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    def test_reject_unauthorized(self, mock_reject, mock_auth):
+        """Test rejection returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_reject.side_effect = UnauthorizedError("unauthorized")
+        resp = client.post(
+            "/mcp-tools/community/review/reject",
+            json={"review_id": 1},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    def test_reject_server_error(self, mock_reject, mock_auth):
+        """Test rejection returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_reject.side_effect = RuntimeError("unexpected")
+        resp = client.post(
+            "/mcp-tools/community/review/reject",
+            json={"review_id": 1},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 # ============================================================================
@@ -275,6 +345,45 @@ class TestCommunityPublish:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_publish_validation_error(self, mock_publish, mock_auth):
+        """Test publishing fails with validation error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = McpValidationError("invalid")
+        resp = client.post("/mcp-tools/community/publish", json={
+            "mcp_id": 1, "name": "svc", "description": "d",
+            "tags": [],
+            "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_publish_unauthorized(self, mock_publish, mock_auth):
+        """Test publishing returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = UnauthorizedError("unauthorized")
+        resp = client.post("/mcp-tools/community/publish", json={
+            "mcp_id": 1, "name": "svc", "description": "d",
+            "tags": [],
+            "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_publish_server_error(self, mock_publish, mock_auth):
+        """Test publishing returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = RuntimeError("unexpected")
+        resp = client.post("/mcp-tools/community/publish", json={
+            "mcp_id": 1, "name": "svc", "description": "d",
+            "tags": [],
+            "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # ============================================================================
 # PUT /mcp-tools/community/update
@@ -308,6 +417,58 @@ class TestCommunityUpdate:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_validation_error(self, mock_update, mock_auth):
+        """Test update fails with validation error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpValidationError("invalid")
+        resp = client.put("/mcp-tools/community/update", json={
+            "market_id": 1, "name": "x",
+            "description": "d", "tags": [],
+            "registry_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_name_conflict(self, mock_update, mock_auth):
+        """Test update fails on name conflict."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNameConflictError("name exists")
+        resp = client.put("/mcp-tools/community/update", json={
+            "market_id": 1, "name": "taken",
+            "description": "d", "tags": [],
+            "registry_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_unauthorized(self, mock_update, mock_auth):
+        """Test update returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = UnauthorizedError("unauthorized")
+        resp = client.put("/mcp-tools/community/update", json={
+            "market_id": 1, "name": "x",
+            "description": "d", "tags": [],
+            "registry_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_server_error(self, mock_update, mock_auth):
+        """Test update returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = RuntimeError("unexpected")
+        resp = client.put("/mcp-tools/community/update", json={
+            "market_id": 1, "name": "x",
+            "description": "d", "tags": [],
+            "registry_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # ============================================================================
 # DELETE /mcp-tools/community/delete
@@ -332,6 +493,24 @@ class TestCommunityDelete:
         mock_delete.side_effect = McpNotFoundError("not found")
         resp = client.delete("/mcp-tools/community/delete?market_id=999", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    def test_delete_unauthorized(self, mock_delete, mock_auth):
+        """Test deletion returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_delete.side_effect = UnauthorizedError("unauthorized")
+        resp = client.delete("/mcp-tools/community/delete?market_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    def test_delete_server_error(self, mock_delete, mock_auth):
+        """Test deletion returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_delete.side_effect = RuntimeError("unexpected")
+        resp = client.delete("/mcp-tools/community/delete?market_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 # ============================================================================
@@ -369,6 +548,301 @@ class TestCommunityDownload:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
         mock_inc.assert_called_once_with(1)
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    def test_download_unauthorized(self, mock_inc, mock_auth):
+        """Test download returns 401 on UnauthorizedError."""
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.post("/mcp-tools/community/1/download", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    def test_download_server_error(self, mock_inc, mock_auth):
+        """Test download returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_inc.side_effect = RuntimeError("unexpected")
+        resp = client.post("/mcp-tools/community/1/download", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# POST /mcp-tools/community (RESTful create)
+# ============================================================================
+
+class TestCreateCommunity:
+    """Test POST /mcp-tools/community"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_create_success(self, mock_publish, mock_auth):
+        """Test successful community MCP creation."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.return_value = 42
+        resp = client.post("/mcp-tools/community", json={
+            "mcp_id": 1, "name": "svc", "description": "desc",
+            "tags": ["a"],
+            "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["data"]["market_id"] == 42
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_create_not_found(self, mock_publish, mock_auth):
+        """Test create fails when source MCP not found."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = McpNotFoundError("not found")
+        resp = client.post("/mcp-tools/community", json={
+            "mcp_id": 999, "name": "x", "description": "d",
+            "tags": [], "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_create_validation_error(self, mock_publish, mock_auth):
+        """Test create fails with validation error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = McpValidationError("invalid")
+        resp = client.post("/mcp-tools/community", json={
+            "mcp_id": 1, "name": "svc", "description": "d",
+            "tags": [], "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_create_name_conflict(self, mock_publish, mock_auth):
+        """Test create fails on name conflict."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = McpNameConflictError("name exists")
+        resp = client.post("/mcp-tools/community", json={
+            "mcp_id": 1, "name": "taken", "description": "d",
+            "tags": [], "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_create_unauthorized(self, mock_publish, mock_auth):
+        """Test create returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = UnauthorizedError("unauthorized")
+        resp = client.post("/mcp-tools/community", json={
+            "mcp_id": 1, "name": "svc", "description": "d",
+            "tags": [], "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    def test_create_server_error(self, mock_publish, mock_auth):
+        """Test create returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_publish.side_effect = RuntimeError("unexpected")
+        resp = client.post("/mcp-tools/community", json={
+            "mcp_id": 1, "name": "svc", "description": "d",
+            "tags": [], "mcp_server": "http://srv", "config_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# PUT /mcp-tools/community/{market_id} (RESTful update)
+# ============================================================================
+
+class TestUpdateCommunityByMarketId:
+    """Test PUT /mcp-tools/community/{market_id}"""
+
+    COMMON_BODY = {"market_id": 1, "name": "x", "description": "d", "tags": [], "registry_json": None}
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_success(self, mock_update, mock_auth):
+        """Test successful update by market_id."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.put("/mcp-tools/community/1", json={
+            "market_id": 1, "name": "new-name", "description": "desc", "tags": [],
+            "registry_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_not_found(self, mock_update, mock_auth):
+        """Test update by market_id fails when record not found."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNotFoundError("not found")
+        resp = client.put("/mcp-tools/community/999", json={
+            "market_id": 999, "name": "x", "description": "d", "tags": [],
+            "registry_json": None,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_validation_error(self, mock_update, mock_auth):
+        """Test update by market_id fails with validation error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpValidationError("invalid")
+        resp = client.put("/mcp-tools/community/1", json={
+            **self.COMMON_BODY,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_name_conflict(self, mock_update, mock_auth):
+        """Test update by market_id fails on name conflict."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNameConflictError("name exists")
+        resp = client.put("/mcp-tools/community/1", json={
+            **self.COMMON_BODY, "name": "taken",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_unauthorized(self, mock_update, mock_auth):
+        """Test update by market_id returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = UnauthorizedError("unauthorized")
+        resp = client.put("/mcp-tools/community/1", json={
+            **self.COMMON_BODY,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.update_community_mcp_service')
+    def test_update_server_error(self, mock_update, mock_auth):
+        """Test update by market_id returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = RuntimeError("unexpected")
+        resp = client.put("/mcp-tools/community/1", json={
+            **self.COMMON_BODY,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# DELETE /mcp-tools/community/{market_id} (RESTful delete)
+# ============================================================================
+
+class TestDeleteCommunityByMarketId:
+    """Test DELETE /mcp-tools/community/{market_id}"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    def test_delete_success(self, mock_delete, mock_auth):
+        """Test successful RESTful deletion by market_id."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.delete("/mcp-tools/community/1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    def test_delete_not_found(self, mock_delete, mock_auth):
+        """Test RESTful deletion fails when record not found."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_delete.side_effect = McpNotFoundError("not found")
+        resp = client.delete("/mcp-tools/community/999", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    def test_delete_unauthorized(self, mock_delete, mock_auth):
+        """Test RESTful deletion returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_delete.side_effect = UnauthorizedError("unauthorized")
+        resp = client.delete("/mcp-tools/community/1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    def test_delete_server_error(self, mock_delete, mock_auth):
+        """Test RESTful deletion returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_delete.side_effect = RuntimeError("unexpected")
+        resp = client.delete("/mcp-tools/community/1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# PATCH /mcp-tools/community/{market_id}/status (change listing status)
+# ============================================================================
+
+class TestChangeCommunityStatus:
+    """Test PATCH /mcp-tools/community/{market_id}/status"""
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.change_mcp_market_status')
+    def test_change_status_success(self, mock_change, mock_auth):
+        """Test successful status change."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.patch("/mcp-tools/community/1/status", json={
+            "status": "shared",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.change_mcp_market_status')
+    def test_change_status_not_found(self, mock_change, mock_auth):
+        """Test status change fails when record not found."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_change.side_effect = McpNotFoundError("not found")
+        resp = client.patch("/mcp-tools/community/999/status", json={
+            "status": "shared",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.change_mcp_market_status')
+    def test_change_status_name_conflict(self, mock_change, mock_auth):
+        """Test status change fails on name conflict."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_change.side_effect = McpNameConflictError("name exists")
+        resp = client.patch("/mcp-tools/community/1/status", json={
+            "status": "shared",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.change_mcp_market_status')
+    def test_change_status_unauthorized(self, mock_change, mock_auth):
+        """Test status change returns 401 on UnauthorizedError."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_change.side_effect = UnauthorizedError("unauthorized")
+        resp = client.patch("/mcp-tools/community/1/status", json={
+            "status": "shared",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.change_mcp_market_status')
+    def test_change_status_invalid_value(self, mock_change, mock_auth):
+        """Test status change returns 400 on invalid status value."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_change.side_effect = ValueError("invalid status")
+        resp = client.patch("/mcp-tools/community/1/status", json={
+            "status": "invalid",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.change_mcp_market_status')
+    def test_change_status_server_error(self, mock_change, mock_auth):
+        """Test status change returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_change.side_effect = RuntimeError("unexpected")
+        resp = client.patch("/mcp-tools/community/1/status", json={
+            "status": "shared",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 if __name__ == "__main__":
