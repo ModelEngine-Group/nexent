@@ -6,6 +6,10 @@ import type {
   AgentRepositoryListingListParams,
   MyEditableAgentListParams,
 } from "@/types/agentRepository";
+import type {
+  MyEditableSkillListParams,
+  SkillRepositoryListingListParams,
+} from "@/types/skillRepository";
 import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
@@ -379,7 +383,9 @@ export const API_ENDPOINTS = {
     official: `${API_BASE_URL}/skills/official`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    getById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     updateUpload: (skillName: string) =>
       `${API_BASE_URL}/skills/${skillName}/upload`,
     delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -483,6 +489,60 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+  },
+  skillRepository: {
+    listings: (params?: SkillRepositoryListingListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.status) queryParams.append("status", params.status);
+      if (params?.skill_id != null) {
+        queryParams.append("skill_id", String(params.skill_id));
+      }
+      if (params?.category_id != null) {
+        queryParams.append("category_id", String(params.category_id));
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/skill${queryString ? `?${queryString}` : ""}`;
+    },
+    mineSkills: (params?: MyEditableSkillListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.ownership) {
+        queryParams.append("ownership", params.ownership);
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.new_skill_padding) {
+        queryParams.append("new_skill_padding", "true");
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
+    },
+    detail: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
+    install: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}/install`,
+    updateStatus: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}/status`,
+    createListing: (skillId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillId}`,
   },
   market: {
     agents: (params?: MarketAgentListParams) => {

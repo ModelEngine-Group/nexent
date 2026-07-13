@@ -13,6 +13,7 @@ from sdk.nexent.core.agents.summary_config import ContextManagerConfig
 
 
 STRATEGY_TOKEN_BUDGET = "token_budget"
+STRATEGY_FULL = "full"
 
 
 class TestNexentAgentComponentRegistration:
@@ -216,7 +217,7 @@ class TestBackwardCompatibility:
     def test_context_manager_config_without_strategy_defaults(self):
         config = ContextManagerConfig(token_threshold=2000)
 
-        assert config.strategy == STRATEGY_TOKEN_BUDGET
+        assert config.strategy == STRATEGY_FULL
         assert "system_prompt" in config.component_budgets
 
 

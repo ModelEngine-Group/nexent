@@ -176,7 +176,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                       <Inbox size={48} className="text-blue-600" />
                     </p>
                     <p className="ant-upload-text !mb-2 text-base">
-                      {t("knowledgeBase.upload.dragHint")}   
+                      {t("knowledgeBase.upload.dragHint")}
                     </p>
                     <p className="ant-upload-hint text-gray-500">
                       {t("knowledgeBase.upload.supportedFormats")}
