@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -6,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
+backend_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../backend")
+)
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
@@ -40,6 +43,28 @@ def test_runtime_event_sink_preserves_delivery_order_and_assigns_sequence():
     assert sink.drain() == [first, second]
     assert sink.drain() == []
     assert sink.events == (first, second)
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_sink_streams_before_close_and_closes_idempotently():
+    sink = RuntimeEventSink(request_id="req-stream")
+    first_received = asyncio.Event()
+    received: list[RuntimeEvent] = []
+
+    async def consume() -> None:
+        async for event in sink.stream():
+            received.append(event)
+            first_received.set()
+
+    task = asyncio.create_task(consume())
+    sink.emit(RuntimeEvent(type=RuntimeEventType.TOOL_CALL, tool_name="slow"))
+    await asyncio.wait_for(first_received.wait(), timeout=1)
+
+    assert [event.tool_name for event in received] == ["slow"]
+    sink.close()
+    sink.close()
+    await asyncio.wait_for(task, timeout=1)
+    assert sink.closed is True
 
 
 @pytest.mark.asyncio
@@ -177,11 +202,17 @@ def test_standard_runtime_events_map_to_existing_process_types():
         RuntimeEvent(type=RuntimeEventType.STEP, content={"step": 1}),
         RuntimeEvent(type=RuntimeEventType.MODEL_DELTA, delta="thinking"),
         RuntimeEvent(type=RuntimeEventType.MODEL_REASONING, reasoning="reason"),
-        RuntimeEvent(type=RuntimeEventType.TOOL_CALL, tool_name="search", tool_input={"q": "x"}),
+        RuntimeEvent(
+            type=RuntimeEventType.TOOL_CALL, tool_name="search", tool_input={"q": "x"}
+        ),
         RuntimeEvent(type=RuntimeEventType.TOOL_DISPLAY, content={"title": "card"}),
         RuntimeEvent(type=RuntimeEventType.RETRIEVAL, content=[{"title": "source"}]),
-        RuntimeEvent(type=RuntimeEventType.IMAGE, content=["https://example.test/image.png"]),
-        RuntimeEvent(type=RuntimeEventType.RUN_FINISHED, content={"status": "completed"}),
+        RuntimeEvent(
+            type=RuntimeEventType.IMAGE, content=["https://example.test/image.png"]
+        ),
+        RuntimeEvent(
+            type=RuntimeEventType.RUN_FINISHED, content={"status": "completed"}
+        ),
     ]
 
     payloads = [runtime_event_to_process_payload(event) for event in events]
@@ -288,7 +319,9 @@ def test_smolagents_process_type_coverage_matches_current_observer_enum():
         / "observer.py"
     )
     source = observer_path.read_text(encoding="utf-8")
-    process_types = set(re.findall(r'=\s*"([a-z_]+)"', source.split("class MessageObserver", 1)[0]))
+    process_types = set(
+        re.findall(r'=\s*"([a-z_]+)"', source.split("class MessageObserver", 1)[0])
+    )
 
     assert set(SMOLAGENTS_PROCESS_TYPE_COMPATIBILITY) == process_types
     assert set(SMOLAGENTS_PROCESS_TYPE_COMPATIBILITY.values()) == {"complete"}

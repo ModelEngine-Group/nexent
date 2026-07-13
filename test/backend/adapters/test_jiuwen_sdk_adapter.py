@@ -144,6 +144,7 @@ def adapter_module(monkeypatch):
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestModuleImport:
     """Verify the module's top-level side effects landed correctly."""
 
@@ -196,6 +197,7 @@ class TestModuleImport:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestJiuwenInitBypasser:
     """Cover ``_JiuwenInitBypasser.find_spec`` and the loader hooks."""
 
@@ -497,9 +499,8 @@ class TestBuildJiuwenModelConfigs:
         assert client.api_base == "https://api.openai.com/v1"
         # Default 120s timeout when not configured.
         assert client.timeout == 120.0
-        # No cert means we cannot verify, so the adapter disables verification
-        # even when the user asked for it.
-        assert client.verify_ssl is False
+        # OpenJiuwen 0.1.15 uses the system CA when no custom certificate is set.
+        assert client.verify_ssl is True
 
     def test_ssl_verify_disabled_when_cert_missing(self, adapter_module, fake_jiuwen_module):
         sys.modules.setdefault(
@@ -522,9 +523,8 @@ class TestBuildJiuwenModelConfigs:
         sys.modules["utils.config_utils"].get_model_name_from_config = lambda cfg: "m"
 
         _, client = adapter_module.build_jiuwen_model_configs(1, "t1")
-        # No cert -> verify_ssl gets turned off, even though the user asked
-        # for verification.
-        assert client.verify_ssl is False
+        # No custom certificate keeps TLS verification enabled with the system CA.
+        assert client.verify_ssl is True
 
     def test_custom_timeout_and_ssl_cert_propagate(self, adapter_module, fake_jiuwen_module):
         sys.modules.setdefault(
@@ -1387,6 +1387,7 @@ class TestLazyImportJiuwenOptionalImports:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestJiuwenInitBypasserFindSpec:
     """Cover the early-return / error branches of ``_JiuwenInitBypasser.find_spec``."""
 
@@ -1439,6 +1440,7 @@ class TestJiuwenInitBypasserFindSpec:
         assert finder.find_spec(non_chain, None, None) is None
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestJiuwenInitBypasserGetAttr:
     """``__getattr__`` returns a real submodule if it exists, raises otherwise."""
 
@@ -1516,6 +1518,7 @@ class TestJiuwenInitBypasserGetAttr:
             _JiuwenInitBypasser.__getattr__(finder, "no_such_submodule")
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestMetaPathIdempotent:
     """Re-importing the module should not stack multiple ``_JiuwenInitBypasser`` finders."""
 
@@ -1547,6 +1550,7 @@ class TestMetaPathIdempotent:
         ]) == len(before)
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestInstallJiuwenBypasserNoOp:
     """``_install_jiuwen_bypasser`` is a no-op kept for backward compatibility."""
 
@@ -1760,6 +1764,7 @@ class TestEvaluateSemanticConsistencyImportFailure:
             )
 
 
+@pytest.mark.skip(reason="OpenJiuwen 0.1.15 no longer uses the legacy import bypasser")
 class TestEnsureAvailableForceInstallBypasser:
     """Branch: when ``_bypasser_installed`` is False at runtime, ensure_available
     re-invokes ``_install_jiuwen_bypasser`` (line 476)."""

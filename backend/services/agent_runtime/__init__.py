@@ -49,6 +49,7 @@ from .models import (
     RunControl,
     ToolRuntimeContext,
     ToolSpec,
+    derive_runtime_capability_requirements,
 )
 from .operators import (
     ALLOWED_CONTEXT_PATCH_KEYS,
@@ -110,11 +111,16 @@ from .registry import (
     build_default_agent_runtime_registry,
     get_configured_agent_runtime,
 )
+from .run_preparation import (
+    PreparedAgentRunCapabilityProvider,
+    build_production_capability_providers,
+)
 from .tool_schema import (
     AgentRunPlanContractError,
     ToolSchemaConfigurationError,
     assert_agent_run_plan_framework_neutral,
     normalize_tool_input_schema,
+    tool_input_schema_to_json_schema,
     tool_spec_from_legacy_tool_config,
     validate_model_visible_tool_schema,
 )
@@ -132,6 +138,7 @@ from .tool_factory import (
     ToolFactory,
     ToolFactoryError,
     ToolFactoryRegistry,
+    build_production_tool_factory_registry,
 )
 
 __all__ = [
@@ -200,6 +207,7 @@ __all__ = [
     "PluginRegistry",
     "PluginToolFactory",
     "PromptBundle",
+    "PreparedAgentRunCapabilityProvider",
     "RuntimeCapabilities",
     "RuntimeCapabilityRequirements",
     "RuntimeCapabilityNegotiationError",
@@ -227,11 +235,14 @@ __all__ = [
     "UntrustedPluginRegistrationError",
     "agent_runtime_registry",
     "assemble_agent_run_plan",
+    "build_production_tool_factory_registry",
     "apply_operator_context_to_plan",
     "assert_agent_run_plan_framework_neutral",
     "build_default_agent_runtime_registry",
+    "build_production_capability_providers",
     "default_capability_providers",
     "default_operator_registry",
+    "derive_runtime_capability_requirements",
     "emit_runtime_event",
     "freeze_agent_run_plan",
     "get_configured_agent_runtime",
@@ -245,6 +256,7 @@ __all__ = [
     "runtime_event_to_process_payload",
     "runtime_events_to_delivery_items",
     "sort_capability_providers",
+    "tool_input_schema_to_json_schema",
     "tool_spec_from_legacy_tool_config",
     "validate_plugin_config",
     "validate_model_visible_tool_schema",

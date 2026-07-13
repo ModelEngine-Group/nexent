@@ -4,7 +4,9 @@ from typing import Any
 
 import pytest
 
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
+backend_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../backend")
+)
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
@@ -295,10 +297,13 @@ def test_mcp_tool_factory_uses_connected_resources_only():
         usage="docs",
     )
 
-    assert factory.create(
-        tool,
-        _context(resources={"mcp.tools": {"docs": {"search": native_tool}}}),
-    ) is native_tool
+    assert (
+        factory.create(
+            tool,
+            _context(resources={"mcp.tools": {"docs": {"search": native_tool}}}),
+        )
+        is native_tool
+    )
 
     with pytest.raises(ToolCreationError, match="connected server 'docs'"):
         factory.create(tool, _context(resources={"mcp.tools": {"docs": {}}}))
@@ -317,10 +322,13 @@ def test_langchain_tool_factory_wraps_explicit_resource_reference():
         metadata={"langchain_tool_name": "CalendarTool"},
     )
 
-    assert factory.create(
-        tool,
-        _context(resources={"langchain.tools": {"CalendarTool": native_tool}}),
-    ) is wrapped_tool
+    assert (
+        factory.create(
+            tool,
+            _context(resources={"langchain.tools": {"CalendarTool": native_tool}}),
+        )
+        is wrapped_tool
+    )
 
     with pytest.raises(ToolCreationError, match="CalendarTool"):
         factory.create(tool, _context())
@@ -430,3 +438,56 @@ def test_plugin_tool_factory_uses_trusted_registered_creator():
 
     with pytest.raises(ToolCreationError, match="PluginTool"):
         PluginToolFactory().create(tool, context)
+
+
+@pytest.mark.asyncio
+async def test_tool_runtime_wrapper_awaits_async_result_before_finished_events():
+    release = __import__("asyncio").Event()
+
+    async def async_tool(value: str) -> dict[str, Any]:
+        await release.wait()
+        return {"value": value, "artifact": {"absolute_path": "/tmp/result.txt"}}
+
+    sink = RuntimeEventSink("req-async-tool")
+    registry = ToolFactoryRegistry()
+    registry.register(ToolSource.LOCAL, StaticFactory(async_tool))
+    wrapped = registry.create(
+        ToolSpec(name="async_tool", source=ToolSource.LOCAL),
+        _context(event_sink=sink),
+    )
+
+    task = __import__("asyncio").create_task(wrapped(value="ok"))
+    await __import__("asyncio").sleep(0)
+    assert [event.metadata.get("tool_status") for event in sink.events] == [
+        "parsed",
+        "started",
+    ]
+
+    release.set()
+    assert await task == {
+        "value": "ok",
+        "artifact": {"absolute_path": "/tmp/result.txt"},
+    }
+    statuses = [event.metadata.get("tool_status") for event in sink.events]
+    assert statuses[:4] == ["parsed", "started", "finished", "execution_logs"]
+    assert any(event.type == RuntimeEventType.ARTIFACT_CREATED for event in sink.events)
+
+
+@pytest.mark.asyncio
+async def test_tool_runtime_wrapper_emits_failed_without_finished_for_async_error():
+    async def failing_tool() -> None:
+        raise ValueError("tool failed")
+
+    sink = RuntimeEventSink("req-failing-tool")
+    registry = ToolFactoryRegistry()
+    registry.register(ToolSource.LOCAL, StaticFactory(failing_tool))
+    wrapped = registry.create(
+        ToolSpec(name="failing_tool", source=ToolSource.LOCAL),
+        _context(event_sink=sink),
+    )
+
+    with pytest.raises(ValueError, match="tool failed"):
+        await wrapped()
+
+    statuses = [event.metadata.get("tool_status") for event in sink.events]
+    assert statuses == ["parsed", "started", "error"]

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -6,7 +7,9 @@ from typing import Any
 
 import pytest
 
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
+backend_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../backend")
+)
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
@@ -28,6 +31,7 @@ from services.agent_runtime.openjiuwen_runtime import (
     OpenJiuwenRuntime,
     OpenJiuwenRuntimeDependencies,
     OpenJiuwenUnsupportedFeatureError,
+    _to_openjiuwen_tool_schema,
 )
 from services.agent_runtime.tool_factory import ToolFactoryRegistry
 
@@ -63,6 +67,8 @@ class FakeReActAgentConfig:
     prompt_template: list[dict[str, Any]]
     max_iterations: int
     context_engine_config: Any = None
+    model_name: str = ""
+    model_provider: str = ""
 
 
 @dataclass
@@ -138,6 +144,53 @@ class FakeContext:
         return messages
 
 
+class FakeSession:
+    def __init__(self, session_id: str, card: Any = None):
+        self.session_id = session_id
+        self.card = card
+        self.post_run_called = False
+
+    def get_session_id(self) -> str:
+        return self.session_id
+
+    async def post_run(self) -> None:
+        self.post_run_called = True
+
+
+class FakeContextEngine:
+    def __init__(self, config: Any = None):
+        self.config = config
+        self.contexts: dict[str, FakeContext] = {}
+        self.create_calls: list[dict[str, Any]] = []
+        self.clear_calls: list[dict[str, Any]] = []
+
+    async def create_context(
+        self,
+        context_id: str = "default_context_id",
+        session: FakeSession | None = None,
+        *,
+        history_messages: list[Any] | None = None,
+        **_: Any,
+    ) -> FakeContext:
+        session_id = session.get_session_id() if session else "default"
+        key = f"{session_id}:{context_id}"
+        context = self.contexts.setdefault(key, FakeContext())
+        if history_messages and not context.messages:
+            await context.add_messages(history_messages)
+        self.create_calls.append(
+            {
+                "context_id": context_id,
+                "session": session,
+                "history_messages": list(history_messages or []),
+            }
+        )
+        return context
+
+    async def clear_context(self, context_id: str, session_id: str) -> None:
+        self.clear_calls.append({"context_id": context_id, "session_id": session_id})
+        self.contexts.pop(f"{session_id}:{context_id}", None)
+
+
 class FakeReActAgent:
     instances: list["FakeReActAgent"] = []
     stream_chunks: list[Any] = []
@@ -150,6 +203,7 @@ class FakeReActAgent:
         self.config = None
         self.stream_inputs = None
         self.context = FakeContext()
+        self.context_engine = FakeContextEngine()
         self.prompt_sections: list[dict[str, Any]] = []
         FakeReActAgent.instances.append(self)
 
@@ -158,9 +212,9 @@ class FakeReActAgent:
         return self
 
     async def _init_context(self, session: Any) -> FakeContext:
-        return self.context
+        return await self.context_engine.create_context(session=session)
 
-    async def stream(self, inputs: dict[str, Any]):
+    async def stream(self, inputs: dict[str, Any], session: Any = None):
         self.stream_inputs = dict(inputs)
         if FakeReActAgent.stream_started is not None:
             FakeReActAgent.stream_started.set()
@@ -169,7 +223,9 @@ class FakeReActAgent:
         for chunk in FakeReActAgent.stream_chunks:
             yield chunk
 
-    def add_prompt_builder_section(self, name: str, content: str, *, priority: int) -> None:
+    def add_prompt_builder_section(
+        self, name: str, content: str, *, priority: int
+    ) -> None:
         self.prompt_sections.append(
             {
                 "name": name,
@@ -199,7 +255,9 @@ class FakeSysOperationCard:
     work_config: FakeLocalWorkConfig | None = None
 
     @staticmethod
-    def generate_tool_id(sys_operation_id: str, operation_name: str, tool_name: str) -> str:
+    def generate_tool_id(
+        sys_operation_id: str, operation_name: str, tool_name: str
+    ) -> str:
         return f"{sys_operation_id}.{operation_name}.{tool_name}"
 
 
@@ -211,7 +269,9 @@ class FakeSkillUtil:
         self.register_calls: list[dict[str, Any]] = []
         FakeSkillUtil.instances.append(self)
 
-    async def register_skills(self, skill_path: str, agent: Any, session_id: str | None = None) -> bool:
+    async def register_skills(
+        self, skill_path: str, agent: Any, session_id: str | None = None
+    ) -> bool:
         self.register_calls.append(
             {
                 "skill_path": skill_path,
@@ -225,6 +285,18 @@ class FakeSkillUtil:
         return "Native skill prompt with read_file."
 
 
+class FakeResult:
+    def __init__(self, ok: bool, message: str = ""):
+        self.ok = ok
+        self.message = message
+
+    def is_ok(self) -> bool:
+        return self.ok
+
+    def msg(self) -> str:
+        return self.message
+
+
 class FakeResourceManager:
     def __init__(self):
         self.added_mcp_servers: list[Any] = []
@@ -233,9 +305,26 @@ class FakeResourceManager:
         self.removed_tools: list[Any] = []
         self.added_sys_operations: list[Any] = []
         self.removed_sys_operations: list[str] = []
+        self.mcp_tool_requests: list[dict[str, Any]] = []
+        self.add_mcp_server_result: Any = None
 
-    async def add_mcp_server(self, server_config: Any, *, expiry_time: float | None = None) -> None:
+    async def add_mcp_server(
+        self, server_config: Any, *, expiry_time: float | None = None
+    ) -> None:
         self.added_mcp_servers.append((server_config, expiry_time))
+        return self.add_mcp_server_result
+
+    async def get_mcp_tool(self, name: str, server_id: str, **_: Any) -> list[Any]:
+        self.mcp_tool_requests.append({"name": name, "server_id": server_id})
+
+        class FakeMcpTool:
+            def __init__(self):
+                self.name = name
+
+            async def invoke(self, inputs: dict[str, Any]) -> dict[str, Any]:
+                return {"name": name, "server_id": server_id, "inputs": inputs}
+
+        return [FakeMcpTool()]
 
     async def remove_mcp_server(self, **kwargs: Any) -> None:
         self.removed_mcp_servers.append(dict(kwargs))
@@ -249,7 +338,9 @@ class FakeResourceManager:
     def add_sys_operation(self, card: Any) -> None:
         self.added_sys_operations.append(card)
 
-    def get_sys_op_tool_cards(self, sys_operation_id: str, **kwargs: Any) -> FakeToolCard:
+    def get_sys_op_tool_cards(
+        self, sys_operation_id: str, **kwargs: Any
+    ) -> FakeToolCard:
         return FakeToolCard(
             id=f"{sys_operation_id}.fs.read_file",
             name="read_file",
@@ -294,6 +385,10 @@ def openjiuwen_dependencies() -> OpenJiuwenRuntimeDependencies:
         SysOperationCard=FakeSysOperationCard,
         LocalWorkConfig=FakeLocalWorkConfig,
         OperationMode=FakeOperationMode,
+        ContextEngine=FakeContextEngine,
+        create_agent_session=lambda session_id, card=None: FakeSession(
+            session_id, card
+        ),
     )
 
 
@@ -339,6 +434,7 @@ def _model_config() -> dict[str, Any]:
         "url": "https://api.example/v1",
         "temperature": 0.2,
         "top_p": 0.8,
+        "max_tokens": 384000,
         "max_output_tokens": 1024,
         "ssl_verify": False,
         "custom_headers": {"X-Tenant": "tenant-1"},
@@ -399,6 +495,7 @@ def test_openjiuwen_capabilities_match_initial_spike_contract():
     assert runtime.capabilities.mcp is True
     assert runtime.capabilities.tool_call_events is True
     assert runtime.capabilities.token_usage_events is True
+    assert runtime.capabilities.tool_artifacts is True
     assert runtime.capabilities.interruptible is True
     assert runtime.capabilities.managed_agents is False
     assert runtime.capabilities.external_a2a_agents is False
@@ -434,7 +531,39 @@ def test_openjiuwen_process_type_coverage_matrix_lists_all_legacy_process_types(
     assert OPENJIUWEN_PROCESS_TYPE_COMPATIBILITY["tool"] == "complete"
 
 
-def test_agent_model_prompt_and_history_mapping_do_not_read_env(monkeypatch, openjiuwen_dependencies):
+def test_openjiuwen_tool_schema_converts_builtin_skill_shorthand():
+    schema = _to_openjiuwen_tool_schema(
+        {
+            "skill_name": "str",
+            "script_path": "str",
+            "params": "dict",
+            "additional_files": "list[str]",
+        }
+    )
+
+    assert schema == {
+        "type": "object",
+        "properties": {
+            "skill_name": {"type": "string"},
+            "script_path": {"type": "string"},
+            "params": {"type": "object"},
+            "additional_files": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": [
+            "skill_name",
+            "script_path",
+            "params",
+            "additional_files",
+        ],
+    }
+
+
+def test_agent_model_prompt_and_history_mapping_do_not_read_env(
+    monkeypatch, openjiuwen_dependencies
+):
     def fail_getenv(*args: Any, **kwargs: Any):
         raise AssertionError("OpenJiuwenRuntime must not read env directly")
 
@@ -453,7 +582,7 @@ def test_agent_model_prompt_and_history_mapping_do_not_read_env(monkeypatch, ope
         "max_tokens": 1024,
     }
     assert bundle.model_client_config.values == {
-        "client_provider": "OpenAI",
+        "client_provider": "NexentOpenAI",
         "api_key": "explicit-key",
         "api_base": "https://api.example/v1",
         "timeout": 60.0,
@@ -467,19 +596,96 @@ def test_agent_model_prompt_and_history_mapping_do_not_read_env(monkeypatch, ope
 
 
 @pytest.mark.asyncio
-async def test_history_is_injected_once_through_agent_owned_context(openjiuwen_dependencies):
+async def test_history_is_injected_once_through_agent_owned_context(
+    openjiuwen_dependencies,
+):
     runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
-    bundle = runtime.to_agent_bundle(_plan())
+    FakeReActAgent.stream_chunks = [
+        {"type": "answer", "payload": {"output": "done", "result_type": "answer"}}
+    ]
 
-    context = await bundle.react_agent._init_context(session=object())
-    context_again = await bundle.react_agent._init_context(session=object())
+    _ = [chunk async for chunk in runtime.run(_plan(), RuntimeEventSink("req-1"))]
 
-    assert [message.content for message in context.messages] == ["previous question"]
-    assert context_again is context
-    assert [message.content for message in context_again.messages] == ["previous question"]
+    context_engine = FakeReActAgent.instances[-1].context_engine
+    seeded_calls = [
+        call for call in context_engine.create_calls if call["history_messages"]
+    ]
+    assert len(seeded_calls) == 1
+    assert [message.content for message in seeded_calls[0]["history_messages"]] == [
+        "previous question"
+    ]
+    assert context_engine.clear_calls == [
+        {"context_id": "default_context_id", "session_id": "req-1:session:root"}
+    ]
 
 
-def test_runtime_native_context_window_maps_to_context_engine_config(openjiuwen_dependencies):
+@pytest.mark.asyncio
+async def test_runtime_lifecycle_logs_do_not_include_sensitive_payloads(
+    caplog,
+    openjiuwen_dependencies,
+):
+    caplog.set_level(
+        logging.DEBUG,
+        logger="services.agent_runtime.openjiuwen_runtime",
+    )
+    runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
+    FakeReActAgent.stream_chunks = [
+        {"type": "answer", "payload": {"output": "done", "result_type": "answer"}}
+    ]
+    model_config = {
+        **_model_config(),
+        "model_name": "gpt-log",
+        "api_key": "secret-api-key",
+        "custom_headers": {"Authorization": "Bearer secret-token"},
+    }
+
+    _ = [
+        chunk
+        async for chunk in runtime.run(
+            _plan(
+                query="secret-query",
+                history=[{"role": "user", "content": "secret-history"}],
+                model_config_list=[model_config],
+            ),
+            RuntimeEventSink("req-1"),
+        )
+    ]
+
+    messages = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "services.agent_runtime.openjiuwen_runtime"
+    )
+    assert "OpenJiuwen runtime run starting" in messages
+    assert "OpenJiuwen agent bundle created" in messages
+    assert "OpenJiuwen runtime run finished" in messages
+    assert "model_name=gpt-log" in messages
+    assert "secret-query" not in messages
+    assert "secret-history" not in messages
+    assert "secret-api-key" not in messages
+    assert "secret-token" not in messages
+
+
+@pytest.mark.asyncio
+async def test_stop_logs_missing_active_openjiuwen_run(caplog, openjiuwen_dependencies):
+    caplog.set_level(
+        logging.DEBUG,
+        logger="services.agent_runtime.openjiuwen_runtime",
+    )
+    runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
+
+    await runtime.stop("missing-request")
+
+    assert any(
+        "OpenJiuwen runtime stop ignored" in record.getMessage()
+        and "request_id=missing-request" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_runtime_native_context_window_maps_to_context_engine_config(
+    openjiuwen_dependencies,
+):
     runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
     plan = _plan(
         root_agent=AgentSpec(
@@ -487,7 +693,10 @@ def test_runtime_native_context_window_maps_to_context_engine_config(openjiuwen_
             name="root",
             model_name="main_model",
             max_steps=3,
-            prompt=PromptBundle(rendered_legacy_system_prompt="system"),
+            prompt=PromptBundle(
+                fragments={"duty": "system"},
+                rendered_legacy_system_prompt="legacy code-agent system",
+            ),
             context_policy=ContextPolicy(mode=ContextMode.RUNTIME_NATIVE),
             runtime_hints={
                 "context_engine": {
@@ -516,7 +725,10 @@ async def test_run_maps_stream_chunks_to_runtime_events(openjiuwen_dependencies)
     FakeReActAgent.stream_chunks = [
         {"type": "llm_output", "payload": {"content": "hello"}},
         {"type": "llm_reasoning", "payload": {"content": "because"}},
-        {"type": "llm_usage", "payload": {"usage_metadata": {"input_tokens": 1, "output_tokens": 2}}},
+        {
+            "type": "llm_usage",
+            "payload": {"usage_metadata": {"input_tokens": 1, "output_tokens": 2}},
+        },
         {"type": "answer", "payload": {"output": "done", "result_type": "answer"}},
     ]
     runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
@@ -532,20 +744,17 @@ async def test_run_maps_stream_chunks_to_runtime_events(openjiuwen_dependencies)
         RuntimeEventType.MODEL_REASONING,
         RuntimeEventType.TOKEN_COUNT,
         RuntimeEventType.FINAL_ANSWER,
-        RuntimeEventType.LEGACY_PROCESS,
-        RuntimeEventType.LEGACY_PROCESS,
         RuntimeEventType.RUN_FINISHED,
     ]
     assert sink.events[2].delta == "hello"
     assert sink.events[3].reasoning == "because"
     assert sink.events[4].token_usage == {"input_tokens": 1, "output_tokens": 2}
     assert sink.events[5].content == "done"
-    assert sink.events[6].metadata["noop_process_type"] == "model_output_code"
-    assert sink.events[7].metadata["noop_process_type"] == "verification"
+    assert _plan().monitoring_metadata.get("openjiuwen.process_type_coverage") is None
 
 
 @pytest.mark.asyncio
-async def test_run_records_noop_diagnostic_when_reasoning_is_absent(openjiuwen_dependencies):
+async def test_run_does_not_emit_user_visible_noop_diagnostic(openjiuwen_dependencies):
     FakeReActAgent.stream_chunks = [
         {"type": "llm_output", "payload": {"content": "hello"}},
         {"type": "answer", "payload": {"output": "done", "result_type": "answer"}},
@@ -555,21 +764,51 @@ async def test_run_records_noop_diagnostic_when_reasoning_is_absent(openjiuwen_d
 
     _ = [chunk async for chunk in runtime.run(_plan(), sink)]
 
-    assert [
-        event.metadata.get("noop_process_type")
-        for event in sink.events
-        if event.metadata.get("noop_process_type")
-    ] == [
-        "model_output_code",
-        "verification",
-        "model_output_deep_thinking",
-    ]
+    assert not any(event.compat_process_type == "other" for event in sink.events)
+
+
+def test_error_answer_maps_to_error_instead_of_final_answer(openjiuwen_dependencies):
+    runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
+
+    event = runtime.runtime_event_from_openjiuwen_chunk(
+        {
+            "type": "answer",
+            "payload": {"output": "model failed", "result_type": "error"},
+        },
+        request_id="req-1",
+        agent_name="root",
+    )
+
+    assert event.type == RuntimeEventType.ERROR
+    assert event.error == "model failed"
+
+
+def test_max_iterations_answer_maps_to_max_steps(openjiuwen_dependencies):
+    event = OpenJiuwenRuntime(
+        dependencies=openjiuwen_dependencies
+    ).runtime_event_from_openjiuwen_chunk(
+        {
+            "type": "answer",
+            "payload": {
+                "output": "Max iterations reached before a final answer",
+                "result_type": "answer",
+            },
+        },
+        request_id="req-1",
+        agent_name="root",
+    )
+
+    assert event.type == RuntimeEventType.MAX_STEPS
 
 
 @pytest.mark.asyncio
-async def test_mcp_connection_uses_request_scoped_id_and_cleans_up(openjiuwen_dependencies):
+async def test_mcp_connection_uses_request_scoped_id_and_cleans_up(
+    openjiuwen_dependencies,
+):
     FakeReActAgent.stream_chunks = [{"type": "answer", "payload": {"output": "done"}}]
-    runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies, mcp_expiry_time=600)
+    runtime = OpenJiuwenRuntime(
+        dependencies=openjiuwen_dependencies, mcp_expiry_time=600
+    )
     plan = _plan(
         mcp_connections=[
             MCPConnectionConfig(
@@ -593,19 +832,115 @@ async def test_mcp_connection_uses_request_scoped_id_and_cleans_up(openjiuwen_de
     assert FakeRunner.resource_mgr.removed_mcp_servers == [
         {"server_id": "req-1:mcp:docs_server", "ignore_exception": True}
     ]
-    assert FakeReActAgent.instances[0].ability_manager.abilities == [mcp_config]
+    assert FakeReActAgent.instances[0].ability_manager.abilities == []
 
 
 @pytest.mark.asyncio
-async def test_local_knowledge_memory_skill_and_plugin_tools_use_tool_factory(openjiuwen_dependencies):
+async def test_mcp_ability_uses_only_plan_allowlist_wrappers(openjiuwen_dependencies):
+    FakeReActAgent.stream_chunks = [{"type": "answer", "payload": {"output": "done"}}]
+    allowed_tool = ToolSpec(
+        name="docs_search",
+        class_name="search",
+        source=ToolSource.MCP,
+        usage="docs",
+    )
+    plan = _plan(
+        root_agent=_plan().root_agent.model_copy(update={"tools": [allowed_tool]}),
+        mcp_connections=[
+            MCPConnectionConfig(
+                name="docs",
+                url="https://mcp.example/sse",
+                transport="sse",
+            )
+        ],
+    )
+
+    _ = [
+        chunk
+        async for chunk in OpenJiuwenRuntime(dependencies=openjiuwen_dependencies).run(
+            plan, RuntimeEventSink("req-1")
+        )
+    ]
+
+    assert FakeRunner.resource_mgr.mcp_tool_requests == [
+        {"name": "search", "server_id": "req-1:mcp:docs"}
+    ]
+    registered_tools = [tool for tool, _kwargs in FakeRunner.resource_mgr.added_tools]
+    assert [tool.card.name for tool in registered_tools] == ["docs_search"]
+    assert FakeReActAgent.instances[0].ability_manager.abilities == [
+        registered_tools[0].card
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mcp_required_failure_blocks_and_optional_failure_warns(
+    openjiuwen_dependencies,
+):
+    FakeReActAgent.stream_chunks = [{"type": "answer", "payload": {"output": "done"}}]
+    FakeRunner.resource_mgr.add_mcp_server_result = FakeResult(
+        False, "connection failed"
+    )
+    required_plan = _plan(
+        mcp_connections=[
+            MCPConnectionConfig(
+                name="required",
+                url="https://mcp.example/sse",
+                transport="sse",
+                required=True,
+            )
+        ]
+    )
+
+    with pytest.raises(Exception, match="connection failed"):
+        _ = [
+            chunk
+            async for chunk in OpenJiuwenRuntime(
+                dependencies=openjiuwen_dependencies
+            ).run(required_plan, RuntimeEventSink("req-1"))
+        ]
+
+    FakeRunner.resource_mgr = FakeResourceManager()
+    FakeRunner.resource_mgr.add_mcp_server_result = FakeResult(False, "optional failed")
+    optional_plan = _plan(
+        mcp_connections=[
+            MCPConnectionConfig(
+                name="optional",
+                url="https://mcp.example/sse",
+                transport="sse",
+                required=False,
+            )
+        ]
+    )
+    _ = [
+        chunk
+        async for chunk in OpenJiuwenRuntime(dependencies=openjiuwen_dependencies).run(
+            optional_plan, RuntimeEventSink("req-1")
+        )
+    ]
+
+    assert optional_plan.monitoring_metadata["runtime_warnings"][0]["server_name"] == (
+        "optional"
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_knowledge_memory_skill_and_plugin_tools_use_tool_factory(
+    openjiuwen_dependencies,
+):
     FakeReActAgent.stream_chunks = [{"type": "answer", "payload": {"output": "done"}}]
     tools = [
-        ToolSpec(name="local_tool", source=ToolSource.LOCAL, input_schema={"query": {"type": "string"}}),
+        ToolSpec(
+            name="local_tool",
+            source=ToolSource.LOCAL,
+            input_schema={"query": {"type": "string"}},
+        ),
         ToolSpec(name="knowledge_tool", source=ToolSource.KNOWLEDGE),
         ToolSpec(name="memory_tool", source=ToolSource.MEMORY),
         ToolSpec(name="skill_tool", source=ToolSource.SKILL),
         ToolSpec(name="plugin_tool", source=ToolSource.PLUGIN),
-        ToolSpec(name="mcp_tool", source=ToolSource.MCP, usage="docs", class_name="search"),
+        ToolSpec(
+            name="mcp_tool", source=ToolSource.MCP, usage="docs", class_name="search"
+        ),
     ]
     plan = _plan(
         root_agent=AgentSpec(
@@ -613,7 +948,7 @@ async def test_local_knowledge_memory_skill_and_plugin_tools_use_tool_factory(op
             name="root",
             model_name="main_model",
             max_steps=3,
-            prompt=PromptBundle(rendered_legacy_system_prompt="system"),
+            prompt=PromptBundle(fragments={"duty": "system"}),
             tools=tools,
         )
     )
@@ -637,7 +972,7 @@ async def test_local_knowledge_memory_skill_and_plugin_tools_use_tool_factory(op
     assert registered_tools[0].card.input_params == {
         "type": "object",
         "properties": {"query": {"type": "string"}},
-        "required": [],
+        "required": ["query"],
     }
     result = await registered_tools[0].invoke({"query": "docs"})
     assert result["tool"] == "local_tool"
@@ -664,7 +999,7 @@ async def test_local_knowledge_memory_skill_and_plugin_tools_use_tool_factory(op
 
 
 @pytest.mark.asyncio
-async def test_native_skill_util_registers_request_scoped_sys_operation_and_read_file(openjiuwen_dependencies):
+async def test_native_skill_util_is_not_used_by_runtime(openjiuwen_dependencies):
     FakeReActAgent.stream_chunks = [{"type": "answer", "payload": {"output": "done"}}]
     plan = _plan(
         runtime_resources={
@@ -682,44 +1017,58 @@ async def test_native_skill_util_registers_request_scoped_sys_operation_and_read
 
     _ = [chunk async for chunk in runtime.run(plan, RuntimeEventSink("req-1"))]
 
-    sys_operation_card = FakeRunner.resource_mgr.added_sys_operations[0]
-    assert sys_operation_card.id == "req-1:sys_operation:skills"
-    assert sys_operation_card.work_config == FakeLocalWorkConfig(
-        sandbox_root=["/tmp/skills"],
-        restrict_to_sandbox=True,
-        shell_allowlist=["ls", "cat"],
-    )
-    skill_util = FakeSkillUtil.instances[0]
-    assert skill_util.sys_operation_id == "req-1:sys_operation:skills"
-    assert skill_util.register_calls[0]["skill_path"] == "/tmp/skills"
-    assert skill_util.register_calls[0]["session_id"] == "req-1"
-    assert [ability.name for ability in FakeReActAgent.instances[0].ability_manager.abilities] == [
-        "read_file"
-    ]
-    assert FakeReActAgent.instances[0].prompt_sections == [
-        {
-            "name": "nexent_native_skills",
-            "content": "Native skill prompt with read_file.",
-            "priority": 250,
-        }
-    ]
-    assert FakeRunner.resource_mgr.removed_sys_operations == ["req-1:sys_operation:skills"]
+    assert FakeSkillUtil.instances == []
+    assert FakeRunner.resource_mgr.added_sys_operations == []
+    assert FakeRunner.resource_mgr.removed_sys_operations == []
 
 
 @pytest.mark.asyncio
-async def test_unsupported_managed_context_compression_and_agents_fail_fast(openjiuwen_dependencies):
+async def test_unsupported_managed_context_compression_and_agents_fail_fast(
+    openjiuwen_dependencies,
+):
     runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
 
     unsupported_plans = [
-        _plan(root_agent=AgentSpec(agent_id=1, name="root", model_name="main_model", max_steps=1,
-                                  managed_agents=[AgentSpec(agent_id=2, name="child", model_name="main_model",
-                                                            max_steps=1)])),
-        _plan(root_agent=AgentSpec(agent_id=1, name="root", model_name="main_model", max_steps=1,
-                                  external_a2a_agents=[{"agent_id": "remote"}])),
-        _plan(root_agent=AgentSpec(agent_id=1, name="root", model_name="main_model", max_steps=1,
-                                  context_policy=ContextPolicy(mode=ContextMode.MANAGED))),
-        _plan(root_agent=AgentSpec(agent_id=1, name="root", model_name="main_model", max_steps=1,
-                                  context_policy=ContextPolicy(compression={"enabled": True}))),
+        _plan(
+            root_agent=AgentSpec(
+                agent_id=1,
+                name="root",
+                model_name="main_model",
+                max_steps=1,
+                managed_agents=[
+                    AgentSpec(
+                        agent_id=2, name="child", model_name="main_model", max_steps=1
+                    )
+                ],
+            )
+        ),
+        _plan(
+            root_agent=AgentSpec(
+                agent_id=1,
+                name="root",
+                model_name="main_model",
+                max_steps=1,
+                external_a2a_agents=[{"agent_id": "remote"}],
+            )
+        ),
+        _plan(
+            root_agent=AgentSpec(
+                agent_id=1,
+                name="root",
+                model_name="main_model",
+                max_steps=1,
+                context_policy=ContextPolicy(mode=ContextMode.MANAGED),
+            )
+        ),
+        _plan(
+            root_agent=AgentSpec(
+                agent_id=1,
+                name="root",
+                model_name="main_model",
+                max_steps=1,
+                context_policy=ContextPolicy(compression={"enabled": True}),
+            )
+        ),
     ]
 
     for plan in unsupported_plans:
@@ -763,3 +1112,61 @@ async def test_stop_cancels_active_task_and_cleans_resources(openjiuwen_dependen
     assert FakeRunner.resource_mgr.removed_mcp_servers == [
         {"server_id": "req-1:mcp:docs", "ignore_exception": True}
     ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_use_distinct_request_scoped_resources(
+    openjiuwen_dependencies,
+):
+    FakeReActAgent.stream_chunks = [{"type": "answer", "payload": {"output": "done"}}]
+    runtime = OpenJiuwenRuntime(dependencies=openjiuwen_dependencies)
+
+    def concurrent_plan(request_id: str) -> AgentRunPlan:
+        return _plan(
+            request_id=request_id,
+            run_control=RunControl(
+                request_id=request_id,
+                user_id="user-1",
+                conversation_id=request_id,
+                metadata={"tenant_id": "tenant-1"},
+            ),
+            mcp_connections=[
+                MCPConnectionConfig(
+                    name="docs",
+                    url="https://mcp.example/sse",
+                    transport="sse",
+                )
+            ],
+        )
+
+    await asyncio.gather(
+        *(
+            asyncio.create_task(
+                _consume_openjiuwen_run(
+                    runtime,
+                    concurrent_plan(request_id),
+                    RuntimeEventSink(request_id),
+                )
+            )
+            for request_id in ("req-a", "req-b")
+        )
+    )
+
+    added_ids = {
+        config.server_id
+        for config, _expiry in FakeRunner.resource_mgr.added_mcp_servers
+    }
+    removed_ids = {
+        item["server_id"] for item in FakeRunner.resource_mgr.removed_mcp_servers
+    }
+    assert added_ids == {"req-a:mcp:docs", "req-b:mcp:docs"}
+    assert removed_ids == added_ids
+    assert runtime._active_runs == {}
+
+
+async def _consume_openjiuwen_run(
+    runtime: OpenJiuwenRuntime,
+    plan: AgentRunPlan,
+    sink: RuntimeEventSink,
+) -> list[Any]:
+    return [chunk async for chunk in runtime.run(plan, sink)]

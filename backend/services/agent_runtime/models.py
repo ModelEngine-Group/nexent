@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from threading import Event
 from typing import Any
 from typing import Literal
 
@@ -24,6 +23,7 @@ CapabilityName = Literal[
     "token_usage_events",
     "interruptible",
     "resumable_stream",
+    "verification",
 ]
 
 
@@ -44,6 +44,7 @@ class RuntimeCapabilities(BaseModel):
     token_usage_events: bool = False
     interruptible: bool = True
     resumable_stream: bool = False
+    verification: bool = False
 
 
 class RuntimeCapabilityRequirements(BaseModel):
@@ -81,11 +82,13 @@ def negotiate_runtime_capabilities(
 ) -> CapabilityNegotiationResult:
     """Compare required and optional plan capabilities with a runtime."""
     missing_required = [
-        name for name in sorted(requirements.required)
+        name
+        for name in sorted(requirements.required)
         if not bool(getattr(capabilities, name))
     ]
     downgraded_optional = [
-        name for name in sorted(requirements.optional)
+        name
+        for name in sorted(requirements.optional)
         if not bool(getattr(capabilities, name))
     ]
 
@@ -302,7 +305,9 @@ class RunControl(BaseModel):
 
     def is_cancelled(self) -> bool:
         """Return whether cancellation has been requested."""
-        return self.cancelled or bool(self.legacy_stop_event and self.legacy_stop_event.is_set())
+        return self.cancelled or bool(
+            self.legacy_stop_event and self.legacy_stop_event.is_set()
+        )
 
     def cancel(self) -> None:
         """Mark the run as cancelled and bridge to the legacy stop event."""
@@ -360,4 +365,71 @@ class AgentRunPlan(BaseModel):
     runtime_resources: dict[str, Any] = Field(default_factory=dict)
     operators: list[OperatorSpec] = Field(default_factory=list)
     monitoring_metadata: dict[str, Any] = Field(default_factory=dict)
+    capability_requirements: RuntimeCapabilityRequirements = Field(
+        default_factory=RuntimeCapabilityRequirements
+    )
     run_control: RunControl
+
+
+def derive_runtime_capability_requirements(
+    root_agent: AgentSpec,
+    mcp_connections: list[MCPConnectionConfig] | None = None,
+    runtime_resources: dict[str, Any] | None = None,
+) -> RuntimeCapabilityRequirements:
+    """Derive runtime requirements from the concrete assembled run plan."""
+    resources = runtime_resources or {}
+    required: set[CapabilityName] = {"streaming", "interruptible"}
+    optional: set[CapabilityName] = {
+        "token_streaming",
+        "reasoning_streaming",
+        "tool_call_events",
+        "token_usage_events",
+    }
+
+    connections = list(mcp_connections or [])
+    if any(connection.required for connection in connections):
+        required.add("mcp")
+    elif connections:
+        optional.add("mcp")
+    if root_agent.managed_agents:
+        required.add("managed_agents")
+    if root_agent.external_a2a_agents:
+        required.add("external_a2a_agents")
+    if (
+        root_agent.context_policy.mode == ContextMode.MANAGED
+        or root_agent.context_policy.compression
+    ):
+        required.add("context_compression")
+    if _verification_enabled(root_agent.verification_config):
+        required.add("verification")
+    if bool(resources.get("runtime.resumable_stream_required")):
+        required.add("resumable_stream")
+    if bool(resources.get("runtime.tool_artifacts_enabled")) or any(
+        tool.source == ToolSource.SKILL
+        or (
+            tool.source == ToolSource.BUILTIN
+            and (
+                tool.metadata.get("capability") == "skill"
+                or (tool.class_name or tool.name)
+                in {
+                    "ReadSkillConfigTool",
+                    "ReadSkillMdTool",
+                    "RunSkillScriptTool",
+                    "WriteSkillFileTool",
+                }
+            )
+        )
+        for tool in root_agent.tools
+    ):
+        optional.add("tool_artifacts")
+
+    optional.difference_update(required)
+    return RuntimeCapabilityRequirements(required=required, optional=optional)
+
+
+def _verification_enabled(config: Any) -> bool:
+    if config is None:
+        return False
+    if isinstance(config, dict):
+        return bool(config.get("enabled"))
+    return bool(getattr(config, "enabled", False))

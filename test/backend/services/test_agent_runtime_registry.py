@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import threading
@@ -5,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
+backend_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../backend")
+)
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
@@ -32,6 +35,7 @@ from services.agent_runtime.models import (
     ToolRuntimeContext,
     ToolSpec,
     ToolVisibility,
+    derive_runtime_capability_requirements,
     negotiate_runtime_capabilities,
 )
 from services.agent_runtime.registry import (
@@ -48,6 +52,7 @@ from services.agent_runtime.tool_schema import (
     ToolSchemaConfigurationError,
     assert_agent_run_plan_framework_neutral,
     normalize_tool_input_schema,
+    tool_input_schema_to_json_schema,
     tool_spec_from_legacy_tool_config,
 )
 
@@ -65,11 +70,17 @@ class _Runtime:
 
 
 def test_runtime_provider_defaults_to_smolagents():
-    assert const.normalize_agent_runtime_provider(None) == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    assert (
+        const.normalize_agent_runtime_provider(None)
+        == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    )
 
 
 def test_runtime_provider_normalizes_case_and_whitespace():
-    assert const.normalize_agent_runtime_provider("  OpenJiuWen ") == const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+    assert (
+        const.normalize_agent_runtime_provider("  OpenJiuWen ")
+        == const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+    )
 
 
 def test_runtime_provider_rejects_unknown_value():
@@ -120,7 +131,10 @@ def test_registry_rejects_duplicate_provider():
 def test_registry_unknown_provider_fails_fast():
     registry = AgentRuntimeRegistry([_Runtime("smolagents")])
 
-    with pytest.raises(UnknownAgentRuntimeProviderError, match="Unknown agent runtime provider 'openjiuwen'"):
+    with pytest.raises(
+        UnknownAgentRuntimeProviderError,
+        match="Unknown agent runtime provider 'openjiuwen'",
+    ):
         registry.get("openjiuwen")
 
 
@@ -131,12 +145,20 @@ def test_default_registry_contains_runtime_spike_extension_points():
         const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
         const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS,
     ]
-    assert registry.get(const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS).name == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
-    assert registry.get(const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN).name == const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+    assert (
+        registry.get(const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS).name
+        == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    )
+    assert (
+        registry.get(const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN).name
+        == const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+    )
 
 
 def test_configured_runtime_uses_deployment_provider(monkeypatch):
-    monkeypatch.setattr(const, "AGENT_RUNTIME_PROVIDER", const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN)
+    monkeypatch.setattr(
+        const, "AGENT_RUNTIME_PROVIDER", const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+    )
 
     runtime = get_configured_agent_runtime()
 
@@ -144,10 +166,18 @@ def test_configured_runtime_uses_deployment_provider(monkeypatch):
 
 
 def test_request_runtime_provider_override_is_ignored(monkeypatch):
-    monkeypatch.setattr(const, "AGENT_RUNTIME_PROVIDER", const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS)
+    monkeypatch.setattr(
+        const, "AGENT_RUNTIME_PROVIDER", const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    )
 
-    assert get_deployment_agent_runtime_provider() == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
-    assert resolve_agent_runtime_provider_for_request("openjiuwen") == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    assert (
+        get_deployment_agent_runtime_provider()
+        == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    )
+    assert (
+        resolve_agent_runtime_provider_for_request("openjiuwen")
+        == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
+    )
 
 
 def test_smolagents_capabilities_are_complete_for_default_path():
@@ -173,8 +203,33 @@ def test_capability_negotiation_blocks_missing_required_capability():
 def test_registry_blocks_runtime_lookup_when_required_capability_is_missing():
     registry = AgentRuntimeRegistry([_Runtime("basic")])
 
-    with pytest.raises(RuntimeCapabilityNegotiationError, match="required capabilities: mcp"):
+    with pytest.raises(
+        RuntimeCapabilityNegotiationError, match="required capabilities: mcp"
+    ):
         registry.get("basic", RuntimeCapabilityRequirements(required={"mcp"}))
+
+
+def test_registry_logs_openjiuwen_selection_with_capability_status(caplog):
+    caplog.set_level(
+        logging.INFO,
+        logger="services.agent_runtime.registry",
+    )
+    runtime = _Runtime(const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN)
+    runtime.capabilities = RuntimeCapabilities(streaming=True, mcp=False)
+    registry = AgentRuntimeRegistry([runtime])
+
+    selected = registry.get(
+        const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
+        RuntimeCapabilityRequirements(required={"streaming"}, optional={"mcp"}),
+    )
+
+    assert selected is runtime
+    assert any(
+        "Agent runtime provider selected" in record.getMessage()
+        and "provider=openjiuwen" in record.getMessage()
+        and "capability_status=degraded" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_capability_negotiation_reports_optional_downgrade():
@@ -186,6 +241,45 @@ def test_capability_negotiation_reports_optional_downgrade():
     assert result.status == "degraded"
     assert result.is_blocking is False
     assert result.downgraded_optional == ["tool_artifacts"]
+
+
+def test_capability_requirements_are_derived_from_actual_agent_configuration():
+    root = AgentSpec(
+        agent_id=1,
+        name="root",
+        model_name="main_model",
+        max_steps=3,
+        prompt=PromptBundle(fragments={"duty": "answer"}),
+        managed_agents=[
+            AgentSpec(
+                agent_id=2,
+                name="child",
+                model_name="main_model",
+                max_steps=2,
+            )
+        ],
+        verification_config={"enabled": True},
+    )
+
+    requirements = derive_runtime_capability_requirements(
+        root,
+        [
+            MCPConnectionConfig(
+                name="docs",
+                url="https://mcp.example/sse",
+                transport="sse",
+                required=True,
+            )
+        ],
+    )
+
+    assert {
+        "streaming",
+        "interruptible",
+        "mcp",
+        "managed_agents",
+        "verification",
+    }.issubset(requirements.required)
 
 
 def test_agent_run_request_context_preserves_deployment_runtime_provider():
@@ -338,13 +432,50 @@ def test_tool_config_inputs_json_string_normalizes_to_tool_spec_schema():
     assert tool_spec.metadata["document_paths"] == ["/allowed/doc"]
 
 
+def test_legacy_tool_type_shorthand_converts_to_provider_safe_json_schema():
+    inputs = {
+        "skill_name": "str",
+        "script_path": "str",
+        "params": "dict",
+        "additional_files": "list[str]",
+    }
+
+    normalized = normalize_tool_input_schema(inputs, tool_name="run_skill_script")
+    json_schema = tool_input_schema_to_json_schema(
+        normalized,
+        tool_name="run_skill_script",
+    )
+
+    assert normalized == {
+        "skill_name": {"type": "string"},
+        "script_path": {"type": "string"},
+        "params": {"type": "object"},
+        "additional_files": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    }
+    assert json_schema == {
+        "type": "object",
+        "properties": normalized,
+        "required": [
+            "skill_name",
+            "script_path",
+            "params",
+            "additional_files",
+        ],
+    }
+
+
 def test_tool_config_inputs_invalid_json_is_diagnostic():
     with pytest.raises(ToolSchemaConfigurationError, match="bad_tool.*invalid JSON"):
         normalize_tool_input_schema("{not-json}", tool_name="bad_tool")
 
 
 def test_tool_config_inputs_must_decode_to_json_object():
-    with pytest.raises(ToolSchemaConfigurationError, match="must decode to a JSON object"):
+    with pytest.raises(
+        ToolSchemaConfigurationError, match="must decode to a JSON object"
+    ):
         normalize_tool_input_schema('["query"]', tool_name="bad_tool")
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import time
@@ -451,6 +452,8 @@ async def start_streaming_chat(
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
         stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
+        if inspect.isawaitable(stop_result):
+            stop_result = await stop_result
 
         # Log token usage
         if ctx.token_id > 0:

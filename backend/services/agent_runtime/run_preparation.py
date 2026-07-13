@@ -3,14 +3,44 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
-from consts.const import AGENT_RUNTIME_PROVIDER_SMOLAGENTS, LANGUAGE
+from consts.const import (
+    AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
+    AGENT_RUNTIME_PROVIDER_SMOLAGENTS,
+    LANGUAGE,
+)
 
-from .models import AgentRunRequestContext, AssemblyState
+from .assembly import (
+    freeze_agent_run_plan,
+    initialize_assembly_state,
+    merge_capability_contribution,
+    sort_capability_providers,
+)
+from .models import (
+    AgentRunPlan,
+    AgentRunRequestContext,
+    AgentSpec,
+    AssemblyState,
+    CapabilityContribution,
+    ContextMode,
+    ContextPolicy,
+    MCPConnectionConfig,
+    OperatorSpec,
+    PromptBundle,
+    RunControl,
+    RuntimeWarningInfo,
+    ToolSource,
+)
 from .providers import KnowledgeProvider
+from .registry import agent_runtime_registry
+from .tool_factory import build_production_tool_factory_registry
 from .tool_schema import tool_spec_from_legacy_tool_config
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -28,6 +58,27 @@ class RuntimeRunPreparation:
 
     agent_run_info: Any
     memory_context: Any
+    plan: AgentRunPlan
+    runtime: Any
+
+
+@dataclass(frozen=True)
+class PreparedAgentRunCapabilityProvider:
+    """Production provider for an already authorized AgentRunInfo snapshot."""
+
+    contribution: CapabilityContribution
+    name: str = "prepared-agent-run"
+    priority: int = 0
+    depends_on: tuple[str, ...] = ()
+
+    def contribute(
+        self,
+        request: AgentRunRequestContext,
+        state: AssemblyState,
+    ) -> CapabilityContribution:
+        """Return the request-scoped production contribution."""
+        _ = (request, state)
+        return self.contribution
 
 
 def preview_runtime_memory(
@@ -51,7 +102,9 @@ def preview_runtime_memory(
         enabled=bool(getattr(user_config, "memory_switch", False)),
         metadata={
             "agent_share_option": getattr(user_config, "agent_share_option", "unknown"),
-            "disable_agent_ids": list(getattr(user_config, "disable_agent_ids", []) or []),
+            "disable_agent_ids": list(
+                getattr(user_config, "disable_agent_ids", []) or []
+            ),
             "disable_user_agent_ids": list(
                 getattr(user_config, "disable_user_agent_ids", []) or []
             ),
@@ -73,6 +126,22 @@ async def prepare_runtime_agent_run(
     from agents.create_agent_info import create_agent_run_info
     from services.memory_config_service import build_memory_context
 
+    request_context = run_request_context or _request_context_from_agent_request(
+        agent_request,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        language=language,
+    )
+    logger.info(
+        "Agent runtime preparation starting, request_id=%s, provider=%s, agent_id=%s, "
+        "conversation_id=%s, debug=%s, allow_memory_search=%s",
+        request_context.request_id,
+        request_context.runtime_provider,
+        request_context.agent_id,
+        request_context.conversation_id,
+        request_context.is_debug,
+        allow_memory_search,
+    )
     memory_context = build_memory_context(
         user_id,
         tenant_id,
@@ -95,24 +164,359 @@ async def prepare_runtime_agent_run(
         tool_params=agent_request.tool_params,
     )
 
-    request_context = run_request_context or _request_context_from_agent_request(
-        agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        language=language,
-    )
     enhance_legacy_knowledge_tools(agent_run_info, request_context)
+    plan = agent_run_plan_from_legacy_info(agent_run_info, request_context)
+    logger.info(
+        "Agent run plan assembled, request_id=%s, provider=%s, agent_id=%s, "
+        "agent_name=%s, conversation_id=%s, history_count=%d, tool_count=%d, "
+        "mcp_count=%d, required_capabilities=%s, optional_capabilities=%s, warning_count=%d",
+        plan.request_id,
+        plan.runtime_provider,
+        plan.root_agent.agent_id,
+        plan.root_agent.name,
+        plan.run_control.conversation_id,
+        len(plan.history or []),
+        _visible_tool_count(plan),
+        len(plan.mcp_connections),
+        _sorted_capabilities(plan.capability_requirements.required),
+        _sorted_capabilities(plan.capability_requirements.optional),
+        len(plan.monitoring_metadata.get("assembly_warnings") or []),
+    )
+    runtime = agent_runtime_registry.get(
+        request_context.runtime_provider,
+        plan.capability_requirements,
+    )
+    logger.info(
+        "Agent runtime preparation finished, request_id=%s, provider=%s, runtime_class=%s",
+        plan.request_id,
+        request_context.runtime_provider,
+        type(runtime).__name__,
+    )
     _mount_conversation_context_manager(agent_request, agent_run_info)
     _register_prepared_run(
         agent_request,
         agent_run_info,
         user_id=user_id,
         run_request_context=run_request_context,
+        run_control=plan.run_control,
     )
     return RuntimeRunPreparation(
         agent_run_info=agent_run_info,
         memory_context=memory_context,
+        plan=plan,
+        runtime=runtime,
     )
+
+
+def agent_run_plan_from_legacy_info(
+    agent_run_info: Any,
+    request_context: AgentRunRequestContext,
+) -> AgentRunPlan:
+    """Convert the production legacy assembly result into a neutral run plan."""
+    effective_request = request_context.model_copy(
+        update={
+            "query": str(getattr(agent_run_info, "query", request_context.query) or ""),
+            "history": [
+                _model_dump(item)
+                for item in (getattr(agent_run_info, "history", None) or [])
+            ],
+        }
+    )
+    state = initialize_assembly_state(
+        effective_request,
+        version_no=(
+            request_context.version_no
+            if request_context.version_no is not None
+            else 0
+            if request_context.is_debug
+            else None
+        ),
+    )
+    for provider in sort_capability_providers(
+        build_production_capability_providers(agent_run_info, request_context)
+    ):
+        merge_capability_contribution(
+            state,
+            provider.contribute(effective_request, state),
+        )
+    run_control = RunControl(
+        request_id=request_context.request_id,
+        user_id=request_context.user_id,
+        conversation_id=request_context.conversation_id,
+        legacy_stop_event=getattr(agent_run_info, "stop_event", None),
+        metadata={
+            "tenant_id": request_context.tenant_id,
+            "language": request_context.language,
+        },
+    )
+    return freeze_agent_run_plan(
+        effective_request,
+        state,
+        run_control=run_control,
+    )
+
+
+def build_production_capability_providers(
+    agent_run_info: Any,
+    request_context: AgentRunRequestContext,
+) -> list[PreparedAgentRunCapabilityProvider]:
+    """Build non-NoOp production providers from the authorized run snapshot."""
+    root_agent = _agent_spec_from_legacy_config(
+        agent_run_info.agent_config,
+        agent_id=request_context.agent_id,
+        runtime_provider=request_context.runtime_provider,
+    )
+    mcp_connections = [
+        connection
+        for connection in (
+            _mcp_connection_from_legacy_host(host, root_agent)
+            for host in (getattr(agent_run_info, "mcp_host", None) or [])
+        )
+        if connection is not None
+    ]
+    runtime_resources = {
+        "tool_factory_registry": build_production_tool_factory_registry(),
+        "smolagents.observer": getattr(agent_run_info, "observer", None),
+    }
+    skill_tools_enabled = any(
+        tool.source in {ToolSource.SKILL, ToolSource.BUILTIN}
+        and (
+            tool.metadata.get("capability") == "skill"
+            or (tool.class_name or tool.name)
+            in {
+                "ReadSkillConfigTool",
+                "ReadSkillMdTool",
+                "RunSkillScriptTool",
+                "WriteSkillFileTool",
+            }
+        )
+        for tool in root_agent.tools
+    )
+    if skill_tools_enabled:
+        runtime_resources["runtime.tool_artifacts_enabled"] = True
+
+    context_compatibility = dict(
+        root_agent.runtime_hints.get("context_compatibility") or {}
+    )
+    warnings = []
+    if context_compatibility.get("legacy_managed_normalized"):
+        warnings.append(
+            RuntimeWarningInfo(
+                code="context_policy_normalized",
+                message=(
+                    "OpenJiuwen uses runtime-native context for the legacy default "
+                    "context manager; Nexent managed compression is not enabled."
+                ),
+                metadata=context_compatibility,
+            )
+        )
+
+    contribution = CapabilityContribution(
+        agent_record={"agent_id": request_context.agent_id},
+        model_configs=[
+            _model_dump(config)
+            for config in (getattr(agent_run_info, "model_config_list", None) or [])
+        ],
+        root_agent=root_agent,
+        mcp_connections=mcp_connections,
+        runtime_resources=runtime_resources,
+        operators=[
+            OperatorSpec(
+                name="skill_file_upload",
+                stages={"after_tool_call", "after_run"},
+                priority=400,
+                required=False,
+            )
+        ]
+        if skill_tools_enabled
+        else [],
+        warnings=warnings,
+        monitoring_metadata={
+            "language": request_context.language,
+            "tenant_id": request_context.tenant_id,
+            "assembly_path": "production_prepared_provider",
+        },
+    )
+    return [PreparedAgentRunCapabilityProvider(contribution=contribution)]
+
+
+def _sorted_capabilities(values: Any) -> list[str]:
+    return sorted(str(value) for value in (values or []))
+
+
+def _visible_tool_count(plan: AgentRunPlan) -> int:
+    return sum(
+        1
+        for tool in plan.root_agent.tools
+        if str(getattr(tool.visibility, "value", tool.visibility)) != "internal"
+    )
+
+
+def _agent_spec_from_legacy_config(
+    agent_config: Any,
+    *,
+    agent_id: Any,
+    runtime_provider: str,
+) -> AgentSpec:
+    prompt_templates = dict(getattr(agent_config, "prompt_templates", None) or {})
+    prompt_fragments = dict(getattr(agent_config, "prompt_fragments", None) or {})
+    tools = []
+    for tool_config in getattr(agent_config, "tools", None) or []:
+        tool = tool_spec_from_legacy_tool_config(tool_config)
+        class_name = tool.class_name or tool.name
+        metadata = dict(tool.metadata or {})
+        if (
+            metadata.get("capability") == "knowledge"
+            or class_name == "KnowledgeBaseSearchTool"
+        ):
+            tool = tool.model_copy(update={"source": ToolSource.KNOWLEDGE})
+        elif class_name in {"SearchMemoryTool", "StoreMemoryTool"}:
+            tool = tool.model_copy(update={"source": ToolSource.MEMORY})
+        tools.append(tool)
+
+    context_policy, legacy_managed_normalized = _legacy_context_policy(
+        getattr(agent_config, "context_manager_config", None),
+        runtime_provider=runtime_provider,
+    )
+    return AgentSpec(
+        agent_id=agent_id,
+        name=str(getattr(agent_config, "name", None) or "root"),
+        description=str(getattr(agent_config, "description", None) or ""),
+        model_name=str(getattr(agent_config, "model_name", None) or "main_model"),
+        max_steps=int(getattr(agent_config, "max_steps", 15) or 15),
+        prompt=PromptBundle(
+            fragments=prompt_fragments,
+            context_components=list(
+                getattr(agent_config, "context_components", None) or []
+            ),
+            rendered_legacy_system_prompt=prompt_templates.get("system_prompt"),
+            templates=prompt_templates,
+        ),
+        tools=tools,
+        managed_agents=[
+            _agent_spec_from_legacy_config(
+                child,
+                agent_id=f"{agent_id}:{index}",
+                runtime_provider=runtime_provider,
+            )
+            for index, child in enumerate(
+                getattr(agent_config, "managed_agents", None) or [],
+                start=1,
+            )
+        ],
+        external_a2a_agents=list(
+            getattr(agent_config, "external_a2a_agents", None) or []
+        ),
+        context_policy=context_policy,
+        verification_config=_model_dump(
+            getattr(agent_config, "verification_config", None)
+        ),
+        runtime_hints={
+            "requested_output_tokens": getattr(
+                agent_config,
+                "requested_output_tokens",
+                None,
+            ),
+            "provide_run_summary": bool(
+                getattr(agent_config, "provide_run_summary", False)
+            ),
+            "instructions": getattr(agent_config, "instructions", None),
+            "capacity_snapshot": getattr(agent_config, "capacity_snapshot", None),
+            "safe_input_budget_snapshot": getattr(
+                agent_config,
+                "safe_input_budget_snapshot",
+                None,
+            ),
+            "context_compatibility": {
+                "legacy_managed_normalized": legacy_managed_normalized,
+                "source_mode": ContextMode.MANAGED.value,
+                "target_mode": context_policy.mode.value,
+            }
+            if legacy_managed_normalized
+            else {},
+        },
+    )
+
+
+def _legacy_context_policy(
+    context_manager_config: Any,
+    *,
+    runtime_provider: str,
+) -> tuple[ContextPolicy, bool]:
+    """Normalize the legacy default context manager for the selected runtime."""
+    enabled = bool(getattr(context_manager_config, "enabled", False))
+    compression = dict(getattr(context_manager_config, "compression", None) or {})
+    legacy_managed_normalized = (
+        enabled
+        and runtime_provider == AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+        and not compression
+    )
+    if legacy_managed_normalized:
+        context_mode = ContextMode.RUNTIME_NATIVE
+    elif enabled:
+        context_mode = ContextMode.MANAGED
+    else:
+        context_mode = ContextMode.LEGACY
+    return (
+        ContextPolicy(
+            mode=context_mode,
+            token_threshold=getattr(context_manager_config, "token_threshold", None),
+            soft_input_budget_tokens=getattr(
+                context_manager_config,
+                "soft_input_budget_tokens",
+                None,
+            ),
+            hard_input_budget_tokens=getattr(
+                context_manager_config,
+                "hard_input_budget_tokens",
+                None,
+            ),
+            compression=compression,
+        ),
+        legacy_managed_normalized,
+    )
+
+
+def _mcp_connection_from_legacy_host(
+    host: Any,
+    root_agent: AgentSpec,
+) -> MCPConnectionConfig | None:
+    data = dict(host) if isinstance(host, dict) else {"url": str(host)}
+    url = str(data.get("url") or "")
+    if not url:
+        return None
+    configured_name = str(data.get("name") or "")
+    usage_names = sorted(
+        {
+            str(tool.usage)
+            for tool in root_agent.tools
+            if tool.source == ToolSource.MCP and tool.usage
+        }
+    )
+    name = configured_name or (usage_names[0] if len(usage_names) == 1 else url)
+    transport = str(data.get("transport") or "")
+    if transport not in {"sse", "streamable-http"}:
+        transport = "sse" if url.endswith("/sse") else "streamable-http"
+    headers = dict(data.get("headers") or {})
+    if data.get("authorization") and "Authorization" not in headers:
+        headers["Authorization"] = str(data["authorization"])
+    return MCPConnectionConfig(
+        name=name,
+        url=url,
+        transport=transport,
+        headers=headers,
+        required=True,
+    )
+
+
+def _model_dump(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "model_dump"):
+        return dict(value.model_dump())
+    return {key: item for key, item in vars(value).items() if not key.startswith("_")}
 
 
 def enhance_legacy_knowledge_tools(
@@ -144,19 +548,21 @@ def enhance_legacy_knowledge_tools(
     provider = _default_knowledge_provider()
     contribution = provider.contribute(
         request_context,
-            AssemblyState(
-                agent_record={"name": agent_name},
-                tools_by_agent={
-                    agent_name: [
-                        spec.model_dump() if hasattr(spec, "model_dump") else spec
-                        for spec in knowledge_specs
-                    ]
-                },
-            ),
-        )
+        AssemblyState(
+            agent_record={"name": agent_name},
+            tools_by_agent={
+                agent_name: [
+                    spec.model_dump() if hasattr(spec, "model_dump") else spec
+                    for spec in knowledge_specs
+                ]
+            },
+        ),
+    )
     enhanced_specs = list(contribution.tools_by_agent.get(agent_name, []))
     if len(enhanced_specs) != len(knowledge_positions):
-        raise ValueError("KnowledgeProvider did not return all enhanced knowledge tools.")
+        raise ValueError(
+            "KnowledgeProvider did not return all enhanced knowledge tools."
+        )
 
     updated_tools = list(tools)
     for position, enhanced_spec in zip(knowledge_positions, enhanced_specs):
@@ -205,13 +611,15 @@ def _default_knowledge_provider() -> KnowledgeProvider:
         rerank_model_resolver=get_rerank_model,
         vector_db_resolver=get_vector_db_core,
         knowledge_name_map_resolver=get_knowledge_name_map_by_index_names,
-        knowledge_summary_resolver=lambda index_name: ElasticSearchService().get_summary(
-            index_name=index_name
+        knowledge_summary_resolver=lambda index_name: (
+            ElasticSearchService().get_summary(index_name=index_name)
         ),
     )
 
 
-def _mount_conversation_context_manager(agent_request: Any, agent_run_info: Any) -> None:
+def _mount_conversation_context_manager(
+    agent_request: Any, agent_run_info: Any
+) -> None:
     from agents.agent_run_manager import agent_run_manager
 
     agent_config = getattr(agent_run_info, "agent_config", None)
@@ -231,6 +639,7 @@ def _register_prepared_run(
     *,
     user_id: str,
     run_request_context: AgentRunRequestContext | None,
+    run_control: RunControl,
 ) -> None:
     from agents.agent_run_manager import agent_run_manager
 
@@ -241,12 +650,14 @@ def _register_prepared_run(
             user_id,
             request_id=run_request_context.request_id,
             runtime_provider=run_request_context.runtime_provider,
+            run_control=run_control,
         )
         return
     agent_run_manager.register_agent_run(
         agent_request.conversation_id,
         agent_run_info,
         user_id,
+        run_control=run_control,
     )
 
 

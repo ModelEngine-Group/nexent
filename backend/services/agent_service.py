@@ -108,6 +108,7 @@ from services.conversation_management_service import (
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from services.agent_runtime.config import resolve_agent_runtime_provider_for_request
+from services.agent_runtime.registry import agent_runtime_registry
 from services.agent_runtime.events import (
     RuntimeDeliveryItem,
     RuntimeEvent,
@@ -117,7 +118,7 @@ from services.agent_runtime.events import (
     runtime_event_to_process_payload,
     runtime_events_to_delivery_items,
 )
-from services.agent_runtime.models import AgentRunRequestContext, OperatorSpec
+from services.agent_runtime.models import AgentRunPlan, AgentRunRequestContext, OperatorSpec
 from services.agent_runtime.operators import (
     OperatorContext,
     OperatorRegistry,
@@ -269,11 +270,11 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
 
 
-async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
-    """Mirror Redis cancel signal into the local agent stop_event."""
-    while not stop_event.is_set():
+async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, cancel_target) -> None:
+    """Mirror the cross-process cancel signal into a local run control."""
+    while not _runtime_cancelled(cancel_target):
         if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
-            stop_event.set()
+            _cancel_runtime_target(cancel_target)
             logger.info(
                 "Runtime cancel signal received, user_id=%s, conversation_id=%s",
                 user_id,
@@ -281,6 +282,76 @@ async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_e
             )
             return
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+
+def _runtime_cancelled(cancel_target: Any) -> bool:
+    is_cancelled = getattr(cancel_target, "is_cancelled", None)
+    if callable(is_cancelled):
+        return bool(is_cancelled())
+    is_set = getattr(cancel_target, "is_set", None)
+    return bool(callable(is_set) and is_set())
+
+
+def _cancel_runtime_target(cancel_target: Any) -> None:
+    cancel = getattr(cancel_target, "cancel", None)
+    if callable(cancel):
+        cancel()
+        return
+    set_event = getattr(cancel_target, "set", None)
+    if callable(set_event):
+        set_event()
+
+
+async def _selected_runtime_chunks(runtime: Any, plan: AgentRunPlan):
+    """Run the selected adapter in the background and stream normalized chunks."""
+    event_sink = RuntimeEventSink(request_id=plan.request_id)
+    run_error: BaseException | None = None
+    logger.debug(
+        "Selected agent runtime dispatch starting, request_id=%s, provider=%s, runtime_class=%s",
+        plan.request_id,
+        plan.runtime_provider,
+        type(runtime).__name__,
+    )
+
+    async def _consume_runtime() -> None:
+        nonlocal run_error
+        try:
+            async for _native_chunk in runtime.run(plan, event_sink):
+                pass
+        except asyncio.CancelledError as exc:
+            run_error = exc
+        except Exception as exc:
+            run_error = exc
+            if not any(event.type == RuntimeEventType.ERROR for event in event_sink.events):
+                event_sink.emit(
+                    RuntimeEvent(
+                        type=RuntimeEventType.ERROR,
+                        request_id=plan.request_id,
+                        agent_name=plan.root_agent.name,
+                        error=str(exc),
+                        metadata={"runtime_provider": plan.runtime_provider},
+                    )
+                )
+        finally:
+            event_sink.close()
+
+    task = asyncio.create_task(_consume_runtime())
+    try:
+        async for event in event_sink.stream():
+            process_payload = runtime_event_to_process_payload(event)
+            yield json.dumps(process_payload.to_sse_payload(), ensure_ascii=False)
+        await task
+        if run_error is not None and not isinstance(run_error, asyncio.CancelledError):
+            raise run_error
+        logger.debug(
+            "Selected agent runtime dispatch finished, request_id=%s, provider=%s, status=%s",
+            plan.request_id,
+            plan.runtime_provider,
+            "cancelled" if isinstance(run_error, asyncio.CancelledError) else "completed",
+        )
+    finally:
+        if not task.done():
+            task.cancel()
 
 
 async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, task: asyncio.Task) -> None:
@@ -1386,6 +1457,8 @@ async def _stream_agent_chunks(
     operator_registry: OperatorRegistry | None = None,
     operator_runtime_resources: dict[str, Any] | None = None,
     operator_monitoring_metadata: dict[str, Any] | None = None,
+    run_plan: AgentRunPlan | None = None,
+    runtime: Any | None = None,
 ):
     """
     Yield SSE chunks from agent_run while persisting messages incrementally.
@@ -1413,6 +1486,14 @@ async def _stream_agent_chunks(
         else None
     )
     runtime_events_for_after_run: list[RuntimeEvent] = []
+    if run_plan is not None:
+        operator_specs = operator_specs or run_plan.operators
+        operator_runtime_resources = (
+            operator_runtime_resources or dict(run_plan.runtime_resources)
+        )
+        operator_monitoring_metadata = (
+            operator_monitoring_metadata or dict(run_plan.monitoring_metadata)
+        )
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
@@ -1435,11 +1516,12 @@ async def _stream_agent_chunks(
             user_id=user_id
         )
 
+    cancel_target = run_plan.run_control if run_plan is not None else agent_run_info.stop_event
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
-            stop_event=agent_run_info.stop_event,
+            cancel_target=cancel_target,
         )
     )
 
@@ -1507,7 +1589,12 @@ async def _stream_agent_chunks(
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
     try:
-        async for chunk in agent_run(agent_run_info):
+        chunk_stream = (
+            _selected_runtime_chunks(runtime, run_plan)
+            if runtime is not None and run_plan is not None
+            else agent_run(agent_run_info)
+        )
+        async for chunk in chunk_stream:
             chunk_type: Optional[str] = None
             chunk_content: str = ""
             try:
@@ -1594,8 +1681,14 @@ async def _stream_agent_chunks(
                     yield output_chunk
             except Exception:
                 logger.exception("Runtime API on_error operators failed")
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        error_was_emitted = any(
+            event.type == RuntimeEventType.ERROR
+            or event.compat_process_type == "error"
+            for event in runtime_events_for_after_run
+        )
+        if not error_was_emitted:
+            await channel.publish(_safe_agent_stream_error_chunk())
+            yield _safe_agent_stream_error_chunk()
     finally:
         # Finalize any in-flight unit and transition the parent message to its
         # terminal status before releasing the agent run slot.
@@ -1621,7 +1714,7 @@ async def _stream_agent_chunks(
                 except Exception:
                     logger.exception("Failed to mark last unit as completed")
 
-            was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
+            was_stopped = _runtime_cancelled(cancel_target)
             terminal_status = "stopped" if was_stopped else "completed" if stream_completed_normally else "failed"
             try:
                 update_message_status(
@@ -1635,7 +1728,7 @@ async def _stream_agent_chunks(
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
 
-        was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
+        was_stopped = _runtime_cancelled(cancel_target)
         terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
 
         if run_request_context is not None:
@@ -3098,6 +3191,7 @@ async def prepare_agent_run(
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
     run_request_context: AgentRunRequestContext | None = None,
+    include_runtime: bool = False,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -3111,6 +3205,8 @@ async def prepare_agent_run(
         allow_memory_search=allow_memory_search,
         run_request_context=run_request_context,
     )
+    if include_runtime:
+        return preparation
     return preparation.agent_run_info, preparation.memory_context
 
 
@@ -3132,6 +3228,18 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
         )
 
     raise ValueError(f"Unsupported target for save_messages: {target!r}")
+
+
+def _unpack_runtime_preparation(preparation: Any) -> tuple[Any, Any, Any, Any]:
+    """Support the production preparation object and legacy test tuple."""
+    if isinstance(preparation, tuple) and len(preparation) == 2:
+        return preparation[0], preparation[1], None, None
+    return (
+        preparation.agent_run_info,
+        preparation.memory_context,
+        preparation.plan,
+        preparation.runtime,
+    )
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
@@ -3195,13 +3303,17 @@ async def generate_stream_with_memory(
 
         # Prepare run through the runtime preparation boundary.
         try:
-            agent_run_info, memory_context = await prepare_agent_run(
+            preparation = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
                 allow_memory_search=True,
                 run_request_context=run_request_context,
+                include_runtime=True,
+            )
+            agent_run_info, memory_context, run_plan, runtime = (
+                _unpack_runtime_preparation(preparation)
             )
         except Exception as prep_err:
             # Normalize any preparation error to MemoryPreparationException
@@ -3220,6 +3332,8 @@ async def generate_stream_with_memory(
             memory_ctx=memory_context,
             channel=channel,
             run_request_context=run_request_context,
+            run_plan=run_plan,
+            runtime=runtime,
         ):
             yield data_chunk
 
@@ -3276,13 +3390,17 @@ async def generate_stream_no_memory(
     """Stream agent responses without any memory preprocessing tokens or fallback logic."""
 
     # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
-    agent_run_info, memory_context = await prepare_agent_run(
+    preparation = await prepare_agent_run(
         agent_request=agent_request,
         user_id=user_id,
         tenant_id=tenant_id,
         language=language,
         allow_memory_search=False,
         run_request_context=run_request_context,
+        include_runtime=True,
+    )
+    agent_run_info, memory_context, run_plan, runtime = _unpack_runtime_preparation(
+        preparation
     )
 
     async for data_chunk in _stream_agent_chunks(
@@ -3293,6 +3411,8 @@ async def generate_stream_no_memory(
         memory_ctx=memory_context,
         channel=channel,
         run_request_context=run_request_context,
+        run_plan=run_plan,
+        runtime=runtime,
     ):
         yield data_chunk
 
@@ -3698,11 +3818,34 @@ async def run_agent_stream(
 
 
 def stop_agent_tasks(conversation_id: int, user_id: str):
+    """Stop tasks synchronously for legacy callers or awaitably in async APIs."""
+    coroutine = _stop_agent_tasks_async(conversation_id, user_id)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    return coroutine
+
+
+async def _stop_agent_tasks_async(conversation_id: int, user_id: str):
     """
     Stop agent run and preprocess tasks for the specified conversation_id.
     Matches the behavior of agent_app.agent_stop_api.
     """
-    # Stop agent run
+    handle = agent_run_manager.get_active_run_handle(conversation_id, user_id)
+    if handle is not None:
+        handle.run_control.cancel()
+        try:
+            runtime = agent_runtime_registry.get(handle.runtime_provider)
+            await runtime.stop(handle.request_id)
+        except Exception:
+            logger.exception(
+                "Failed to stop runtime provider=%s request_id=%s",
+                handle.runtime_provider,
+                handle.request_id,
+            )
+
+    # Preserve legacy stop bridging and the cross-process cancel signal.
     agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
 
     # Stop preprocess tasks

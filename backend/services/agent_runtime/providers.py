@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -33,7 +33,9 @@ LegacyModelConfigResolver = Callable[[str], Mapping[str, Any] | None]
 PromptCacheResolver = Callable[[str | None], Mapping[str, Any] | None]
 AgentRecordResolver = Callable[[int, str, int | None], Mapping[str, Any] | None]
 ToolRecordsResolver = Callable[[int, str, int | None], Sequence[Mapping[str, Any]]]
-SubAgentRelationsResolver = Callable[[int, str, int | None], Sequence[Mapping[str, Any]]]
+SubAgentRelationsResolver = Callable[
+    [int, str, int | None], Sequence[Mapping[str, Any]]
+]
 SubAgentVersionResolver = Callable[[int, int | None, str], int | None]
 ExternalA2AResolver = Callable[[int, str, int | None], Sequence[Any]]
 AppConfigResolver = Callable[[str, str], str | None]
@@ -189,7 +191,9 @@ def _none_vector_db_resolver() -> Any:
     return None
 
 
-def _default_prompt_template_resolver(is_manager: bool, language: str) -> Mapping[str, Any]:
+def _default_prompt_template_resolver(
+    is_manager: bool, language: str
+) -> Mapping[str, Any]:
     _ = (is_manager, language)
     return {
         "system_prompt": (
@@ -225,13 +229,14 @@ class ModelProvider:
         if legacy_config:
             model_configs.extend(self._legacy_alias_configs(legacy_config))
 
-        selected_model_id = request.override_model_id or state.agent_record.get("model_id")
+        selected_model_id = request.override_model_id or state.agent_record.get(
+            "model_id"
+        )
         selected_model = self._find_model_record(model_configs, selected_model_id)
         selected_model_name = (
             selected_model.get("cite_name")
             if selected_model is not None
-            else state.agent_record.get("model_name")
-            or "main_model"
+            else state.agent_record.get("model_name") or "main_model"
         )
 
         monitoring_metadata = {
@@ -273,7 +278,9 @@ class ModelProvider:
 
     def _model_record_to_config(self, record: Mapping[str, Any]) -> dict[str, Any]:
         model_factory = record.get("model_factory")
-        model_name = _add_repo_to_name(record.get("model_repo"), record.get("model_name"))
+        model_name = _add_repo_to_name(
+            record.get("model_repo"), record.get("model_name")
+        )
         return {
             "cite_name": record.get("display_name"),
             "api_key": record.get("api_key", ""),
@@ -289,13 +296,17 @@ class ModelProvider:
             "max_tokens": record.get("max_tokens"),
             "context_window_tokens": record.get("context_window_tokens"),
             "max_input_tokens": record.get("max_input_tokens"),
-            "default_output_reserve_tokens": record.get("default_output_reserve_tokens"),
+            "default_output_reserve_tokens": record.get(
+                "default_output_reserve_tokens"
+            ),
             "tokenizer_family": record.get("tokenizer_family"),
             "capacity_source": record.get("capacity_source"),
             "capability_profile_version": record.get("capability_profile_version"),
         }
 
-    def _legacy_alias_configs(self, legacy_config: Mapping[str, Any]) -> list[dict[str, Any]]:
+    def _legacy_alias_configs(
+        self, legacy_config: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
         model_factory = legacy_config.get("model_factory")
         model_config = {
             "api_key": legacy_config.get("api_key", ""),
@@ -450,9 +461,7 @@ class ToolProvider:
             seen_identifiers.update(identifiers)
 
             override_params = (
-                overrides.get(str(tool_name))
-                or overrides.get(str(class_name))
-                or {}
+                overrides.get(str(tool_name)) or overrides.get(str(class_name)) or {}
             )
             params = _merge_tool_record_params(record, override_params)
             metadata = dict(record.get("metadata") or {})
@@ -483,9 +492,7 @@ class MCPProvider:
     """Contribute MCP connections and optional MCP tool declarations."""
 
     mcp_records_resolver: MCPRecordsResolver = _none_mcp_records_resolver
-    mcp_tool_records_resolver: MCPToolRecordsResolver = (
-        _none_mcp_tool_records_resolver
-    )
+    mcp_tool_records_resolver: MCPToolRecordsResolver = _none_mcp_tool_records_resolver
     name: str = "mcp"
     priority: int = 600
     depends_on: tuple[str, ...] = ("tool",)
@@ -506,9 +513,7 @@ class MCPProvider:
             for server_name in _used_mcp_server_names(state.tools_by_agent)
             if server_name
         }
-        used_server_names.update(
-            tool.usage for tool in contributed_tools if tool.usage
-        )
+        used_server_names.update(tool.usage for tool in contributed_tools if tool.usage)
 
         records_by_name = {
             _mcp_record_name(record): record
@@ -611,9 +616,7 @@ class SkillProvider:
             "version_no": version_no,
             "capability": "skill",
             "enabled_skill_names": [
-                _skill_name(record)
-                for record in enabled_skills
-                if _skill_name(record)
+                _skill_name(record) for record in enabled_skills if _skill_name(record)
             ],
         }
         injected_params = {
@@ -632,16 +635,12 @@ class SkillProvider:
         return CapabilityContribution(
             tools_by_agent={agent_name: tools},
             prompt_fragments={
-                "skills": [
-                    _skill_prompt_summary(record)
-                    for record in enabled_skills
-                ]
+                "skills": [_skill_prompt_summary(record) for record in enabled_skills]
             },
             runtime_resources={
                 "skill.local_skills_dir": self.local_skills_dir,
                 "skill.enabled_skills": [
-                    _skill_runtime_record(record)
-                    for record in enabled_skills
+                    _skill_runtime_record(record) for record in enabled_skills
                 ],
             },
             operators=[
@@ -683,7 +682,9 @@ class MemoryProvider:
         memory_config = dict(getattr(memory_context, "memory_config", {}) or {})
         monitoring_metadata = {
             "memory.enabled": bool(getattr(user_config, "memory_switch", False)),
-            "memory.agent_share_option": getattr(user_config, "agent_share_option", None),
+            "memory.agent_share_option": getattr(
+                user_config, "agent_share_option", None
+            ),
             "memory.disabled_agent_ids": list(
                 getattr(user_config, "disable_agent_ids", []) or []
             ),
@@ -696,7 +697,9 @@ class MemoryProvider:
             "memory.config": memory_config,
             "memory.tenant_id": getattr(memory_context, "tenant_id", request.tenant_id),
             "memory.user_id": getattr(memory_context, "user_id", request.user_id),
-            "memory.agent_id": str(getattr(memory_context, "agent_id", request.agent_id)),
+            "memory.agent_id": str(
+                getattr(memory_context, "agent_id", request.agent_id)
+            ),
         }
         if request.is_debug:
             monitoring_metadata["memory.disabled_reason"] = "debug"
@@ -826,9 +829,7 @@ class KnowledgeProvider:
             or "root"
         )
         existing_tools = list(state.tools_by_agent.get(agent_name, []))
-        knowledge_tools = [
-            tool for tool in existing_tools if _is_knowledge_tool(tool)
-        ]
+        knowledge_tools = [tool for tool in existing_tools if _is_knowledge_tool(tool)]
         if not knowledge_tools:
             return CapabilityContribution()
 
@@ -867,8 +868,12 @@ class KnowledgeProvider:
             if any(warning.code == "knowledge_summary_failed" for warning in warnings)
             else "ok"
         )
-        runtime_resources["knowledge.display_name_to_index_map"] = display_name_to_index_map
-        runtime_resources["knowledge.index_name_to_display_map"] = index_name_to_display_map
+        runtime_resources["knowledge.display_name_to_index_map"] = (
+            display_name_to_index_map
+        )
+        runtime_resources["knowledge.index_name_to_display_map"] = (
+            index_name_to_display_map
+        )
         return CapabilityContribution(
             tools_by_agent={agent_name: enhanced_tools},
             prompt_fragments={"knowledge_base_summary": knowledge_summary},
@@ -892,7 +897,9 @@ class KnowledgeProvider:
             monitoring_metadata={
                 "knowledge.tool_count": len(enhanced_tools),
                 "knowledge.kb_ids": kb_ids,
-                "knowledge.summary_status": runtime_resources["knowledge.summary_status"],
+                "knowledge.summary_status": runtime_resources[
+                    "knowledge.summary_status"
+                ],
             },
             warnings=warnings,
         )
@@ -938,9 +945,7 @@ class KnowledgeProvider:
             )
         )
         if not embedding_model:
-            raise ValueError(
-                f"No embedding model found for index '{index_names[0]}'."
-            )
+            raise ValueError(f"No embedding model found for index '{index_names[0]}'.")
         vdb_core = self.vector_db_resolver()
 
         metadata = dict(tool.metadata)
@@ -1039,11 +1044,7 @@ def _normalize_index_names(value: Any) -> list[str]:
             except json.JSONDecodeError:
                 pass
         if "," in stripped:
-            return [
-                item.strip()
-                for item in stripped.split(",")
-                if item.strip()
-            ]
+            return [item.strip() for item in stripped.split(",") if item.strip()]
         return [stripped]
     if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
         normalized: list[str] = []
@@ -1088,22 +1089,21 @@ class ContextProvider:
         request: AgentRunRequestContext,
         state: AssemblyState,
     ) -> CapabilityContribution:
-        agent_record = self.agent_record_resolver(
-            request.agent_id,
-            request.tenant_id,
-            state.version_no,
-        ) or state.agent_record
+        agent_record = (
+            self.agent_record_resolver(
+                request.agent_id,
+                request.tenant_id,
+                state.version_no,
+            )
+            or state.agent_record
+        )
         state.agent_record.update(dict(agent_record))
         agent_name = str(agent_record.get("name") or "root")
         is_manager = bool(state.managed_agents or state.external_a2a_agents)
-        app_name = (
-            self.app_config_resolver("APP_NAME", request.tenant_id)
-            or "Nexent"
-        )
-        app_description = (
-            self.app_config_resolver("APP_DESCRIPTION", request.tenant_id)
-            or _default_app_description(request.language)
-        )
+        app_name = self.app_config_resolver("APP_NAME", request.tenant_id) or "Nexent"
+        app_description = self.app_config_resolver(
+            "APP_DESCRIPTION", request.tenant_id
+        ) or _default_app_description(request.language)
         fragments = {
             **_agent_prompt_fragments(agent_record),
             **state.prompt_fragments,
@@ -1114,13 +1114,25 @@ class ContextProvider:
         }
         context_components = list(state.context_components)
         enable_context_manager = bool(agent_record.get("enable_context_manager", False))
+        compression = dict(agent_record.get("compression") or {})
+        legacy_managed_normalized = (
+            enable_context_manager
+            and request.runtime_provider == "openjiuwen"
+            and not compression
+        )
         rendered_legacy_system_prompt = None
         context_policy = ContextPolicy(
-            mode=ContextMode.MANAGED if enable_context_manager else ContextMode.LEGACY,
+            mode=(
+                ContextMode.RUNTIME_NATIVE
+                if legacy_managed_normalized
+                else ContextMode.MANAGED
+                if enable_context_manager
+                else ContextMode.LEGACY
+            ),
             token_threshold=agent_record.get("context_token_threshold"),
             soft_input_budget_tokens=agent_record.get("soft_input_budget_tokens"),
             hard_input_budget_tokens=agent_record.get("hard_input_budget_tokens"),
-            compression=dict(agent_record.get("compression") or {}),
+            compression=compression,
         )
         if enable_context_manager:
             context_components.append(
@@ -1161,11 +1173,35 @@ class ContextProvider:
             ),
             context_policy=context_policy,
             verification_config=agent_record.get("verification_config"),
-            runtime_hints={"version_no": state.version_no},
+            runtime_hints={
+                "version_no": state.version_no,
+                "context_compatibility": {
+                    "legacy_managed_normalized": True,
+                    "source_mode": ContextMode.MANAGED.value,
+                    "target_mode": ContextMode.RUNTIME_NATIVE.value,
+                }
+                if legacy_managed_normalized
+                else {},
+            },
         )
         return CapabilityContribution(
             root_agent=root_agent,
             agent_record=dict(agent_record),
+            warnings=[
+                RuntimeWarningInfo(
+                    code="context_policy_normalized",
+                    message=(
+                        "OpenJiuwen uses runtime-native context for the legacy default "
+                        "context manager; Nexent managed compression is not enabled."
+                    ),
+                    metadata={
+                        "source_mode": ContextMode.MANAGED.value,
+                        "target_mode": ContextMode.RUNTIME_NATIVE.value,
+                    },
+                )
+            ]
+            if legacy_managed_normalized
+            else [],
         )
 
 
@@ -1264,11 +1300,13 @@ def _mcp_headers_from_record(record: Mapping[str, Any]) -> dict[str, str]:
         headers["Authorization"] = str(authorization)
     custom_headers = record.get("custom_headers") or record.get("headers") or {}
     if isinstance(custom_headers, Mapping):
-        headers.update({
-            str(key): str(value)
-            for key, value in custom_headers.items()
-            if value is not None
-        })
+        headers.update(
+            {
+                str(key): str(value)
+                for key, value in custom_headers.items()
+                if value is not None
+            }
+        )
     return headers
 
 
@@ -1297,11 +1335,7 @@ def _skill_name(record: Mapping[str, Any]) -> str:
 
 
 def _skill_description(record: Mapping[str, Any]) -> str:
-    return str(
-        record.get("description")
-        or record.get("skill_description")
-        or ""
-    )
+    return str(record.get("description") or record.get("skill_description") or "")
 
 
 def _skill_prompt_summary(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1388,9 +1422,7 @@ def _with_injected_params(
     injected_params: Mapping[str, Any],
 ) -> ToolSpec:
     clean_injected_params = {
-        key: value
-        for key, value in injected_params.items()
-        if value is not None
+        key: value for key, value in injected_params.items() if value is not None
     }
     return tool.model_copy(
         update={"injected_params": clean_injected_params},
@@ -1404,11 +1436,12 @@ def _memory_retrieval_levels(memory_context: Any) -> list[str]:
     levels = ["tenant", "agent", "user", "user_agent"]
     if getattr(user_config, "agent_share_option", "never") == "never":
         levels = [level for level in levels if level != "agent"]
-    if agent_id in {str(item) for item in getattr(user_config, "disable_agent_ids", []) or []}:
+    if agent_id in {
+        str(item) for item in getattr(user_config, "disable_agent_ids", []) or []
+    }:
         levels = [level for level in levels if level != "agent"]
     if agent_id in {
-        str(item)
-        for item in getattr(user_config, "disable_user_agent_ids", []) or []
+        str(item) for item in getattr(user_config, "disable_user_agent_ids", []) or []
     }:
         levels = [level for level in levels if level != "user_agent"]
     return levels
@@ -1556,7 +1589,9 @@ def _safe_input_budget_snapshot(
 
     if context_window is not None:
         soft_input_budget_tokens = max(int(context_window) - requested_output_tokens, 1)
-        soft_input_budget_tokens = min(soft_input_budget_tokens, hard_input_budget_tokens)
+        soft_input_budget_tokens = min(
+            soft_input_budget_tokens, hard_input_budget_tokens
+        )
     else:
         soft_input_budget_tokens = hard_input_budget_tokens
 
@@ -1568,7 +1603,9 @@ def _safe_input_budget_snapshot(
     }
 
 
-def _tool_overrides_for_agent(tool_params: Any, agent_name: str) -> dict[str, dict[str, Any]]:
+def _tool_overrides_for_agent(
+    tool_params: Any, agent_name: str
+) -> dict[str, dict[str, Any]]:
     if not tool_params:
         return {}
     if isinstance(tool_params, Mapping):
@@ -1583,10 +1620,7 @@ def _tool_overrides_for_agent(tool_params: Any, agent_name: str) -> dict[str, di
         if isinstance(agent_override, Mapping)
         else getattr(agent_override, "tools", {})
     )
-    return {
-        str(tool_name): dict(params)
-        for tool_name, params in dict(tools).items()
-    }
+    return {str(tool_name): dict(params) for tool_name, params in dict(tools).items()}
 
 
 def memory_prompt_fragment(memory_items: Sequence[Any]) -> dict[str, str]:

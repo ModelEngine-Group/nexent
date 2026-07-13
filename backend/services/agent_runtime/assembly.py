@@ -17,6 +17,7 @@ from .models import (
     RunControl,
     RuntimeWarningInfo,
     ToolSpec,
+    derive_runtime_capability_requirements,
 )
 from .operators import (
     OperatorContext,
@@ -180,7 +181,9 @@ def sort_capability_providers(
             raise CapabilityProviderDependencyError(
                 f"Capability provider dependency cycle detected: {cycle_members}."
             )
-        ready.sort(key=lambda provider: (getattr(provider, "priority", 100), provider.name))
+        ready.sort(
+            key=lambda provider: (getattr(provider, "priority", 100), provider.name)
+        )
         provider = ready[0]
         provider_name = _normalize_provider_name(provider.name)
         sorted_providers.append(provider)
@@ -208,7 +211,12 @@ async def assemble_agent_run_plan(
         version_no=version_no,
         agent_record=agent_record,
     )
-    provider_list = default_capability_providers() if providers is None else providers
+    if providers is None:
+        raise AssemblyError(
+            "Production run assembly requires explicit capability providers; "
+            "NoOp providers are test-only."
+        )
+    provider_list = providers
     provider_list = _with_plugin_providers(provider_list, plugin_registry)
     for provider in sort_capability_providers(provider_list):
         contribution = provider.contribute(request, state)
@@ -272,7 +280,9 @@ def merge_capability_contribution(
 
     if contribution.root_agent is not None:
         if state.root_agent is not None and state.root_agent != contribution.root_agent:
-            raise CapabilityContributionConflictError("Multiple root agents were contributed.")
+            raise CapabilityContributionConflictError(
+                "Multiple root agents were contributed."
+            )
         state.root_agent = contribution.root_agent
     state.managed_agents.extend(contribution.managed_agents)
     state.external_a2a_agents.extend(contribution.external_a2a_agents)
@@ -320,6 +330,11 @@ def freeze_agent_run_plan(
             for warning in state.warnings
         ]
 
+    capability_requirements = derive_runtime_capability_requirements(
+        root_agent,
+        list(state.mcp_connections),
+        dict(state.runtime_resources),
+    )
     plan = AgentRunPlan(
         request_id=request.request_id,
         runtime_provider=request.runtime_provider,
@@ -331,6 +346,7 @@ def freeze_agent_run_plan(
         runtime_resources=dict(state.runtime_resources),
         operators=list(state.operators),
         monitoring_metadata=monitoring_metadata,
+        capability_requirements=capability_requirements,
         run_control=run_control
         or RunControl(
             request_id=request.request_id,
@@ -342,14 +358,16 @@ def freeze_agent_run_plan(
     return plan
 
 
-def _attach_state_to_root_agent(root_agent: AgentSpec, state: AssemblyState) -> AgentSpec:
+def _attach_state_to_root_agent(
+    root_agent: AgentSpec, state: AssemblyState
+) -> AgentSpec:
     root_tools = list(root_agent.tools)
     state_tools = list(state.tools_by_agent.get(root_agent.name, []))
     combined_tools = _merge_tool_lists(root_agent.name, root_tools, state_tools)
     prompt = _merge_prompt_bundle(root_agent.prompt, state)
     managed_agents = list(root_agent.managed_agents) + list(state.managed_agents)
-    external_a2a_agents = (
-        list(root_agent.external_a2a_agents) + list(state.external_a2a_agents)
+    external_a2a_agents = list(root_agent.external_a2a_agents) + list(
+        state.external_a2a_agents
     )
     return root_agent.model_copy(
         update={
@@ -372,7 +390,8 @@ def _merge_prompt_bundle(prompt: PromptBundle, state: AssemblyState) -> PromptBu
     return prompt.model_copy(
         update={
             "fragments": fragments,
-            "context_components": list(prompt.context_components) + list(state.context_components),
+            "context_components": list(prompt.context_components)
+            + list(state.context_components),
         },
         deep=True,
     )
@@ -415,7 +434,9 @@ def _tool_identifiers(tool: ToolSpec) -> set[str]:
     identifiers = {tool.name}
     if tool.class_name:
         identifiers.add(tool.class_name)
-    return {identifier.strip().lower() for identifier in identifiers if identifier.strip()}
+    return {
+        identifier.strip().lower() for identifier in identifiers if identifier.strip()
+    }
 
 
 def _merge_dict_without_conflicts(
@@ -435,7 +456,9 @@ def _merge_dict_without_conflicts(
 def _normalize_provider_name(provider_name: str) -> str:
     normalized_name = provider_name.strip().lower()
     if not normalized_name:
-        raise CapabilityProviderDependencyError("Capability provider name cannot be empty.")
+        raise CapabilityProviderDependencyError(
+            "Capability provider name cannot be empty."
+        )
     return normalized_name
 
 

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
-from collections import deque
 from enum import Enum
-from typing import Any
+from typing import Any, AsyncIterator
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,8 +67,7 @@ LEGACY_PROCESS_TYPES = {
 }
 
 SMOLAGENTS_PROCESS_TYPE_COMPATIBILITY = {
-    process_type: "complete"
-    for process_type in sorted(LEGACY_PROCESS_TYPES)
+    process_type: "complete" for process_type in sorted(LEGACY_PROCESS_TYPES)
 }
 
 
@@ -126,13 +125,17 @@ class RuntimeDeliveryItem(BaseModel):
 
 
 class RuntimeEventSink:
-    """In-memory ordered sink used by runtime adapters and API-layer tests."""
+    """Ordered request-scoped event sink with real-time async consumption."""
+
+    _CLOSE_SENTINEL = object()
 
     def __init__(self, request_id: str | None = None):
         self.request_id = request_id
         self._events: list[RuntimeEvent] = []
-        self._queue: deque[RuntimeEvent] = deque()
+        self._queue: asyncio.Queue[RuntimeEvent | object] = asyncio.Queue()
+        self._drain_cursor = 0
         self._next_sequence = 0
+        self._closed = False
 
     @property
     def events(self) -> tuple[RuntimeEvent, ...]:
@@ -141,13 +144,15 @@ class RuntimeEventSink:
 
     def emit(self, event: RuntimeEvent) -> RuntimeEvent:
         """Record one event and assign request/sequence metadata when absent."""
+        if self._closed:
+            raise RuntimeError("RuntimeEventSink is closed.")
         if event.request_id is None and self.request_id is not None:
             event = event.model_copy(update={"request_id": self.request_id})
         if event.sequence is None:
             event = event.model_copy(update={"sequence": self._next_sequence})
         self._next_sequence = max(self._next_sequence, int(event.sequence) + 1)
         self._events.append(event)
-        self._queue.append(event)
+        self._queue.put_nowait(event)
         return event
 
     async def emit_async(self, event: RuntimeEvent) -> RuntimeEvent:
@@ -155,13 +160,35 @@ class RuntimeEventSink:
         return self.emit(event)
 
     def drain(self) -> list[RuntimeEvent]:
-        """Return and clear queued events while keeping the historical snapshot."""
-        drained = list(self._queue)
-        self._queue.clear()
+        """Return events not previously drained while preserving the snapshot."""
+        drained = self._events[self._drain_cursor :]
+        self._drain_cursor = len(self._events)
         return drained
 
+    async def stream(self) -> AsyncIterator[RuntimeEvent]:
+        """Yield events as soon as they are emitted until the sink is closed."""
+        while True:
+            item = await self._queue.get()
+            if item is self._CLOSE_SENTINEL:
+                return
+            yield item
 
-async def emit_runtime_event(event_sink: Any, event: RuntimeEvent) -> RuntimeEvent | None:
+    def close(self) -> None:
+        """Close the stream after all events already queued are consumed."""
+        if self._closed:
+            return
+        self._closed = True
+        self._queue.put_nowait(self._CLOSE_SENTINEL)
+
+    @property
+    def closed(self) -> bool:
+        """Return whether no more events can be emitted."""
+        return self._closed
+
+
+async def emit_runtime_event(
+    event_sink: Any, event: RuntimeEvent
+) -> RuntimeEvent | None:
     """Emit an event to a sink that may expose sync or async emit methods."""
     if event_sink is None:
         return None
@@ -370,7 +397,9 @@ def runtime_events_to_delivery_items(
         else:
             unit_index = next_unit_index
             current_merge_key = process_payload.unit_merge_key
-            current_merge_unit_index = unit_index if process_payload.unit_merge_key else None
+            current_merge_unit_index = (
+                unit_index if process_payload.unit_merge_key else None
+            )
             next_unit_index += 1
         message_unit = _message_unit_for_payload(process_payload, unit_index)
 

@@ -22,7 +22,12 @@ from .models import (
     ToolSpec,
 )
 from .events import emit_runtime_event, runtime_event_from_legacy_observer_message
-from .operators import OperatorContext, OperatorRegistry, OperatorRunner, default_operator_registry
+from .operators import (
+    OperatorContext,
+    OperatorRegistry,
+    OperatorRunner,
+    default_operator_registry,
+)
 
 
 AgentRunCallable = Callable[[Any], AsyncIterator[Any]]
@@ -81,6 +86,7 @@ class SmolagentsRuntime:
         token_usage_events=True,
         interruptible=True,
         resumable_stream=True,
+        verification=True,
     )
 
     def __init__(
@@ -95,7 +101,9 @@ class SmolagentsRuntime:
         self._active_runs: dict[str, tuple[Any, RunControl]] = {}
         self._lock = threading.Lock()
 
-    async def run(self, plan: AgentRunPlan, event_sink: Any = None) -> AsyncIterator[Any]:
+    async def run(
+        self, plan: AgentRunPlan, event_sink: Any = None
+    ) -> AsyncIterator[Any]:
         """Execute a smolagents run by delegating to the legacy agent_run path."""
         agent_run_info = self.to_agent_run_info(plan, event_sink)
         with self._lock:
@@ -145,8 +153,12 @@ class SmolagentsRuntime:
                 step_number=event.step_number,
                 model_output=event.content,
                 tool_input=event.tool_input,
-                tool_output=event.tool_output if event.tool_output is not None else event.content,
-                final_answer=event.content if event.compat_process_type == "final_answer" else None,
+                tool_output=event.tool_output
+                if event.tool_output is not None
+                else event.content,
+                final_answer=event.content
+                if event.compat_process_type == "final_answer"
+                else None,
                 runtime_events=[event],
             )
             result = await OperatorRunner(self._operator_registry).run_stage(
@@ -193,7 +205,9 @@ class SmolagentsRuntime:
             ],
             observer=observer,
             agent_config=agent_config,
-            mcp_host=[self._to_mcp_host(connection) for connection in plan.mcp_connections],
+            mcp_host=[
+                self._to_mcp_host(connection) for connection in plan.mcp_connections
+            ],
             history=self._to_agent_history(plan.history),
             stop_event=stop_event,
             context_manager=context_manager,
@@ -224,7 +238,9 @@ class SmolagentsRuntime:
             max_steps=agent.max_steps,
             requested_output_tokens=agent.runtime_hints.get("requested_output_tokens"),
             model_name=agent.model_name,
-            provide_run_summary=bool(agent.runtime_hints.get("provide_run_summary", False)),
+            provide_run_summary=bool(
+                agent.runtime_hints.get("provide_run_summary", False)
+            ),
             instructions=agent.runtime_hints.get("instructions"),
             managed_agents=[
                 self.to_agent_config(managed_agent, plan=None)
@@ -288,7 +304,9 @@ class SmolagentsRuntime:
         inputs = tool.raw_inputs
         if inputs is None:
             inputs = json.dumps(tool.input_schema or {}, ensure_ascii=False)
-        source = tool.source.value if hasattr(tool.source, "value") else str(tool.source)
+        source = (
+            tool.source.value if hasattr(tool.source, "value") else str(tool.source)
+        )
         return tool_config_class(
             class_name=tool.class_name or tool.name,
             name=tool.name,
@@ -334,7 +352,12 @@ class SmolagentsRuntime:
         if isinstance(agent, external_config_class):
             return agent
         data = _model_dump(agent)
-        agent_id = data.get("agent_id") or data.get("external_agent_id") or data.get("id") or ""
+        agent_id = (
+            data.get("agent_id")
+            or data.get("external_agent_id")
+            or data.get("id")
+            or ""
+        )
         data["agent_id"] = str(agent_id)
         data.setdefault("name", data.get("agent_name") or data["agent_id"] or "Unknown")
         data.setdefault("description", "")
@@ -375,7 +398,9 @@ class SmolagentsRuntime:
             content = data.get("content", "")
             file_description = _format_minio_files_for_content(data.get("minio_files"))
             if file_description:
-                content = f"{content}{file_description}" if content else file_description
+                content = (
+                    f"{content}{file_description}" if content else file_description
+                )
             converted_history.append(
                 agent_history_class(
                     role=str(data.get("role") or "user"),
@@ -449,10 +474,7 @@ def _model_dump(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         return value.model_dump()
     if is_dataclass(value):
-        return {
-            field.name: getattr(value, field.name)
-            for field in fields(value)
-        }
+        return {field.name: getattr(value, field.name) for field in fields(value)}
     return dict(vars(value))
 
 
@@ -463,7 +485,9 @@ def _format_minio_files_for_content(minio_files: Any, max_files: int = 20) -> st
     file_lines: list[str] = []
     for index, file_info in enumerate(minio_files):
         if index >= max_files:
-            file_lines.append(f"  - ... (and {len(minio_files) - max_files} more files)")
+            file_lines.append(
+                f"  - ... (and {len(minio_files) - max_files} more files)"
+            )
             break
         if not isinstance(file_info, Mapping):
             continue

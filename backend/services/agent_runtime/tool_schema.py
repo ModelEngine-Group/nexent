@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
@@ -80,6 +81,23 @@ FRAMEWORK_NATIVE_MODULE_PREFIXES = (
     "agent_core",
 )
 
+LEGACY_TOOL_TYPE_ALIASES = {
+    "str": "string",
+    "string": "string",
+    "text": "string",
+    "int": "integer",
+    "integer": "integer",
+    "float": "number",
+    "number": "number",
+    "bool": "boolean",
+    "boolean": "boolean",
+    "dict": "object",
+    "mapping": "object",
+    "object": "object",
+    "list": "array",
+    "array": "array",
+}
+
 
 def normalize_tool_input_schema(
     raw_inputs: str | Mapping[str, Any] | None,
@@ -122,12 +140,53 @@ def normalize_tool_input_schema(
             )
         )
 
+    normalized = _normalize_tool_schema_mapping(parsed, tool_name=tool_name)
     validate_model_visible_tool_schema(
-        parsed,
+        normalized,
         tool_name=tool_name,
         hidden_input_names=hidden_input_names,
     )
-    return parsed
+    return normalized
+
+
+def tool_input_schema_to_json_schema(
+    input_schema: Mapping[str, Any] | None,
+    *,
+    tool_name: str | None = None,
+) -> dict[str, Any]:
+    """Convert a neutral or legacy input mapping to provider-safe JSON Schema."""
+    normalized = normalize_tool_input_schema(input_schema or {}, tool_name=tool_name)
+    is_object_schema = normalized.get("type") == "object" or isinstance(
+        normalized.get("properties"), Mapping
+    )
+    if is_object_schema:
+        result = dict(normalized)
+        raw_properties = result.get("properties") or {}
+        explicit_required = result.get("required")
+    else:
+        result = {"type": "object"}
+        raw_properties = normalized
+        explicit_required = None
+
+    properties = {
+        str(name): _clean_json_schema_property(
+            config, tool_name=tool_name, name=str(name)
+        )
+        for name, config in raw_properties.items()
+    }
+    if isinstance(explicit_required, list):
+        required = [str(name) for name in explicit_required if str(name) in properties]
+    else:
+        required = [
+            str(name)
+            for name, config in raw_properties.items()
+            if _legacy_property_is_required(config)
+        ]
+
+    result["type"] = "object"
+    result["properties"] = properties
+    result["required"] = required
+    return result
 
 
 def validate_model_visible_tool_schema(
@@ -138,12 +197,10 @@ def validate_model_visible_tool_schema(
 ) -> None:
     """Ensure model-visible schema does not expose system-injected parameters."""
     hidden_names = {
-        name.lower()
-        for name in (hidden_input_names or DEFAULT_HIDDEN_TOOL_INPUT_NAMES)
+        name.lower() for name in (hidden_input_names or DEFAULT_HIDDEN_TOOL_INPUT_NAMES)
     }
     visible_names = {
-        name.lower()
-        for name in extract_model_visible_input_names(input_schema)
+        name.lower() for name in extract_model_visible_input_names(input_schema)
     }
     leaked_names = sorted(visible_names & hidden_names)
     if leaked_names:
@@ -179,7 +236,9 @@ def tool_spec_from_legacy_tool_config(
     class_name = getattr(tool_config, "class_name", None)
     name = getattr(tool_config, "name", None) or class_name
     if not name:
-        raise ToolSchemaConfigurationError("ToolConfig.name or ToolConfig.class_name is required.")
+        raise ToolSchemaConfigurationError(
+            "ToolConfig.name or ToolConfig.class_name is required."
+        )
 
     raw_inputs = getattr(tool_config, "inputs", None)
     input_schema = normalize_tool_input_schema(
@@ -197,13 +256,200 @@ def tool_spec_from_legacy_tool_config(
         source=getattr(tool_config, "source", None) or "local",
         class_name=class_name,
         usage=getattr(tool_config, "usage", None),
-        params=_dict_or_empty(getattr(tool_config, "params", None), field_name="params", tool_name=str(name)),
+        params=_dict_or_empty(
+            getattr(tool_config, "params", None),
+            field_name="params",
+            tool_name=str(name),
+        ),
         metadata=_dict_or_empty(
             getattr(tool_config, "metadata", None),
             field_name="metadata",
             tool_name=str(name),
         ),
     )
+
+
+def _normalize_tool_schema_mapping(
+    schema: Mapping[str, Any],
+    *,
+    tool_name: str | None,
+) -> dict[str, Any]:
+    normalized = dict(schema)
+    if normalized.get("type") == "object" or isinstance(
+        normalized.get("properties"), Mapping
+    ):
+        properties = normalized.get("properties") or {}
+        normalized["properties"] = {
+            str(name): _normalize_property_schema(
+                config,
+                tool_name=tool_name,
+                property_name=str(name),
+            )
+            for name, config in properties.items()
+        }
+        return normalized
+    return {
+        str(name): _normalize_property_schema(
+            config,
+            tool_name=tool_name,
+            property_name=str(name),
+        )
+        for name, config in normalized.items()
+    }
+
+
+def _normalize_property_schema(
+    config: Any,
+    *,
+    tool_name: str | None,
+    property_name: str,
+) -> Any:
+    if isinstance(config, bool):
+        return config
+    if isinstance(config, str):
+        return _legacy_type_to_schema(
+            config,
+            tool_name=tool_name,
+            property_name=property_name,
+        )
+    if not isinstance(config, Mapping):
+        raise ToolSchemaConfigurationError(
+            _format_tool_error(
+                tool_name,
+                f"Tool input '{property_name}' must be a schema object or type string, "
+                f"got {type(config).__name__}.",
+            )
+        )
+
+    normalized = dict(config)
+    type_value = normalized.get("type")
+    if isinstance(type_value, str):
+        type_schema = _legacy_type_to_schema(
+            type_value,
+            tool_name=tool_name,
+            property_name=property_name,
+        )
+        normalized.pop("type", None)
+        normalized = {**type_schema, **normalized}
+    if isinstance(normalized.get("properties"), Mapping):
+        normalized["properties"] = {
+            str(name): _normalize_property_schema(
+                value,
+                tool_name=tool_name,
+                property_name=f"{property_name}.{name}",
+            )
+            for name, value in normalized["properties"].items()
+        }
+    if "items" in normalized:
+        normalized["items"] = _normalize_property_schema(
+            normalized["items"],
+            tool_name=tool_name,
+            property_name=f"{property_name}[]",
+        )
+    return normalized
+
+
+def _legacy_type_to_schema(
+    raw_type: str,
+    *,
+    tool_name: str | None,
+    property_name: str,
+) -> dict[str, Any]:
+    normalized = raw_type.strip().replace("typing.", "")
+    optional_match = re.fullmatch(r"Optional\s*\[(.+)]", normalized, re.IGNORECASE)
+    if optional_match:
+        schema = _legacy_type_to_schema(
+            optional_match.group(1),
+            tool_name=tool_name,
+            property_name=property_name,
+        )
+        _make_schema_nullable(schema)
+        schema["optional"] = True
+        return schema
+
+    generic_match = re.fullmatch(
+        r"(?:list|array|sequence)\s*\[(.+)]",
+        normalized,
+        re.IGNORECASE,
+    )
+    if generic_match:
+        return {
+            "type": "array",
+            "items": _legacy_type_to_schema(
+                generic_match.group(1),
+                tool_name=tool_name,
+                property_name=f"{property_name}[]",
+            ),
+        }
+
+    lowered = normalized.lower()
+    if lowered in {"any", "typing.any"}:
+        return {}
+    json_type = LEGACY_TOOL_TYPE_ALIASES.get(lowered)
+    if json_type is None:
+        raise ToolSchemaConfigurationError(
+            _format_tool_error(
+                tool_name,
+                f"Tool input '{property_name}' uses unsupported type '{raw_type}'.",
+            )
+        )
+    return {"type": json_type}
+
+
+def _legacy_property_is_required(config: Any) -> bool:
+    if not isinstance(config, Mapping):
+        return True
+    if config.get("required") is not None:
+        return bool(config.get("required"))
+    if config.get("optional") is not None:
+        return not bool(config.get("optional"))
+    return not bool(config.get("nullable")) and "default" not in config
+
+
+def _clean_json_schema_property(
+    config: Any,
+    *,
+    tool_name: str | None,
+    name: str,
+) -> Any:
+    normalized = _normalize_property_schema(
+        config,
+        tool_name=tool_name,
+        property_name=name,
+    )
+    if isinstance(normalized, bool):
+        return normalized
+    cleaned = dict(normalized)
+    nullable = bool(cleaned.pop("nullable", False))
+    cleaned.pop("optional", None)
+    cleaned.pop("required", None)
+    cleaned.pop("description_zh", None)
+    if nullable:
+        _make_schema_nullable(cleaned)
+    if isinstance(cleaned.get("properties"), Mapping):
+        cleaned["properties"] = {
+            str(child_name): _clean_json_schema_property(
+                child_config,
+                tool_name=tool_name,
+                name=f"{name}.{child_name}",
+            )
+            for child_name, child_config in cleaned["properties"].items()
+        }
+    if "items" in cleaned:
+        cleaned["items"] = _clean_json_schema_property(
+            cleaned["items"],
+            tool_name=tool_name,
+            name=f"{name}[]",
+        )
+    return cleaned
+
+
+def _make_schema_nullable(schema: dict[str, Any]) -> None:
+    type_value = schema.get("type")
+    if isinstance(type_value, str):
+        schema["type"] = [type_value, "null"]
+    elif isinstance(type_value, list) and "null" not in type_value:
+        schema["type"] = [*type_value, "null"]
 
 
 def assert_agent_run_plan_framework_neutral(plan: AgentRunPlan) -> None:
@@ -239,7 +485,9 @@ def _find_framework_native_values(value: Any) -> Iterator[str]:
     yield from _walk_framework_native_values(value, "$", visited)
 
 
-def _walk_framework_native_values(value: Any, path: str, visited: set[int]) -> Iterator[str]:
+def _walk_framework_native_values(
+    value: Any, path: str, visited: set[int]
+) -> Iterator[str]:
     if value is None or isinstance(value, (str, int, float, bool, bytes)):
         return
 
@@ -270,4 +518,3 @@ def _walk_framework_native_values(value: Any, path: str, visited: set[int]) -> I
     if isinstance(value, (list, tuple, set, frozenset)):
         for index, child in enumerate(value):
             yield from _walk_framework_native_values(child, f"{path}[{index}]", visited)
-

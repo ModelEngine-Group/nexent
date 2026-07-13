@@ -1,203 +1,34 @@
-"""
-openjiuwen SDK adapter for Nexent.
+"""OpenJiuwen prompt optimization adapter for Nexent."""
 
-This module works around circular import bugs in openjiuwen 0.1.13 by:
-  1. Stubbing react_agent_evolve (causes the circular import)
-  2. Installing a meta-path finder that blocks broken __init__.py files
-  3. All of the above runs at MODULE LOAD TIME (before openjiuwen imports)
-
-The adapters/__init__.py wraps the import in try/except so the server
-starts even when openjiuwen is not installed.
-"""
 import asyncio
-import importlib.abc
-import importlib.machinery
 import json
 import logging
-import os
-import sys
-import types
 from typing import Any, List, Literal, Optional, Tuple
 
-# ----------------------------------------------------------------------
-# MUST install bypasser + stubs before any openjiuwen import.
-# The module-level `from openjiuwen.dev_tools.tune.base import ...` below
-# triggers the entire circular import chain.  Installing the bypasser here
-# (before that line executes) breaks the cycle.
-# ----------------------------------------------------------------------
-
-# Stub react_agent_evolve so single_agent.__init__.py can import it without
-# hitting the circular core.operator dependency.
-if "openjiuwen.core.single_agent.agents.react_agent_evolve" not in sys.modules:
-    _stub = types.ModuleType("openjiuwen.core.single_agent.agents.react_agent_evolve")
-    _stub.__file__ = "<bypasser stub>"
-
-    # Provide a dummy ReActAgentEvolve class.  The real one lives in the
-    # actual react_agent_evolve.py which we cannot load at this stage
-    # because it imports ToolCallOperator from core.operator (still blocked).
-    # The stub class satisfies the import in single_agent.__init__.py.
-    class _DummyReActAgentEvolve:  # noqa: N801
-        pass
-
-    _stub.ReActAgentEvolve = _DummyReActAgentEvolve
-    _stub.__all__ = ["ReActAgentEvolve"]
-    sys.modules["openjiuwen.core.single_agent.agents.react_agent_evolve"] = _stub
-
-# NOTE: do NOT stub openjiuwen.core.single_agent.  Its real __init__.py must
-# run so that `from .schema.agent_card import AgentCard` and the other
-# relative submodule imports resolve correctly.  We only need react_agent_evolve
-# stubbed (its real file imports ToolCallOperator from core.operator, which
-# the bypasser below blocks).
-
-# Stub missing optional dependencies before openjiuwen import chain reaches them
-for _name, _attrs in [
-    ("pymilvus", {"is_successful": lambda *a, **kw: True}),
-    ("dashscope", {}),
-    ("pdfplumber", {}),
-]:
-    if _name not in sys.modules:
-        _mod = types.ModuleType(_name)
-        _mod.__path__ = []
-        for _k, _v in _attrs.items():
-            setattr(_mod, _k, _v)
-        sys.modules[_name] = _mod
-
-for _name in ["pymilvus.client", "pymilvus.client.utils"]:
-    if _name not in sys.modules:
-        _m = types.ModuleType(_name)
-        _m.__path__ = []
-        if _name == "pymilvus.client.utils":
-            _m.is_successful = lambda *a, **kw: True
-        sys.modules[_name] = _m
-
-for _name, _attrs in [
-    ("dashscope.api_entities", {}),
-    ("dashscope.api_entities.data", {}),
-    ("dashscope.api_entities.dashscope_response", {"DashScopeAPIResponse": object}),
-    ("dashscope.common", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
-    ("dashscope.common.constants", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
-]:
-    if _name not in sys.modules:
-        _m = types.ModuleType(_name)
-        _m.__path__ = []
-        for _k, _v in _attrs.items():
-            setattr(_m, _k, _v)
-        sys.modules[_name] = _m
-
-_CIRCULAR_CHAIN = {
-    "openjiuwen.agent_evolving",
-    "openjiuwen.agent_evolving.trainer",
-    "openjiuwen.agent_evolving.trainer.trainer",
-    "openjiuwen.agent_evolving.trainer.progress",
-    "openjiuwen.core",
-    "openjiuwen.dev_tools",
-    "openjiuwen.dev_tools.tune",
-    "openjiuwen.dev_tools.tune.optimizer",
-    "openjiuwen.dev_tools.tune.optimizer.instruction_optimizer",
-    "openjiuwen.dev_tools.prompt_builder",
-    "openjiuwen.dev_tools.prompt_builder.builder",
-}
-
-
-class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """
-    Meta path finder that intercepts __init__.py loading within openjiuwen,
-    blocking only the packages in the circular import chain while letting
-    all other modules (including base.py files) load normally.
-    """
-
-    def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
-        if not fullname.startswith("openjiuwen") or fullname == "openjiuwen":
-            return None
-        try:
-            import openjiuwen as _oj
-
-            pkg_root = _oj.__path__[0]
-        except ImportError:
-            return None
-        parts = fullname.split(".")[1:]
-        file_path = pkg_root
-        for p in parts:
-            file_path = os.path.join(file_path, p)
-        is_package = os.path.isdir(file_path)
-        if not is_package:
-            return None
-        init_path = os.path.join(file_path, "__init__.py")
-        if not os.path.exists(init_path):
-            return None
-        if fullname not in _CIRCULAR_CHAIN:
-            return None
-        spec = importlib.machinery.ModuleSpec(
-            fullname, self, is_package=True, origin="<init bypassed>"
-        )
-        spec.submodule_search_locations = [file_path]
-        return spec
-
-    def create_module(self, module: Any) -> None:
-        return None
-
-    def exec_module(self, module: Any) -> None:
-        import openjiuwen as _oj
-
-        pkg_root = _oj.__path__[0]
-        parts = module.__name__.split(".")[1:]
-        file_path = pkg_root
-        for p in parts:
-            file_path = os.path.join(file_path, p)
-        module.__path__ = [file_path]
-        module.__file__ = os.path.join(file_path, "__init__.py")
-
-    def __getattr__(self, name: str) -> Any:
-        """Handle special attributes like find_distributions to prevent recursion."""
-        import openjiuwen as _oj
-        import importlib
-
-        if name in (
-            "find_distributions",
-            "find_module",
-            "__path__",
-            "__name__",
-            "__file__",
-            "__loader__",
-            "__package__",
-            "__spec__",
-        ):
-            raise AttributeError(name)
-        pkg_root = _oj.__path__[0]
-        parts = self.__name__.split(".")[1:] + [name]
-        file_path = pkg_root
-        for p in parts:
-            file_path = os.path.join(file_path, p)
-        if os.path.isdir(file_path) and os.path.exists(os.path.join(file_path, "__init__.py")):
-            return importlib.import_module(f"{self.__name__}.{name}")
-        if os.path.exists(file_path + ".py"):
-            return importlib.import_module(f"{self.__name__}.{name}")
-        raise AttributeError(name)
-
-
-# Install the bypasser into sys.meta_path so it intercepts openjiuwen imports.
-for _finder in sys.meta_path:
-    if isinstance(_finder, _JiuwenInitBypasser):
-        break
-else:
-    sys.meta_path.insert(0, _JiuwenInitBypasser())
-
-# No-op: bypasser is already installed above.
-# Kept for backward compatibility with code that calls it.
-_bypasser_installed = True
+from adapters.openjiuwen_compat import (
+    NEXENT_OPENAI_CLIENT_PROVIDER,
+    OpenJiuwenCompatibilityError,
+    load_openjiuwen_public_api,
+    validate_openjiuwen_version,
+)
+from adapters.exception import JiuwenSDKError
 
 
 def _install_jiuwen_bypasser() -> bool:
-    """No-op: bypasser is installed at module load time. Kept for compatibility."""
-    return True
-
-# Now safe to import openjiuwen — bypasser is active.
-from openjiuwen.dev_tools.tune.base import Case as _Case, EvaluatedCase as _EvaluatedCase
+    """Compatibility no-op retained for callers from the 0.1.13 adapter."""
+    return False
 
 
-def _case_from_inputs_label(inputs: dict, label: dict) -> "_Case":
+def _case_types() -> tuple[Any, Any]:
+    from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
+
+    return Case, EvaluatedCase
+
+
+def _case_from_inputs_label(inputs: dict, label: dict) -> Any:
     # Keep stable keys for schema; allow extra fields to exist.
-    return _Case(inputs=inputs, label=label)
+    case_type, _ = _case_types()
+    return case_type(inputs=inputs, label=label)
 
 
 def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
@@ -209,9 +40,8 @@ def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
     reason = getattr(evaluated, "reason", "") or ""
     return score, str(reason)
 
-logger = logging.getLogger("jiuwen_adapter")
 
-from adapters.exception import JiuwenSDKError
+logger = logging.getLogger("jiuwen_adapter")
 
 
 # ----------------------------------------------------------------------
@@ -237,6 +67,7 @@ def run_async(coro):
     if loop.is_running():
         try:
             import nest_asyncio
+
             nest_asyncio.apply()
             return loop.run_until_complete(coro)
         except ImportError:
@@ -262,11 +93,10 @@ def run_async(coro):
 # ----------------------------------------------------------------------
 def _lazy_import_jiuwen():
     """延迟导入 Jiuwen SDK，避免 openjiuwen 未装时模块级 ImportError"""
-    _install_jiuwen_bypasser()
-
     try:
+        validate_openjiuwen_version()
         import openjiuwen  # noqa: F401
-    except ImportError as e:
+    except (ImportError, OpenJiuwenCompatibilityError) as e:
         raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
 
     from openjiuwen.core.foundation.llm.schema.config import (
@@ -274,12 +104,6 @@ def _lazy_import_jiuwen():
         ModelClientConfig,
         ProviderType,
     )
-    # Optional: allow adjusting SDK internal client timeout via config if supported.
-    # We keep import local to avoid breaking on SDK version differences.
-    try:
-        from openjiuwen.core.foundation.llm import ModelClientOptions  # type: ignore
-    except Exception:  # pragma: no cover
-        ModelClientOptions = None  # type: ignore
     from openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder import (
         FeedbackPromptBuilder,
     )
@@ -289,7 +113,9 @@ def _lazy_import_jiuwen():
     from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
 
     # Evaluator metrics (avoid importing openjiuwen.dev_tools.tune package root)
-    from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import LLMAsJudgeMetric
+    from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
+        LLMAsJudgeMetric,
+    )
 
     return (
         ModelRequestConfig,
@@ -308,7 +134,9 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     from database.model_management_db import get_model_by_model_id
     from utils.config_utils import get_model_name_from_config
 
-    ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _, _ = _lazy_import_jiuwen()
+    ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _, _ = (
+        _lazy_import_jiuwen()
+    )
 
     model_config = get_model_by_model_id(model_id, tenant_id)
     if not model_config:
@@ -326,11 +154,9 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
 
     ssl_cert = model_config.get("ssl_cert") or None
     ssl_verify = model_config.get("ssl_verify", True)
-    if ssl_verify and not ssl_cert:
-        ssl_verify = False
 
     client_config = ModelClientConfig(
-        client_provider=ProviderType.OpenAI,
+        client_provider=NEXENT_OPENAI_CLIENT_PROVIDER,
         api_key=model_config["api_key"],
         api_base=api_base,
         timeout=float(timeout_seconds),
@@ -345,16 +171,16 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     return request_config, client_config
 
 
-def _build_openai_client(
-    client_config: "ModelClientConfig", request_config: "ModelRequestConfig"
-) -> Any:
+def _build_openai_client(client_config: Any, request_config: Any) -> Any:
     """
     直接创建 OpenAIModelClient，绕过 FeedbackPromptBuilder 的深导入链。
     """
-    _install_jiuwen_bypasser()
-    from openjiuwen.core.foundation.llm.model_clients.openai_model_client import (
-        OpenAIModelClient,
-    )
+    try:
+        OpenAIModelClient = load_openjiuwen_public_api().NexentOpenAIModelClient
+    except OpenJiuwenCompatibilityError:
+        from openjiuwen.core.foundation.llm.model_clients.openai_model_client import (
+            OpenAIModelClient,
+        )
 
     class _DirectClient:
         """对 OpenAIModelClient 的薄封装，只暴露 invoke() 方法"""
@@ -379,13 +205,14 @@ def _build_openai_client(
 
 def _build_message(role: str, content: str) -> dict:
     return {"role": role, "content": content}
+
+
 def _lazy_import_jiuwen_builders():
     """Lazily import prompt builders only when optimization paths need them."""
-    _install_jiuwen_bypasser()
-
     try:
+        validate_openjiuwen_version()
         import openjiuwen  # noqa: F401
-    except ImportError as e:
+    except (ImportError, OpenJiuwenCompatibilityError) as e:
         raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
 
     from openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder import (
@@ -409,7 +236,7 @@ def _unwrap_prompt_response(text: str) -> str:
         for lang in ("json", ""):
             fence = f"```{lang}\n"
             if text.startswith(fence):
-                text = text[len(fence):]
+                text = text[len(fence) :]
                 if text.endswith("\n```"):
                     text = text[:-4]
                 elif text.endswith("```"):
@@ -472,12 +299,10 @@ class JiuwenSDKAdapter:
 
     def _ensure_available(self):
         """确保 Jiuwen SDK 可用"""
-        if not _bypasser_installed:
-            _install_jiuwen_bypasser()
-
         try:
+            validate_openjiuwen_version()
             import openjiuwen  # noqa: F401
-        except ImportError as e:
+        except (ImportError, OpenJiuwenCompatibilityError) as e:
             raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
 
     def optimize(
@@ -497,7 +322,9 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        logger.info(f"[jiuwen-adapter] mode={mode}, start_pos={start_pos}, end_pos={end_pos}")
+        logger.info(
+            f"[jiuwen-adapter] mode={mode}, start_pos={start_pos}, end_pos={end_pos}"
+        )
 
         request_config, client_config = build_jiuwen_model_configs(
             self.model_id, self.tenant_id
@@ -603,7 +430,9 @@ class JiuwenSDKAdapter:
         except Exception as exc:
             raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
 
-        request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+        request_config, client_config = build_jiuwen_model_configs(
+            self.model_id, self.tenant_id
+        )
 
         metric = LLMAsJudgeMetric(
             model_config=request_config,
@@ -612,11 +441,13 @@ class JiuwenSDKAdapter:
         )
 
         # Build the same prompt that ``metric.compute()`` uses.
-        messages = metric._template.format({
-            "question": str(question or ""),
-            "expected_answer": str(expected_answer),
-            "model_answer": str(model_answer),
-        }).to_messages()
+        messages = metric._template.format(
+            {
+                "question": str(question or ""),
+                "expected_answer": str(expected_answer),
+                "model_answer": str(model_answer),
+            }
+        ).to_messages()
 
         # Append a directive requiring Chinese output for the evaluation reason.
         # This ensures consistent Chinese language in the report regardless of
@@ -636,6 +467,7 @@ class JiuwenSDKAdapter:
             else:
                 # Append a new user message with the directive
                 from openjiuwen.core.foundation.llm import UserMessage
+
                 messages.append(UserMessage(content=chinese_directive.lstrip("\n")))
 
         try:
@@ -645,6 +477,7 @@ class JiuwenSDKAdapter:
 
         try:
             from openjiuwen.agent_evolving.utils import TuneUtils
+
             data = TuneUtils.parse_json_from_llm_response(response)
         except Exception as exc:
             raise JiuwenSDKError(f"Failed to parse judge response: {exc}") from exc
@@ -653,7 +486,9 @@ class JiuwenSDKAdapter:
             raise JiuwenSDKError(f"Judge response is not a JSON object: {response!r}")
 
         result = data.get("result")
-        if result is True or (isinstance(result, str) and result.strip().lower() == "true"):
+        if result is True or (
+            isinstance(result, str) and result.strip().lower() == "true"
+        ):
             score = 1.0
         else:
             score = 0.0

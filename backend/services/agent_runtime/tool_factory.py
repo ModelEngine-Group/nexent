@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -139,7 +141,9 @@ class LocalToolFactory:
         try:
             tool_obj = tool_class(**dict(tool.params))
         except Exception as exc:
-            raise ToolCreationError(f"Failed to create local tool {class_name}: {exc}") from exc
+            raise ToolCreationError(
+                f"Failed to create local tool {class_name}: {exc}"
+            ) from exc
         _attach_runtime_context(tool_obj, context)
         return tool_obj
 
@@ -152,7 +156,9 @@ class MCPToolFactory:
     def supports(self, tool: ToolSpec, context: ToolRuntimeContext) -> bool:
         """Return whether the tool is an MCP tool with a server reference."""
         _ = context
-        return _normalize_source(tool.source) == ToolSource.MCP.value and bool(tool.usage)
+        return _normalize_source(tool.source) == ToolSource.MCP.value and bool(
+            tool.usage
+        )
 
     def create(self, tool: ToolSpec, context: ToolRuntimeContext) -> Any:
         """Return an already-connected MCP native tool."""
@@ -297,7 +303,8 @@ class PluginToolFactory:
 
     def __init__(
         self,
-        creators: Mapping[str, Callable[[ToolSpec, ToolRuntimeContext], Any]] | None = None,
+        creators: Mapping[str, Callable[[ToolSpec, ToolRuntimeContext], Any]]
+        | None = None,
     ):
         self._creators = dict(creators or {})
 
@@ -387,6 +394,32 @@ class ToolRuntimeEventWrapper:
                 ),
             )
             raise
+        if inspect.isawaitable(result):
+            return self._await_result(result)
+        return self._finish_result(result)
+
+    async def _await_result(self, result: Any) -> Any:
+        try:
+            resolved = await result
+        except Exception as exc:
+            self._emit_failure(exc)
+            raise
+        return self._finish_result(resolved)
+
+    def _emit_failure(self, exc: Exception) -> None:
+        _emit_tool_runtime_event(
+            self._context,
+            RuntimeEvent(
+                type=RuntimeEventType.ERROR,
+                request_id=self._context.request_id,
+                agent_name=self._context.agent_name,
+                tool_name=self._tool.name,
+                error=str(exc),
+                metadata={"tool_status": "error"},
+            ),
+        )
+
+    def _finish_result(self, result: Any) -> Any:
         _emit_tool_runtime_event(
             self._context,
             RuntimeEvent(
@@ -413,6 +446,54 @@ class ToolRuntimeEventWrapper:
         )
         _emit_tool_output_events(self._context, self._tool, result)
         return result
+
+
+def build_production_tool_factory_registry() -> ToolFactoryRegistry:
+    """Build the production registry from explicitly installed Nexent tools."""
+    registry = ToolFactoryRegistry()
+    registry.register(ToolSource.LOCAL, _LazyNexentToolFactory(ToolSource.LOCAL))
+    registry.register(
+        ToolSource.KNOWLEDGE,
+        _LazyNexentToolFactory(ToolSource.KNOWLEDGE),
+    )
+    registry.register(ToolSource.MEMORY, _LazyNexentToolFactory(ToolSource.MEMORY))
+    registry.register(ToolSource.SKILL, _LazyNexentToolFactory(ToolSource.SKILL))
+    registry.register(ToolSource.BUILTIN, BuiltinSkillToolFactory())
+    registry.register(ToolSource.MCP, MCPToolFactory())
+    return registry
+
+
+class _LazyNexentToolFactory:
+    """Resolve SDK tool classes only when an authorized tool is constructed."""
+
+    name = "nexent_production"
+
+    def __init__(self, source: ToolSource):
+        self._source = source
+
+    def supports(self, tool: ToolSpec, context: ToolRuntimeContext) -> bool:
+        _ = context
+        return _normalize_source(tool.source) == self._source.value
+
+    def create(self, tool: ToolSpec, context: ToolRuntimeContext) -> Any:
+        class_name = tool.class_name or tool.name
+        if self._source == ToolSource.SKILL and class_name in _BUILTIN_SKILL_TOOL_NAMES:
+            return BuiltinSkillToolFactory().create(
+                tool.model_copy(update={"source": ToolSource.BUILTIN}),
+                context,
+            )
+        module_name = _NEXENT_TOOL_MODULES.get(class_name)
+        if module_name is None:
+            raise ToolCreationError(
+                f"Nexent production tool class '{class_name}' is not registered."
+            )
+        module = importlib.import_module(module_name)
+        tool_class = getattr(module, class_name)
+        if self._source == ToolSource.KNOWLEDGE:
+            return KnowledgeToolFactory({class_name: tool_class}).create(tool, context)
+        if self._source == ToolSource.MEMORY:
+            return MemoryToolFactory({class_name: tool_class}).create(tool, context)
+        return LocalToolFactory({class_name: tool_class}).create(tool, context)
 
 
 def wrap_tool_with_runtime_events(
@@ -452,7 +533,9 @@ def _tool_call_target(tool_obj: Any, method_name: str | None) -> Callable[..., A
     forward = getattr(tool_obj, "forward", None)
     if callable(forward):
         return forward
-    raise ToolCreationError(f"Tool '{getattr(tool_obj, 'name', 'unknown')}' is not callable.")
+    raise ToolCreationError(
+        f"Tool '{getattr(tool_obj, 'name', 'unknown')}' is not callable."
+    )
 
 
 def _emit_tool_runtime_event(
@@ -585,7 +668,9 @@ def _lookup_nested_tool(
     return None
 
 
-def _find_tool_by_name(tools: list[Any] | tuple[Any, ...], tool_name: str) -> Any | None:
+def _find_tool_by_name(
+    tools: list[Any] | tuple[Any, ...], tool_name: str
+) -> Any | None:
     for native_tool in tools:
         if getattr(native_tool, "name", None) == tool_name:
             return native_tool
@@ -639,6 +724,38 @@ _ANALYZE_MEDIA_TOOL_NAMES = {
     "AnalyzeAudioTool",
     "AnalyzeImageTool",
     "AnalyzeVideoTool",
+}
+
+_NEXENT_TOOL_MODULES = {
+    "MySqlTool": "nexent.core.tools.sql_tools.mysql_tool",
+    "PostgreSqlTool": "nexent.core.tools.sql_tools.postgres_tool",
+    "MsSqlTool": "nexent.core.tools.sql_tools.mssql_tool",
+    "ExaSearchTool": "nexent.core.tools.exa_search_tool",
+    "GetEmailTool": "nexent.core.tools.get_email_tool",
+    "KnowledgeBaseSearchTool": "nexent.core.tools.knowledge_base_search_tool",
+    "DifySearchTool": "nexent.core.tools.dify_search_tool",
+    "DataMateSearchTool": "nexent.core.tools.datamate_search_tool",
+    "IdataSearchTool": "nexent.core.tools.idata_search_tool",
+    "HaotianSearchTool": "nexent.core.tools.haotian_search_tool",
+    "RAGFlowSearchTool": "nexent.core.tools.ragflow_search_tool",
+    "AidpSearchTool": "nexent.core.tools.aidp_search_tool",
+    "SendEmailTool": "nexent.core.tools.send_email_tool",
+    "TavilySearchTool": "nexent.core.tools.tavily_search_tool",
+    "LinkupSearchTool": "nexent.core.tools.linkup_search_tool",
+    "CreateFileTool": "nexent.core.tools.create_file_tool",
+    "ReadFileTool": "nexent.core.tools.read_file_tool",
+    "DeleteFileTool": "nexent.core.tools.delete_file_tool",
+    "CreateDirectoryTool": "nexent.core.tools.create_directory_tool",
+    "DeleteDirectoryTool": "nexent.core.tools.delete_directory_tool",
+    "MoveItemTool": "nexent.core.tools.move_item_tool",
+    "ListDirectoryTool": "nexent.core.tools.list_directory_tool",
+    "TerminalTool": "nexent.core.tools.terminal_tool",
+    "AnalyzeTextFileTool": "nexent.core.tools.analyze_text_file_tool",
+    "AnalyzeImageTool": "nexent.core.tools.analyze_image_tool",
+    "AnalyzeAudioTool": "nexent.core.tools.analyze_audio_tool",
+    "AnalyzeVideoTool": "nexent.core.tools.analyze_video_tool",
+    "StoreMemoryTool": "nexent.core.tools.store_memory_tool",
+    "SearchMemoryTool": "nexent.core.tools.search_memory_tool",
 }
 
 

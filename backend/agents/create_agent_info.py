@@ -1127,6 +1127,24 @@ async def create_agent_config(
             language=language,
             agent_id=agent_id
         ),
+        prompt_fragments={
+            "identity": {
+                "app_name": app_name,
+                "app_description": app_description,
+                "agent_name": agent_info.get("name"),
+                "agent_description": agent_info.get("description"),
+            },
+            "duty": duty_prompt,
+            "constraint": constraint_prompt,
+            "few_shots": few_shots_prompt,
+            "knowledge_base_summary": knowledge_base_summary,
+            "memory_list": memory_list,
+            "skills": skills,
+            "runtime_instructions": (
+                "Use the supplied function tools when needed. Return the final response "
+                "directly to the user without Python code-agent conventions."
+            ),
+        },
         tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
@@ -1561,6 +1579,7 @@ async def create_agent_run_info(
 
         if mcp_record:
             mcp_config = {
+                "name": mcp_record.get("remote_mcp_server_name"),
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }

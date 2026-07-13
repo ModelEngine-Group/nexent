@@ -14589,6 +14589,116 @@ async def test_run_agent_stream_title_generation_zh_language(
 
 
 @pytest.mark.asyncio
+async def test_selected_runtime_chunks_delivers_tool_started_before_tool_finishes():
+    from backend.services.agent_runtime.events import RuntimeEvent, RuntimeEventType
+    from backend.services.agent_runtime.models import (
+        AgentRunPlan,
+        AgentSpec,
+        PromptBundle,
+        RunControl,
+    )
+
+    release_tool = asyncio.Event()
+
+    class FakeRuntime:
+        async def run(self, plan, event_sink):
+            event_sink.emit(
+                RuntimeEvent(
+                    type=RuntimeEventType.TOOL_CALL,
+                    request_id=plan.request_id,
+                    tool_name="slow_tool",
+                    metadata={"tool_status": "started"},
+                )
+            )
+            await release_tool.wait()
+            event_sink.emit(
+                RuntimeEvent(
+                    type=RuntimeEventType.FINAL_ANSWER,
+                    request_id=plan.request_id,
+                    content="done",
+                )
+            )
+            if False:
+                yield None
+
+    plan = AgentRunPlan(
+        request_id="runtime-api-test",
+        runtime_provider="openjiuwen",
+        query="hello",
+        root_agent=AgentSpec(
+            agent_id=1,
+            name="root",
+            model_name="main_model",
+            max_steps=3,
+            prompt=PromptBundle(fragments={"duty": "answer"}),
+        ),
+        run_control=RunControl(request_id="runtime-api-test", user_id="user-1"),
+    )
+    chunks = agent_service._selected_runtime_chunks(FakeRuntime(), plan)
+
+    first = json.loads(await asyncio.wait_for(anext(chunks), timeout=1))
+    assert first["type"] == "tool"
+    assert release_tool.is_set() is False
+
+    release_tool.set()
+    second = json.loads(await asyncio.wait_for(anext(chunks), timeout=1))
+    assert second == {"type": "final_answer", "content": "done"}
+    with pytest.raises(StopAsyncIteration):
+        await anext(chunks)
+
+
+@pytest.mark.asyncio
+async def test_stop_agent_tasks_routes_to_active_runtime_before_remote_signal(monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.services.agent_runtime.models import RunControl
+
+    order: list[str] = []
+    run_control = RunControl(
+        request_id="stop-runtime-test",
+        user_id="user-1",
+        conversation_id=123,
+    )
+    handle = SimpleNamespace(
+        request_id="stop-runtime-test",
+        runtime_provider="openjiuwen",
+        run_control=run_control,
+    )
+
+    class FakeRuntime:
+        async def stop(self, request_id: str) -> None:
+            assert run_control.cancelled is True
+            assert request_id == "stop-runtime-test"
+            order.append("runtime")
+
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "get_active_run_handle",
+        lambda *_args, **_kwargs: handle,
+    )
+    monkeypatch.setattr(
+        agent_service.agent_runtime_registry,
+        "get",
+        lambda _provider: FakeRuntime(),
+    )
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "stop_agent_run",
+        lambda *_args, **_kwargs: order.append("remote") or True,
+    )
+    monkeypatch.setattr(
+        agent_service.preprocess_manager,
+        "stop_preprocess_tasks",
+        lambda _conversation_id: False,
+    )
+
+    result = await agent_service._stop_agent_tasks_async(123, "user-1")
+
+    assert order == ["runtime", "remote"]
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
 @patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
 @patch("backend.services.agent_service.generate_stream_with_memory")
 @patch("backend.services.agent_service.preview_runtime_memory")

@@ -199,6 +199,10 @@ class AgentConfig(BaseModel):
     name: str = Field(description="Agent name")
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
+    prompt_fragments: Optional[Dict[str, Any]] = Field(
+        description="Framework-neutral prompt fragments for non-code runtimes",
+        default=None,
+    )
     tools: List[ToolConfig] = Field(description="List of tool information")
     max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
     requested_output_tokens: Optional[int] = Field(

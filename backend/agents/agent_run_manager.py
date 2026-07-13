@@ -61,11 +61,12 @@ class AgentRunManager:
         request_id: str | None = None,
         runtime_provider: str | None = None,
         event_sink: Any | None = None,
+        run_control: RunControl | None = None,
     ):
         """register agent run instance"""
         request_id = request_id or str(uuid.uuid4())
         runtime_provider = runtime_provider or get_deployment_agent_runtime_provider()
-        run_control = RunControl(
+        run_control = run_control or RunControl(
             request_id=request_id,
             user_id=user_id,
             conversation_id=conversation_id,

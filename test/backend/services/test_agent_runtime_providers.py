@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
+backend_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../backend")
+)
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
@@ -149,9 +151,7 @@ def _summary(plan) -> dict[str, Any]:
         "context_mode": plan.root_agent.context_policy.mode.value,
         "tool_names": [tool.name for tool in plan.root_agent.tools],
         "tool_params": {
-            tool.name: tool.params
-            for tool in plan.root_agent.tools
-            if tool.params
+            tool.name: tool.params for tool in plan.root_agent.tools if tool.params
         },
         "prompt_fragments": {
             key: plan.root_agent.prompt.fragments[key]
@@ -233,7 +233,9 @@ def test_sub_agent_provider_resolves_internal_children_and_external_a2a():
             1: [{"selected_agent_id": 2, "selected_agent_version_no": 5}],
             2: [{"selected_agent_id": 3, "selected_agent_version_no": 6}],
         }.get(agent_id, []),
-        version_resolver=lambda selected_agent_id, selected_version, tenant_id: selected_version,
+        version_resolver=lambda selected_agent_id, selected_version, tenant_id: (
+            selected_version
+        ),
         external_a2a_resolver=lambda agent_id, tenant_id, version_no: [
             {"agent_id": "a2a-1", "name": "remote"}
         ],
@@ -319,8 +321,14 @@ def test_context_provider_renders_legacy_prompt():
     assert contribution.root_agent.name == "root"
     assert contribution.root_agent.model_name == "gpt-4o"
     assert contribution.root_agent.context_policy.mode == ContextMode.LEGACY
-    assert "Answer questions." in contribution.root_agent.prompt.rendered_legacy_system_prompt
-    assert "**Docs**: facts" in contribution.root_agent.prompt.rendered_legacy_system_prompt
+    assert (
+        "Answer questions."
+        in contribution.root_agent.prompt.rendered_legacy_system_prompt
+    )
+    assert (
+        "**Docs**: facts"
+        in contribution.root_agent.prompt.rendered_legacy_system_prompt
+    )
 
 
 def test_context_provider_uses_managed_components_without_legacy_rendering():
@@ -334,7 +342,33 @@ def test_context_provider_uses_managed_components_without_legacy_rendering():
 
     assert contribution.root_agent.context_policy.mode == ContextMode.MANAGED
     assert contribution.root_agent.prompt.rendered_legacy_system_prompt is None
-    assert contribution.root_agent.prompt.context_components[0]["type"] == "agent_profile"
+    assert (
+        contribution.root_agent.prompt.context_components[0]["type"] == "agent_profile"
+    )
+
+
+def test_context_provider_normalizes_legacy_default_for_openjiuwen():
+    agent_record = _agent_record(enable_context_manager=True)
+    state = AssemblyState(agent_record=agent_record, version_no=3)
+    provider = _context_provider(agent_record)
+
+    contribution = provider.contribute(
+        _request(runtime_provider=const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN),
+        state,
+    )
+
+    assert contribution.root_agent.context_policy.mode == ContextMode.RUNTIME_NATIVE
+    assert contribution.warnings[0].code == "context_policy_normalized"
+
+    compressed_record = _agent_record(
+        enable_context_manager=True,
+        compression={"strategy": "summary"},
+    )
+    compressed = _context_provider(compressed_record).contribute(
+        _request(runtime_provider=const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN),
+        AssemblyState(agent_record=compressed_record, version_no=3),
+    )
+    assert compressed.root_agent.context_policy.mode == ContextMode.MANAGED
 
 
 @pytest.mark.asyncio
@@ -365,10 +399,14 @@ async def test_runtime_assembly_e2e_matrix_covers_core_capabilities():
                     "duty_prompt": "Research facts.",
                 }
             }.get(agent_id),
-            relations_resolver=lambda agent_id, tenant_id, version_no: [
-                {"selected_agent_id": 2, "selected_agent_version_no": 5}
-            ] if agent_id == 1 else [],
-            version_resolver=lambda selected_agent_id, selected_version, tenant_id: selected_version,
+            relations_resolver=lambda agent_id, tenant_id, version_no: (
+                [{"selected_agent_id": 2, "selected_agent_version_no": 5}]
+                if agent_id == 1
+                else []
+            ),
+            version_resolver=lambda selected_agent_id, selected_version, tenant_id: (
+                selected_version
+            ),
             external_a2a_resolver=lambda agent_id, tenant_id, version_no: [
                 {"agent_id": "a2a-1", "name": "remote"}
             ],
@@ -415,9 +453,13 @@ async def test_runtime_assembly_e2e_matrix_covers_core_capabilities():
             ],
         ),
         MemoryProvider(
-            memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: memory_context,
+            memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+                memory_context
+            ),
             memory_searcher=lambda **kwargs: {
-                "results": [{"content": "likes concise answers", "memory_level": "user"}]
+                "results": [
+                    {"content": "likes concise answers", "memory_level": "user"}
+                ]
             },
         ),
         MCPProvider(
@@ -450,9 +492,17 @@ async def test_runtime_assembly_e2e_matrix_covers_core_capabilities():
     )
 
     tool_names = {tool.name for tool in plan.root_agent.tools}
-    assert {"echo", "knowledge_base_search", "read_skill_md", "search_memory", "docs_search"} <= tool_names
+    assert {
+        "echo",
+        "knowledge_base_search",
+        "read_skill_md",
+        "search_memory",
+        "docs_search",
+    } <= tool_names
     assert plan.root_agent.managed_agents[0].name == "researcher"
-    assert plan.root_agent.external_a2a_agents == [{"agent_id": "a2a-1", "name": "remote"}]
+    assert plan.root_agent.external_a2a_agents == [
+        {"agent_id": "a2a-1", "name": "remote"}
+    ]
     assert plan.mcp_connections[0].name == "docs"
     assert plan.mcp_connections[0].transport == "streamable-http"
     assert plan.root_agent.prompt.fragments["skills"][0]["name"] == "report-writer"
@@ -489,7 +539,9 @@ async def test_runtime_assembly_e2e_memory_switch_and_failure_downgrade():
                 contribution=CapabilityContribution(),
             ),
             MemoryProvider(
-                memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: disabled_context
+                memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+                    disabled_context
+                )
             ),
             _context_provider(_agent_record(model_name="gpt-4o")),
         ],
@@ -506,7 +558,9 @@ async def test_runtime_assembly_e2e_memory_switch_and_failure_downgrade():
                 contribution=CapabilityContribution(),
             ),
             MemoryProvider(
-                memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: _memory_context(),
+                memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+                    _memory_context()
+                ),
                 memory_searcher=failing_memory_searcher,
             ),
             _context_provider(_agent_record(model_name="gpt-4o")),
@@ -712,7 +766,10 @@ def test_skill_provider_outputs_enabled_skill_prompt_tools_and_hidden_params():
     assert all(tool.metadata["agent_id"] == 1 for tool in tools)
     assert all(tool.metadata["tenant_id"] == "tenant-1" for tool in tools)
     assert all(tool.metadata["version_no"] == 3 for tool in tools)
-    assert all(tool.injected_params["local_skills_dir"] == "/opt/nexent/skills" for tool in tools)
+    assert all(
+        tool.injected_params["local_skills_dir"] == "/opt/nexent/skills"
+        for tool in tools
+    )
     assert all("local_skills_dir" not in tool.input_schema for tool in tools)
     assert all("tenant_id" not in tool.input_schema for tool in tools)
     assert contribution.runtime_resources["skill.enabled_skills"] == [
@@ -767,7 +824,9 @@ def _memory_context(
             disable_agent_ids=disable_agent_ids or [],
             disable_user_agent_ids=disable_user_agent_ids or [],
         ),
-        memory_config=memory_config if memory_config is not None else {"provider": "mem0"},
+        memory_config=memory_config
+        if memory_config is not None
+        else {"provider": "mem0"},
         tenant_id="tenant-1",
         user_id="user-1",
         agent_id="1",
@@ -777,7 +836,9 @@ def _memory_context(
 @pytest.mark.asyncio
 async def test_memory_provider_retrieves_context_and_outputs_active_tools():
     provider = MemoryProvider(
-        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: _memory_context(),
+        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+            _memory_context()
+        ),
         memory_searcher=lambda **kwargs: {
             "results": [{"content": "likes concise answers", "memory_level": "user"}]
         },
@@ -820,8 +881,10 @@ async def test_memory_provider_retrieves_context_and_outputs_active_tools():
 @pytest.mark.asyncio
 async def test_memory_provider_skips_debug_and_switch_off_without_tools():
     provider = MemoryProvider(
-        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: _memory_context(
-            memory_switch=not skip_query,
+        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+            _memory_context(
+                memory_switch=not skip_query,
+            )
         ),
     )
 
@@ -830,8 +893,10 @@ async def test_memory_provider_skips_debug_and_switch_off_without_tools():
         AssemblyState(agent_record={"name": "root"}, version_no=3),
     )
     off_contribution = await MemoryProvider(
-        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: _memory_context(
-            memory_switch=False,
+        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+            _memory_context(
+                memory_switch=False,
+            )
         ),
     ).contribute(
         _request(),
@@ -841,7 +906,9 @@ async def test_memory_provider_skips_debug_and_switch_off_without_tools():
     assert debug_contribution.tools_by_agent == {}
     assert debug_contribution.monitoring_metadata["memory.disabled_reason"] == "debug"
     assert off_contribution.tools_by_agent == {}
-    assert off_contribution.monitoring_metadata["memory.disabled_reason"] == "switch_off"
+    assert (
+        off_contribution.monitoring_metadata["memory.disabled_reason"] == "switch_off"
+    )
 
 
 @pytest.mark.asyncio
@@ -853,10 +920,12 @@ async def test_memory_provider_applies_share_and_disable_lists_to_retrieval_leve
         return {"results": []}
 
     provider = MemoryProvider(
-        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: _memory_context(
-            agent_share_option="never",
-            disable_agent_ids=["1"],
-            disable_user_agent_ids=["1"],
+        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+            _memory_context(
+                agent_share_option="never",
+                disable_agent_ids=["1"],
+                disable_user_agent_ids=["1"],
+            )
         ),
         memory_searcher=searcher,
     )
@@ -867,15 +936,22 @@ async def test_memory_provider_applies_share_and_disable_lists_to_retrieval_leve
     )
 
     assert captured_kwargs["memory_levels"] == ["tenant", "user"]
-    assert contribution.runtime_resources["memory.retrieval_levels"] == ["tenant", "user"]
+    assert contribution.runtime_resources["memory.retrieval_levels"] == [
+        "tenant",
+        "user",
+    ]
     assert contribution.context_components[0]["levels"] == ["tenant", "user"]
 
 
 @pytest.mark.asyncio
 async def test_memory_provider_soft_fails_retrieval_and_keeps_memory_tools():
     provider = MemoryProvider(
-        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: _memory_context(),
-        memory_searcher=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("mem0 down")),
+        memory_context_resolver=lambda user_id, tenant_id, agent_id, skip_query: (
+            _memory_context()
+        ),
+        memory_searcher=lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError("mem0 down")
+        ),
     )
 
     contribution = await provider.contribute(
