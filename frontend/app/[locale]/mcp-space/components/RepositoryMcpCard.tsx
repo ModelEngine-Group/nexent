@@ -1,4 +1,4 @@
-import { Button, Dropdown, Tag, type MenuProps } from "antd";
+import { Button, Dropdown, type MenuProps } from "antd";
 import { Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
@@ -29,12 +29,6 @@ export default function RepositoryMcpCard({
   const tags = service.tags || [];
   const deploymentType = resolveDeploymentType(service);
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
-  const author =
-    service.authorDisplayName ||
-    service.authorName ||
-    t("mcpTools.repository.authorFallback", {
-      name: service.communityId ? ` ${service.communityId}` : "",
-    });
   const installCount = Number(service.installCount || 0);
   const toolCount = resolveToolCount(service);
 
@@ -50,7 +44,7 @@ export default function RepositoryMcpCard({
   }
 
   return (
-    <div className="group flex min-h-[292px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
+    <div className="group flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <TransportIcon
@@ -62,14 +56,11 @@ export default function RepositoryMcpCard({
           />
           <div className="min-w-0">
             <h3
-              className="line-clamp-1 text-lg font-semibold text-slate-900"
+              className="line-clamp-1 text-base font-semibold text-slate-900"
               title={service.name}
             >
               {service.name}
             </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              {t("mcpTools.repository.source", { source: author })}
-            </p>
           </div>
         </div>
         {actionItems.length > 0 ? (
@@ -93,23 +84,23 @@ export default function RepositoryMcpCard({
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Tag color="blue" className="m-0 rounded-full">
+        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
           {deploymentLabel}
-        </Tag>
+        </span>
         {tags.slice(0, 3).map((tag) => (
-          <Tag
+          <span
             key={`${service.communityId || service.name}-${tag}`}
-            className="m-0 rounded-full bg-slate-50"
+            className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
           >
             {tag}
-          </Tag>
+          </span>
         ))}
         {tags.length > 3 ? (
-          <Tag className="m-0 rounded-full bg-slate-50">+{tags.length - 3}</Tag>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">+{tags.length - 3}</span>
         ) : null}
-        <Tag className="m-0 rounded-full bg-blue-50 text-blue-700">
+        <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
           {t("mcpTools.repository.toolCount", { count: toolCount })}
-        </Tag>
+        </span>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
@@ -119,10 +110,11 @@ export default function RepositoryMcpCard({
         </span>
       </div>
 
-      <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
+      <div className="mt-auto flex items-center gap-2 pt-4">
         <Button
           type={installed ? "default" : "primary"}
           disabled={installed}
+          className="flex-1"
           icon={<Download className="h-3.5 w-3.5" />}
           onClick={() => onInstall(service)}
         >
@@ -131,6 +123,7 @@ export default function RepositoryMcpCard({
             : t("mcpTools.repository.install")}
         </Button>
         <Button
+          className="flex-1"
           icon={<Eye className="h-3.5 w-3.5" />}
           onClick={() => onSelect(service)}
         >

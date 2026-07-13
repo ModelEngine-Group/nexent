@@ -2,15 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, ConfigProvider, Empty, Modal, Segmented, Spin, Steps, Tag, type StepsProps } from "antd";
+import { App, Button, ConfigProvider, Empty, Modal, Spin, Steps, type StepsProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import {
-  CloudUploadOutlined,
-  InboxOutlined,
-  SafetyCertificateOutlined,
-} from "@ant-design/icons";
-import { CheckCircle, Clock, Download, Eye, Plus, Puzzle, XCircle } from "lucide-react";
+import { CheckCircle, ChevronLeft, ChevronRight, Clock, CloudUpload, Download, Eye, Inbox, Plus, Puzzle, ShieldCheck, XCircle } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -70,7 +67,7 @@ const mcpToolsTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#0284c7" },
 };
 
-const MINE_PAGE_SIZE = 12;
+const MINE_PAGE_SIZE = 6;
 type DeploymentFilter = McpDeploymentType | typeof FILTER_ALL;
 
 type DeploymentCountable = {
@@ -227,54 +224,10 @@ export default function McpToolsPage() {
     <></>
   ) : null;
 
-  const userTabOptions = [
-    {
-      value: McpToolsServicesTab.REPOSITORY,
-      label: (
-        <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
-          <InboxOutlined className="text-sm" aria-hidden />
-          <span>{t("mcpTools.page.tab.repository")}</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-            {repositoryCount}
-          </span>
-        </span>
-      ),
-    },
-    {
-      value: McpToolsServicesTab.MINE,
-      label: (
-        <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
-          <CloudUploadOutlined className="text-sm" aria-hidden />
-          <span>{t("mcpTools.page.tab.mine")}</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-            {mineCount}
-          </span>
-        </span>
-      ),
-    },
-  ];
-
-  const adminTabOptions = [
-    ...userTabOptions,
-    {
-      value: McpToolsServicesTab.REVIEW,
-      label: (
-        <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
-          <SafetyCertificateOutlined className="text-sm" aria-hidden />
-          <span>{t("mcpTools.page.tab.review")}</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-            {reviewCount}
-          </span>
-        </span>
-      ),
-    },
-  ];
-
-  const tabOptions = isAdmin ? adminTabOptions : userTabOptions;
 
   return (
     <ConfigProvider theme={mcpToolsTheme}>
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col bg-slate-50/40">
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
           <motion.div
             initial="initial"
@@ -282,56 +235,52 @@ export default function McpToolsPage() {
             exit="out"
             variants={pageVariants}
             transition={pageTransition}
-            className="mx-auto w-full max-w-7xl px-6 py-8"
+            className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10"
           >
             <div className="flex flex-col gap-6">
               <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
-                className="overflow-hidden rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-sky-50 p-6 shadow-sm"
               >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-sky-600 shadow-lg shadow-blue-900/10">
-                      <Puzzle className="h-7 w-7 text-white" />
+                <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                      <Puzzle className="size-7" />
                     </div>
-                    <div className="min-w-0">
-                      <h1 className="text-3xl font-bold text-blue-800 dark:text-blue-400">
+                    <div>
+                      <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
                         {t("mcpTools.page.title")}
                       </h1>
-                      <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+                      <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                         {t("mcpTools.page.subtitle")}
                       </p>
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-                    <Tag
-                      color="blue"
-                      className="m-0 rounded-full px-3 py-1 text-sm"
-                    >
-                      {isAdmin
-                        ? t("mcpTools.page.role.admin")
-                        : t("mcpTools.page.role.user")}
-                    </Tag>
-                    <span className="text-xs text-slate-500">
-                      {isAdmin
-                        ? t("mcpTools.page.role.adminHint")
-                        : t("mcpTools.page.role.userHint")}
-                    </span>
-                  </div>
-                </div>
+                </section>
               </motion.div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-[3px] shadow-sm">
-                <Segmented
-                  block
-                  value={tab}
-                  onChange={(value) => setTab(value as McpToolsServicesTab)}
-                  options={tabOptions}
-                  className="h-11 w-full rounded-xl bg-transparent text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:flex-1 [&_.ant-segmented-item]:rounded-lg [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:h-full [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:justify-center [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-item-selected]:text-blue-700 [&_.ant-segmented-thumb]:rounded-lg [&_.ant-segmented-thumb]:bg-blue-50 [&_.ant-segmented-thumb]:shadow-sm"
-                />
-              </div>
+              <Tabs value={tab} onValueChange={(value) => setTab(value as McpToolsServicesTab)} className="w-full">
+                <TabsList className={cn("mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
+                  <TabsTrigger value={McpToolsServicesTab.REPOSITORY} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
+                    <Inbox className="size-4" aria-hidden />
+                    {t("mcpTools.page.tab.repository")}
+                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{repositoryCount}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value={McpToolsServicesTab.MINE} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
+                    <CloudUpload className="size-4" aria-hidden />
+                    {t("mcpTools.page.tab.mine")}
+                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{mineCount}</span>
+                  </TabsTrigger>
+                  {isAdmin ? (
+                    <TabsTrigger value={McpToolsServicesTab.REVIEW} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
+                      <ShieldCheck className="size-4" aria-hidden />
+                      {t("mcpTools.page.tab.review")}
+                      <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{reviewCount}</span>
+                    </TabsTrigger>
+                  ) : null}
+                </TabsList>
+              </Tabs>
 
               {tab === McpToolsServicesTab.REPOSITORY ? (
                 <RepositoryView
@@ -607,7 +556,17 @@ function MineView({
     setPage(1);
   }, [search, tag, deploymentType]);
 
-  const pagedItems = paginateItems(filteredItems, page, MINE_PAGE_SIZE);
+  const firstPageSize = MINE_PAGE_SIZE - 1;
+
+  const pagedItems = useMemo(() => {
+    if (filteredItems.length === 0) return [];
+    if (page === 1) {
+      return filteredItems.slice(0, firstPageSize);
+    }
+    const start = firstPageSize + (page - 2) * MINE_PAGE_SIZE;
+    return filteredItems.slice(start, start + MINE_PAGE_SIZE);
+  }, [filteredItems, page]);
+
   const loading = localList.loading || myPublished.loading;
 
   const handleToggle = async (service: McpServiceItem) => {
@@ -774,7 +733,7 @@ function MineView({
         </PlaceholderBox>
       ) : (
         <ResponsiveCardGrid>
-          <AddMcpServiceCard onClick={onAdd} />
+          {page === 1 ? <AddMcpServiceCard onClick={onAdd} /> : null}
           {pagedItems.map((item) => {
             const key = getMineItemKey(item);
             const onlineService =
@@ -814,13 +773,46 @@ function MineView({
         </ResponsiveCardGrid>
       )}
 
-      <McpToolsPagination
-        mode="offset"
-        current={page}
-        pageSize={MINE_PAGE_SIZE}
-        total={filteredItems.length}
-        onChange={setPage}
-      />
+      {(() => {
+        const remainingItems = Math.max(0, filteredItems.length - firstPageSize);
+        const totalPages = 1 + Math.ceil(remainingItems / MINE_PAGE_SIZE);
+        if (totalPages <= 1) return null;
+        return (
+          <div className="flex items-center justify-center gap-1.5 pt-4">
+            <Button
+              type="default"
+              className="flex size-9 items-center justify-center rounded-lg p-0"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+              (pageNumber) => (
+                <Button
+                  key={pageNumber}
+                  type={pageNumber === page ? "primary" : "default"}
+                  className="flex size-9 items-center justify-center rounded-lg p-0"
+                  onClick={() => setPage(pageNumber)}
+                  aria-current={pageNumber === page ? "page" : undefined}
+                >
+                  {pageNumber}
+                </Button>
+              )
+            )}
+            <Button
+              type="default"
+              className="flex size-9 items-center justify-center rounded-lg p-0"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+              aria-label="Next page"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        );
+      })()}
 
       <ReviewProgressModal
         item={reviewProgressItem}
@@ -1243,10 +1235,7 @@ function ReviewTableRow({
 
 function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="grid gap-4"
-      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}
-    >
+    <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {children}
     </div>
   );
@@ -1254,7 +1243,7 @@ function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {
 
 function PlaceholderBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-slate-500 shadow-sm">
+    <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 px-6 py-16 text-center text-slate-500 dark:border-slate-700">
       {children}
     </div>
   );

@@ -1,8 +1,7 @@
-import { Button, Dropdown, Tag, type MenuProps } from "antd";
-import { ArrowDownFromLine, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, Upload, User } from "lucide-react";
+import { Button, Dropdown, type MenuProps } from "antd";
+import { ArrowDownFromLine, Clock, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpSource } from "@/const/mcpTools";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import {
   formatRegistryDate,
@@ -55,7 +54,6 @@ export default function MineMcpServiceCard({
   onRefreshToolCount,
 }: MineMcpServiceCardProps) {
   const { t } = useTranslation("common");
-  const { user } = useAuthorizationContext();
   const service = item.service;
   const tags = service.tags || [];
   const deploymentType = resolveDeploymentType(service);
@@ -70,12 +68,6 @@ export default function MineMcpServiceCard({
     : reviewStatus === "approved";
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
-
-  const authorName = onlineService?.authorDisplayName
-    || onlineService?.authorName
-    || (service.registryJson as Record<string, string> | undefined)?._authorDisplayName
-    || (service.registryJson as Record<string, string> | undefined)?._authorName
-    || null;
 
   // Owned = user-created MCP can be published/updated; community-installed
   // or registry-installed MCPs only permit deletion.
@@ -159,7 +151,7 @@ export default function MineMcpServiceCard({
   })();
 
   return (
-    <div className="group flex min-h-[292px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
+    <div className="group flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <div className={`flex min-w-0 gap-3 ${isPending ? "items-center" : "items-start"}`}>
           <TransportIcon
@@ -172,16 +164,16 @@ export default function MineMcpServiceCard({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h3
-                className="line-clamp-1 text-lg font-semibold text-slate-900"
+                className="line-clamp-1 text-base font-semibold text-slate-900"
                 title={service.name}
               >
                 {service.name}
               </h3>
               {isInRepository ? (
-                <Tag color="blue" className="m-0 rounded-full shrink-0 inline-flex items-center gap-1">
-                  <Cloud className="h-3 w-3" />
-                  Hub
-                </Tag>
+                <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                  <Share2 className="size-2.5" aria-hidden />
+                  {t("mcpTools.mine.onHub")}
+                </span>
               ) : null}
             </div>
             {isPending ? (
@@ -218,32 +210,24 @@ export default function MineMcpServiceCard({
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Tag color="blue" className="m-0 rounded-full">
+        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
           {deploymentLabel}
-        </Tag>
+        </span>
         {tags.slice(0, 3).map((tag) => (
-          <Tag
+          <span
             key={`${service.name}-${tag}`}
-            className="m-0 rounded-full bg-slate-50"
+            className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
           >
             {tag}
-          </Tag>
+          </span>
         ))}
         {tags.length > 3 ? (
-          <Tag className="m-0 rounded-full bg-slate-50">+{tags.length - 3}</Tag>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">+{tags.length - 3}</span>
         ) : null}
-        <Tag className="m-0 rounded-full bg-blue-50 text-blue-700">
+        <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
           {t("mcpTools.repository.toolCount", { count: toolCount })}
-        </Tag>
+        </span>
       </div>
-
-      {/* Creator */}
-      <p className="mt-2 text-xs text-slate-400">
-        <User className="mr-0.5 inline h-3 w-3" />
-        {isLocal && localService?.source === McpSource.LOCAL && !authorName
-          ? user?.email || "-"
-          : authorName || "-"}
-      </p>
 
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
@@ -252,8 +236,9 @@ export default function MineMcpServiceCard({
         </span>
       </div>
 
-      <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
+      <div className="mt-auto flex items-center gap-2 pt-4">
         <Button
+          className="flex-1"
           icon={<Edit3 className="h-3.5 w-3.5" />}
           onClick={() => {
             if (item.kind === "local") onEditLocal(item.service);
@@ -268,16 +253,16 @@ export default function MineMcpServiceCard({
             loading={toggling}
             icon={<Power className="h-3.5 w-3.5" />}
             onClick={() => onToggle(localService)}
-            className={
+            className={`flex-1 ${
               isEnabled
                 ? "border-blue-200 bg-blue-50 text-blue-700 hover:!border-blue-300 hover:!text-blue-700"
                 : ""
-            }
+            }`}
           >
             {isEnabled ? t("mcpTools.mine.enabled") : t("mcpTools.mine.enable")}
           </Button>
         ) : (
-          <Button disabled>{t("mcpTools.mine.publishedService")}</Button>
+          <Button className="flex-1" disabled>{t("mcpTools.mine.publishedService")}</Button>
         )}
       </div>
     </div>

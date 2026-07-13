@@ -12,12 +12,13 @@ export default function AddMcpServiceCard({ onClick }: AddMcpServiceCardProps) {
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-[292px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-white p-5 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/30 hover:shadow-md"
+      className="flex h-full min-h-52 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 transition-colors hover:border-primary/50 hover:text-primary dark:border-slate-700 dark:text-slate-400 dark:hover:border-primary/50 dark:hover:text-primary"
+      aria-label={t("mcpTools.mine.addService")}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
-        <Plus className="h-6 w-6" />
+      <div className="flex size-12 items-center justify-center rounded-full border-2 border-current">
+        <Plus className="size-6" aria-hidden />
       </div>
-      <span className="text-sm font-medium text-slate-500 transition group-hover:text-blue-600">
+      <span className="text-sm font-medium">
         {t("mcpTools.mine.addService")}
       </span>
     </button>

@@ -89,7 +89,7 @@ export default function McpToolsSearchFilterBar({
   ) : null;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+    <div>
       <div className="flex flex-row items-center gap-3 overflow-x-auto">
         <div className="grid min-w-[240px] flex-1 gap-3 grid-cols-[minmax(160px,1fr)_auto] items-center">
           <Input
