@@ -1,5 +1,5 @@
 ﻿import logging
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -157,7 +157,7 @@ async def list_community_mcp_tag_stats_api(
 @router.get("/community/review/list")
 async def list_community_mcp_review_services_api(
     query: CommunityReviewListRequest = Depends(),
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None,
 ):
     """
@@ -184,7 +184,7 @@ async def list_community_mcp_review_services_api(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to list MCP community review services: {exc}")
+        logger.exception("Failed to list MCP community review services")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to list MCP community review services"
@@ -246,7 +246,7 @@ async def reject_community_mcp_service_api(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to reject MCP community service: {exc}")
+        logger.exception("Failed to reject MCP community service")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to reject MCP community service"

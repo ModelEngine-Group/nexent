@@ -74,6 +74,20 @@ export default function McpToolsSearchFilterBar({
     </button>
   );
 
+  const tabsContent = filterTabs?.length ? (
+    <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+      {filterTabs.map((item) =>
+        renderTab(item, activeFilterTab === item.value, () => onFilterTabChange?.(item.value))
+      )}
+    </div>
+  ) : categoryStats?.length && onDeploymentTypeChange ? (
+    <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+      {categoryStats.map((item) =>
+        renderTab(item, deploymentType === item.value, () => onDeploymentTypeChange(item.value))
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
       <div className="flex flex-row items-center gap-3 overflow-x-auto">
@@ -98,19 +112,7 @@ export default function McpToolsSearchFilterBar({
         </div>
         {actions ? <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div> : null}
       </div>
-      {filterTabs?.length ? (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-          {filterTabs.map((item) =>
-            renderTab(item, activeFilterTab === item.value, () => onFilterTabChange?.(item.value))
-          )}
-        </div>
-      ) : categoryStats?.length && onDeploymentTypeChange ? (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-          {categoryStats.map((item) =>
-            renderTab(item, deploymentType === item.value, () => onDeploymentTypeChange(item.value))
-          )}
-        </div>
-      ) : null}
+      {tabsContent}
     </div>
   );
 }

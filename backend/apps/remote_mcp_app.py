@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -652,7 +652,7 @@ async def check_mcp_health(
 @router.post("/test-connection")
 async def test_mcp_connection_endpoint(
     payload: TestMcpConnectionRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Lightweight MCP connectivity test. Performs only the initialize handshake.
@@ -674,7 +674,7 @@ async def test_mcp_connection_endpoint(
             content={"success": success}
         )
     except Exception as e:
-        logger.error(f"MCP test connection failed: {e}")
+        logger.exception("MCP test connection failed")
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"success": False, "error": str(e) or "Connection failed"}

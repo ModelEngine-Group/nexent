@@ -185,7 +185,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         custom_headers = {"X-Custom-Header": "value1", "X-Another": "value2"}
         result = await mcp_server_health(
-            'http://test-server/mcp',
+            'https://test-server/mcp',
             authorization_token=None,
             custom_headers=custom_headers
         )
@@ -207,7 +207,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_client_cls.return_value = mock_client
 
         result = await mcp_server_health(
-            'http://test-server/mcp',
+            'https://test-server/mcp',
             authorization_token='Bearer token123',
             custom_headers={"X-Custom-Header": "custom-value"}
         )
@@ -231,7 +231,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_client_cls.return_value = mock_client
 
         result = await mcp_server_health(
-            'http://test-server/sse',
+            'https://test-server/sse',
             authorization_token=None,
             custom_headers={"X-Request-ID": "req-123"}
         )
@@ -253,7 +253,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_client_cls.return_value = mock_client
 
         with self.assertRaises(MCPConnectionError):
-            await mcp_server_health('http://test-server', custom_headers={"X-Test": "value"})
+            await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_timeout_error_raises_mcp_connection_error(self, mock_client_cls):
@@ -265,7 +265,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_client_cls.return_value = mock_client
 
         with self.assertRaises(MCPConnectionError):
-            await mcp_server_health('http://test-server', custom_headers={"X-Test": "value"})
+            await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
     @patch('backend.services.remote_mcp_service.Client')
     async def test_health_timeout_in_message_raises_mcp_connection_error(self, mock_client_cls):
@@ -277,7 +277,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_client_cls.return_value = mock_client
 
         with self.assertRaises(MCPConnectionError):
-            await mcp_server_health('http://test-server', custom_headers={"X-Test": "value"})
+            await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
 
 # ============================================================================
@@ -297,13 +297,13 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         custom_headers = {"X-API-Key": "key123", "X-Custom": "value"}
         await add_remote_mcp_server_list(
-            'tid', 'uid', 'http://srv', 'name',
+            'tid', 'uid', 'https://srv', 'name',
             custom_headers=custom_headers
         )
 
         # Verify custom_headers passed to health check
         mock_health_check.assert_called_once_with(
-            'http://srv',
+            'https://srv',
             {"X-API-Key": "key123", "X-Custom": "value"},
         )
 
@@ -320,13 +320,13 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_health_check.return_value = ["tool1"]
 
         await add_remote_mcp_server_list(
-            'tid', 'uid', 'http://srv', 'name',
+            'tid', 'uid', 'https://srv', 'name',
             authorization_token='Bearer token123',
             custom_headers={"X-Header": "value"}
         )
 
         mock_health_check.assert_called_once_with(
-            'http://srv',
+            'https://srv',
             {"Authorization": "Bearer token123", "X-Header": "value"},
         )
 
@@ -338,10 +338,10 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_check_name.return_value = False
         mock_health_check.return_value = ["tool1"]
 
-        await add_remote_mcp_server_list('tid', 'uid', 'http://srv', 'name')
+        await add_remote_mcp_server_list('tid', 'uid', 'https://srv', 'name')
 
         mock_health_check.assert_called_once_with(
-            'http://srv',
+            'https://srv',
             {},
         )
 
@@ -367,7 +367,7 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         custom_headers = {"X-Custom-Auth": "header-value"}
         await add_mcp_service(
             tenant_id='tid', user_id='uid', name='test-svc',
-            description='desc', source='local', server_url='http://srv/mcp',
+            description='desc', source='local', server_url='https://srv/mcp',
             tags=['tag1'], authorization_token='tok',
             custom_headers=custom_headers,
             container_config=None, registry_json=None, enabled=True,
@@ -376,7 +376,7 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         # Verify custom_headers passed to health check
         mock_health_check.assert_called_once_with(
-            'http://srv/mcp',
+            'https://srv/mcp',
             {"Authorization": "tok", "X-Custom-Auth": "header-value"},
         )
 
@@ -396,7 +396,7 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         custom_headers = {"X-Disabled-Header": "value"}
         await add_mcp_service(
             tenant_id='tid', user_id='uid', name='test-svc',
-            description='desc', source='local', server_url='http://srv/mcp',
+            description='desc', source='local', server_url='https://srv/mcp',
             tags=None, authorization_token=None,
             custom_headers=custom_headers,
             container_config=None, registry_json=None, enabled=False,
@@ -421,7 +421,7 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         await add_mcp_service(
             tenant_id='tid', user_id='uid', name='test-svc',
-            description='desc', source='local', server_url='http://srv/mcp',
+            description='desc', source='local', server_url='https://srv/mcp',
             tags=None, authorization_token=None,
             custom_headers=None,
             container_config=None, registry_json=None, enabled=False,
@@ -450,9 +450,9 @@ class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCas
         custom_headers = {"X-Update-Header": "update-value"}
         update_data = MockMCPUpdateRequest(
             current_service_name="old",
-            current_mcp_url="http://old.url",
+            current_mcp_url="https://old.url",
             new_service_name="new",
-            new_mcp_url="http://new.url",
+            new_mcp_url="https://new.url",
             new_authorization_token="tok",
             custom_headers=custom_headers,
         )
@@ -460,7 +460,7 @@ class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCas
         await update_remote_mcp_server_list(update_data, 'tid', 'uid')
 
         mock_health.assert_called_once_with(
-            remote_mcp_server="http://new.url",
+            remote_mcp_server="https://new.url",
             authorization_token="tok",
             custom_headers=custom_headers,
         )
@@ -475,9 +475,9 @@ class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCas
 
         update_data = MockMCPUpdateRequest(
             current_service_name="old",
-            current_mcp_url="http://old.url",
+            current_mcp_url="https://old.url",
             new_service_name="new",
-            new_mcp_url="http://new.url",
+            new_mcp_url="https://new.url",
             new_authorization_token=None,
             custom_headers=None,
         )
@@ -485,7 +485,7 @@ class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCas
         await update_remote_mcp_server_list(update_data, 'tid', 'uid')
 
         mock_health.assert_called_once_with(
-            remote_mcp_server="http://new.url",
+            remote_mcp_server="https://new.url",
             authorization_token=None,
             custom_headers=None,
         )
@@ -508,7 +508,7 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
             new_name='new-name', description='desc',
-            server_url='http://new.url', authorization_token='tok',
+            server_url='https://new.url', authorization_token='tok',
             custom_headers=custom_headers,
             tags=['a', 'b'],
             config_json=None, market_id=None,
@@ -526,7 +526,7 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
             new_name='new-name', description='desc',
-            server_url='http://new.url', authorization_token='tok',
+            server_url='https://new.url', authorization_token='tok',
             custom_headers=None,
             tags=None,
             config_json=None, market_id=None,
@@ -545,7 +545,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
 
     def _make_record(self, **overrides):
         base = {
-            "mcp_id": 1, "mcp_name": "test-svc", "mcp_server": "http://srv/mcp",
+            "mcp_id": 1, "mcp_name": "test-svc", "mcp_server": "https://srv/mcp",
             "container_id": None, "container_port": None, "config_json": None,
             "authorization_token": None, "custom_headers": None,
             "enabled": False, "source": "local",
@@ -572,7 +572,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
         await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
 
         mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv/mcp',
+            remote_mcp_server='https://srv/mcp',
             authorization_token='tok',
             custom_headers={"X-Enabling-Custom": "value"},
         )
@@ -596,7 +596,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
         await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
 
         mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv/mcp',
+            remote_mcp_server='https://srv/mcp',
             authorization_token='tok',
             custom_headers=None,
         )
@@ -621,7 +621,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
         mock_records.return_value = []
         mock_mgr = MagicMock()
         mock_mgr.start_mcp_container = AsyncMock(return_value={
-            "container_id": "new-cid", "mcp_url": "http://localhost:8080/mcp", "host_port": 8080,
+            "container_id": "new-cid", "mcp_url": "https://localhost:8080/mcp", "host_port": 8080,
         })
         mock_mgr_cls.return_value = mock_mgr
         mock_health.return_value = True
@@ -651,13 +651,13 @@ class TestGetRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         """Test custom_headers is included in list response when is_need_auth=True."""
         mock_get.return_value = [
             {
-                "mcp_name": "svc1", "mcp_server": "http://srv1/mcp",
+                "mcp_name": "svc1", "mcp_server": "https://srv1/mcp",
                 "status": True, "mcp_id": 1,
                 "authorization_token": "tok1",
                 "custom_headers": {"X-Custom1": "value1"},
             },
             {
-                "mcp_name": "svc2", "mcp_server": "http://srv2/mcp",
+                "mcp_name": "svc2", "mcp_server": "https://srv2/mcp",
                 "status": False, "mcp_id": 2,
                 "authorization_token": None,
                 "custom_headers": {"X-Custom2": "value2"},
@@ -675,7 +675,7 @@ class TestGetRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         """Test custom_headers is None when not set in record."""
         mock_get.return_value = [
             {
-                "mcp_name": "svc1", "mcp_server": "http://srv1/mcp",
+                "mcp_name": "svc1", "mcp_server": "https://srv1/mcp",
                 "status": True, "mcp_id": 1,
                 "authorization_token": "tok1",
                 "custom_headers": None,
@@ -699,7 +699,7 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
         """Test custom_headers is included in get_mcp_record_by_id response."""
         mock_get_record.return_value = {
             "mcp_name": "test-service",
-            "mcp_server": "http://test.com/mcp",
+            "mcp_server": "https://test.com/mcp",
             "authorization_token": "Bearer token123",
             "custom_headers": {"X-Record-Custom": "record-value"},
         }
@@ -714,7 +714,7 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
         """Test custom_headers is None when not set in record."""
         mock_get_record.return_value = {
             "mcp_name": "test-service",
-            "mcp_server": "http://test.com/mcp",
+            "mcp_server": "https://test.com/mcp",
             "authorization_token": "Bearer token123",
             "custom_headers": None,
         }
@@ -744,16 +744,16 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
         mock_get_headers.return_value = {"X-Health-Custom": "health-value"}
         mock_health.return_value = True
 
-        await check_mcp_health_and_update_db('http://srv', 'name', 'tid', 'uid')
+        await check_mcp_health_and_update_db('https://srv', 'name', 'tid', 'uid')
 
         mock_get_headers.assert_called_once_with(
             mcp_name='name',
-            mcp_server='http://srv',
+            mcp_server='https://srv',
             tenant_id='tid'
         )
 
         mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv',
+            remote_mcp_server='https://srv',
             authorization_token='Bearer token123',
             custom_headers={"X-Health-Custom": "health-value"},
         )
@@ -770,10 +770,10 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
         mock_get_headers.return_value = None
         mock_health.return_value = True
 
-        await check_mcp_health_and_update_db('http://srv', 'name', 'tid', 'uid')
+        await check_mcp_health_and_update_db('https://srv', 'name', 'tid', 'uid')
 
         mock_health.assert_called_once_with(
-            remote_mcp_server='http://srv',
+            remote_mcp_server='https://srv',
             authorization_token='Bearer token123',
             custom_headers=None,
         )
@@ -791,7 +791,7 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
         mock_health.return_value = False
 
         with self.assertRaises(MCPConnectionError):
-            await check_mcp_health_and_update_db('http://srv', 'name', 'tid', 'uid')
+            await check_mcp_health_and_update_db('https://srv', 'name', 'tid', 'uid')
 
 
 # ============================================================================
@@ -807,7 +807,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     async def test_health_with_custom_headers(self, mock_get, mock_health, mock_status):
         """Test check_mcp_service_health retrieves and uses custom_headers."""
         mock_get.return_value = {
-            "mcp_server": "http://srv/mcp",
+            "mcp_server": "https://srv/mcp",
             "authorization_token": "tok",
             "custom_headers": {"X-Service-Custom": "service-value"},
         }
@@ -817,7 +817,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "healthy")
         mock_health.assert_called_once_with(
-            remote_mcp_server="http://srv/mcp",
+            remote_mcp_server="https://srv/mcp",
             authorization_token="tok",
             custom_headers={"X-Service-Custom": "service-value"},
         )
@@ -828,7 +828,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     async def test_health_without_custom_headers(self, mock_get, mock_health, mock_status):
         """Test check_mcp_service_health when custom_headers is None."""
         mock_get.return_value = {
-            "mcp_server": "http://srv/mcp",
+            "mcp_server": "https://srv/mcp",
             "authorization_token": "tok",
             "custom_headers": None,
         }
@@ -838,7 +838,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "healthy")
         mock_health.assert_called_once_with(
-            remote_mcp_server="http://srv/mcp",
+            remote_mcp_server="https://srv/mcp",
             authorization_token="tok",
             custom_headers=None,
         )
@@ -857,7 +857,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
         """Test list_mcp_service_tools_by_id passes custom_headers to tool retrieval."""
         mock_get.return_value = {
             "mcp_name": "svc",
-            "mcp_server": "http://srv/mcp",
+            "mcp_server": "https://srv/mcp",
             "authorization_token": "tok",
             "custom_headers": {"X-Tools-Custom": "tools-value"},
         }
@@ -870,7 +870,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(len(result), 1)
         mock_get_tools.assert_called_once_with(
             mcp_server_name='svc',
-            remote_mcp_server='http://srv/mcp',
+            remote_mcp_server='https://srv/mcp',
             tenant_id='tid',
             authorization_token='tok',
             custom_headers={"X-Tools-Custom": "tools-value"},
@@ -882,7 +882,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
         """Test list_mcp_service_tools_by_id when custom_headers is None."""
         mock_get.return_value = {
             "mcp_name": "svc",
-            "mcp_server": "http://srv/mcp",
+            "mcp_server": "https://srv/mcp",
             "authorization_token": "tok",
             "custom_headers": None,
         }
@@ -894,7 +894,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
 
         mock_get_tools.assert_called_once_with(
             mcp_server_name='svc',
-            remote_mcp_server='http://srv/mcp',
+            remote_mcp_server='https://srv/mcp',
             tenant_id='tid',
             authorization_token='tok',
             custom_headers=None,
@@ -930,7 +930,7 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
         mock_mgr = MagicMock()
         mock_mgr.start_mcp_container = AsyncMock(return_value={
             "container_id": "cid",
-            "mcp_url": "http://localhost:8080/mcp",
+            "mcp_url": "https://localhost:8080/mcp",
             "host_port": 8080,
             "container_name": "test-svc-xyz",
         })
@@ -970,9 +970,9 @@ class TestCustomHeadersIntegration(unittest.IsolatedAsyncioTestCase):
         custom_headers = {"X-Integration-Test": "full-flow-value"}
         update_data = MockMCPUpdateRequest(
             current_service_name="old-svc",
-            current_mcp_url="http://old.url",
+            current_mcp_url="https://old.url",
             new_service_name="new-svc",
-            new_mcp_url="http://new.url",
+            new_mcp_url="https://new.url",
             new_authorization_token="Bearer tok",
             custom_headers=custom_headers,
         )

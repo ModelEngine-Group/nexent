@@ -216,9 +216,11 @@ def test_get_community_record_by_id_found(monkeypatch, mock_session):
     r = MockCommunityRecord(1)
 
     mock_first = MagicMock(return_value=r)
-    mock_filter = MagicMock()
-    mock_filter.first = mock_first
-    query.filter.return_value = mock_filter
+    mock_second_filter = MagicMock()
+    mock_second_filter.first = mock_first
+    mock_first_filter = MagicMock()
+    mock_first_filter.filter.return_value = mock_second_filter
+    query.filter.return_value = mock_first_filter
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -236,9 +238,11 @@ def test_get_community_record_by_id_not_found(monkeypatch, mock_session):
     session, query = mock_session
 
     mock_first = MagicMock(return_value=None)
-    mock_filter = MagicMock()
-    mock_filter.first = mock_first
-    query.filter.return_value = mock_filter
+    mock_second_filter = MagicMock()
+    mock_second_filter.first = mock_first
+    mock_first_filter = MagicMock()
+    mock_first_filter.filter.return_value = mock_second_filter
+    query.filter.return_value = mock_first_filter
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
