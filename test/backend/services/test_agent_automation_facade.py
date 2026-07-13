@@ -11,6 +11,7 @@ from services.agent_automation.errors import (
     AutomationScheduleInvalidError,
 )
 from services.agent_automation.facade import AgentAutomationFacade
+from services.agent_automation.intent_analyzer import AutomationIntentContext
 from services.agent_automation.models import (
     AutomationProposalCreateRequest,
     AutomationProposalConfirmRequest,
@@ -22,10 +23,44 @@ from services.agent_automation.models import (
     ScheduleRuleType,
     ScheduleTrigger,
 )
+from services.agent_automation.prompt_generator import AutomationTaskContent
 
 
 @pytest.mark.asyncio
-async def test_create_proposal_optimizes_instruction_for_selected_agent(monkeypatch):
+async def test_create_proposal_rejects_ambiguous_schedule_before_creating_conversation(monkeypatch):
+    created = False
+
+    def fake_create_conversation(*args, **kwargs):
+        nonlocal created
+        created = True
+
+    monkeypatch.setattr(facade_module, "create_new_conversation", fake_create_conversation)
+
+    with pytest.raises(AutomationScheduleInvalidError, match="缺少可确定的日期或时间"):
+        await AgentAutomationFacade().create_proposal(
+            AutomationProposalCreateRequest(agent_id=7, message="每周发一个周报"),
+            "tenant",
+            "user",
+        )
+
+    assert created is False
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_maps_invalid_date_to_schedule_error():
+    with pytest.raises(AutomationScheduleInvalidError, match="无法解析任务执行时间"):
+        await AgentAutomationFacade().create_proposal(
+            AutomationProposalCreateRequest(
+                agent_id=7,
+                message="2026年2月30日上午9点提醒我提交报告",
+            ),
+            "tenant",
+            "user",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_generates_title_and_instruction_before_capability_resolution(monkeypatch):
     captured = {}
 
     async def fake_resolve_agent_capabilities(*args, **kwargs):
@@ -35,9 +70,9 @@ async def test_create_proposal_optimizes_instruction_for_selected_agent(monkeypa
             agent_snapshot={"agent_id": 7, "name": "周报助手", "description": "整理项目进展"},
         )
 
-    async def fake_optimize_instruction(context):
+    async def fake_generate_task_content(context):
         captured["context"] = context
-        return "请根据当前会话中的项目进展整理本周周报。"
+        return AutomationTaskContent(title="生成周报", instruction="整理本周项目周报")
 
     monkeypatch.setattr(facade_module, "get_conversation", lambda conversation_id, user_id: {
         "conversation_id": conversation_id,
@@ -51,8 +86,8 @@ async def test_create_proposal_optimizes_instruction_for_selected_agent(monkeypa
     monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
     monkeypatch.setattr(
         facade_module.automation_prompt_generator,
-        "optimize_instruction",
-        fake_optimize_instruction,
+        "generate_task_content",
+        fake_generate_task_content,
     )
     monkeypatch.setattr(
         facade_module.agent_automation_db,
@@ -82,15 +117,16 @@ async def test_create_proposal_optimizes_instruction_for_selected_agent(monkeypa
         AutomationProposalCreateRequest(
             conversation_id=100,
             agent_id=7,
-            message="每周发一个周报",
+            message="每周五上午9点发一个周报",
         ),
         "tenant",
         "user",
     )
 
-    assert result["task"]["instruction"] == "请根据当前会话中的项目进展整理本周周报。"
+    assert result["task"]["title"] == "生成周报"
+    assert result["task"]["instruction"] == "整理本周项目周报"
     assert result["task"]["original_instruction"] == "发一个周报"
-    assert captured["context"].agent_snapshot["name"] == "周报助手"
+    assert captured["context"].instruction == "发一个周报"
     assert captured["stored_task"]["_conversation_message_id"] == 31
     assert captured["stored_task"]["_conversation_unit_id"] == 41
 
@@ -105,8 +141,9 @@ async def test_create_proposal_creates_conversation_only_for_automation_intent(m
             agent_snapshot={"agent_id": 7, "name": "周报助手"},
         )
 
-    async def fake_optimize_instruction(context):
-        return "请生成周报"
+    async def fake_generate_task_content(context):
+        captured["prompt_instruction"] = context.instruction
+        return AutomationTaskContent(title=context.instruction, instruction=context.instruction)
 
     monkeypatch.setattr(
         facade_module,
@@ -124,8 +161,8 @@ async def test_create_proposal_creates_conversation_only_for_automation_intent(m
     monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
     monkeypatch.setattr(
         facade_module.automation_prompt_generator,
-        "optimize_instruction",
-        fake_optimize_instruction,
+        "generate_task_content",
+        fake_generate_task_content,
     )
     monkeypatch.setattr(
         facade_module.agent_automation_db,
@@ -148,13 +185,93 @@ async def test_create_proposal_creates_conversation_only_for_automation_intent(m
     assert "conversation" not in captured
 
     proposal = await AgentAutomationFacade().create_proposal(
-        AutomationProposalCreateRequest(agent_id=7, message="每周发一个周报"),
+        AutomationProposalCreateRequest(agent_id=7, message="每分钟给我发一句你好"),
         "tenant",
         "user",
     )
     assert proposal["conversation_id"] == 321
-    assert captured["conversation"]["conversation_title"] == "发一个周报"
+    assert proposal["task"]["schedule_trigger"]["rule_type"] == "INTERVAL"
+    assert proposal["task"]["schedule_trigger"]["interval_seconds"] == 60
+    assert proposal["task"]["instruction"] == "发一句你好"
+    assert captured["prompt_instruction"] == "发一句你好"
+    assert captured["conversation"]["conversation_title"] == "发一句你好"
     assert captured["conversation"]["agent_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_uses_llm_structured_content_without_second_prompt_call(monkeypatch):
+    captured = {}
+    trigger = ScheduleTrigger(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.CRON,
+        timezone="Asia/Shanghai",
+        start_at=datetime(2026, 7, 13, 10, 0, tzinfo=timezone(timedelta(hours=8))),
+        cron_expr="0 8 * * *",
+    )
+
+    async def fake_analyze(context: AutomationIntentContext):
+        captured["analysis_context"] = context
+        return {
+            "is_automation_intent": True,
+            "confidence": 0.99,
+            "title": "查询黄历",
+            "instruction": "查询当天的黄历信息",
+            "schedule_trigger": trigger,
+            "schedule_error": None,
+            "analysis_source": "llm",
+            "task_content_generated": True,
+            "task_content_source": "llm",
+        }
+
+    async def fail_second_prompt_call(context):
+        raise AssertionError("LLM intent analysis must not trigger a second title/prompt call")
+
+    async def fake_resolve_agent_capabilities(*args, **kwargs):
+        return CapabilityResolution(executable=True, agent_snapshot={"agent_id": 7})
+
+    monkeypatch.setattr(facade_module.automation_intent_analyzer, "analyze", fake_analyze)
+    monkeypatch.setattr(
+        facade_module.automation_prompt_generator,
+        "generate_task_content",
+        fail_second_prompt_call,
+    )
+    monkeypatch.setattr(
+        facade_module,
+        "get_conversation",
+        lambda conversation_id, user_id: {"conversation_id": conversation_id},
+    )
+    monkeypatch.setattr(facade_module, "update_conversation_agent_id_service", lambda *args: True)
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task_by_conversation", lambda *args: None)
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "create_proposal",
+        lambda values, user_id: {"proposal_id": 15, **values},
+    )
+    monkeypatch.setattr(
+        facade_module.automation_conversation_adapter,
+        "append_proposal_exchange",
+        lambda *args: {"message_id": 31, "unit_id": 41},
+    )
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal_task", lambda *args: True)
+
+    result = await AgentAutomationFacade().create_proposal(
+        AutomationProposalCreateRequest(
+            conversation_id=100,
+            agent_id=7,
+            model_id=42,
+            message="每天早上八点算一下当天的黄历信息",
+        ),
+        "tenant",
+        "user",
+    )
+
+    assert result["intent_analysis_source"] == "llm"
+    assert result["task_content_source"] == "llm"
+    assert result["task"]["title"] == "查询黄历"
+    assert result["task"]["instruction"] == "查询当天的黄历信息"
+    assert result["task"]["schedule_trigger"]["cron_expr"] == "0 8 * * *"
+    assert captured["analysis_context"].model_id == 42
 
 
 @pytest.mark.asyncio
@@ -514,9 +631,40 @@ async def test_create_task_rejects_interval_shorter_than_backend_minimum(monkeyp
                     rule_type=ScheduleRuleType.INTERVAL,
                     timezone="Asia/Shanghai",
                     start_at="2030-01-01T09:00:00+08:00",
-                    interval_seconds=60,
+                    interval_seconds=4,
                 ),
             ),
             "tenant",
             "user",
         )
+
+
+@pytest.mark.asyncio
+async def test_create_task_rejects_past_once_schedule_before_external_lookups(monkeypatch):
+    looked_up = False
+
+    def fake_get_conversation(*args):
+        nonlocal looked_up
+        looked_up = True
+
+    monkeypatch.setattr(facade_module, "get_conversation", fake_get_conversation)
+
+    with pytest.raises(AutomationScheduleInvalidError, match="must be in the future"):
+        await AgentAutomationFacade().create_task(
+            AutomationTaskCreateRequest(
+                title="过期任务",
+                agent_id=3,
+                instruction="发送提醒",
+                conversation_id=123,
+                schedule_trigger=ScheduleTrigger(
+                    mode=ScheduleMode.ONCE,
+                    rule_type=ScheduleRuleType.AT,
+                    timezone="Asia/Shanghai",
+                    start_at="2020-01-01T09:00:00+08:00",
+                ),
+            ),
+            "tenant",
+            "user",
+        )
+
+    assert looked_up is False

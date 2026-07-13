@@ -410,7 +410,7 @@ export default function AgentTasksPage() {
                         label="间隔秒数"
                         rules={[{ required: true }]}
                       >
-                        <InputNumber min={300} className="w-full" />
+                        <InputNumber min={5} className="w-full" />
                       </Form.Item>
                     ) : (
                       <Form.Item

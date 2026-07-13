@@ -18,6 +18,7 @@ from services.agent_automation.models import (
     CapabilityBinding,
     CapabilityType,
 )
+from services.agent_automation.prompt_generator import AutomationTaskContent
 
 
 @pytest.mark.asyncio
@@ -81,14 +82,14 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     async def fake_resolve_agent_capabilities(*args, **kwargs):
         return initial_resolution
 
-    async def fake_optimize_instruction(context):
-        return "请基于当前会话整理一份项目周报。"
+    async def fake_generate_task_content(context):
+        return AutomationTaskContent(title="项目周报", instruction="整理一份项目周报")
 
     monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
     monkeypatch.setattr(
         facade_module.automation_prompt_generator,
-        "optimize_instruction",
-        fake_optimize_instruction,
+        "generate_task_content",
+        fake_generate_task_content,
     )
     monkeypatch.setattr(
         facade_module.agent_automation_db,
@@ -132,7 +133,7 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     proposal = await service.create_proposal(
         AutomationProposalCreateRequest(
             agent_id=7,
-            message="每周发一个周报",
+            message="每周五上午9点发一个周报",
             model_id=55,
         ),
         "tenant",
@@ -142,7 +143,7 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     assert proposal["conversation_id"] == 321
     assert captured["agent_calls"] == 0
     assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[0]["message"][0]["content"] == "每周发一个周报"
+    assert messages[0]["message"][0]["content"] == "每周五上午9点发一个周报"
     assert messages[1]["message"][0]["type"] == "automation_proposal"
 
     task = await service.confirm_proposal(
@@ -176,10 +177,6 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
             },
         }
 
-    async def fake_generate_execution_prompt(context):
-        captured["prompt_context"] = context
-        return "请使用最新周报助手和当前会话生成本周管理周报。"
-
     async def fake_run_agent_background(agent_request, user_id, tenant_id, skip_user_save=False):
         captured["agent_calls"] += 1
         captured["agent_request"] = agent_request
@@ -212,11 +209,6 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
         return tasks[task_id]
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(
-        runner_module.automation_prompt_generator,
-        "generate_execution_prompt",
-        fake_generate_execution_prompt,
-    )
     monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module, "is_agent_running", lambda *args: False)
     monkeypatch.setattr(runner_module, "get_conversation_history_service", fake_history)
@@ -237,9 +229,7 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     assert run["status"] == "SUCCEEDED"
     assert captured["agent_calls"] == 1
     assert captured["agent_request"].conversation_id == 321
-    assert captured["agent_request"].query == "请使用最新周报助手和当前会话生成本周管理周报。"
-    assert captured["prompt_context"].agent_snapshot["name"] == "最新周报助手"
-    assert captured["prompt_context"].capability_bindings[0]["name"] == "latest-search"
+    assert captured["agent_request"].query == "整理一份项目周报"
     assert [message["role"] for message in messages] == [
         "user",
         "assistant",

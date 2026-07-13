@@ -2,7 +2,7 @@
 
 ## 1. 背景与目标
 
-Nexent 需要支持用户在自然语言对话中为当前选择的智能体创建自动化任务，任务管理页面只负责管理，不提供脱离会话的手工创建入口。任务可以是一次性执行，也可以是周期性执行。每个任务唯一绑定创建它的会话，每次触发都在同一个会话里追加经过优化的提示词并执行智能体，用户可以在该会话中持续查看任务上下文和历史结果。
+Nexent 需要支持用户在自然语言对话中为当前选择的智能体创建自动化任务，任务管理页面只负责管理，不提供脱离会话的手工创建入口。任务可以是一次性执行，也可以是周期性执行。每个任务唯一绑定创建它的会话；创建时生成并确认稳定的标题和单次执行指令，后续每次触发原样复用该指令，用户可以在同一会话中持续查看历史结果。
 
 本设计的核心目标：
 
@@ -50,7 +50,8 @@ backend/database/agent_automation_db.py
 | `schedule_engine.py` | 统一计算一次性与周期性任务的下一次触发时间 |
 | `scheduler.py` | 后台轮询、抢占到期任务、lease 续期、恢复异常运行 |
 | `runner.py` | 把一次触发转换成会话消息，并调用后台智能体执行入口 |
-| `intent_parser.py` | 对话中识别“创建自动任务”的意图，只负责抽取时间、频率、任务目标 |
+| `intent_analyzer.py` | 使用当前选择的 LLM 判断自动任务意图，并结构化生成标题、单次指令和调度配置 |
+| `intent_parser.py` | 确定性时间解析与 LLM 不可用时的降级策略 |
 | `capability_resolver.py` | 基于 Nexent 现有 Agent 配置匹配可用技能、工具、知识库、子 Agent 和 A2A Agent |
 
 与现有模块的依赖方向：
@@ -88,7 +89,7 @@ flowchart LR
 | Agent Runtime Port | `run_agent_background(agent_request, runtime_context)` | 从 `agent_service.run_agent_stream` 抽出公共 runner |
 | Automation Delete Hook | `on_conversation_deleted(conversation_id, user_id)` | `agent_automation.facade` |
 | Agent Capability Port | `resolve_agent_capabilities(agent_id, tenant_id, user_id, version_no)` | 复用 `create_agent_config`、`SkillService.get_enabled_skills_for_agent`、`search_tools_for_sub_agent` |
-| Prompt Strategy Port | `optimize_instruction(context)`、`generate_execution_prompt(context)` | `agent_automation.prompt_generator`，策略模式 + 工厂模式 |
+| Prompt Strategy Port | `generate_task_content(context)` | `agent_automation.prompt_generator`，在创建阶段一次性生成标题和执行指令 |
 
 ## 3. 领域模型
 
@@ -429,7 +430,7 @@ WHERE delete_flag = 'N' AND status <> 'DELETED';
 
 迁移要求：
 
-- 新增 `deploy/sql/migrations/v_next_add_agent_automation.sql`。
+- 新增 `deploy/sql/migrations/v2.3.0_0713_add_agent_automation.sql`，并同步更新 `deploy/sql/init.sql` 以覆盖 fresh deploy。
 - 同步更新 `deploy/sql/init.sql`。
 - 同步更新 `deploy/k8s/helm/nexent/charts/nexent-common/files/init.sql`。
 - ORM 模型新增到 `backend/database/db_models.py`，遵循现有 `TableBase` 约定。
@@ -552,7 +553,8 @@ sequenceDiagram
 
   U->>Chat: 输入“明天上午9点帮我总结进展”
   Chat->>Auto: POST /proposals
-  Auto->>Auto: intent_parser 识别时间、任务指令、一次性/周期性
+  Auto->>Auto: intent_analyzer 调用 LLM 判断意图并生成结构化任务
+  Auto->>Auto: 校验 AT / INTERVAL / Cron / 时区 / 时间范围
   Auto->>Cap: 基于当前 Agent 匹配技能、工具、知识库、子 Agent
   Cap-->>Auto: 返回 matched/missing capabilities
   Auto->>Conv: 写入 automation proposal card
@@ -565,21 +567,30 @@ sequenceDiagram
 
 自然语言识别规则：
 
-- 第一阶段用规则识别明显时间表达，例如“明天 9 点”“每天上午 9 点”“每周一”，抽取 `ScheduleTrigger`。
-- 第二阶段用轻量 LLM prompt 把用户话术拆成 `instruction`、`capability_intents`、`output_requirements`，不能直接生成工具调用。
-- 第三阶段由 `CapabilityResolver` 调用现有 Agent 能力装配链路，生成 matched/missing capabilities。
-- 置信度低于 0.75 时不创建 proposal，只让普通 Agent 对话继续。
+- 消息包含日期、时间、周期、提醒或计划信号时，`IntentAnalyzer` 优先调用当前选择的 LLM；选择模型不可用时使用租户默认 LLM，两者均不可用或模型输出非法时才降级到 `IntentParser`。
+- LLM 在一次调用中同时输出 `is_automation_intent`、`title`、`instruction`、`schedule` 和 `schedule_error`，不再为标题和提示词发起第二次模型调用。
+- `IntentParser` 作为确定性降级策略，支持固定间隔、相对延迟、明确/短日期、今天/明天/后天、相对月份、工作日/周末、星期范围、多星期、多月日、月底、季度、年度日期和五段 Cron 可表达的日历周期。
+- 固定间隔生成 `INTERVAL`；指定一次时间生成 `AT`；每天、每周、每月、每年等日历周期生成标准五段 Cron。
+- 同一周期任务可以包含具有相同分钟或相同小时的多个时刻，例如“每天上午 9 点、下午 3 点”生成 `0 9,15 * * *`；无法用单个 Cron 精确表达的多个时刻要求拆分任务，不生成近似规则。
+- 用户在文本中明确常见地区时间、UTC 或 IANA 时区时优先使用文本时区，否则使用请求携带的 IANA 时区；一次性任务遇到 DST 不存在或歧义时间时拒绝创建。
+- 缺少日期、缺少具体时刻、日期非法或指定时间已过去时，返回明确的 `schedule_error`，不默认猜测为上午 9 点，也不创建 proposal。
+- 意图判定同时检查调度语义、业务动作和两者在句子中的修饰关系，不使用“时间词 + 动作词”简单碰撞规则。
+- 调度语义位于任务动作之前时识别为创建命令，例如“每天八点获取黄历”和“帮我每天八点分析销量”；动作位于调度短语之前且调度短语属于查询对象时继续走普通任务，例如“分析一下每天八点的销量”。
+- 调度短语但没有业务动作的问句、说明句和个人习惯陈述不会被识别为创建命令，例如“每周的销量是多少”“每天八点如何获取黄历”“我每天八点都会查看黄历”。
+- LLM 生成的标题和单次指令必须通过语言、长度、调度噪音和编排噪音校验；规则降级路径才调用 `AutomationPromptGenerator` 生成任务内容。
+- `CapabilityResolver` 使用最终 `instruction` 调用现有 Agent 能力装配链路，生成 matched/missing capabilities。
+- 低置信度或非任务意图不创建 proposal，只让普通 Agent 对话继续。
 - 所有对话创建都必须用户确认，不能由模型直接创建 `ACTIVE` 任务。
 - 如果缺少必要能力，确认卡片展示“需要先启用的技能/工具/知识库”；用户不能直接确认，只能修改任务要求或去配置 Agent。
 
-`intent_parser` 输出结构：
+`intent_analyzer` 输出结构：
 
 ```json
 {
   "is_automation_intent": true,
   "confidence": 0.92,
-  "title": "总结项目进展",
-  "instruction": "总结这个项目的最新进展，并给出风险和下一步建议",
+  "title": "",
+  "instruction": "总结项目进展",
   "schedule_trigger": {
     "mode": "ONCE",
     "rule_type": "AT",
@@ -587,22 +598,9 @@ sequenceDiagram
     "start_at": "2026-07-09T09:00:00+08:00",
     "max_fire_count": 1
   },
-  "capability_intents": [
-    {
-      "type": "KNOWLEDGE_BASE",
-      "query": "项目文档、项目进展、风险",
-      "required": true
-    },
-    {
-      "type": "TOOL",
-      "query": "读取项目管理系统实时进展",
-      "required": false
-    }
-  ],
-  "output_requirements": {
-    "format": "summary_with_risks_and_next_steps",
-    "language": "zh"
-  }
+  "schedule_error": null,
+  "capability_intents": [],
+  "output_requirements": {}
 }
 ```
 
@@ -640,12 +638,15 @@ sequenceDiagram
   Run->>R: compute and update next_fire_at
 ```
 
-后台执行提示词由 `AutomationPromptGenerator` 在每次触发时生成：
+自动任务意图、标题、提示词和执行周期由 `AutomationIntentAnalyzer` 在创建提案时统一生成：
 
-- `AutomationPromptStrategyFactory` 根据租户模型配置选择 LLM 策略或模板策略。
-- LLM 策略结合任务指令、每次执行时重新解析到的最新 Agent 名称与职责、最新能力摘要、本次计划时间和最近会话语境生成本次提示词；创建时保存的模型、工具参数和原始要求仍由任务绑定。
-- 模型不可用或生成失败时，自动降级到 YAML 模板策略，保证调度任务可继续执行。
-- 输出结构由任务目标决定，不统一追加与任务无关的固定章节。
+- `AutomationIntentStrategyFactory` 优先使用请求中的当前选择 LLM，否则使用租户默认 LLM；没有可用模型时使用规则策略。
+- LLM 策略严格输出结构化 JSON；标题是任务目标短语，指令是一次触发真正执行的业务动作，调度类型只能是 `AT`、`INTERVAL` 或 `CRON`。
+- 普通任务由 LLM 返回 `is_automation_intent=false`，继续进入原有 Agent 对话，不创建会话或 proposal。
+- LLM 生成的 Cron、时区、时间范围、最小间隔和字段组合必须经过确定性校验，校验失败时不允许落库或作为普通任务立即执行。
+- 不允许加入调度时间、Agent、能力、工具、配置、重试、错误处理或用户未要求的步骤和输出格式。
+- 模型不可用、JSON 非法、输出过长或任一字段引入编排噪音时，整组分析结果降级为确定性规则，不保留半清洗输出。
+- 任务触发时直接复用用户已确认的执行指令，Agent 配置、工具参数和会话历史通过运行时参数独立传递。
 
 执行策略：
 
@@ -689,11 +690,11 @@ delete_conversation_service
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `AGENT_AUTOMATION_ENABLED` | `true` | 是否启用调度器 |
-| `AGENT_AUTOMATION_POLL_INTERVAL_SECONDS` | `30` | 扫描间隔 |
+| `AGENT_AUTOMATION_POLL_INTERVAL_SECONDS` | `5` | 扫描间隔 |
 | `AGENT_AUTOMATION_MAX_CONCURRENT_RUNS` | `2` | 单实例并发执行数 |
 | `AGENT_AUTOMATION_LEASE_SECONDS` | `120` | 任务抢占 lease |
 | `AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS` | `1800` | 默认执行超时 |
-| `AGENT_AUTOMATION_MIN_INTERVAL_SECONDS` | `300` | 普通用户最小周期 |
+| `AGENT_AUTOMATION_MIN_INTERVAL_SECONDS` | `5` | 普通用户最小周期 |
 
 多实例抢占：
 
@@ -769,8 +770,7 @@ frontend/types/agentAutomation.ts
 | 错误码 | 场景 |
 | --- | --- |
 | `AUTOMATION_CONVERSATION_ALREADY_BOUND` | 会话已有未删除任务 |
-| `AUTOMATION_INVALID_SCHEDULE` | ScheduleTrigger 非法 |
-| `AUTOMATION_MIN_INTERVAL_VIOLATED` | 周期低于最小间隔 |
+| `AUTOMATION_SCHEDULE_INVALID` | ScheduleTrigger 非法、时间已过去、Cron 非法或周期低于最小间隔 |
 | `AUTOMATION_CONVERSATION_NOT_FOUND` | 会话不存在或无权限 |
 | `AUTOMATION_AGENT_NOT_FOUND` | Agent 不存在或无权限 |
 | `AUTOMATION_TASK_NOT_FOUND` | 任务不存在或无权限 |
@@ -798,6 +798,7 @@ frontend/types/agentAutomation.ts
   - `ONCE + AT` 首次返回 start_at，执行后返回 `None`。
   - `RECURRING + INTERVAL` 正确计算下一次。
   - `RECURRING + CRON` 正确处理 timezone。
+  - Cron 校验拒绝越界分钟/小时，支持多时刻、星期范围、月底和季度表达式。
   - `end_at`、`max_fire_count` 生效。
 - Repository：
   - 创建任务、编辑任务、软删除任务。
@@ -808,7 +809,7 @@ frontend/types/agentAutomation.ts
   - 新对话只在识别到自动任务意图后创建，并同时持久化用户指令与 proposal；普通聊天不创建空会话。
   - 并发确认同一会话时，数据库唯一约束竞争映射为 `AUTOMATION_CONVERSATION_ALREADY_BOUND`，不返回 500。
   - 对话 proposal 确认后创建 task。
-  - 创建提案时基于当前选择 Agent 优化基础任务指令。
+  - 创建提案时生成不含调度与编排噪音的标题和单次执行指令。
   - proposal 能解析出 schedule，但必需能力缺失时不能确认创建 `ACTIVE` 任务。
   - 用户修改 instruction 后重新匹配能力，匹配成功才允许确认。
   - 前端提交不属于该 Agent 的 capability binding 时返回 `AUTOMATION_CAPABILITY_BINDING_INVALID`。
@@ -820,7 +821,7 @@ frontend/types/agentAutomation.ts
   - overlap 时 run 状态为 `SKIPPED`。
   - 计划失败或跳过后推进到下一周期，手动立即运行不消费下一计划触发。
   - 运行前发现绑定技能、工具或知识库被禁用时，不调用 Agent，run 状态为 `FAILED`，错误码为 `AUTOMATION_CAPABILITY_UNAVAILABLE`。
-  - 每次运行重新生成提示词，包含 Agent 职责、能力绑定摘要、计划时间和最近会话语境，但不硬编码具体工具调用顺序。
+  - 每次运行原样复用创建时已确认的执行指令；Agent 配置、能力和会话历史只通过结构化运行参数传入。
 - Scheduler：
   - 启动恢复 timeout run。
   - 停机错过多次触发后按 `RUN_ONCE` 只补一次。
@@ -839,10 +840,13 @@ frontend/types/agentAutomation.ts
 - 用户在对话中输入“明天上午 9 点帮我总结项目进展”，确认后生成一次性任务；到点后同一会话新增自动提示词和智能体回复，任务状态变为 `COMPLETED`。
 - 用户在对话中输入“每天 9 点联网查询竞品新闻并总结”，但当前 Agent 未启用联网搜索工具；系统生成提案但不可确认，卡片提示需要启用对应工具或修改任务要求。
 - 用户为 Agent 启用联网搜索工具后重新创建上述任务；能力匹配通过，任务可以确认并保存能力快照。
-- 用户在当前会话输入“每周发一个周报”，系统结合当前选择的 Agent 生成合理任务指令；确认后任务页展示下一次执行时间，每次执行都重新优化提示词并追加到同一会话。
-- 用户从新对话输入“每周发一个周报”时，系统直接创建并绑定新会话、展示提案，不先让 Agent 立即生成一次周报。
+- 用户输入“每周发一个周报”时，因为缺少星期和具体时间，系统明确要求补充信息，不默认猜测执行时间。
+- 用户从新对话输入“每周五上午 9 点发一个周报”时，系统创建并绑定新会话、展示提案，不先让 Agent 立即生成一次周报。
 - 用户询问“今天项目进展如何”或“明天上午的天气怎么样”时不会误生成定时任务提案。
 - 用户输入“每周五下午 3 点发一个周报”时生成 `0 15 * * 5`，输入“每月 15 日上午 10 点汇总销售数据”时生成 `0 10 15 * *`。
+- 用户输入“每周一至周五上午 9 点发送日报”时生成 `0 9 * * 1-5`；输入“每天上午 9 点、下午 3 点检查状态”时生成 `0 9,15 * * *`。
+- 用户输入“每月最后一天上午 9 点生成月报”时生成 `0 9 L * *`；输入“每季度第一天上午 9 点生成季报”时生成 `0 9 1 1,4,7,10 *`。
+- 用户输入“每 5 秒发送一次你好”时生成 `INTERVAL=5`，调度器按 5 秒轮询基线发现到期任务；重叠运行仍按 `SKIP` 策略保护。
 - 周期任务创建后，管理员禁用其绑定知识库；下一次运行前校验失败，run 记录 `AUTOMATION_CAPABILITY_UNAVAILABLE`，不会让 Agent 编造总结。
 - 删除绑定会话后，任务页不再展示该任务，后台不会再触发。
 - 暂停周期任务后不会执行；恢复后基于当前时间重新计算下一次触发。

@@ -20,7 +20,7 @@ from .errors import (
     AutomationNotFoundError,
     AutomationScheduleInvalidError,
 )
-from .intent_parser import parse_automation_intent
+from .intent_analyzer import AutomationIntentContext, automation_intent_analyzer
 from .models import (
     AutomationProposalConfirmRequest,
     AutomationProposalCreateRequest,
@@ -33,8 +33,13 @@ from .models import (
     CapabilityBinding,
     ScheduleTrigger,
 )
-from .prompt_generator import AutomationPromptContext, automation_prompt_generator
-from .schedule_engine import compute_next_fire_at
+from .prompt_generator import (
+    AutomationPromptContext,
+    AutomationTaskContent,
+    automation_prompt_generator,
+    detect_instruction_language,
+)
+from .schedule_engine import compute_next_fire_at, is_valid_cron_expression
 
 logger = logging.getLogger("agent_automation.facade")
 
@@ -62,6 +67,16 @@ def _parse_trigger(raw: Dict[str, Any] | ScheduleTrigger) -> ScheduleTrigger:
 
 
 def _validate_schedule_policy(trigger: ScheduleTrigger) -> None:
+    if trigger.mode.value == "ONCE" and _as_utc(trigger.start_at) <= _utcnow():
+        raise AutomationScheduleInvalidError(
+            "Automation execution time must be in the future.",
+            details={"start_at": trigger.start_at.isoformat()},
+        )
+    if trigger.rule_type.value == "CRON" and not is_valid_cron_expression(trigger.cron_expr or ""):
+        raise AutomationScheduleInvalidError(
+            "Automation cron expression is invalid.",
+            details={"cron_expr": trigger.cron_expr},
+        )
     if (
         trigger.rule_type.value == "INTERVAL"
         and trigger.interval_seconds is not None
@@ -83,7 +98,18 @@ class AgentAutomationFacade:
         tenant_id: str,
         user_id: str,
     ) -> Dict[str, Any]:
-        parsed = parse_automation_intent(request.message, request.timezone, tenant_id)
+        try:
+            parsed = await automation_intent_analyzer.analyze(AutomationIntentContext(
+                tenant_id=tenant_id,
+                message=request.message,
+                timezone=request.timezone,
+                model_id=request.model_id,
+            ))
+        except ValueError as exc:
+            raise AutomationScheduleInvalidError(
+                f"无法解析任务执行时间：{exc}",
+                details={"input": request.message, "timezone": request.timezone},
+            ) from exc
         if not parsed.get("is_automation_intent"):
             return {
                 "proposal_id": None,
@@ -92,12 +118,32 @@ class AgentAutomationFacade:
                 "executable": False,
                 "task": None,
                 "capability_resolution": None,
+                "intent_analysis_source": parsed.get("analysis_source", "rule"),
+                "task_content_source": parsed.get("task_content_source"),
             }
+        if parsed.get("schedule_error") or not parsed.get("schedule_trigger"):
+            raise AutomationScheduleInvalidError(
+                parsed.get("schedule_error") or "Unable to determine the automation schedule.",
+                details={"input": request.message, "timezone": request.timezone},
+            )
+        _validate_schedule_policy(parsed["schedule_trigger"])
+
+        if parsed.get("task_content_generated"):
+            task_content = AutomationTaskContent(
+                title=parsed["title"],
+                instruction=parsed["instruction"],
+            )
+        else:
+            task_content = await automation_prompt_generator.generate_task_content(AutomationPromptContext(
+                tenant_id=tenant_id,
+                instruction=parsed["instruction"],
+                language=detect_instruction_language(parsed["instruction"]),
+            ))
 
         conversation_id = request.conversation_id
         if conversation_id is None:
             conversation = create_new_conversation(
-                parsed["title"],
+                task_content.title,
                 user_id,
                 agent_id=request.agent_id,
             )
@@ -119,20 +165,12 @@ class AgentAutomationFacade:
             agent_id=request.agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            instruction=parsed["instruction"],
+            instruction=task_content.instruction,
             version_no=request.agent_version_no or 0,
         )
-        optimized_instruction = await automation_prompt_generator.optimize_instruction(AutomationPromptContext(
-            tenant_id=tenant_id,
-            instruction=parsed["instruction"],
-            agent_snapshot=resolution.agent_snapshot,
-            capability_bindings=resolution.model_dump(mode="json")["matched_capabilities"],
-            title=parsed["title"],
-            timezone=request.timezone,
-        ))
         proposed_task = {
-            "title": parsed["title"],
-            "instruction": optimized_instruction,
+            "title": task_content.title,
+            "instruction": task_content.instruction,
             "original_instruction": parsed["instruction"],
             "agent_id": request.agent_id,
             "agent_version_no": request.agent_version_no,
@@ -157,6 +195,8 @@ class AgentAutomationFacade:
             "executable": resolution.executable,
             "task": proposed_task,
             "capability_resolution": resolution.model_dump(mode="json"),
+            "intent_analysis_source": parsed.get("analysis_source", "rule"),
+            "task_content_source": parsed.get("task_content_source", "rule"),
         }
         try:
             message_refs = automation_conversation_adapter.append_proposal_exchange(
@@ -254,6 +294,8 @@ class AgentAutomationFacade:
         tenant_id: str,
         user_id: str,
     ) -> Dict[str, Any]:
+        trigger = request.schedule_trigger
+        _validate_schedule_policy(trigger)
         conversation_id = request.conversation_id
         if not get_conversation(conversation_id, user_id):
             raise AutomationNotFoundError("Conversation does not exist or is not accessible.")
@@ -292,8 +334,6 @@ class AgentAutomationFacade:
         else:
             bindings = resolution.model_dump(mode="json")["matched_capabilities"]
 
-        trigger = request.schedule_trigger
-        _validate_schedule_policy(trigger)
         next_fire_at = compute_next_fire_at(trigger, _utcnow(), 0)
         runtime_snapshot = {
             **resolution.agent_snapshot,

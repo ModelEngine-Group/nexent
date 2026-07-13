@@ -63,7 +63,10 @@ def test_conversation_unique_active_index_exists_in_orm_and_sql():
     assert "status <> 'DELETED'" in str(unique_index.dialect_options["postgresql"]["where"])
 
     init_sql = Path("deploy/sql/init.sql").read_text()
-    migration_sql = Path("deploy/sql/migrations/v_next_add_agent_automation.sql").read_text()
+    migration_sql = Path("deploy/sql/migrations/v2.3.0_0713_add_agent_automation.sql").read_text()
     for sql in (init_sql, migration_sql):
+        assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_task_t" in sql
+        assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_run_t" in sql
+        assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t" in sql
         assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_conversation_active" in sql
         assert "WHERE delete_flag = 'N' AND status <> 'DELETED'" in sql

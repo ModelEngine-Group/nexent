@@ -14,7 +14,6 @@ from services.conversation_management_service import (
 
 from .capability_resolver import validate_bindings_available
 from .models import AutomationRunStatus, ScheduleTrigger
-from .prompt_generator import AutomationPromptContext, automation_prompt_generator
 from .schedule_engine import compute_next_fire_at
 
 
@@ -52,17 +51,6 @@ def _history_items(history_payload: List[Dict[str, Any]]) -> List[HistoryItem]:
         if content:
             items.append(HistoryItem(role=msg.get("role", "user"), content=content))
     return items
-
-
-def _conversation_context(history_payload: List[Dict[str, Any]], max_messages: int = 6, max_chars: int = 4000) -> str:
-    if not history_payload:
-        return ""
-    lines = []
-    for message in history_payload[0].get("message", [])[-max_messages:]:
-        content = _message_content(message).strip()
-        if content:
-            lines.append(f"{message.get('role', 'user')}: {content}")
-    return "\n".join(lines)[-max_chars:]
 
 
 class AgentAutomationRunner:
@@ -171,22 +159,7 @@ class AgentAutomationRunner:
                 stored_snapshot.get("original_instruction") or task["instruction"]
             ),
         }
-        current_capability_bindings = (
-            current_resolution.get("matched_capabilities")
-            or task.get("capability_bindings")
-            or []
-        )
-        generated_prompt = await automation_prompt_generator.generate_execution_prompt(AutomationPromptContext(
-            tenant_id=task["tenant_id"],
-            instruction=task["instruction"],
-            agent_snapshot=runtime_snapshot,
-            capability_bindings=current_capability_bindings,
-            title=task["title"],
-            timezone=task.get("timezone", "Asia/Shanghai"),
-            scheduled_fire_at=scheduled,
-            trigger_type=trigger_type,
-            conversation_context=_conversation_context(history_payload),
-        ))
+        generated_prompt = task["instruction"].strip()
         message_request = MessageRequest(
             conversation_id=task["conversation_id"],
             message_idx=len(history_payload[0].get("message", [])) if history_payload else 0,

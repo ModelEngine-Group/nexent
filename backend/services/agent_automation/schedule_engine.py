@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -7,6 +8,48 @@ except ImportError:  # pragma: no cover - dependency fallback for isolated tests
     croniter = None
 
 from .models import ScheduleMode, ScheduleRuleType, ScheduleTrigger
+
+
+def is_valid_cron_expression(expression: str) -> bool:
+    """Validate five-field cron expressions before they are persisted."""
+    if len((expression or "").split()) != 5:
+        return False
+    if croniter is not None:
+        try:
+            return bool(croniter.is_valid(expression))
+        except Exception:
+            return False
+    minute, hour, day_of_month, month, day_of_week = expression.split()
+    return all((
+        _is_valid_cron_field(minute, 0, 59),
+        _is_valid_cron_field(hour, 0, 23),
+        _is_valid_cron_field(day_of_month, 1, 31, allow_last=True),
+        _is_valid_cron_field(month, 1, 12),
+        _is_valid_cron_field(day_of_week, 0, 7),
+    ))
+
+
+def _is_valid_cron_field(field: str, minimum: int, maximum: int, allow_last: bool = False) -> bool:
+    if not field:
+        return False
+    for part in field.split(","):
+        base, separator, step = part.partition("/")
+        if separator and (not step.isdigit() or int(step) <= 0):
+            return False
+        if base == "*":
+            continue
+        if allow_last and base == "L" and not separator:
+            continue
+        if "-" in base:
+            start, end = base.split("-", 1)
+            if not start.isdigit() or not end.isdigit():
+                return False
+            if not (minimum <= int(start) <= int(end) <= maximum):
+                return False
+            continue
+        if not base.isdigit() or not minimum <= int(base) <= maximum:
+            return False
+    return True
 
 
 def _ensure_aware(value: datetime, timezone_name: str) -> datetime:
@@ -41,6 +84,8 @@ def compute_next_fire_at(
             steps = int(elapsed // trigger.interval_seconds) + 1
             next_fire = start_at + timedelta(seconds=steps * trigger.interval_seconds)
     elif trigger.rule_type == ScheduleRuleType.CRON:
+        if not is_valid_cron_expression(trigger.cron_expr or ""):
+            raise ValueError(f"Invalid cron expression: {trigger.cron_expr}")
         base = max(local_after, start_at)
         if local_after <= start_at and _cron_matches_start(trigger.cron_expr, start_at):
             next_fire = start_at
@@ -59,6 +104,11 @@ def compute_next_fire_at(
 
 
 def _cron_matches_start(expr: str, start_at: datetime) -> bool:
+    if croniter is not None:
+        try:
+            return bool(croniter.match(expr, start_at))
+        except Exception:
+            return False
     parts = (expr or "").split()
     if len(parts) != 5:
         if croniter is not None:
@@ -69,45 +119,59 @@ def _cron_matches_start(expr: str, start_at: datetime) -> bool:
         return False
 
     minute, hour, day_of_month, month, day_of_week = parts
-    checks = (
+    day_of_month_matches = _cron_day_of_month_matches(day_of_month, start_at)
+    day_of_week_matches = _cron_weekday_matches(day_of_week, start_at)
+    if day_of_month != "*" and day_of_week != "*":
+        calendar_day_matches = day_of_month_matches or day_of_week_matches
+    else:
+        calendar_day_matches = day_of_month_matches and day_of_week_matches
+    return all((
         _cron_field_matches(minute, start_at.minute),
         _cron_field_matches(hour, start_at.hour),
-        _cron_field_matches(day_of_month, start_at.day),
         _cron_field_matches(month, start_at.month),
-        _cron_weekday_matches(day_of_week, start_at),
-    )
-    return all(checks)
+        calendar_day_matches,
+    ))
 
 
 def _cron_field_matches(field: str, value: int) -> bool:
-    return field == "*" or (field.isdigit() and int(field) == value)
+    if field == "*":
+        return True
+    for part in field.split(","):
+        base, _, step = part.partition("/")
+        step_value = int(step) if step.isdigit() else 1
+        if base == "*" and (value % step_value == 0):
+            return True
+        if "-" in base:
+            start, end = (int(item) for item in base.split("-", 1))
+            if start <= value <= end and (value - start) % step_value == 0:
+                return True
+        elif base.isdigit() and int(base) == value:
+            return True
+    return False
+
+
+def _cron_day_of_month_matches(field: str, value: datetime) -> bool:
+    if field == "L":
+        return value.day == monthrange(value.year, value.month)[1]
+    return _cron_field_matches(field, value.day)
 
 
 def _cron_weekday_matches(field: str, value: datetime) -> bool:
     if field == "*":
         return True
-    if not field.isdigit():
-        return False
-    return (int(field) - 1) % 7 == value.weekday()
+    cron_weekday = (value.weekday() + 1) % 7
+    return _cron_field_matches(field, cron_weekday) or (
+        cron_weekday == 0 and _cron_field_matches(field, 7)
+    )
 
 
 def _fallback_next_cron(expr: str, base: datetime) -> datetime:
-    """Fallback for simple five-field cron expressions generated by v1 UI."""
-    parts = (expr or "").split()
-    if len(parts) != 5:
-        raise ValueError("croniter is required for complex cron expressions")
-    minute, hour, day_of_month, month, day_of_week = parts
-    if not minute.isdigit() or not hour.isdigit():
-        raise ValueError("croniter is required for non-numeric minute/hour cron expressions")
-    target = base.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
-    if target <= base:
-        target += timedelta(days=1)
-    for _ in range(366 * 5):
-        if (
-            _cron_field_matches(day_of_month, target.day)
-            and _cron_field_matches(month, target.month)
-            and _cron_weekday_matches(day_of_week, target)
-        ):
+    """Fallback evaluator for validated numeric five-field cron expressions."""
+    if not is_valid_cron_expression(expr):
+        raise ValueError(f"Invalid cron expression: {expr}")
+    target = base.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    for _ in range(366 * 5 * 24 * 60):
+        if _cron_matches_start(expr, target):
             return target
-        target += timedelta(days=1)
+        target += timedelta(minutes=1)
     raise ValueError("Unable to find the next fire time for cron expression")

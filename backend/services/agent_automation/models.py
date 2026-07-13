@@ -1,8 +1,9 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class StrEnum(str, Enum):
@@ -69,19 +70,36 @@ class ScheduleTrigger(BaseModel):
     interval_seconds: Optional[int] = Field(default=None, gt=0)
     max_fire_count: Optional[int] = Field(default=None, gt=0)
 
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except Exception as exc:
+            raise ValueError(f"Invalid timezone: {value}") from exc
+        return value
+
     @model_validator(mode="after")
     def validate_combination(self):
+        if self.end_at is not None and self.end_at <= self.start_at:
+            raise ValueError("end_at must be later than start_at")
         if self.mode == ScheduleMode.ONCE:
             if self.rule_type != ScheduleRuleType.AT:
                 raise ValueError("ONCE schedule only supports AT rule_type")
+            if self.cron_expr is not None or self.interval_seconds is not None:
+                raise ValueError("ONCE schedule cannot include cron_expr or interval_seconds")
             self.max_fire_count = 1
         elif self.mode == ScheduleMode.RECURRING:
             if self.rule_type == ScheduleRuleType.AT:
                 raise ValueError("RECURRING schedule does not support AT rule_type")
             if self.rule_type == ScheduleRuleType.CRON and not self.cron_expr:
                 raise ValueError("cron_expr is required for CRON schedules")
+            if self.rule_type == ScheduleRuleType.CRON and self.interval_seconds is not None:
+                raise ValueError("CRON schedule cannot include interval_seconds")
             if self.rule_type == ScheduleRuleType.INTERVAL and not self.interval_seconds:
                 raise ValueError("interval_seconds is required for INTERVAL schedules")
+            if self.rule_type == ScheduleRuleType.INTERVAL and self.cron_expr is not None:
+                raise ValueError("INTERVAL schedule cannot include cron_expr")
         return self
 
 

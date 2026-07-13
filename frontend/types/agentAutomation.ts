@@ -73,6 +73,8 @@ export interface AgentAutomationProposalData {
   proposal_id?: number | null;
   conversation_id?: number | null;
   confidence?: number;
+  intent_analysis_source?: "llm" | "rule";
+  task_content_source?: "llm" | "rule";
   executable?: boolean;
   task?: {
     title?: string;

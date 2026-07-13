@@ -232,20 +232,11 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
             },
         }
 
-    async def fake_generate_prompt(context):
-        captured["prompt_context"] = context
-        return "请使用最新智能体配置生成周报"
-
     async def fake_run_agent_background(agent_request, *args, **kwargs):
         captured["agent_request"] = agent_request
         return {"assistant_message_id": 456}
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(
-        runner_module.automation_prompt_generator,
-        "generate_execution_prompt",
-        fake_generate_prompt,
-    )
     monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda _: False)
     monkeypatch.setattr(
@@ -282,12 +273,7 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
     run = await runner_module.AgentAutomationRunner().execute_task(task)
 
     assert run["status"] == "SUCCEEDED"
-    context = captured["prompt_context"]
-    assert context.instruction == task["instruction"]
-    assert context.agent_snapshot["name"] == "最新周报智能体"
-    assert context.agent_snapshot["description"] == "使用最新配置生成管理周报"
-    assert context.agent_snapshot["model_id"] == 55
-    assert context.capability_bindings[0]["name"] == "latest-search"
+    assert captured["agent_request"].query == task["instruction"]
     assert captured["agent_request"].model_id == 55
     assert captured["agent_request"].tool_params == {"tools": {"search": {"top_k": 5}}}
 
@@ -301,19 +287,11 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     async def fake_validate_bindings_available(*args, **kwargs):
         return {"available": True, "unavailable_bindings": []}
 
-    async def fake_generate_prompt(context):
-        return "请生成本周周报"
-
     async def slow_run_agent_background(*args, **kwargs):
         await asyncio.sleep(1)
         return {"assistant_message_id": 456}
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(
-        runner_module.automation_prompt_generator,
-        "generate_execution_prompt",
-        fake_generate_prompt,
-    )
     monkeypatch.setattr(runner_module, "run_agent_background", slow_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda _: False)
     monkeypatch.setattr(
