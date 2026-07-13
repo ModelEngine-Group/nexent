@@ -1008,67 +1008,6 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 </Card>
               ),
             }] : []),
-            {
-              key: "openapi",
-              label: (
-                <span className="flex items-center gap-2">
-                  <Import size={16} />
-                  {t("mcpConfig.openApiToMcp.title")}
-                </span>
-              ),
-              children: (
-                <Card size="small" className="mt-2">
-                  <Space direction="vertical" className="w-full" size="small">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        placeholder={t("mcpConfig.openapiService.form.serviceNamePlaceholder")}
-                        value={openApiServiceName}
-                        onChange={(e) => setOpenApiServiceName(e.target.value)}
-                        disabled={actionsLocked || importingOpenApi}
-                        style={{ flex: 0.8 }}
-                        maxLength={20}
-                      />
-                      <Input
-                        placeholder={t("mcpConfig.openapiService.form.serverUrlPlaceholder")}
-                        value={openApiServerUrl}
-                        onChange={(e) => setOpenApiServerUrl(e.target.value)}
-                        disabled={actionsLocked || importingOpenApi}
-                        style={{ flex: 3 }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Input.TextArea
-                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
-                        value={openApiHeadersTemplate}
-                        onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
-                        rows={2}
-                        disabled={actionsLocked || importingOpenApi}
-                      />
-                      <Input.TextArea
-                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
-                        value={openApiJson}
-                        onChange={(e) => setOpenApiJson(e.target.value)}
-                        rows={6}
-                        disabled={actionsLocked || importingOpenApi}
-                      />
-                    </div>
-                    <div className="flex justify-end">
-                      <Button
-                        type="primary"
-                        onClick={onImportOpenApiService}
-                        loading={importingOpenApi || updatingTools}
-                        disabled={actionsLocked}
-                        icon={importingOpenApi || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
-                      >
-                        {updatingTools
-                          ? t("mcpConfig.openApiToMcp.button.adding")
-                          : t("mcpConfig.openApiToMcp.button.add")}
-                      </Button>
-                    </div>
-                  </Space>
-                </Card>
-              ),
-            },
           ]}
         />
       </Modal>

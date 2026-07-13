@@ -82,7 +82,6 @@ def get_agent_repository_by_id_and_publisher(
     with get_db_session() as session:
         record = session.query(AgentRepository).filter(
             AgentRepository.agent_repository_id == repository_id,
-            AgentRepository.publisher_tenant_id == publisher_tenant_id,
             AgentRepository.delete_flag != "Y",
         ).first()
         return as_dict(record) if record else None
@@ -201,7 +200,6 @@ def list_agent_repository_summaries(
             AgentRepository.downloads,
         ).filter(
             AgentRepository.delete_flag != "Y",
-            AgentRepository.publisher_tenant_id == publisher_tenant_id,
         )
         if status:
             query = query.filter(AgentRepository.status == status)

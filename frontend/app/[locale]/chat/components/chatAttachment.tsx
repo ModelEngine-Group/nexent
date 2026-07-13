@@ -1,25 +1,16 @@
 import { chatConfig } from "@/const/chatConfig";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   convertImageUrlToApiUrl,
   extractObjectNameFromUrl,
+  storageService,
 } from "@/services/storageService";
 import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { App } from "antd";
+import { Download } from "lucide-react";
 import { getFileExtension, getFileIcon } from "@/lib/chat/fileIconUtils";
-
-// Selected file state for preview drawer
-interface SelectedFileState {
-  objectName: string;
-  fileName: string;
-  fileType?: string;
-  fileSize?: number;
-  previewUrl?: string;
-  downloadUrl?: string;
-}
+import log from "@/lib/logger";
 
 // Format file size
 const formatFileSize = (size: number): string => {
@@ -33,48 +24,43 @@ export function ChatAttachment({
   onImageClick,
   className = "",
 }: ChatAttachmentProps) {
-  const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(
-    null
-  );
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
   if (!attachments || attachments.length === 0) return null;
 
-  //Handle file click
-  const handleFileClick = (attachment: AttachmentItem) => {
-    let objectName = attachment.object_name;
+  const handleDownload = async (attachment: AttachmentItem) => {
+    const objectName =
+      attachment.object_name ||
+      (attachment.url ? extractObjectNameFromUrl(attachment.url) : null);
+    const downloadUrl = attachment.download_url;
+    const fileName = attachment.name;
 
-    if (!objectName && attachment.url) {
-      objectName = extractObjectNameFromUrl(attachment.url) || undefined;
-    }
-
-    if (!objectName && !attachment.preview_url) {
-      message.warning(t("filePreview.previewFailed"));
-      return;
-    }
-
-    setSelectedFile({
-      objectName: objectName || "",
-      fileName: attachment.name,
-      fileType: attachment.contentType,
-      fileSize: attachment.size,
-      previewUrl: attachment.preview_url,
-      downloadUrl: attachment.download_url,
-    });
-
-    // Also call external callback if provided (for compatibility with images)
-    if (onImageClick && attachment.url) {
-      const extension = getFileExtension(attachment.name);
-      const isImage =
-        attachment.type === "image" ||
-        (attachment.contentType &&
-          attachment.contentType.startsWith("image/")) ||
-        chatConfig.imageExtensions.includes(extension);
-
-      if (isImage) {
-        onImageClick(attachment.url);
+    try {
+      if (downloadUrl) {
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = fileName;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => document.body.removeChild(link), 100);
+        return;
       }
+      if (!objectName) {
+        message.warning(t("filePreview.previewFailed"));
+        return;
+      }
+      await storageService.downloadFile(objectName, fileName);
+    } catch (err) {
+      log.error("Failed to download file:", err);
+      message.error(t("chatAttachment.downloadError"));
+    }
+  };
+
+  const handleImageClick = (attachment: AttachmentItem) => {
+    if (onImageClick && attachment.url) {
+      onImageClick(attachment.url);
     }
   };
 
@@ -91,17 +77,17 @@ export function ChatAttachment({
         return (
           <div
             key={`attachment-${index}`}
-            className="relative group rounded-md border border-slate-200 bg-white shadow-sm hover:shadow transition-all duration-200 w-[190px] mb-1 cursor-pointer"
-            onClick={() => {
-              if (attachment.url) {
-                handleFileClick(attachment);
-              }
-            }}
+            className="relative group rounded-md border border-slate-200 bg-white shadow-sm hover:shadow transition-all duration-200 w-[190px] mb-1"
           >
             <div className="relative p-2 h-[52px] flex items-center">
               {isImage ? (
                 <div className="flex items-center gap-3 w-full">
-                  <div className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => handleImageClick(attachment)}
+                    className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md block"
+                    aria-label={attachment.name}
+                  >
                     {attachment.url && (
                       <img
                         src={
@@ -113,7 +99,7 @@ export function ChatAttachment({
                         loading="lazy"
                       />
                     )}
-                  </div>
+                  </button>
                   <div className="flex-1 overflow-hidden">
                     <span
                       className="text-sm truncate block max-w-[110px] font-medium"
@@ -145,23 +131,21 @@ export function ChatAttachment({
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              aria-label={t("common.download")}
+              title={t("common.download")}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownload(attachment);
+              }}
+              className="absolute top-1.5 right-1.5 p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+            >
+              <Download size={14} />
+            </button>
           </div>
         );
       })}
-
-      {/* File preview drawer */}
-      {selectedFile && (
-        <FilePreviewDrawer
-          open={!!selectedFile}
-          objectName={selectedFile.objectName}
-          fileName={selectedFile.fileName}
-          fileType={selectedFile.fileType}
-          fileSize={selectedFile.fileSize}
-          previewUrl={selectedFile.previewUrl}
-          downloadUrl={selectedFile.downloadUrl}
-          onClose={() => setSelectedFile(null)}
-        />
-      )}
     </div>
   );
 }

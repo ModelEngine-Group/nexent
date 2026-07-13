@@ -48,6 +48,7 @@ import {
   createUserToken,
 } from "@/services/tokenService";
 import { ErrorCode } from "@/const/errorCode";
+import { oauthService } from "@/services/oauthService";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -94,6 +95,29 @@ export default function UserProfileComp() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // When SSO is enabled and the provider exposes a change-password URL,
+  // the in-app password modal is bypassed and the user is redirected
+  // to the OAuth provider's account/password page.
+  const [ssoChangePasswordUrl, setSsoChangePasswordUrl] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    oauthService
+      .getSSOConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        if (cfg?.sso_enabled && cfg.change_password_url) {
+          setSsoChangePasswordUrl(cfg.change_password_url);
+        }
+      })
+      .catch((err) => {
+        log.error("Failed to load SSO config for change-password redirect:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Password strength state for change password modal
   const [newPasswordValue, setNewPasswordValue] = useState("");
@@ -363,7 +387,13 @@ export default function UserProfileComp() {
 
                 <div
                   className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
-                  onClick={() => setIsPasswordModalOpen(true)}
+                  onClick={() => {
+                    if (ssoChangePasswordUrl) {
+                      window.location.href = ssoChangePasswordUrl;
+                      return;
+                    }
+                    setIsPasswordModalOpen(true);
+                  }}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center">

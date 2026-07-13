@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Button } from "antd";
 import { GithubOutlined } from "@ant-design/icons";
@@ -9,6 +10,8 @@ import Image from "next/image";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { oauthService } from "@/services/oauthService";
+import log from "@/lib/logger";
 
 /**
  * Authentication dialogs component
@@ -30,6 +33,40 @@ export function AuthDialogs() {
     isAuthzPromptModalOpen,
     closeAuthzPromptModal,
   } = useAuthorizationContext();
+
+  // Mirror the top-left login button behavior: when SSO is enabled, the
+  // "Login Now" action redirects to the OAuth provider instead of opening
+  // the local login modal.
+  const [ssoConfig, setSsoConfig] = useState<{
+    sso_enabled: boolean;
+    sso_provider: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    oauthService
+      .getSSOConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        setSsoConfig(cfg);
+      })
+      .catch((err) => {
+        log.error("Failed to fetch SSO config for session-expired modal:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSessionExpiredLogin = () => {
+    closeSessionExpiredModal();
+    if (ssoConfig?.sso_enabled) {
+      const provider = ssoConfig.sso_provider || "default";
+      oauthService.startOAuthLogin(provider);
+      return;
+    }
+    openLoginModal();
+  };
 
   return (
     <>
@@ -68,10 +105,16 @@ export function AuthDialogs() {
 
           {/* Action buttons */}
           <div className="flex flex-col gap-3 mb-6">
-            {/* Login button */}
+            {/* Login button — mirrors the top-left login button behavior:
+                SSO enabled → redirect to OAuth provider; otherwise open login modal */}
             <Button
               onClick={() => {
                 closeAuthPromptModal();
+                if (ssoConfig?.sso_enabled) {
+                  const provider = ssoConfig.sso_provider || "default";
+                  oauthService.startOAuthLogin(provider);
+                  return;
+                }
                 openLoginModal();
               }}
               className="w-full h-12 rounded-lg font-medium flex items-center justify-center gap-2 shadow-sm"
@@ -110,10 +153,7 @@ export function AuthDialogs() {
       <Modal
         title={t("login.expired.title")}
         open={isSessionExpiredModalOpen}
-        onOk={() => {
-          closeSessionExpiredModal();
-          openLoginModal();
-        }}
+        onOk={handleSessionExpiredLogin}
         onCancel={closeSessionExpiredModal}
         okText={t("login.expired.okText")}
         cancelText={t("login.expired.cancelText")}

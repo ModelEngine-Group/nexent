@@ -2661,6 +2661,7 @@
   "common.back": "Back",
   "common.edit": "Edit",
   "common.preview": "Preview",
+  "common.download": "Download",
   "common.fullscreen": "Fullscreen",
   "common.delete": "Delete",
   "common.pagination.total": "Total {{total}} items",

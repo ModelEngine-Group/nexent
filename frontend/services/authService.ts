@@ -15,6 +15,7 @@ import { ASSET_OWNER_TENANT_ID, STATUS_CODES, USER_ROLES } from "@/const/auth";
 import { generateAvatarUrl } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/auth";
 import { authFlowState } from "@/lib/authFlow";
+import { authEventUtils } from "@/lib/authEvents";
 import {
   removeSessionFromStorage,
   getSessionFromStorage,
@@ -283,9 +284,11 @@ export const authService = {
       // server.js clears HttpOnly cookies; clear local user info
       removeSessionFromStorage();
       if (casLogoutUrl && typeof window !== "undefined") {
+        authEventUtils.emitPostLogout();
         window.location.href = casLogoutUrl;
       } else {
         authFlowState.endExplicitLogout();
+        authEventUtils.emitPostLogout();
       }
 
       return { error: null };

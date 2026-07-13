@@ -69,7 +69,7 @@ class ContextManagerConfig:
     max_observation_length: int = 0
 
     # === NEW: Strategy Selection ===
-    strategy: StrategyType = "token_budget"
+    strategy: StrategyType = "full"
     """Context component selection strategy.
     
     Options:

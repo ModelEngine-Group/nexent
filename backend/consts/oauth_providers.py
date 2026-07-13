@@ -116,9 +116,9 @@ KEYCLOAK_PROVIDER = OAuthProviderDefinition(
     name="keycloak",
     display_name="Keycloak",
     icon="keycloak",
-    authorize_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/auth",
+    authorize_url=f"{KEYCLOAK_URL}/auth/realms/{KEYCLOAK_REALM}/protocol/openid-connect/auth",
     authorize_params={"response_type": "code", "scope": "openid email profile"},
-    token_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token",
+    token_url=f"{KEYCLOAK_URL}/auth/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token",
     token_params_map={
         "client_id": "client_id",
         "client_secret": "client_secret",
@@ -129,7 +129,7 @@ KEYCLOAK_PROVIDER = OAuthProviderDefinition(
     token_error_key="error",
     token_error_message_key="error_description",
     token_content_type="application/x-www-form-urlencoded",
-    userinfo_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
+    userinfo_url=f"{KEYCLOAK_URL}/auth/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
     userinfo_field_map={
         "id": "email",
         "email": "email",
@@ -137,6 +137,7 @@ KEYCLOAK_PROVIDER = OAuthProviderDefinition(
     },
     client_id_env="KEYCLOAK_OAUTH_CLIENT_ID",
     client_secret_env="KEYCLOAK_OAUTH_CLIENT_SECRET",
+    change_password_url_env="KEYCLOAK_CHANGE_PASSWORD_URL",
 )
 
 OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
@@ -167,3 +168,15 @@ def is_provider_enabled(definition: OAuthProviderDefinition) -> bool:
 
 def get_all_provider_definitions() -> Dict[str, OAuthProviderDefinition]:
     return dict(OAUTH_PROVIDER_REGISTRY)
+
+
+def get_provider_change_password_url(provider: str) -> str:
+    """Resolve the configured change-password URL for a provider, if any."""
+    try:
+        definition = get_provider_definition(provider)
+    except KeyError:
+        return ""
+    env_var = definition.change_password_url_env
+    if not env_var:
+        return ""
+    return os.getenv(env_var, "") or ""

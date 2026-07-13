@@ -112,6 +112,7 @@ class OAuthProviderDefinition(BaseModel):
     client_id_env: str
     client_secret_env: str
     enabled_check: Optional[str] = None
+    change_password_url_env: Optional[str] = None
 
 
 # Response models for model management

@@ -63,6 +63,7 @@ export const authEventUtils = {
   emitLoginSuccess: () => authEvents.emit(AUTH_EVENTS.LOGIN_SUCCESS),
   emitRegisterSuccess: () => authEvents.emit(AUTH_EVENTS.REGISTER_SUCCESS),
   emitLogout: () => authEvents.emit(AUTH_EVENTS.LOGOUT),
+  emitPostLogout: () => authEvents.emit(AUTH_EVENTS.POST_LOGOUT),
   emitSessionExpired: () => authEvents.emit(AUTH_EVENTS.SESSION_EXPIRED),
   emitTokenRefreshed: () => authEvents.emit(AUTH_EVENTS.TOKEN_REFRESHED),
   emitServiceUnavailable: () =>

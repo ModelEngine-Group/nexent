@@ -198,7 +198,7 @@ export const oauthService = {
     }
   },
 
-  getSSOConfig: async (): Promise<{ sso_enabled: boolean; sso_provider: string } | null> => {
+  getSSOConfig: async (): Promise<{ sso_enabled: boolean; sso_provider: string; change_password_url: string } | null> => {
     try {
       const response = await fetch(API_ENDPOINTS.oauth.ssoConfig);
       if (!response.ok) {

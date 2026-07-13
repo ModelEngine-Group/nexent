@@ -2636,6 +2636,7 @@
   "common.back": "返回",
   "common.edit": "编辑",
   "common.preview": "预览",
+  "common.download": "下载",
   "common.fullscreen": "全屏",
   "common.delete": "删除",
   "common.pagination.total": "共 {{total}} 条",

@@ -22,6 +22,8 @@ from consts.exceptions import (
 )
 from consts.error_code import ErrorCode
 from services.cas_service import build_logout_url, CasAuthenticationError
+from services.keycloak_service import terminate_keycloak_sessions_by_user_id
+from services.maxkb_service import force_logout_maxkb_user
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
@@ -154,10 +156,16 @@ async def logout(request: Request):
     """User logout"""
     authorization = request.headers.get("Authorization")
     try:
-        # Make logout idempotent: if no token or token expired, still return success
         session_id = None
         cas_logout_url = ""
+        user_id = None
         if authorization:
+            # Resolve user_id for Keycloak logout before any side effects.
+            try:
+                user_id, _ = get_current_user_id(authorization)
+            except Exception:
+                pass
+
             session_id = extract_session_id_from_authorization(authorization)
             if session_id:
                 from database.cas_session_db import revoke_cas_session_by_session_id
@@ -174,6 +182,26 @@ async def logout(request: Request):
                 # Ignore sign out errors to keep logout idempotent
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
+
+        # Keycloak SSO session termination (best-effort, non-blocking).
+        if user_id:
+            try:
+                terminate_keycloak_sessions_by_user_id(user_id)
+            except Exception as kc_err:
+                logging.warning(f"Keycloak logout failed: {str(kc_err)}")
+
+        # MaxKB admin force-logout (best-effort, non-blocking).
+        # MaxKB expects the user's email in the "username" field.
+        if user_id:
+
+            try:
+                user_tenant = get_user_tenant_by_user_id(user_id)
+                user_email = user_tenant.get("user_email") if user_tenant else None
+                if user_email:
+                    force_logout_maxkb_user(user_email)
+            except Exception as maxkb_err:
+                logging.warning(f"MaxKB logout failed: {str(maxkb_err)}")
+
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={
                                 "message": "Logout successful",

@@ -9,7 +9,10 @@ from pydantic import ValidationError as PydanticValidationError
 
 from consts.model import OAuthCompleteRequest
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
-from consts.oauth_providers import get_all_provider_definitions
+from consts.oauth_providers import (
+    get_all_provider_definitions,
+    get_provider_change_password_url,
+)
 from consts.const import SSO_ENABLED, SSO_PROVIDER, WORKFLOW_ENABLED, WORKFLOW_URL
 from database.oauth_account_db import get_oauth_account_by_provider
 from services.oauth_service import (
@@ -365,6 +368,10 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
 @router.get("/sso/config")
 async def get_sso_config():
     """Get SSO configuration - whether SSO is enabled and which provider."""
+    change_password_url = (
+        get_provider_change_password_url(SSO_PROVIDER) if SSO_ENABLED else ""
+    )
+
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={
@@ -372,6 +379,7 @@ async def get_sso_config():
             "data": {
                 "sso_enabled": SSO_ENABLED,
                 "sso_provider": SSO_PROVIDER if SSO_ENABLED else None,
+                "change_password_url": change_password_url,
             },
         },
     )

@@ -47,6 +47,7 @@ export const AUTH_EVENTS = {
   LOGIN_SUCCESS: "auth:login-success",
   REGISTER_SUCCESS: "auth:register-success",
   LOGOUT: "auth:logout",
+  POST_LOGOUT: "auth:post-logout", // Emitted after logout completes, before redirect
   SESSION_EXPIRED: "auth:session-expired", // Deprecated: this is an authorization event; prefer AUTHZ_EVENTS.PERMISSION_DENIED.
   TOKEN_REFRESHED: "auth:token-refreshed",
   SERVICE_UNAVAILABLE: "auth:service-unavailable",

@@ -92,6 +92,21 @@ OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 # Keycloak OAuth Configuration
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "")
+KEYCLOAK_CHANGE_PASSWORD_URL = os.getenv("KEYCLOAK_CHANGE_PASSWORD_URL", "")
+# Keycloak Admin API credentials for backend session management.
+# Used to terminate Keycloak sessions on user logout via Admin REST API.
+KEYCLOAK_ADMIN_CLIENT_ID = os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", "")
+KEYCLOAK_ADMIN_USERNAME = os.getenv("KEYCLOAK_ADMIN_USERNAME", "")
+KEYCLOAK_ADMIN_PASSWORD = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "")
+
+# MaxKB force-logout integration.
+# When MAXKB_LOGOUT_URL is set, the /user/logout endpoint will additionally
+# call MaxKB's admin force-logout API to terminate the user's MaxKB session.
+# MAXKB_SYSTEM_API_KEY is the system API key (Bearer token) required by the
+# MaxKB admin endpoint.
+MAXKB_LOGOUT_URL = os.getenv("MAXKB_LOGOUT_URL", "").rstrip("/")
+MAXKB_SYSTEM_API_KEY = os.getenv("MAXKB_SYSTEM_API_KEY", "")
+MAXKB_LOGOUT_TIMEOUT_S = int(os.getenv("MAXKB_LOGOUT_TIMEOUT_S", "10") or 10)
 
 # SSO Auto-Login Configuration (for third-party OAuth providers like GDE)
 SSO_ENABLED = os.getenv("SSO_ENABLED", "false").lower() == "true"
@@ -190,10 +205,10 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv(
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")
 IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
-DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
-DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
-DEFAULT_APP_NAME_ZH = "Nexent 智能体"
-DEFAULT_APP_NAME_EN = "Nexent Agent"
+DEFAULT_APP_DESCRIPTION_ZH = "灵犀是一个智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
+DEFAULT_APP_DESCRIPTION_EN = "Lingxi is an agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
+DEFAULT_APP_NAME_ZH = "灵犀智能体"
+DEFAULT_APP_NAME_EN = "Lingxi Agent"
 
 # Minio Configuration
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")

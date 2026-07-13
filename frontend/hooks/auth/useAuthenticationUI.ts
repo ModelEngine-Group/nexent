@@ -168,6 +168,10 @@ export function useAuthenticationUI({
       setRegisterModalOptions(null);
     };
 
+    const handlePostLogout = () => {
+      openAuthPromptModal();
+    };
+
     const cleanup = authEvents.on(
       AUTH_EVENTS.SESSION_EXPIRED,
       handleSessionExpired
@@ -176,10 +180,15 @@ export function useAuthenticationUI({
       AUTH_EVENTS.REGISTER_SUCCESS,
       handleRegisterSuccess
     );
+    const cleanupPostLogout = authEvents.on(
+      AUTH_EVENTS.POST_LOGOUT,
+      handlePostLogout
+    );
 
     return () => {
       cleanup();
       cleanupRegister();
+      cleanupPostLogout();
     };
   }, [
     effectivePath,
@@ -188,6 +197,7 @@ export function useAuthenticationUI({
     redirectToCasIfForced,
     isLoginModalOpen,
     isRegisterModalOpen,
+    openAuthPromptModal,
   ]);
 
   // Auto-open login modal when returning from a failed OAuth redirect
@@ -249,7 +259,6 @@ export function useAuthenticationUI({
     }
 
     openAuthPromptModal();
-  }, [pathname, isAuthenticated, isSpeedMode, isAuthChecking, isSessionExpiredModalOpen, openAuthPromptModal, isOAuthCompletePage, ssoConfig]);
 
     redirectToCasIfForced(effectivePath).then((redirected) => {
       if (!cancelled && !redirected) {
@@ -271,6 +280,8 @@ export function useAuthenticationUI({
     isOAuthCompletePage,
     isSharePage,
     redirectToCasIfForced,
+    ssoConfig,
+    openAuthPromptModal,
   ]);
 
   return {

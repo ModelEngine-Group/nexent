@@ -19,7 +19,6 @@ import {
   CircleOff,
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 
 import {
   UI_CONFIG,
@@ -35,7 +34,10 @@ import {
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
-import { extractObjectNameFromUrl } from "@/services/storageService";
+import {
+  extractObjectNameFromUrl,
+  storageService,
+} from "@/services/storageService";
 import { Document } from "@/types/knowledgeBase";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
@@ -178,14 +180,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       label: group.group_name,
       value: group.group_id,
     }));
-
-    // Preview drawer state
-    const [selectedFile, setSelectedFile] = useState<{
-      objectName: string;
-      fileName: string;
-      fileType?: string;
-      fileSize?: number;
-    } | null>(null);
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -1027,27 +1021,31 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         <td className={LAYOUT.CELL_PADDING}>
                           <div className="flex gap-2">
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 const objectName =
                                   extractObjectNameFromUrl(doc.id) || undefined;
                                 if (!objectName) {
                                   message.warning(
-                                    t("filePreview.previewFailed")
+                                    t("chatAttachment.downloadError")
                                   );
                                   return;
                                 }
-
-                                setSelectedFile({
-                                  objectName,
-                                  fileName: doc.name,
-                                  fileType: doc.type,
-                                  fileSize: doc.size,
-                                });
+                                try {
+                                  await storageService.downloadFile(
+                                    objectName,
+                                    doc.name
+                                  );
+                                } catch (err) {
+                                  log.error("Failed to download file:", err);
+                                  message.error(
+                                    t("chatAttachment.downloadError")
+                                  );
+                                }
                               }}
                               className={LAYOUT.ACTION_TEXT}
-                              title={t("common.preview")}
+                              title={t("common.download")}
                             >
-                              {t("common.preview")}
+                              {t("common.download")}
                             </button>
                             <button
                               onClick={() => onDelete(doc.id)}
@@ -1110,18 +1108,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             />
           ))}
 
-        {/* File preview drawer */}
-        {selectedFile && (
-          <FilePreviewDrawer
-            open={!!selectedFile}
-            objectName={selectedFile.objectName}
-            fileName={selectedFile.fileName}
-            fileType={selectedFile.fileType}
-            fileSize={selectedFile.fileSize}
-            previewContext="knowledgeBase"
-            onClose={() => setSelectedFile(null)}
-          />
-        )}
+
       </div>
     );
   }
