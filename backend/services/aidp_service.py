@@ -590,8 +590,11 @@ def upload_aidp_docs_impl(
             timeout=120.0,
             verify_ssl=False,
         )
+        # httpx files= expects: [(field_name, (filename, file_obj, content_type)), ...]
+        # Previously incorrectly passed [(filename, file_obj, content_type), ...]
+        # which caused "too many values to unpack (expected 2)" at httpx level.
         file_tuples = [
-            (f.filename, f.file, f.content_type or "application/octet-stream")
+            ("files", (f.filename, f.file, f.content_type or "application/octet-stream"))
             for f in files
         ]
         response = client.post(upload_url, headers=headers, files=file_tuples)

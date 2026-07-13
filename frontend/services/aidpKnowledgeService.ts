@@ -244,9 +244,14 @@ class AidpKnowledgeService {
       formData.append("files", file);
     }
 
+    // Strip Content-Type from getAuthHeaders(): when body is FormData,
+    // the browser must set "multipart/form-data; boundary=..." itself.
+    // getAuthHeaders() hardcodes "application/json" which breaks multipart parsing.
+    const { "Content-Type": _ignored, ...restHeaders } = getAuthHeaders() as Record<string, string>;
+
     const response = await fetch(url, {
       method: "POST",
-      headers: getAuthHeaders(),
+      headers: restHeaders,
       body: formData,
     });
 
