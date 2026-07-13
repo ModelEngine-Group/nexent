@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Spin } from "antd";
 import { ChevronLeft, ChevronRight, Plus, Search, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { deleteAgent } from "@/services/agentConfigService";
 import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
@@ -81,6 +83,7 @@ export function MineAgentsView({
 }: MineAgentsViewProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useParams<{ locale: string }>();
@@ -103,6 +106,9 @@ export function MineAgentsView({
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
+  const deleteAgentMutation = useMutation({
+    mutationFn: (agentId: number) => deleteAgent(agentId),
+  });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -133,7 +139,38 @@ export function MineAgentsView({
     if (permission === "READ_ONLY") {
       return;
     }
-    router.push(`/${locale}/agents?agent_id=${agentId}`);
+    router.push(
+      `/${locale}/agents?agent_id=${agentId}&from=agent-space&tab=mine`
+    );
+  };
+
+  const handleDeleteAgent = (agent: MyEditableAgentItem) => {
+    const name = agent.name?.trim() || t("agentRepository.card.untitled");
+    confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", { name }),
+      onOk: async () => {
+        try {
+          const result = await deleteAgentMutation.mutateAsync(agent.agent_id);
+          if (!result.success) {
+            throw new Error(result.message || "delete failed");
+          }
+          message.success(
+            t("businessLogic.config.error.agentDeleteSuccess", { name })
+          );
+          await Promise.all([
+            invalidateAgentRepositoryCaches(queryClient),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
+          ]);
+        } catch (error) {
+          log.error("Failed to delete agent:", error);
+          message.error(t("businessLogic.config.error.agentDeleteFailed"));
+          throw error;
+        }
+      },
+    });
   };
 
   const handleEvaluate = (agent: MyEditableAgentItem) => {
@@ -361,10 +398,15 @@ export function MineAgentsView({
                     }
                     onApplyListing={() => handleApplyListing(agent)}
                     onViewReview={(mode) => handleViewReview(agent, mode)}
+                    onDelete={() => handleDeleteAgent(agent)}
                     onEvaluate={() => handleEvaluate(agent)}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending
+                    }
+                    isDeleting={
+                      deleteAgentMutation.isPending &&
+                      deleteAgentMutation.variables === agent.agent_id
                     }
                   />
                 </div>

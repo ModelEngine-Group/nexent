@@ -3,6 +3,7 @@ import logging
 from apps.app_factory import create_app
 from apps.agent_app import agent_config_router as agent_router
 from apps.agent_repository_app import agent_repository_router
+from apps.skill_repository_app import skill_repository_router
 from apps.config_sync_app import router as config_sync_router
 from apps.datamate_app import router as datamate_router
 from apps.vectordatabase_app import router as vectordatabase_router
@@ -61,6 +62,7 @@ app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)
 app.include_router(agent_repository_router)
+app.include_router(skill_repository_router)
 app.include_router(vectordatabase_router)
 app.include_router(datamate_router)
 app.include_router(voice_router)
