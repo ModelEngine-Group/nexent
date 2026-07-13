@@ -1,5 +1,11 @@
 replicaCount: 1
 
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
 images:
   web:
     repository: nexent/nexent-web
@@ -17,6 +23,9 @@ resources:
 
 config:
   marketBackend: "http://60.204.251.153:8010"
+  proxyTimeoutMs: "600000"
+  proxyWsTimeoutMs: "600000"
+  sseProxyTimeoutMs: "600000"
   modelEngine:
     enabled: "false"
 

@@ -9,6 +9,8 @@ metadata:
     "helm.sh/hook-weight": "20"
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+{{ toYaml .Values.strategy | indent 4 }}
   selector:
     matchLabels:
       app: nexent-web
@@ -42,6 +44,12 @@ spec:
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: MARKET_BACKEND
               value: {{ .Values.config.marketBackend | quote }}
+            - name: PROXY_TIMEOUT_MS
+              value: {{ .Values.config.proxyTimeoutMs | quote }}
+            - name: PROXY_WS_TIMEOUT_MS
+              value: {{ .Values.config.proxyWsTimeoutMs | quote }}
+            - name: SSE_PROXY_TIMEOUT_MS
+              value: {{ .Values.config.sseProxyTimeoutMs | quote }}
             - name: MODEL_ENGINE_ENABLED
               value: {{ .Values.config.modelEngine.enabled | quote }}
           resources:
