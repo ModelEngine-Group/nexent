@@ -13,7 +13,7 @@ platform string → adapter class mapping is maintained by ExternalKBAdapterRegi
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 logger = logging.getLogger("platform_adapters")
 
@@ -110,7 +110,11 @@ class EmbeddingModelConfig:
 
 @dataclass
 class KnowledgeBaseInfo:
-    id: str = ""
+    # V4 standard field name — see 外部知识库适配器标准接口设计方案.md §3.3.3.
+    # Using `knowledge_base_id` (not `id`) matches what the HTTP response of
+    # `GET /knowledge-bases/{knowledge_base_id}` specifies and what
+    # `frontend/types/unifiedKB.ts` expects (`UnifiedKnowledgeBase.knowledge_base_id`).
+    knowledge_base_id: str = ""
     name: str = ""
     description: str = ""
     embedding_model: str = ""
@@ -237,7 +241,14 @@ class ExternalKBAdapter(ABC):
     @abstractmethod
     def list_knowledge_bases(
         self, keyword: Optional[str] = None, page: int = 1, page_size: int = 50
-    ) -> List[KnowledgeBaseInfo]:
+    ) -> Tuple[int, List["KnowledgeBaseInfo"]]:
+        """List knowledge bases with total count for pagination.
+
+        Returns:
+            A tuple of (total_count, page_items) where total_count is the total
+            number of KBs matching the query (before pagination) and page_items
+            is the sliced list for the current page.
+        """
         ...
 
     @abstractmethod
@@ -341,6 +352,40 @@ def _normalize_doc_status(status: Any) -> str:
     return _DOC_STATUS_MAP.get(str(status or "").lower(), "indexing")
 
 
+def _format_es_create_time(value: Any) -> str:
+    """Format an ES ``create_time`` value into an ISO 8601 string.
+
+    ES may return ``create_time`` in a number of shapes depending on what the
+    indexer stored: ISO string, Unix epoch in seconds (``int``/``float``),
+    Unix epoch in milliseconds (common ES timestamp format), a ``datetime``
+    object (when already parsed), or ``None``. A naive ``str(value)`` on a
+    Unix epoch produces a raw digit string the frontend parses as millisecond
+    epoch → displays "1970". Detect numeric values and convert explicitly.
+
+    Returns an ISO 8601 string or ``""`` when the value is absent or invalid.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        # Heuristic: values > 1e12 are almost certainly milliseconds (year > 2001)
+        # Values in seconds for years 2001-2400 are in range [1e9, 1.4e10].
+        if ts > 1e12:
+            ts = ts / 1000.0
+        try:
+            import datetime as _dt
+            return _dt.datetime.fromtimestamp(ts).isoformat()
+        except (ValueError, OSError, OverflowError):
+            return ""
+    # If it's already a string or datetime, pass through via str().
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            return ""
+    return str(value)
+
+
 # ---------------------------------------------------------------------------
 # LocalKBAdapter — nexent's own Elasticsearch-based knowledge base
 # ---------------------------------------------------------------------------
@@ -390,16 +435,66 @@ class LocalKBAdapter(ExternalKBAdapter):
     def _get_vdb_core(self):
         if self.vdb_core:
             return self.vdb_core
-        from ...vector_database.elasticsearch_core import ElasticSearchCore
-        es_host = self._extra.get("es_host") or self._url
+
+        es_host_from_config = self._extra.get("es_host") or self._url
         es_api_key = self._extra.get("es_api_key") or self._api_key
         verify_certs = self._extra.get("es_verify_certs", False)
+
+        # LocalKBAdapter has an empty external_kb_config (no URL/key).
+        # Fall back to the system-wide ES client built from consts.const,
+        # which is already wired up and tested by the rest of the platform.
+        if not es_host_from_config:
+            try:
+                from services.vectordatabase_service import get_vector_db_core
+                self.vdb_core = get_vector_db_core()
+                return self.vdb_core
+            except Exception as exc:
+                logger.debug("System VDB core unavailable, cannot build ES client: %s", exc)
+                raise RuntimeError(
+                    "LocalKBAdapter has no ES URL configured via external_kb_config, "
+                    "and the system-wide VDB core could not be loaded."
+                ) from exc
+
+        from ...vector_database.elasticsearch_core import ElasticSearchCore
         self.vdb_core = ElasticSearchCore(
-            host=es_host,
+            host=es_host_from_config,
             api_key=es_api_key,
             verify_certs=verify_certs,
         )
         return self.vdb_core
+
+    def _coerce_to_index_name(self, kb_id: str) -> str:
+        """Resolve a ``kb_id`` to the real ES ``index_name`` used by this adapter.
+
+        The local adapter's KB identifiers flowing over the unified API are
+        numeric ``knowledge_record_t.knowledge_id`` values (e.g. ``"15"``).
+        The actual Elasticsearch index is named with a UUID suffix
+        (``"15-992b7c6bac0f485ca7c1c16c36efe3b5"``) and is looked up from
+        the ``knowledge_record_t`` row via the module-level
+        ``_resolve_index_name`` helper.
+
+        This is a LocalKBAdapter-internal concern. Other adapter
+        implementations (Dify, AIDP, ...) use their own native KB identifiers
+        and do not need — and MUST NOT reuse — this mapping. Resolution is
+        therefore kept strictly inside the local adapter's method bodies
+        rather than in the shared service layer.
+
+        When resolution fails (PG unavailable, kb_id not numeric, or tenant
+        mismatch), logs at ERROR level so the data bug is visible but still
+        returns ``kb_id`` itself — the downstream ES call will fail with a
+        clear "no such index" error, which is more useful than silently
+        returning the wrong data.
+        """
+        index_name = _resolve_index_name(str(kb_id), self._tenant_id)
+        if index_name:
+            return index_name
+        logger.error(
+            "LocalKBAdapter: cannot resolve kb_id=%r to ES index_name for "
+            "tenant=%r; using raw kb_id (downstream ES call will likely "
+            "fail with 'no such index')",
+            kb_id, self._tenant_id,
+        )
+        return str(kb_id)
 
     def health_check(self) -> Dict[str, Any]:
         try:
@@ -437,27 +532,80 @@ class LocalKBAdapter(ExternalKBAdapter):
             from database.knowledge_db import get_knowledge_info_by_tenant_id
             rows = get_knowledge_info_by_tenant_id(self._tenant_id)
             results: List[KnowledgeBaseInfo] = []
+
+            # Build a cache of ES-derived counts keyed by index_name.
+            # knowledge_record_t has no document_count/chunk_count columns, so
+            # we compute them per-KB by aggregating ES chunks via
+            # get_documents_detail. This also surfaces legacy (pre-V4) data
+            # that lives only in ES and is not backfilled into
+            # kb_document_record_t.
+            es_stats_cache: Dict[str, Dict[str, int]] = {}
+            try:
+                core = self._get_vdb_core()
+            except Exception as exc:
+                logger.debug("Cannot build ES core for KB list stats: %s", exc)
+                core = None
+
+            def _es_stats(row: Dict[str, Any]) -> Dict[str, int]:
+                if core is None:
+                    return {"document_count": 0, "chunk_count": 0}
+                index_name = row.get("index_name") or ""
+                if not index_name:
+                    return {"document_count": 0, "chunk_count": 0}
+                if index_name in es_stats_cache:
+                    return es_stats_cache[index_name]
+                try:
+                    files = core.get_documents_detail(index_name)
+                    doc_count = len(files)
+                    chunk_count = sum(f.get("chunk_count", 0) or 0 for f in files)
+                except Exception as exc:
+                    logger.debug(
+                        "ES stats unavailable for index %s: %s", index_name, exc
+                    )
+                    doc_count = chunk_count = 0
+                stats = {"document_count": doc_count, "chunk_count": chunk_count}
+                es_stats_cache[index_name] = stats
+                return stats
+
             for row in rows:
                 name = row.get("knowledge_name") or row.get("knowledge_id", "")
                 kb_name = str(name).lower()
                 kw = (keyword or "").lower()
                 if kw and kw not in kb_name:
                     continue
+
+                # Use ES-derived counts as the authoritative source. Fall back
+                # to any PG-provided value only if ES returned 0 (e.g. the
+                # index was just created and ES hasn't populated yet).
+                es_counts = _es_stats(row)
+                document_count = (
+                    es_counts["document_count"]
+                    or row.get("document_count", 0)
+                    or 0
+                )
+                chunk_count = (
+                    es_counts["chunk_count"]
+                    or row.get("chunk_count", 0)
+                    or 0
+                )
+
                 results.append(KnowledgeBaseInfo(
-                    id=str(row.get("knowledge_id")),
+                    knowledge_base_id=str(row.get("knowledge_id")),
                     name=str(name),
                     description=row.get("knowledge_describe", ""),
-                    document_count=row.get("document_count", 0) or 0,
-                    chunk_count=row.get("chunk_count", 0) or 0,
+                    document_count=document_count,
+                    chunk_count=chunk_count,
                     embedding_model=row.get("embedding_model_name", ""),
                     status="active",
-                    created_at=str(row.get("create_time", "")),
+                    created_at=_format_es_create_time(row.get("create_time")),
+                    updated_at=_format_es_create_time(row.get("update_time")),
                     metadata={
                         "index_name": row.get("index_name", ""),
                     },
                 ))
+            total = len(results)
             start = (page - 1) * page_size
-            return results[start:start + page_size]
+            return (total, results[start:start + page_size])
         except Exception:
             logger.debug("PG unavailable; falling back to ES list_knowledge_bases")
 
@@ -477,18 +625,21 @@ class LocalKBAdapter(ExternalKBAdapter):
                 file_count = 0
 
             results.append(KnowledgeBaseInfo(
-                id=idx_name,
+                knowledge_base_id=idx_name,
                 name=idx_name,
                 description="",
                 document_count=file_count,
                 chunk_count=doc_count,
                 embedding_model="",
                 status="active",
+                created_at="",
+                updated_at="",
                 metadata={"index_name": idx_name},
             ))
 
+        total = len(results)
         start = (page - 1) * page_size
-        return results[start:start + page_size]
+        return (total, results[start:start + page_size])
 
     def get_knowledge_base(self, kb_id: str) -> KnowledgeBaseInfo:
         # Try PG-first (human-readable name)
@@ -500,13 +651,15 @@ class LocalKBAdapter(ExternalKBAdapter):
             })
             if kb_record:
                 return KnowledgeBaseInfo(
-                    id=kb_id,
+                    knowledge_base_id=kb_id,
                     name=kb_record.get("knowledge_name", ""),
                     description=kb_record.get("knowledge_describe", ""),
                     document_count=kb_record.get("document_count", 0) or 0,
                     chunk_count=kb_record.get("chunk_count", 0) or 0,
                     embedding_model=kb_record.get("embedding_model_name", ""),
                     status="active",
+                    created_at=_format_es_create_time(kb_record.get("create_time")),
+                    updated_at=_format_es_create_time(kb_record.get("update_time")),
                     metadata={
                         "index_name": kb_record.get("index_name", ""),
                         "is_multimodal": bool(kb_record.get("is_multimodal", False)),
@@ -515,24 +668,31 @@ class LocalKBAdapter(ExternalKBAdapter):
         except Exception:
             logger.debug("PG lookup failed for kb_id=%s; using ES fallback", kb_id)
 
-        # ES fallback
+        # ES fallback: resolve numeric kb_id to the real ES index_name.
+        # The unified API receives ``kb_id`` as a numeric ``knowledge_id``
+        # string (e.g. "15"); ES indices are ``"{knowledge_id}-{uuid}"``.
+        # Without this resolution the ES lookup would always return False.
         core = self._get_vdb_core()
-        exists = core.check_index_exists(kb_id)
+        index_name = self._coerce_to_index_name(kb_id)
+        exists = core.check_index_exists(index_name)
         if not exists:
-            raise ValueError(f"Index '{kb_id}' does not exist")
-        doc_count = core.count_documents(kb_id)
+            raise ValueError(f"Index '{index_name}' does not exist (kb_id={kb_id!r})")
+        doc_count = core.count_documents(index_name)
         try:
-            detail = core.get_documents_detail(kb_id)
+            detail = core.get_documents_detail(index_name)
             file_count = len(detail) if detail else 0
         except Exception:
             file_count = 0
         return KnowledgeBaseInfo(
-            id=kb_id,
-            name=kb_id,
+            knowledge_base_id=kb_id,
+            name=index_name,
             description="",
             document_count=file_count,
             chunk_count=doc_count,
             status="active",
+            created_at="",
+            updated_at="",
+            metadata={"index_name": index_name},
         )
 
     def search(self, request: SearchRequest) -> SearchResponse:
@@ -542,7 +702,15 @@ class LocalKBAdapter(ExternalKBAdapter):
         # V4 standard: "hybrid_search" / "semantic_search" / "keyword_search"
         # Local canonical: "hybrid" / "semantic" / "accurate"
         mode = _V4_TO_CANONICAL.get(request.search_mode, request.search_mode or "hybrid")
-        index_names = request.kb_ids if request.kb_ids else core.get_user_indices()
+        # The unified API receives numeric ``knowledge_id`` values (e.g. "15").
+        # ES indices are named with the UUID suffix (e.g. "15-992b7c6bac...").
+        # Resolve each ``kb_id`` to its real ``index_name`` before handing the
+        # list to the vector store. When the caller omits ``kb_ids`` we fall
+        # back to every index owned by the current tenant.
+        if request.kb_ids:
+            index_names = [self._coerce_to_index_name(kb_id) for kb_id in request.kb_ids]
+        else:
+            index_names = core.get_user_indices()
         if not index_names:
             return SearchResponse(results=[], query=request.query)
 
@@ -672,12 +840,15 @@ class LocalKBAdapter(ExternalKBAdapter):
 
         kb_id = str(result.get("knowledge_id") or "")
         resolved_embedding_model = result.get("embedding_model_name", "") or embedding_model
+        create_time_val = result.get("create_time") or result.get("update_time")
         return KnowledgeBaseInfo(
-            id=kb_id,
+            knowledge_base_id=kb_id,
             name=name,
             description=description,
             embedding_model=resolved_embedding_model,
             status="active",
+            created_at=_format_es_create_time(create_time_val),
+            updated_at=_format_es_create_time(create_time_val),
             metadata={"index_name": index_name},
         )
 
@@ -685,7 +856,7 @@ class LocalKBAdapter(ExternalKBAdapter):
         """Update knowledge base metadata (name, description, permissions)."""
         from services.vectordatabase_service import ElasticSearchService
 
-        index_name = _resolve_index_name(kb_id, self._tenant_id) or kb_id
+        index_name = self._coerce_to_index_name(kb_id)
 
         if name:
             ElasticSearchService.update_knowledge_base(
@@ -726,7 +897,7 @@ class LocalKBAdapter(ExternalKBAdapter):
         import asyncio
         from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 
-        index_name = _resolve_index_name(kb_id, self._tenant_id) or kb_id
+        index_name = self._coerce_to_index_name(kb_id)
         vdb_core = get_vector_db_core()
         user_id = self.config.get("user_id", "")
 
@@ -820,7 +991,16 @@ class LocalKBAdapter(ExternalKBAdapter):
         }
 
     def list_documents(self, kb_id: str, page: int = 1, page_size: int = 50) -> Dict[str, Any]:
-        """List documents using PG as source-of-truth, falling back to ES list_files."""
+        """List documents using PG as source-of-truth, falling back to ES list_files.
+
+        Two sources of truth may contain document info:
+          * PG: ``kb_document_record_t`` — authoritative for new (post-V4) uploads.
+          * ES: chunk-level aggregation via ``get_documents_detail`` — legacy data lives
+            here for KBs uploaded before ``kb_document_record_t`` was introduced.
+
+        Strategy: use PG when it returns any rows. When PG returns 0 rows (the table is
+        empty for pre-V4 data), fall through to ES using the resolved ``index_name``.
+        """
         # PG-primary path
         try:
             from database import document_db
@@ -833,63 +1013,88 @@ class LocalKBAdapter(ExternalKBAdapter):
             records = pg_result.get("records", [])
             total = pg_result.get("total", 0)
 
-            items = []
-            for doc in records:
-                filename = doc.get("filename", "")
-                ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
-                create_time = doc.get("create_time")
-                created_at_str = create_time.isoformat() if create_time else ""
-                items.append({
-                    "id": doc.get("document_uuid", ""),
-                    "name": filename,
-                    "status": _normalize_doc_status(doc.get("status", "waiting")),
-                    "chunk_count": doc.get("chunk_count", 0) or 0,
-                    "size": doc.get("file_size", 0) or 0,
-                    "created_at": created_at_str,
-                    "updated_at": "",
-                    "knowledge_base_id": kb_id,
-                    "type": ext,
-                    "token_count": 0,
-                    "error_message": doc.get("error_message"),
-                })
-            return {
-                "list": items,
-                "total": total,
-                "page": page,
-                "page_size": page_size,
-                "has_more": (page * page_size) < total,
-            }
+            if total > 0:
+                items = []
+                for doc in records:
+                    filename = doc.get("filename", "")
+                    ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+                    create_time = doc.get("create_time")
+                    created_at_str = create_time.isoformat() if create_time else ""
+                    items.append({
+                        "id": doc.get("document_uuid", ""),
+                        "name": filename,
+                        "status": _normalize_doc_status(doc.get("status", "waiting")),
+                        "chunk_count": doc.get("chunk_count", 0) or 0,
+                        "size": doc.get("file_size", 0) or 0,
+                        "created_at": created_at_str,
+                        "updated_at": "",
+                        "knowledge_base_id": kb_id,
+                        "type": ext,
+                        "token_count": 0,
+                        "error_message": doc.get("error_message"),
+                    })
+                return {
+                    "list": items,
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": (page * page_size) < total,
+                }
         except Exception as exc:
             logger.debug("PG list_documents failed for kb %s: %s; falling back to ES", kb_id, exc)
 
-        # ES fallback
+        # PG returned 0 rows (unbackfilled table for pre-V4 data) or raised —
+        # fall through to ES. Resolve numeric kb_id to the real index_name
+        # (e.g. "4" -> "4-6b47...") because ES indices are named by index_name.
+        index_name = self._coerce_to_index_name(kb_id)
+
         core = self._get_vdb_core()
-        result = core.get_index_chunks(kb_id, page=page, page_size=page_size)
-        chunks = result.get("chunks", [])
+        try:
+            file_records = core.get_documents_detail(index_name)
+        except Exception as exc:
+            logger.warning("ES get_documents_detail failed for %s: %s", index_name, exc)
+            # Index may not exist (empty KB) — return empty, not error.
+            return {
+                "list": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "has_more": False,
+            }
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        paged = file_records[start:end]
+
         items = []
-        for c in chunks:
-            filename = c.get("filename", "")
+        for file_rec in paged:
+            path_or_url = file_rec.get("path_or_url", "")
+            filename = file_rec.get("filename", "") or (
+                path_or_url.rsplit("/", 1)[-1] if path_or_url else ""
+            )
             ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+            created_at_str = _format_es_create_time(file_rec.get("create_time"))
             items.append({
-                "id": c.get("id", ""),
+                "id": _encode_doc_id(path_or_url),
                 "name": filename,
-                "content": (c.get("content", "") or "")[:200],
-                "status": "active",
-                "chunk_count": 0,
-                "size": 0,
-                "created_at": "",
+                "status": "completed",  # ES only has chunks for indexed docs
+                "chunk_count": file_rec.get("chunk_count", 0) or 0,
+                "size": file_rec.get("file_size", 0) or 0,
+                "created_at": created_at_str,
                 "updated_at": "",
                 "knowledge_base_id": kb_id,
                 "type": ext,
                 "token_count": 0,
                 "error_message": None,
             })
+
+        total = len(file_records)
         return {
             "list": items,
-            "total": result.get("total", 0),
+            "total": total,
             "page": page,
             "page_size": page_size,
-            "has_more": page * page_size < result.get("total", 0),
+            "has_more": end < total,
         }
 
     def delete_document(self, kb_id: str, doc_id: str) -> bool:
@@ -898,7 +1103,7 @@ class LocalKBAdapter(ExternalKBAdapter):
         from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 
         # Resolve internal index_name from kb_id
-        index_name = _resolve_index_name(kb_id, self._tenant_id) or kb_id
+        index_name = self._coerce_to_index_name(kb_id)
 
         # Resolve source_uri from doc_id
         source_uri: Optional[str] = None
@@ -977,6 +1182,13 @@ class LocalKBAdapter(ExternalKBAdapter):
                 file_size = pg_doc.get("file_size", 0) or 0
                 status = pg_doc.get("status", "indexing")
                 progress = 100 if status == "completed" else (0 if status == "waiting" else 50)
+                progress_msg_map = {
+                    "completed": "Completed",
+                    "indexing": "Indexing in progress...",
+                    "failed": "Failed",
+                    "paused": "Paused",
+                    "waiting": "Waiting...",
+                }
                 return {
                     "id": doc_id,
                     "name": filename,
@@ -987,10 +1199,10 @@ class LocalKBAdapter(ExternalKBAdapter):
                     "chunk_count": chunk_count,
                     "token_count": 0,
                     "progress": progress,
-                    "progress_msg": pg_doc.get("error_message") or "",
+                    "progress_msg": progress_msg_map.get(status, "Unknown"),
                     "created_at": created_at_str,
                     "updated_at": "",
-                    "error_message": pg_doc.get("error_message"),
+                    "error": pg_doc.get("error_message") if status == "failed" else None,
                 }
         except Exception:
             pass
@@ -999,7 +1211,7 @@ class LocalKBAdapter(ExternalKBAdapter):
         source_uri = _decode_doc_id(doc_id)
         if source_uri:
             try:
-                index_name = _resolve_index_name(kb_id, self._tenant_id) or kb_id
+                index_name = self._coerce_to_index_name(kb_id)
                 import asyncio
                 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
                 vdb_core = get_vector_db_core()
@@ -1036,6 +1248,13 @@ class LocalKBAdapter(ExternalKBAdapter):
                         status = _normalize_doc_status(f.get("status", "waiting"))
                         chunk_count = f.get("chunk_count", 0) or 0
                         progress = 100 if status == "completed" else (0 if status == "waiting" else 50)
+                        progress_msg_map = {
+                            "completed": "Completed",
+                            "indexing": "Indexing in progress...",
+                            "failed": "Failed",
+                            "paused": "Paused",
+                            "waiting": "Waiting...",
+                        }
                         return {
                             "id": doc_id,
                             "name": filename,
@@ -1046,10 +1265,10 @@ class LocalKBAdapter(ExternalKBAdapter):
                             "chunk_count": chunk_count,
                             "token_count": 0,
                             "progress": progress,
-                            "progress_msg": f.get("error_reason") or "",
+                            "progress_msg": progress_msg_map.get(status, "Unknown"),
                             "created_at": "",
                             "updated_at": "",
-                            "error_message": f.get("error_reason"),
+                            "error": f.get("error_reason") if status == "failed" else None,
                         }
             except Exception as exc:
                 logger.debug("ES fallback failed for doc status %s: %s", doc_id, exc)
@@ -1088,7 +1307,7 @@ class LocalKBAdapter(ExternalKBAdapter):
         from utils.auth_utils import generate_session_jwt
 
         # Resolve internal index_name
-        index_name = _resolve_index_name(kb_id, self._tenant_id) or kb_id
+        index_name = self._coerce_to_index_name(kb_id)
 
         # Accept either UploadFile objects or raw files list
         files = upload_files or file_paths or []
@@ -1181,14 +1400,14 @@ class LocalKBAdapter(ExternalKBAdapter):
         try:
             from database import document_db
             for path, name in zip(uploaded_paths, uploaded_names):
-                doc_row = document_db.create_document_record({
-                    "knowledge_id": int(kb_id),
-                    "source_uri": path,
-                    "filename": name,
-                    "status": "indexing",
-                    "file_size": 0,
-                    "user_id": user_id,
-                })
+                doc_row = document_db.create_document_record(
+                    knowledge_id=int(kb_id),
+                    tenant_id=self._tenant_id,
+                    source_uri=path,
+                    filename=name,
+                    file_size=0,
+                    user_id=user_id,
+                )
                 documents.append({
                     "id": doc_row["document_uuid"],
                     "name": name,

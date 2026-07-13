@@ -1,17 +1,50 @@
 /**
- * @fileoverview Intentionally uses `knowledgeBaseService` (not `unifiedKBService`).
+ * @fileoverview Background polling service.
  *
- * Background polling with setInterval timers, document status transitions, and
- * cross-component sync events. Migrating to the unified service would require
- * restructuring the timer management and status polling contract without any
- * user-visible improvement. This file is the last candidate for migration
- * (P7+) — leave as-is unless a compelling reason appears.
+ * Owns `setInterval`-based document-state and KB-ready polling plus the
+ * cross-component `documentsUpdated` / `knowledgeBaseDataUpdated` custom
+ * events that keep various KB-aware components in sync with server-side
+ * progress.
+ *
+ * The polling itself (`listDocuments` for per-KB doc state, and
+ * `getKnowledgeBase` for KB readiness in the create workflow) routes through
+ * the unified KB surface `/api/v1/kb/...`, which requires an `adapter_id`
+ * along with the `kbId`. The legacy local `/api/indices/{num}/files` and
+ * `/api/indices` paths are never called by this service, even when the KB
+ * state is stale — a missing `adapter_id` is logged as a data bug and the
+ * poll either retries on the next tick or, for the KB-ready path, rejects,
+ * rather than silently falling back to the legacy endpoint.
+ *
+ * Legacy `knowledgeBaseService` is still imported for its local-only helpers
+ * (e.g. chunk/summary APIs), which live outside the standard KB CRUD
+ * surface and are not covered by this service's polling contract.
  */
+import unifiedKBService from './unifiedKBService';
 import knowledgeBaseService from './knowledgeBaseService';
 
 import { NON_TERMINAL_STATUSES } from '@/const/knowledgeBase';
 import { Document, KnowledgeBase } from '@/types/knowledgeBase';
+import type { UnifiedDocument } from '@/types/unifiedKB';
 import log from '@/lib/logger';
+
+/**
+ * Map a `UnifiedDocument` (returned by the unified `/api/v1/kb/...`
+ * endpoints) onto the legacy `Document` shape consumed by the pre-migration
+ * UI. Fields without a unified counterpart fall back to defensive defaults.
+ */
+const mapUnifiedDocToLegacy = (ud: UnifiedDocument, kbId: string): Document => ({
+  id: ud.id,
+  kb_id: kbId,
+  name: ud.name || ud.id,
+  type: (ud.type as Document["type"]) || "UNKNOWN",
+  size: ud.size || 0,
+  create_time: ud.created_at || "",
+  chunk_num: ud.chunk_count || 0,
+  token_num: ud.token_count || 0,
+  status: (ud.status as Document["status"]) || "UNKNOWN",
+  latest_task_id: "",
+  error_reason: ud.error_message || undefined,
+});
 
 class KnowledgeBasePollingService {
   private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
@@ -20,18 +53,113 @@ class KnowledgeBasePollingService {
   private maxKnowledgeBasePolls: number = 60; // Maximum 60 polling attempts
   private maxDocumentPolls: number = 200; // Maximum 200 polling attempts (10 minutes for long-running tasks)
   private activeKnowledgeBaseId: string | null = null; // Record current active knowledge base ID
+  private activeAdapterId: number | null = null;       // Adapter ID for the active KB (required for unified calls)
   private pendingRequests: Map<string, Promise<Document[]>> = new Map();
   
   // Debounce timers for batching multiple rapid requests
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 
-  // Set current active knowledge base ID 
-  setActiveKnowledgeBase(kbId: string | null): void {
+  // Set current active knowledge base ID and its adapter ID.
+  // `adapterId` is required for any polling tick that will call
+  // `listDocuments` — without it the unified surface refuses the call,
+  // and this service will NOT silently fall back to the legacy
+  // `/api/indices/{num}/files` endpoint. Callers that don't yet know the
+  // adapter ID can pass `undefined` but subsequent polls for that KB will
+  // log a data-bug warning and skip the HTTP request until the ID is set.
+  setActiveKnowledgeBase(kbId: string | null, adapterId?: number): void {
     this.activeKnowledgeBaseId = kbId;
+    this.activeAdapterId = typeof adapterId === "number" ? adapterId : null;
+    if (kbId != null && this.activeAdapterId == null) {
+      log.warn(
+        `setActiveKnowledgeBase: KB ${kbId} registered without an adapter_id; document polling will be disabled until one is provided.`
+      );
+    }
   }
 
-  // Start document status polling, only update documents for specified knowledge base
-  startDocumentStatusPolling(kbId: string, callback: (documents: Document[]) => void): void {
+  /**
+   * Fetch the per-KB document list through the unified surface.
+   *
+   * Requires the KB to be the currently active one; when the active
+   * `adapter_id` is unknown, returns an empty array and logs a data-bug
+   * warning. Never calls the legacy `/api/indices/{num}/files` endpoint —
+   * that path uses raw numeric IDs and misses the real UUID-suffixed ES
+   * index, so falling back to it would hide the upstream mapping bug.
+   */
+  private async _fetchDocsViaUnified(
+    kbId: string,
+    adapterIdOverride?: number
+  ): Promise<Document[]> {
+    const adapterId =
+      typeof adapterIdOverride === "number"
+        ? adapterIdOverride
+        : this.activeAdapterId;
+    if (typeof adapterId !== "number") {
+      log.warn(
+        `polling: cannot fetch documents for KB ${kbId} — active adapter_id is missing; returning empty list.`
+      );
+      return [];
+    }
+    try {
+      const resp = await unifiedKBService.listDocuments(adapterId, kbId, {
+        pageSize: 100,
+      });
+      return (resp.list || []).map((ud) => mapUnifiedDocToLegacy(ud, kbId));
+    } catch (err) {
+      log.error(
+        `polling: unified listDocuments failed for KB ${kbId} on adapter ${adapterId}:`,
+        err
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Refresh KB list via the unified cross-adapter aggregate endpoint.
+   *
+   * Used by `pollForKnowledgeBaseReady` which needs to wait for a newly
+   * created KB to show up in the list after upload. Unlike the legacy
+   * `getKnowledgeBasesInfo(true)` path, this returns KBs from the adapter
+   * registry with `adapter_id` already populated, so downstream callers
+   * (e.g. document polling) can route requests through the unified surface
+   * without a further lookup.
+   */
+  private async _listKbsUnified(): Promise<KnowledgeBase[]> {
+    try {
+      const resp = await unifiedKBService.listAllKnowledgeBases();
+      return (resp.list || []).map((ukb) => ({
+        id: ukb.knowledge_base_id,
+        name: ukb.name,
+        description: ukb.description || "",
+        chunkCount: ukb.chunk_count || 0,
+        documentCount: ukb.document_count || 0,
+        createdAt: null,
+        avatar: "",
+        chunkNum: 0,
+        language: "",
+        nickname: "",
+        parserId: "",
+        permission: "",
+        tokenNum: 0,
+        source: ukb.platform || "nexent",
+        embeddingModel: ukb.embedding_model || "unknown",
+        adapter_id: ukb.adapter_id,
+        adapter_name: ukb.adapter_name,
+      }));
+    } catch (err) {
+      log.error("polling: unified listAllKnowledgeBases failed:", err);
+      throw err;
+    }
+  }
+
+  // Start document status polling, only update documents for specified knowledge base.
+  // `adapterId` is recommended — when provided it is used instead of
+  // `activeAdapterId` so each polling interval can route through the
+  // unified surface even if the caller switches the active KB mid-poll.
+  startDocumentStatusPolling(
+    kbId: string,
+    callback: (documents: Document[]) => void,
+    adapterId?: number
+  ): void {
     log.debug(`Start polling documents status for knowledge base ${kbId}`);
     
     // Clear existing polling first
@@ -67,8 +195,12 @@ class KnowledgeBasePollingService {
           // Reuse existing request to avoid duplicate API calls
           documents = await pendingRequest;
         } else {
-          // Create new request and track it
-          const requestPromise = knowledgeBaseService.getAllFiles(kbId);
+          // Create new request and track it — route through unified surface.
+          // `_fetchDocsViaUnified` is the single source of truth for per-KB
+          // doc listing inside this service; missing adapter_id is handled
+          // inside it (returns [] and logs), so we do NOT fall back to the
+          // legacy `/api/indices/{num}/files` endpoint here.
+          const requestPromise = this._fetchDocsViaUnified(kbId, adapterId);
           this.pendingRequests.set(requestKey, requestPromise);
           
           try {
@@ -132,16 +264,20 @@ class KnowledgeBasePollingService {
    * @param kbId Knowledge base ID
    * @param timeoutType Type of timeout (for logging purposes)
    * @param callback Optional callback to update UI with modified documents
+   * @param adapterId Adapter ID for the KB, used to route doc listing via unified surface
    */
   private async handlePollingTimeout(
     kbId: string, 
     timeoutType: 'document' | 'knowledgeBase',
-    callback?: (documents: Document[]) => void
+    callback?: (documents: Document[]) => void,
+    adapterId?: number
   ): Promise<void> {
     try {
       log.log(`Handling ${timeoutType} polling timeout for knowledge base ${kbId}`);
-      // Get current documents
-      const documents = await knowledgeBaseService.getAllFiles(kbId);
+      // Get current documents via the unified surface. On failure (or when
+      // adapter_id is unknown) `_fetchDocsViaUnified` returns [] and logs a
+      // warning rather than silently calling legacy `/api/indices/{num}/files`.
+      const documents = await this._fetchDocsViaUnified(kbId, adapterId);
       // Find all documents that are still in processing state
       const processingDocs = documents.filter(doc => 
         NON_TERMINAL_STATUSES.includes(doc.status)
@@ -168,22 +304,29 @@ class KnowledgeBasePollingService {
   
   /**
    * Poll to check if knowledge base is ready (exists and stats updated).
+   * @param kbId Knowledge base ID
    * @param kbName Knowledge base name
    * @param originalDocumentCount The document count before upload (for incremental upload)
    * @param expectedIncrement The number of new files uploaded
+   * @param adapterId Adapter ID — required for both KB listing (cross-adapter aggregate)
+   *                  and any document fallback that runs after a timeout.
    */
   pollForKnowledgeBaseReady(
     kbId: string,
     kbName: string,
     originalDocumentCount: number = 0,
-    expectedIncrement: number = 0
+    expectedIncrement: number = 0,
+    adapterId?: number
   ): Promise<KnowledgeBase> {
     return new Promise(async (resolve, reject) => {
       let count = 0;
       const checkForStats = async () => {
         try {
-          const result = await knowledgeBaseService.getKnowledgeBasesInfo(true);
-          const kbs = result.knowledgeBases;
+          // Use the unified cross-adapter aggregate. The legacy
+          // `getKnowledgeBasesInfo(true)` call is deliberately avoided here —
+          // it doesn't populate `adapter_id` on the returned KBs, which makes
+          // any downstream poll unable to route through the unified surface.
+          const kbs = await this._listKbsUnified();
           const kb = kbs.find(k => k.id === kbId || k.name === kbName);
 
           // Check if KB exists and its stats are populated
@@ -202,10 +345,10 @@ class KnowledgeBasePollingService {
             log.error(`Knowledge base ${kbName} readiness check timed out after ${this.maxKnowledgeBasePolls} attempts.`);
             
             // Handle knowledge base polling timeout - mark related tasks as failed
-            await this.handlePollingTimeout(kbId, 'knowledgeBase');
+            await this.handlePollingTimeout(kbId, 'knowledgeBase', undefined, adapterId);
             // Push documents to UI
             try {
-              const documents = await knowledgeBaseService.getAllFiles(kbId);
+              const documents = await this._fetchDocsViaUnified(kbId, adapterId);
               this.triggerDocumentsUpdate(kbId, documents);
             } catch (e) {
               // Ignore error
@@ -220,10 +363,10 @@ class KnowledgeBasePollingService {
             setTimeout(checkForStats, this.knowledgeBasePollingInterval);
           } else {
             // Handle knowledge base polling timeout on error as well
-            await this.handlePollingTimeout(kbId, 'knowledgeBase');
+            await this.handlePollingTimeout(kbId, 'knowledgeBase', undefined, adapterId);
             // Push documents to UI
             try {
-              const documents = await knowledgeBaseService.getAllFiles(kbId);
+              const documents = await this._fetchDocsViaUnified(kbId, adapterId);
               this.triggerDocumentsUpdate(kbId, documents);
             } catch (e) {
               // Ignore error
@@ -236,15 +379,26 @@ class KnowledgeBasePollingService {
     });
   }
 
-  // Simplified method for new knowledge base creation workflow
-  async handleNewKnowledgeBaseCreation(kbId: string, kbName: string, originalDocumentCount: number = 0, expectedIncrement: number = 0, callback: (kb: KnowledgeBase) => void) {
-    // Start document polling
+  // Simplified method for new knowledge base creation workflow.
+  // `adapterId` is passed through to both the doc-polling and the KB-ready
+  // polling paths so they can route through the unified surface end-to-end.
+  async handleNewKnowledgeBaseCreation(
+    kbId: string,
+    kbName: string,
+    adapterId: number | undefined,
+    originalDocumentCount: number = 0,
+    expectedIncrement: number = 0,
+    callback: (kb: KnowledgeBase) => void
+  ): Promise<void> {
+    // Start document polling (routes through unified surface when adapterId is set)
     this.startDocumentStatusPolling(kbId, (documents) => {
       this.triggerDocumentsUpdate(kbId, documents);
-    });
+    }, adapterId);
     try {
       // Start knowledge base polling parallelly
-      const populatedKB = await this.pollForKnowledgeBaseReady(kbId, kbName, originalDocumentCount, expectedIncrement);
+      const populatedKB = await this.pollForKnowledgeBaseReady(
+        kbId, kbName, originalDocumentCount, expectedIncrement, adapterId
+      );
       // callback with populated knowledge base when everything is ready
       callback(populatedKB);
     } catch (error) {

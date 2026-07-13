@@ -5,8 +5,15 @@
  * knowledge bases. All requests go through `/api/v1/kb/...`, which internally
  * dispatches to the correct adapter via ExternalKnowledgeBaseService.
  *
- * Legacy services (`knowledgeBaseService`, `externalKBService`) are deprecated;
- * new code should use this service exclusively.
+ * This is the standard KB CRUD surface — use it for anything that works
+ * uniformly across adapters (list/create/delete KBs, upload/list/delete
+ * documents, adapter health & capabilities).
+ *
+ * `knowledgeBaseService` is NOT deprecated — it is the *local-only extension*
+ * service for capabilities that external platforms do not expose
+ * (chunk-level CRUD, summary generation, embedding model status, and
+ * legacy platform-specific helpers for dify/datamate/idata/aidp that will
+ * be retired once those platforms land as registered adapters).
  */
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -43,13 +50,32 @@ async function handleResponse<T>(response: Response): Promise<T> {
     log.error(`UnifiedKBService: HTTP ${response.status} — ${text}`);
     throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
   }
-  // Some endpoints may return empty bodies on DELETE 204
   const ct = response.headers.get("content-type") || "";
+  let body: unknown;
   if (ct.includes("application/json")) {
-    return response.json() as Promise<T>;
+    body = await response.json();
+  } else {
+    const txt = await response.text();
+    body = txt ? JSON.parse(txt) : {};
   }
-  const txt = await response.text();
-  return (txt ? JSON.parse(txt) : {}) as T;
+
+  // V4 standard envelope unwrap — all /api/v1/kb/* responses are wrapped as
+  // {code: 0, data: <payload>, message: "success"} or {code: N, message: "..."}
+  if (
+    body !== null &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    "code" in body &&
+    "data" in body
+  ) {
+    const env = body as { code: number; data: unknown; message?: string };
+    if (env.code !== 0) {
+      throw new Error(env.message ?? `API error: code ${env.code}`);
+    }
+    return env.data as T;
+  }
+
+  return body as T;
 }
 
 // =============================================================================
@@ -71,7 +97,14 @@ class UnifiedKBService {
       method: "GET",
       headers: buildHeaders(),
     });
-    return handleResponse<AdapterListResponse>(res);
+    const data = await handleResponse<
+      AdapterListResponse | UnifiedAdapter[]
+    >(res);
+    // Defensive: normalize raw-array responses into `{list, total}` shape.
+    if (Array.isArray(data)) {
+      return { list: data, total: data.length };
+    }
+    return data;
   }
 
   /**

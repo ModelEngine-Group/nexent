@@ -156,6 +156,7 @@ const CreateKBModal: React.FC<CreateKBModalProps> = ({
     try {
       const createdKb = await unifiedKbManager.createKb(
         selectedAdapterId,
+        selectedAdapter!.platform,
         config
       );
       message.success("KB 创建成功");

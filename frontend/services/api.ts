@@ -539,6 +539,14 @@ export const API_ENDPOINTS = {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
+  /**
+   * @deprecated Dead code. This was the initial V4 "standard KB" surface
+   * (`/api/v1/...`) drafted before the adapter-based design landed. It has
+   * been superseded by `unifiedKb` below, which routes every request through
+   * `/api/v1/kb/adapters/{adapterId}/...` so local and external knowledge
+   * bases share one surface. Kept only as a tombstone; no production caller
+   * exists as of phase 4 cleanup. New code must use `unifiedKb`.
+   */
   // ---- V4 standard knowledge base API (POST /api/v1/...) ----
   standardKb: {
     health: `${API_BASE_URL}/api/v1/health`,

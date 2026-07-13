@@ -49,15 +49,20 @@ export default function KnowledgeList({
 
   const handleDelete = async (record: KnowledgeBase) => {
     try {
-      // Route through unified surface when the KB carries an adapter_id.
-      // KnowledgeList filters out external sources via `isExternalSource`,
-      // so records reaching here typically have adapter_id set by the
-      // useKnowledgeList hook (which merges adapter info when available).
-      if (typeof record.adapter_id === "number") {
-        await unifiedKBService.deleteKnowledgeBase(record.adapter_id, record.id);
-      } else {
-        await knowledgeBaseService.deleteKnowledgeBase(record.id);
+      // Deleting a KB requires its adapter_id. Records shown here have
+      // been loaded by `useKnowledgeList`, which merges adapter info from
+      // the adapter registry — so a missing adapter_id means the local
+      // client view is stale (or the KB was never registered under the
+      // unified surface). Rather than silently call the legacy delete
+      // endpoint (which would also skip the adapter-aware cascade
+      // cleanup the unified path provides), treat missing adapter_id as a
+      // stale-data condition: ask the user to refresh and retry.
+      if (typeof record.adapter_id !== "number") {
+        message.warning(t("tenantResources.knowledgeBase.staleData"));
+        refetch();
+        return;
       }
+      await unifiedKBService.deleteKnowledgeBase(record.adapter_id, record.id);
       message.success(t("tenantResources.knowledgeBase.deleted"));
       refetch();
     } catch (error: any) {

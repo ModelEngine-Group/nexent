@@ -79,10 +79,15 @@ const buildKbFromUnified = (
   legacyMeta: Partial<KnowledgeBase> | undefined
 ): KnowledgeBase => {
   const metadata = (unified.metadata ?? {}) as Record<string, unknown>;
+  // Defensive: backend may return `id` instead of `knowledge_base_id`.
+  // Fall back so React keys are never "undefined".
+  const fallbackId =
+    (unified as unknown as Record<string, unknown>).id ?? "";
+  const kbId = String(unified.knowledge_base_id || fallbackId);
   return {
-    id: String(unified.knowledge_base_id),
+    id: kbId,
     name: unified.name,
-    index_name: (metadata.index_name as string) || String(unified.knowledge_base_id),
+    index_name: (metadata.index_name as string) || kbId,
     display_name: unified.name,
     description: unified.description ?? null,
     documentCount: unified.document_count || 0,
@@ -473,7 +478,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           const response = await unifiedKBService.listDocuments(
             adapterId,
             activeKnowledgeBase.id,
-            { pageSize: 1000 }
+            { pageSize: 100 }
           );
           documents = (response.list || []).map((ud) => ({
             id: ud.id,
@@ -489,16 +494,17 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
             error_reason: ud.error_message,
           }));
         } else {
-          // Stale-state KB or one loaded from pre-migration cache — fall back
-          // to legacy. Phase 5 (component-level) will eventually eliminate
-          // these paths entirely.
-          log.warn(
-            `KB ${activeKnowledgeBase.id} has no adapter_id; falling back to legacy getAllFiles for document refresh`
+          // Stale KB state or missing adapter_id is a data mapping bug —
+          // the KB entry in the client state should carry an `adapter_id`
+          // populated by `_fetchAllKbsUnified`. Rather than silently call
+          // the legacy `/api/indices/{id}/files` endpoint (which returns
+          // nothing once the real ES index carries a UUID suffix), surface
+          // the data bug as an error and return an empty list so the KB
+          // list is the one source of truth to refetch from.
+          log.error(
+            `KB ${activeKnowledgeBase.id} is missing adapter_id; refusing to call legacy /api/indices endpoint. Check _fetchAllKbsUnified / adapter registry wiring.`
           );
-          documents = await knowledgeBaseService.getAllFiles(
-            activeKnowledgeBase.id,
-            activeKnowledgeBase.source
-          );
+          documents = [];
         }
 
         log.log("documents", documents);

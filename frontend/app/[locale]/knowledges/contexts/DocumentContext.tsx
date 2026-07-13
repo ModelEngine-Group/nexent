@@ -188,16 +188,21 @@ const documentReducer = (
 export const DocumentContext = createContext<{
   state: DocumentState;
   dispatch: React.Dispatch<DocumentAction>;
-  // Legacy methods — keep for backward compatibility with pre-migration callers
+  // Standard-document methods. Route through `/api/v1/kb/adapters/{id}/...`
+  // when `adapterId` is provided. Missing `adapterId` is treated as a data
+  // mapping bug — the call throws instead of silently falling back to the
+  // legacy `/api/indices/{id}/files` endpoint, so the upstream source of KB
+  // data can be fixed.
   fetchDocuments: (
     kbId: string,
-    forceRefresh?: boolean,
-    kbSource?: string
-  ) => Promise<void>;
+    adapterId?: number,
+    opts?: { forceRefresh?: boolean; kbSource?: string }
+  ) => Promise<Document[]>;
   uploadDocuments: (
     kbId: string,
     files: File[],
-    modelId?: number
+    modelId?: number,
+    adapterId?: number
   ) => Promise<void>;
   deleteDocument: (kbId: string, docId: string) => Promise<void>;
   // New unified methods — route through the /api/v1/kb/adapters/{id}/... surface.
@@ -230,7 +235,7 @@ export const DocumentContext = createContext<{
     error: null,
   },
   dispatch: () => {},
-  fetchDocuments: async () => {},
+  fetchDocuments: async () => [],
   uploadDocuments: async () => {},
   deleteDocument: async () => {},
   fetchDocumentsUnified: async () => {},
@@ -294,19 +299,47 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
     };
   }, []);
 
-  // Fetch documents for a knowledge base
+  // Fetch documents for a knowledge base through the unified KB surface.
+  //
+  // `adapterId` is required. A missing value is treated as a data mapping bug
+  // (caller should have obtained it from `KnowledgeBase.adapter_id`) and the
+  // call rejects with a descriptive error — it does NOT silently fall back to
+  // `knowledgeBaseService.getAllFiles`, because that path uses `/api/indices/
+  // {numeric_id}/files` which does not work once the real ES index carries a
+  // UUID suffix (e.g. "4-6b4730d0..."), and it would hide the upstream bug.
   const fetchDocuments = useCallback(
-    async (kbId: string, forceRefresh?: boolean, kbSource?: string) => {
+    async (
+      kbId: string,
+      adapterId?: number,
+      opts: { forceRefresh?: boolean; kbSource?: string } = {}
+    ): Promise<Document[]> => {
       // Skip if already loading this kb
-      if (state.loadingKbIds.has(kbId)) return;
+      if (state.loadingKbIds.has(kbId)) {
+        return state.documentsMap[kbId] || [];
+      }
 
       // If forceRefresh is false and we have cached data, return directly
       if (
-        !forceRefresh &&
+        !opts.forceRefresh &&
         state.documentsMap[kbId] &&
         state.documentsMap[kbId].length > 0
       ) {
-        return; // If we have cached data and don't need force refresh, return directly without server request
+        return state.documentsMap[kbId];
+      }
+
+      // Missing adapter_id is a data bug. Surface it as an error instead of
+      // falling back to the legacy interface (which uses a numeric index name
+      // and misses the real ES index).
+      if (typeof adapterId !== "number") {
+        const msg = `KB ${kbId} is missing adapter_id; refusing to call legacy /api/indices endpoint. Check the KB data source so adapter_id is populated.`;
+        log.error(msg);
+        // Dispatch an error so the UI can surface a hint, and also rethrow
+        // so callers can decide whether to refetch / abort.
+        dispatch({
+          type: DOCUMENT_ACTION_TYPES.ERROR,
+          payload: t("document.error.load"),
+        });
+        throw new Error(msg);
       }
 
       dispatch({
@@ -315,21 +348,26 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
       });
 
       try {
-        // Use getAllFiles() to get documents including those not yet in ES
-        const documents = await knowledgeBaseService.getAllFiles(
+        const response = await unifiedKBService.listDocuments(
+          adapterId,
           kbId,
-          kbSource
+          { pageSize: 100 }
+        );
+        const documents = (response.list || []).map((ud) =>
+          mapUnifiedDocumentToLegacy(ud, kbId)
         );
         dispatch({
           type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS,
           payload: { kbId, documents },
         });
+        return documents;
       } catch (error) {
         log.error(t("document.error.fetch"), error);
         dispatch({
           type: DOCUMENT_ACTION_TYPES.ERROR,
           payload: t("document.error.load"),
         });
+        throw error;
       } finally {
         dispatch({
           type: DOCUMENT_ACTION_TYPES.SET_LOADING_KB_ID,
@@ -340,9 +378,21 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
     [state.loadingKbIds, state.documentsMap, t]
   );
 
-  // Upload documents to a knowledge base
+  // Upload documents to a knowledge base.
+  //
+  // The upload itself (multipart POST) continues to go through the legacy
+  // `knowledgeBaseService.uploadDocuments` endpoint — that code path is what
+  // drives the file→minio→celery pipeline and is not yet replaced by the
+  // unified surface. Post-upload refresh, however, is routed through
+  // `fetchDocuments(kbId, adapterId)`, which requires a valid `adapterId`.
+  // Without an `adapterId`, post-upload refresh will throw a data-bug error.
   const uploadDocuments = useCallback(
-    async (kbId: string, files: File[], modelId?: number) => {
+    async (
+      kbId: string,
+      files: File[],
+      modelId?: number,
+      adapterId?: number
+    ) => {
       dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: true });
 
       try {
@@ -359,13 +409,13 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
           payload: true,
         });
 
-        // Get latest status immediately after upload
-        const latestDocuments = await knowledgeBaseService.getAllFiles(kbId);
-        // Update document status
-        dispatch({
-          type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS,
-          payload: { kbId, documents: latestDocuments },
-        });
+        // Get latest status immediately after upload — via unified surface.
+        // Throws if adapterId is missing (data mapping bug).
+        const latestDocuments = await fetchDocuments(
+          kbId,
+          adapterId,
+          { forceRefresh: true }
+        );
 
         // Trigger document status update event to notify other components
         window.dispatchEvent(
@@ -393,7 +443,7 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         });
       }
     },
-    [t]
+    [t, fetchDocuments]
   );
 
   // Delete a document (legacy path, kept for backward compatibility)
@@ -478,9 +528,10 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
   // `UnifiedDocument[]` back to legacy `Document[]` so the dispatched
   // `documentsUpdated` event keeps its historical payload shape.
   //
-  // Fallback: if `listDocuments` throws (e.g. local-only DataMate KB without
-  // a real adapter backing it), fall back to legacy `getAllFiles` so the
-  // post-upload refresh still works.
+  // Post-upload refresh does NOT fall back to `knowledgeBaseService.getAllFiles` —
+  // the unified call is authoritative for this path. If refresh fails the
+  // upload is still considered successful (the file is already persisted
+  // server-side) but the user must manually refresh to see the updated list.
   const uploadDocumentsUnified = useCallback(
     async (
       adapterId: number,
@@ -494,6 +545,13 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         // Multipart/form-data is required by FastAPI's File(...)/Form(...) signature.
         // JSON.stringify(files) produces empty braces, so a JSON body is always
         // rejected with 422. Build FormData explicitly.
+        //
+        // CRITICAL: Do NOT pass `Content-Type` in headers. Fetch needs to set
+        // it automatically to "multipart/form-data; boundary=..." when the body
+        // is FormData. Passing "application/json" (from getAuthHeaders()) makes
+        // FastAPI fail with 422 Unprocessable Entity because it tries to parse
+        // a multipart byte-stream as JSON and cannot find the `files` field.
+        const { "Content-Type": _drop, ...authHeadersWithoutContentType } = getAuthHeaders();
         const formData = new FormData();
         for (const file of files) {
           formData.append("files", file);
@@ -504,14 +562,20 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         if (opts.metadata) {
           formData.append("metadata", opts.metadata);
         }
-        await fetch(
+        const uploadResponse = await fetch(
           `/api/v1/kb/adapters/${adapterId}/knowledge-bases/${kbId}/documents`,
           {
             method: "POST",
-            headers: getAuthHeaders(),
+            headers: authHeadersWithoutContentType,
             body: formData,
           },
         );
+        if (!uploadResponse.ok) {
+          const text = await uploadResponse.text().catch(() => "");
+          throw new Error(
+            `Upload failed: HTTP ${uploadResponse.status} ${text || uploadResponse.statusText}`
+          );
+        }
 
         dispatch({
           type: DOCUMENT_ACTION_TYPES.SET_LOADING_DOCUMENTS,
@@ -519,22 +583,32 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         });
 
         // Refresh via unified listDocuments — same namespace as the upload.
+        // Do NOT silently fall back to legacy `getAllFiles`: the unified call
+        // is expected to be authoritative. If it fails, surface the failure —
+        // upload still succeeds (file is already persisted server-side) but
+        // the user must manually refresh to see the updated list.
         let latestDocuments: Document[];
         try {
           const response = await unifiedKBService.listDocuments(
             adapterId,
             kbId,
-            { pageSize: 1000 }
+            { pageSize: 100 }
           );
           latestDocuments = (response.list || []).map((ud) =>
             mapUnifiedDocumentToLegacy(ud, kbId)
           );
         } catch (refreshErr) {
-          log.warn(
-            `unified listDocuments refresh failed for kb ${kbId}; falling back to legacy getAllFiles:`,
+          log.error(
+            `unified listDocuments refresh failed for kb ${kbId} after upload:`,
             refreshErr
           );
-          latestDocuments = await knowledgeBaseService.getAllFiles(kbId);
+          dispatch({
+            type: DOCUMENT_ACTION_TYPES.ERROR,
+            payload: t("document.error.load"),
+          });
+          // Keep the previous document list rather than silently loading
+          // from the legacy `/api/indices/{id}/files` path.
+          latestDocuments = state.documentsMap[kbId] || [];
         }
 
         dispatch({

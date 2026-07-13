@@ -18,8 +18,12 @@
  *       getDocumentErrorInfo
  *   - KB metadata with permissions:
  *       updateKnowledgeBase (with ingroup_permission/group_ids)
- *   - Local-only cross-KB retrieval:
- *       getAllFiles (per-KB file listing), hybridSearch (local hybrid scoring)
+ *   - Local-only cross-KB retrieval & file helpers:
+ *       getAllFiles (local-only per-KB file listing via `/api/indices/{id}/files`;
+ *           NOT for standard KB UI — use `unifiedKBService.listDocuments`
+ *           instead; kept for a handful of local-only polling & legacy
+ *           platform flows that bypass the adapter surface),
+ *       hybridSearch (local hybrid scoring)
  *   - Platform-specific data-source listings (until external adapters
  *     are implemented by their respective platforms):
  *       getDifyKnowledgeBases, syncDifyKnowledgeBases,
@@ -1681,6 +1685,11 @@ class KnowledgeBaseService {
   /**
    * GET /api/v1/knowledge-bases — paginated list using the V4 standard route.
    * Returns local KBs in the unified {code, data, message} envelope.
+   *
+   * @deprecated Dead code. The unified KB surface (`unifiedKBService.listAllKnowledgeBases`
+   * backed by `API_ENDPOINTS.unifiedKb.allKnowledgeBases`) is the single entry
+   * point for KB listing across all adapters, and is what every current caller
+   * uses. Kept as a tombstone only; new code must use the unified surface.
    */
   async listKnowledgeBasesStandard(
     keyword?: string,
@@ -1733,6 +1742,12 @@ class KnowledgeBaseService {
   /**
    * POST /api/v1/retrieve — cross-KB retrieval using the V4 standard route.
    * Supports hybrid / semantic / keyword search across multiple KB ids.
+   *
+   * @deprecated Dead code. Cross-KB retrieval should go through
+   * `unifiedKBService.retrieveAll` backed by `API_ENDPOINTS.unifiedKb.retrieveAll`
+   * (`/api/v1/kb/retrieve-all`), which routes via the adapter registry and
+   * works uniformly for local and external KBs. Kept as a tombstone only;
+   * no production caller exists as of phase 4 cleanup.
    */
   async retrieve(
     query: string,

@@ -145,7 +145,12 @@ const UnifiedKnowledgeBaseView: React.FC<UnifiedKnowledgeBaseViewProps> = ({
         const kbs = await unifiedKbManager.listAllKbs({ keyword });
         return { kbs, total: kbs.length };
       }
-      const result = await unifiedKbManager.listKbsInAdapter(activeAdapterId!, { keyword });
+      const adapterPlatform =
+        adaptersQuery.data?.find((a) => a.adapter_id === activeAdapterId)?.platform ?? "";
+      const result = await unifiedKbManager.listKbsInAdapter(activeAdapterId!, {
+        keyword,
+        adapterPlatform,
+      });
       return { kbs: result.kbs, total: result.total };
     },
     enabled: !!activeAdapterId || activeTab === "all",
@@ -280,6 +285,12 @@ const UnifiedKnowledgeBaseView: React.FC<UnifiedKnowledgeBaseViewProps> = ({
       status: a.status,
     })) ?? [];
 
+  /** Platform of the currently selected adapter (for passing to child components). */
+  const selectedAdapterPlatform: string | null =
+    selectedAdapterId !== null
+      ? adaptersQuery.data?.find((a) => a.adapter_id === selectedAdapterId)?.platform ?? null
+      : null;
+
   /** Convert KbSummary[] to KnowledgeBaseItem[] for the grid component. */
   const gridItems: KnowledgeBaseItem[] =
     (kbsQuery.data?.kbs ?? []).map(toGridItem);
@@ -352,6 +363,7 @@ const UnifiedKnowledgeBaseView: React.FC<UnifiedKnowledgeBaseViewProps> = ({
         visible={selectedKbId !== null}
         kbId={selectedKbId}
         adapterId={selectedAdapterId}
+        adapterPlatform={selectedAdapterPlatform}
         onUpdated={handleDetailUpdated}
         onClosed={handleDetailClose}
       />

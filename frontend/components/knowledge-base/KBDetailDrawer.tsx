@@ -49,6 +49,8 @@ export interface KBDetailDrawerProps {
   kbId: string | null;
   /** Numeric adapter ID that owns the KB. */
   adapterId: number | null;
+  /** Platform of the adapter (e.g. "local", "dify"). Caller supplies from context. */
+  adapterPlatform: string | null;
   /** Called after document upload / delete so the parent can refresh its data. */
   onUpdated: () => void;
   /** Called when the drawer is closed. */
@@ -106,6 +108,7 @@ const KBDetailDrawer: React.FC<KBDetailDrawerProps> = ({
   visible,
   kbId,
   adapterId,
+  adapterPlatform,
   onUpdated,
   onClosed,
   onError,
@@ -120,14 +123,12 @@ const KBDetailDrawer: React.FC<KBDetailDrawerProps> = ({
 
   // -- queries ---------------------------------------------------------------
 
-  /** Fetch the selected KB's metadata by scanning the adapter's KB list. */
+  /** Fetch the selected KB's metadata directly via getKb (single-record lookup). */
   const kbQuery = useQuery({
     queryKey: ["unified-kb", "selected-kb", kbId, adapterId],
     queryFn: () =>
-      unifiedKbManager
-        .listKbsInAdapter(adapterId!, { page: 1, pageSize: 1000 })
-        .then((res) => res.kbs.find((k) => k.id === kbId) ?? null),
-    enabled: visible && kbId !== null && adapterId !== null,
+      unifiedKbManager.getKb(adapterId!, kbId!, adapterPlatform ?? "unknown"),
+    enabled: visible && kbId !== null && adapterId !== null && adapterPlatform !== null,
   });
 
   /** Fetch the document list for the selected KB. */
@@ -313,7 +314,7 @@ const KBDetailDrawer: React.FC<KBDetailDrawerProps> = ({
               <Table<DocSummary>
                 dataSource={docsQuery.data?.docs ?? []}
                 loading={docsQuery.isLoading}
-                rowKey="doc_id"
+                rowKey="document_id"
                 size="small"
                 pagination={false}
                 columns={docColumns}

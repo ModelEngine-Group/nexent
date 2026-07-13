@@ -14,7 +14,7 @@
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS nexent.kb_document_record_t (
-    doc_id          BIGSERIAL PRIMARY KEY,
+    document_id     BIGSERIAL PRIMARY KEY,
     document_uuid   VARCHAR(64)  NOT NULL UNIQUE,
     knowledge_id    BIGINT       NOT NULL,
     tenant_id       VARCHAR(100) NOT NULL,

@@ -739,6 +739,8 @@ class ElasticSearchService:
                 "id": index_name,
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
+                "create_time": record_info.get("create_time"),
+                "update_time": record_info.get("update_time"),
             }
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")

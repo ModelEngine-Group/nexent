@@ -147,6 +147,7 @@ export interface UnifiedDocumentStatus {
   type?: string;
   status: string;
   chunk_count?: number;
+  total_chunks?: number;
   token_count?: number;
   progress?: number;
   progress_msg?: string;

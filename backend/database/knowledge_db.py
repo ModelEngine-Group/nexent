@@ -84,6 +84,8 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_id": new_record.knowledge_id,
                 "index_name": new_record.index_name,
                 "knowledge_name": new_record.knowledge_name,
+                "create_time": new_record.create_time,
+                "update_time": new_record.update_time,
             }
     except SQLAlchemyError as e:
         raise e

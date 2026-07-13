@@ -1999,6 +1999,7 @@
   "tenantResources.knowledgeBase.noSummary": "该知识库尚无摘要",
   "tenantResources.knowledgeBase.viewSummary": "摘要概览",
   "tenantResources.knowledgeBase.externalSourceDisabled": "不可操作外部知识库",
+  "tenantResources.knowledgeBase.staleData": "知识库数据已过期，请刷新页面后重试",
 
   "tenantResources.models.status.available": "可用",
   "tenantResources.models.status.unavailable": "不可用",

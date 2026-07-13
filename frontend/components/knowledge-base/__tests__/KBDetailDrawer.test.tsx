@@ -62,6 +62,7 @@ describe("KBDetailDrawer", () => {
     visible: true,
     kbId: "kb-1",
     adapterId: 1,
+    adapterPlatform: "local",
     onUpdated: mockOnUpdated,
     onClosed: mockOnClosed,
     onError: vi.fn(),
@@ -98,7 +99,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
 
     renderWithProviders(<KBDetailDrawer {...defaultProps} />);
@@ -117,7 +118,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
     mockUnifiedKbManager.listDocuments.mockResolvedValue({
       docs: mockDocuments,
@@ -142,7 +143,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
 
     renderWithProviders(<KBDetailDrawer {...defaultProps} />);
@@ -158,7 +159,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
     mockUnifiedKbManager.uploadDocuments.mockResolvedValue([]);
 
@@ -184,7 +185,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
     mockUnifiedKbManager.listDocuments.mockResolvedValue({
       docs: mockDocuments,
@@ -221,7 +222,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
     mockUnifiedKbManager.listDocuments.mockResolvedValue({
       docs: mockDocuments,
@@ -267,7 +268,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
 
     renderWithProviders(<KBDetailDrawer {...defaultProps} />);
@@ -290,7 +291,7 @@ describe("KBDetailDrawer", () => {
       kbs: [mockKbSummary],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
 
     renderWithProviders(<KBDetailDrawer {...defaultProps} />);
@@ -310,7 +311,7 @@ describe("KBDetailDrawer", () => {
       kbs: [difyKb],
       total: 1,
       page: 1,
-      pageSize: 1000,
+        pageSize: 100,
     });
 
     renderWithProviders(<KBDetailDrawer {...defaultProps} />);

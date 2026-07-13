@@ -577,6 +577,8 @@ class KnowledgeRecord(TableBase):
         default=True,
         doc="Whether to preserve uploaded source documents after vectorization",
     )
+    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now())
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), onupdate=func.now())
 
 
 class TenantConfig(TableBase):
@@ -1576,13 +1578,12 @@ class KnowledgeDocumentRecord(TableBase):
         doc="Tenant ID for multi-tenancy isolation"
     )
     source_uri = Column(
-        String(1000),
+        Text,
         nullable=False,
         doc="MinIO object path or external URL (used as internal document identifier)"
     )
     filename = Column(
         String(500),
-        nullable=False,
         doc="Original filename displayed to user"
     )
     file_size = Column(
@@ -1605,7 +1606,7 @@ class KnowledgeDocumentRecord(TableBase):
         doc="Number of chunks/segments indexed from this document"
     )
     celery_task_id = Column(
-        String(100),
+        String(200),
         doc="Celery task ID for async indexing (optional)"
     )
 

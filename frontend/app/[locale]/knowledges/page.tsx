@@ -4,64 +4,45 @@ import React, { useEffect } from "react";
 import { motion } from "framer-motion";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useDeployment } from "@/components/providers/deploymentProvider";
-import log from "@/lib/logger";
-import unifiedKBService from "@/services/unifiedKBService";
 
-import DataConfig from "./KnowledgeBaseConfiguration";
+import UnifiedKnowledgeBaseView from "@/components/knowledge-base/UnifiedKnowledgeBaseView";
 
 /**
- * KnowledgesContent - Main component for knowledge base configuration
- * Can be used in setup flow or as standalone page
+ * KnowledgesContent - Main component for knowledge base configuration.
+ *
+ * Renders the unified knowledge base management view (Phase 3 architecture).
+ * The view handles:
+ * - Adapter list (local + external)
+ * - KB list with Tab filter (all / local / external)
+ * - KB creation via 2-step modal (select adapter -> fill form)
+ * - KB detail drawer with document management
  */
 export default function KnowledgesContent() {
-  // Get user and deployment state from respective hooks
-  const { isSpeedMode } = useDeployment();
+  // Use custom hook for common setup flow logic (page transitions)
+  const { pageVariants, pageTransition } = useSetupFlow();
 
-  // Use custom hook for common setup flow logic
-  const {
-    pageVariants,
-    pageTransition,
-  } = useSetupFlow();
-
-  // Knowledge base specific initialization
+  // Dispatch legacy event for backward compatibility with old components
+  // that might still listen to this (e.g., polling service, sidebar).
   useEffect(() => {
-    // Trigger knowledge base data acquisition when the page is initialized
     window.dispatchEvent(
       new CustomEvent("knowledgeBaseDataUpdated", {
         detail: { forceRefresh: true },
       })
     );
-
-    const loadKnowledgeBaseList = async () => {
-      try {
-        // Cache-warm: hit the unified dispatcher so subsequent list operations
-        // go through the LocalKBAdapter path. Return value is intentionally unused.
-        await unifiedKBService.listAllKnowledgeBases();
-      } catch (error) {
-        log.error("Failed to load knowledge base list:", error);
-      }
-    };
-
-    loadKnowledgeBaseList();
-  }, [isSpeedMode]);
+  }, []);
 
   return (
-    <>
-      <div className="w-full h-full p-8">
-        <motion.div
-          initial="initial"
-          animate="in"
-          exit="out"
-          variants={pageVariants}
-          transition={pageTransition}
-          style={{ width: "100%", height: "100%" }}
-        >
-          <div className="w-full h-full flex items-center justify-center">
-            <DataConfig isActive={true} />
-          </div>
-        </motion.div>
-      </div>
-    </>
+    <div className="w-full h-full p-8">
+      <motion.div
+        initial="initial"
+        animate="in"
+        exit="out"
+        variants={pageVariants}
+        transition={pageTransition}
+        style={{ width: "100%", height: "100%" }}
+      >
+        <UnifiedKnowledgeBaseView defaultTab="all" />
+      </motion.div>
+    </div>
   );
 }

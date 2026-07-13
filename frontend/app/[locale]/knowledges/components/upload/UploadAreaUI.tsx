@@ -164,25 +164,23 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                 e.stopPropagation();
               }}
             >
-              <div className="h-full" onClick={() => onStartNewSelection?.()}>
-                <Dragger
-                  {...uploadProps}
-                  className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200"
-                  showUploadList={false}
-                >
-                  <div className="flex flex-col items-center justify-center h-full">
-                    <p className="ant-upload-drag-icon !mb-4">
-                      <Inbox size={48} className="text-blue-600" />
-                    </p>
-                    <p className="ant-upload-text !mb-2 text-base">
-                      {t("knowledgeBase.upload.dragHint")}
-                    </p>
-                    <p className="ant-upload-hint text-gray-500">
-                      {t("knowledgeBase.upload.supportedFormats")}
-                    </p>
-                  </div>
-                </Dragger>
-              </div>
+              <Dragger
+                {...uploadProps}
+                className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200"
+                showUploadList={false}
+              >
+                <div className="flex flex-col items-center justify-center h-full">
+                  <p className="ant-upload-drag-icon !mb-4">
+                    <Inbox size={48} className="text-blue-600" />
+                  </p>
+                  <p className="ant-upload-text !mb-2 text-base">
+                    {t("knowledgeBase.upload.dragHint")}
+                  </p>
+                  <p className="ant-upload-hint text-gray-500">
+                    {t("knowledgeBase.upload.supportedFormats")}
+                  </p>
+                </div>
+              </Dragger>
             </div>
           </div>
         </div>

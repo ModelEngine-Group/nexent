@@ -157,7 +157,11 @@ class UnifiedKnowledgeBaseManager {
    * `group_ids`, a follow-up call to the legacy `knowledgeBaseService`
    * patches permissions (Q2 fallback). The fallback is non-fatal.
    */
-  async createKb(adapterId: number, config: CreateKbConfig): Promise<KbSummary> {
+  async createKb(
+    adapterId: number,
+    adapterPlatform: string,
+    config: CreateKbConfig,
+  ): Promise<KbSummary> {
     const created = await unifiedKBService.createKnowledgeBase(adapterId, {
       name: config.name,
       description: config.description,
@@ -167,10 +171,10 @@ class UnifiedKnowledgeBaseManager {
       extra: {},
     });
 
-    // ★ Q2 fallback: patch permissions via legacy service for local adapter
-    const adapter = await unifiedKBService.getAdapter(adapterId);
+    // ★ Q2 fallback: patch permissions via legacy service for local adapter.
+    // Non-fatal — local legacy service may not be reachable during pure adapter flow.
     if (
-      adapter.platform === "local" &&
+      adapterPlatform === "local" &&
       (config.ingroup_permission || (config.group_ids?.length ?? 0) > 0)
     ) {
       try {
@@ -186,22 +190,22 @@ class UnifiedKnowledgeBaseManager {
       }
     }
 
-    return toKbSummary(created, adapterId, adapter.platform);
+    return toKbSummary(created, adapterId, adapterPlatform);
   }
 
-  /** Update KB name / description. */
+  /** Update KB name / description. The adapterPlatform is caller-supplied to avoid an extra getAdapter round-trip. */
   async updateKb(
     adapterId: number,
     kbId: string,
     updates: UpdateKbConfig,
+    adapterPlatform: string,
   ): Promise<KbSummary> {
     const updated = await unifiedKBService.updateKnowledgeBase(
       adapterId,
       kbId,
       { name: updates.name, description: updates.description },
     );
-    const adapter = await unifiedKBService.getAdapter(adapterId);
-    return toKbSummary(updated, adapterId, adapter.platform);
+    return toKbSummary(updated, adapterId, adapterPlatform);
   }
 
   /** Delete a KB and all its documents. */
@@ -209,15 +213,38 @@ class UnifiedKnowledgeBaseManager {
     await unifiedKBService.deleteKnowledgeBase(adapterId, kbId);
   }
 
-  /** List KBs within a single adapter (paginated). */
+  /**
+   * Fetch a single KB by its adapter + KB ID.
+   * Returns null if the KB does not exist (404 from the API).
+   */
+  async getKb(
+    adapterId: number,
+    kbId: string,
+    adapterPlatform: string,
+  ): Promise<KbSummary | null> {
+    try {
+      const kb = await unifiedKBService.getKnowledgeBase(adapterId, kbId);
+      return toKbSummary(kb, adapterId, adapterPlatform);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * List KBs within a single adapter (paginated).
+   * `adapterPlatform` is caller-supplied when available; falls back to a `getAdapter`
+   * round-trip otherwise (e.g. legacy code paths that don't carry context).
+   */
   async listKbsInAdapter(
     adapterId: number,
-    opts?: { keyword?: string; page?: number; pageSize?: number },
+    opts?: { keyword?: string; page?: number; pageSize?: number; adapterPlatform?: string },
   ): Promise<{ kbs: KbSummary[]; total: number; page: number; pageSize: number }> {
     const res = await unifiedKBService.listKnowledgeBases(adapterId, opts);
-    const adapter = await unifiedKBService.getAdapter(adapterId);
+    const platform =
+      opts?.adapterPlatform ??
+      (await unifiedKBService.getAdapter(adapterId)).platform;
     return {
-      kbs: res.list.map((kb) => toKbSummary(kb, adapterId, adapter.platform)),
+      kbs: res.list.map((kb) => toKbSummary(kb, adapterId, platform)),
       total: res.total,
       page: res.page,
       pageSize: res.page_size,
@@ -261,11 +288,16 @@ class UnifiedKnowledgeBaseManager {
       formData.append("metadata", JSON.stringify(opts.metadata));
     }
 
+    // Strip `Content-Type` from auth headers so fetch can auto-set
+    // "multipart/form-data; boundary=..." from the FormData body. Keeping
+    // "application/json" here makes FastAPI fail with 422 Unprocessable Entity
+    // because the body cannot be parsed as JSON.
+    const { "Content-Type": _remove, ...uploadHeaders } = getAuthHeaders();
     const res = await fetch(
       `${API_BASE_URL}/adapters/${adapterId}/knowledge-bases/${kbId}/documents`,
       {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: uploadHeaders,
         body: formData,
       },
     );
@@ -277,8 +309,26 @@ class UnifiedKnowledgeBaseManager {
 
     const ct = res.headers.get("content-type") || "";
     if (ct.includes("application/json")) {
-      const data = (await res.json()) as UnifiedDocument[] | { list: UnifiedDocument[] };
-      const items = Array.isArray(data) ? data : (data.list ?? []);
+      let body: unknown = await res.json();
+
+      // V4 envelope unwrap — same logic as handleResponse
+      if (
+        body !== null &&
+        typeof body === "object" &&
+        !Array.isArray(body) &&
+        "code" in body &&
+        "data" in body
+      ) {
+        const env = body as { code: number; data: unknown; message?: string };
+        if (env.code !== 0) {
+          throw new Error(env.message ?? `API error: code ${env.code}`);
+        }
+        body = env.data;
+      }
+
+      const items: UnifiedDocument[] = Array.isArray(body)
+        ? body
+        : ((body as { list?: UnifiedDocument[] }).list ?? []);
       return items.map((doc) => toDocSummary(doc, kbId, adapterId));
     }
     return [];
@@ -315,11 +365,28 @@ class UnifiedKnowledgeBaseManager {
     docId: string,
   ): Promise<DocStatus> {
     const res = await unifiedKBService.getDocumentStatus(adapterId, kbId, docId);
+    const status = (res.status ?? "indexing") as DocStatus["status"];
+    const progressPct =
+      res.progress ??
+      (status === "completed"
+        ? 100
+        : status === "indexing"
+          ? 50
+          : 0);
     return {
       document_id: docId,
-      status: res.status as DocStatus["status"],
+      knowledge_base_id: kbId,
+      status,
+      size: res.size,
+      type: res.type,
+      token_count: res.token_count,
+      progress_pct: progressPct,
+      progress_msg: res.progress_msg,
       chunk_count: res.chunk_count,
-      error_message: res.error_message,
+      total_chunks: res.total_chunks,
+      error_message: res.error ?? res.error_message,
+      created_at: res.created_at,
+      updated_at: res.updated_at,
     };
   }
 

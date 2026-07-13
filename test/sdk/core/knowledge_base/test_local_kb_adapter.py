@@ -164,11 +164,12 @@ def test_list_knowledge_bases_falls_back_to_es_when_pg_unavailable(
     mock_es_core.count_documents.return_value = 10
     mock_es_core.get_documents_detail.return_value = [{"document_id": "d1", "name": "doc.pdf"}]
 
-    results = local_adapter.list_knowledge_bases(keyword="idx-1", page=1, page_size=10)
-    assert len(results) == 1
-    assert isinstance(results[0], KnowledgeBaseInfo)
-    assert results[0].id == "idx-1"
-    assert results[0].name == "idx-1"
+    total, page_results = local_adapter.list_knowledge_bases(keyword="idx-1", page=1, page_size=10)
+    assert total == 1
+    assert len(page_results) == 1
+    assert isinstance(page_results[0], KnowledgeBaseInfo)
+    assert page_results[0].knowledge_base_id == "idx-1"
+    assert page_results[0].name == "idx-1"
 
 
 def test_list_knowledge_bases_uses_pg_when_available(local_adapter, monkeypatch):
@@ -190,11 +191,12 @@ def test_list_knowledge_bases_uses_pg_when_available(local_adapter, monkeypatch)
         "database.knowledge_db.get_knowledge_info_by_tenant_id", _fake_rows
     )
 
-    results = local_adapter.list_knowledge_bases(page=1, page_size=10)
-    assert len(results) == 1
-    assert results[0].id == "42"
-    assert results[0].name == "产品手册"
-    assert results[0].embedding_model == "text-embedding-v3"
+    total, page_results = local_adapter.list_knowledge_bases(page=1, page_size=10)
+    assert total == 1
+    assert len(page_results) == 1
+    assert page_results[0].knowledge_base_id == "42"
+    assert page_results[0].name == "产品手册"
+    assert page_results[0].embedding_model == "text-embedding-v3"
 
 
 def test_list_knowledge_bases_pagination(local_adapter, mock_es_core, monkeypatch):
@@ -207,9 +209,11 @@ def test_list_knowledge_bases_pagination(local_adapter, mock_es_core, monkeypatc
     mock_es_core.count_documents.return_value = 1
     mock_es_core.get_documents_detail.return_value = []
 
-    page1 = local_adapter.list_knowledge_bases(page=1, page_size=10)
+    total1, page1 = local_adapter.list_knowledge_bases(page=1, page_size=10)
+    assert total1 == 30
     assert len(page1) == 10
-    page2 = local_adapter.list_knowledge_bases(page=2, page_size=10)
+    total2, page2 = local_adapter.list_knowledge_bases(page=2, page_size=10)
+    assert total2 == 30
     assert len(page2) == 10
 
 
@@ -233,7 +237,7 @@ def test_get_knowledge_base_uses_pg_when_available(local_adapter, monkeypatch):
     )
     kb = local_adapter.get_knowledge_base("7")
     assert isinstance(kb, KnowledgeBaseInfo)
-    assert kb.id == "7"
+    assert kb.knowledge_base_id == "7"
     assert kb.name == "FAQ"
     assert kb.document_count == 2
 
@@ -250,7 +254,7 @@ def test_get_knowledge_base_falls_back_to_es_when_pg_unavailable(
 
     kb = local_adapter.get_knowledge_base("idx-1")
     assert isinstance(kb, KnowledgeBaseInfo)
-    assert kb.id == "idx-1"
+    assert kb.knowledge_base_id == "idx-1"
     assert kb.chunk_count == 42
 
 
@@ -289,7 +293,7 @@ def test_create_knowledge_base_success(local_adapter, monkeypatch):
         name="new-kb", description="desc", embedding_model="text-embedding-v3"
     )
     assert isinstance(result, KnowledgeBaseInfo)
-    assert result.id == "101"
+    assert result.knowledge_base_id == "101"
     assert result.name == "new-kb"
     assert result.embedding_model == "text-embedding-v3"
     fake.create_knowledge_base.assert_called_once()
@@ -445,6 +449,7 @@ def test_list_documents_returns_dict_with_items(local_adapter, mock_es_core, mon
 
 def test_upload_documents_pipeline(local_adapter, monkeypatch):
     captured = {}
+    db_captured = {}
 
     async def _fake_upload(**kwargs):
         captured.update(kwargs)
@@ -452,6 +457,10 @@ def test_upload_documents_pipeline(local_adapter, monkeypatch):
 
     async def _fake_trigger(**kwargs):
         return {"tasks": 1}
+
+    def _fake_create_document_record(**kwargs):
+        db_captured.update(kwargs)
+        return {"document_uuid": "uuid-1"}
 
     monkeypatch.setattr(
         "services.file_management_service.upload_files_impl", _fake_upload
@@ -468,7 +477,7 @@ def test_upload_documents_pipeline(local_adapter, monkeypatch):
     )
     monkeypatch.setattr(
         "database.document_db.create_document_record",
-        lambda data: {"document_uuid": "uuid-1"},
+        _fake_create_document_record,
     )
 
     result = local_adapter.upload_documents(
@@ -476,6 +485,14 @@ def test_upload_documents_pipeline(local_adapter, monkeypatch):
     )
     assert "document_ids" in result
     assert "uuid-1" in result["document_ids"]
+    assert db_captured == {
+        "knowledge_id": 42,
+        "tenant_id": "tenant-A",
+        "source_uri": "/m/file1.pdf",
+        "filename": "file1.pdf",
+        "file_size": 0,
+        "user_id": "",
+    }
 
 
 def test_upload_documents_with_custom_chunking_strategy(local_adapter, monkeypatch):
@@ -504,7 +521,7 @@ def test_upload_documents_with_custom_chunking_strategy(local_adapter, monkeypat
     )
     monkeypatch.setattr(
         "database.document_db.create_document_record",
-        lambda data: {"document_uuid": "uuid-1"},
+        lambda **kwargs: {"document_uuid": "uuid-1"},
     )
 
     result = local_adapter.upload_documents(
@@ -541,7 +558,7 @@ def test_upload_documents_default_chunking_strategy_is_basic(local_adapter, monk
     )
     monkeypatch.setattr(
         "database.document_db.create_document_record",
-        lambda data: {"document_uuid": "uuid-1"},
+        lambda **kwargs: {"document_uuid": "uuid-1"},
     )
 
     result = local_adapter.upload_documents(
@@ -676,8 +693,9 @@ def test_list_knowledge_bases_returns_dataclass(local_adapter, monkeypatch):
              "index_name": "1-x", "create_time": ""}
         ],
     )
-    results = local_adapter.list_knowledge_bases(page=1, page_size=10)
-    assert all(isinstance(r, KnowledgeBaseInfo) for r in results)
+    total, page_results = local_adapter.list_knowledge_bases(page=1, page_size=10)
+    assert total == 1
+    assert all(isinstance(r, KnowledgeBaseInfo) for r in page_results)
 
 
 def test_search_returns_search_response_dataclass(local_adapter, mock_es_core):

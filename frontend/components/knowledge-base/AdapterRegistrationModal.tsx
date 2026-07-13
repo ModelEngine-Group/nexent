@@ -178,8 +178,9 @@ const AdapterRegistrationModal: React.FC<AdapterRegistrationModalProps> = ({
       message.success("健康检查完成");
       // Refresh capabilities so the capability summary stays fresh.
       unifiedKbManager.getAdapterCapabilities(id).catch(() => undefined);
+      // Only invalidate internal query state — do NOT close the modal or
+      // call onRegistered (the parent KB list refreshes on modal close only).
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      onRegistered?.();
     },
     onError: (err: Error) => message.error(`健康检查失败: ${err.message}`),
   });
@@ -190,7 +191,7 @@ const AdapterRegistrationModal: React.FC<AdapterRegistrationModalProps> = ({
     onSuccess: (_, vars) => {
       message.success(vars.enabled ? "已启用" : "已禁用");
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      onRegistered?.();
+      // Do NOT call onRegistered — only invalidate in place.
     },
     onError: (err: Error) => message.error(`操作失败: ${err.message}`),
   });

@@ -2031,6 +2031,7 @@
   "tenantResources.knowledgeBase.noSummary": "This knowledge base has no summary",
   "tenantResources.knowledgeBase.viewSummary": "Summary Overview",
   "tenantResources.knowledgeBase.externalSourceDisabled": "External knowledge base - operation disabled",
+  "tenantResources.knowledgeBase.staleData": "Knowledge base data is outdated. Please refresh the page and try again.",
 
   "tenantResources.models.status.available": "Available",
   "tenantResources.models.status.unavailable": "Unavailable",

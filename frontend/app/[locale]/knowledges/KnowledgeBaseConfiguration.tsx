@@ -36,6 +36,7 @@ import {
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
+import AdapterRegistrationModal from "@/components/knowledge-base/AdapterRegistrationModal";
 import {
   useKnowledgeBaseContext,
   KnowledgeBaseProvider,
@@ -315,14 +316,23 @@ function DataConfig({ isActive }: DataConfigProps) {
         setIsCreatingMode(false);
         setHasClickedUpload(false);
         setActiveKnowledgeBase(knowledgeBase);
-        // Route through the unified surface when the KB carries an adapter_id
-        // (freshly-created local KBs get one from P3-4; external KBs carry it
-        // after fetchKnowledgeBases). For legacy-loaded KBs, fall back.
-        if (typeof knowledgeBase.adapter_id === "number") {
-          fetchDocumentsUnified(knowledgeBase.adapter_id, knowledgeBase.id);
-        } else {
-          fetchDocuments(knowledgeBase.id, false, knowledgeBase.source);
-        }
+        // Route through the unified surface, which requires an adapter_id.
+        // Freshly-created local KBs receive one from LocalKBAdapter; external
+        // KBs carry it after `fetchKnowledgeBases` enriches them from the
+        // adapter registry. A KB without `adapter_id` here means the client
+        // state is stale — surface that as a data bug so the upstream source
+        // of KB data can be fixed (instead of silently calling the legacy
+        // `/api/indices/{id}/files` endpoint).
+        fetchDocuments(
+          knowledgeBase.id,
+          knowledgeBase.adapter_id,
+          { forceRefresh: false, kbSource: knowledgeBase.source }
+        ).catch((err) => {
+          log.warn(
+            `Failed to fetch documents for KB ${knowledgeBase.id} on select:`,
+            err
+          );
+        });
       }
     };
 
@@ -449,8 +459,13 @@ function DataConfig({ isActive }: DataConfigProps) {
       }
     }
 
-    // Set active knowledge base ID to polling service
-    knowledgeBasePollingService.setActiveKnowledgeBase(kb.id);
+    // Set active knowledge base ID and its adapter_id for the polling
+    // service. The adapter_id is required for the service to route its
+    // per-KB doc refreshes through the unified surface; when missing,
+    // the service silently skips the poll rather than fall back to the
+    // legacy `/api/indices/{num}/files` endpoint (which uses a raw
+    // numeric ID and misses the real UUID-suffixed ES index).
+    knowledgeBasePollingService.setActiveKnowledgeBase(kb.id, kb.adapter_id);
 
     // Call knowledge base switch handling function
     handleKnowledgeBaseChange(kb);
@@ -465,10 +480,13 @@ function DataConfig({ isActive }: DataConfigProps) {
         payload: true,
       });
 
-      // Get latest document data
-      const documents = await knowledgeBaseService.getAllFiles(
+      // Refresh document data via unified surface. The new `fetchDocuments`
+      // signature requires an adapter_id; without one it rejects (data bug),
+      // which the outer catch converts into a user-visible error.
+      const documents = await fetchDocuments(
         kb.id,
-        kb.source
+        kb.adapter_id,
+        { forceRefresh: true, kbSource: kb.source }
       );
 
       // Trigger document update event
@@ -480,11 +498,11 @@ function DataConfig({ isActive }: DataConfigProps) {
           // Directly call fetchKnowledgeBases to update knowledge base list data
           await fetchKnowledgeBases(false, true);
         } catch (error) {
-          log.error("鑾峰彇鐭ヨ瘑搴撴渶鏂版暟鎹け璐?", error);
+          log.error("获取知识库最新数据失败:", error);
         }
       }, 100);
     } catch (error) {
-      log.error("鑾峰彇鏂囨。鍒楄〃澶辫触:", error);
+      log.error("获取文档列表失败:", error);
       message.error(t("knowledgeBase.message.getDocumentsFailed"));
       docDispatch({
         type: "ERROR",
@@ -613,6 +631,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
   const [dataMateUrl, setDataMateUrl] = useState("");
   const [dataMateUrlError, setDataMateUrlError] = useState<string | null>(null);
+
+  // Adapter management modal (V4 unified KB adapter registry)
+  const [showAdapterModal, setShowAdapterModal] = useState(false);
 
   /**
    * Validate DataMate URL format
@@ -848,7 +869,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         setIsCreatingMode(false);
         setActiveKnowledgeBase(newKB);
-        knowledgeBasePollingService.setActiveKnowledgeBase(newKB.id);
+        knowledgeBasePollingService.setActiveKnowledgeBase(newKB.id, newKB.adapter_id);
         setHasClickedUpload(false);
         setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
 
@@ -872,6 +893,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           .handleNewKnowledgeBaseCreation(
             newKB.id,
             newKB.name,
+            newKB.adapter_id,
             0,
             filesToUpload.length,
             (populatedKB) => {
@@ -934,7 +956,8 @@ function DataConfig({ isActive }: DataConfigProps) {
               detail: { kbId, documents },
             })
           );
-        }
+        },
+        activeAdapterId
       );
     } catch (error) {
       log.error(t("document.error.upload"), error);
@@ -986,11 +1009,16 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
   }, [newlyCreatedKbId, viewingDocuments.length]);
 
-  // Update active knowledge base ID in polling service when component initializes or active knowledge base changes
+  // Update active knowledge base ID and adapter_id in polling service when
+  // the active KB changes. The adapter_id is required for polling ticks to
+  // route through the unified doc-refresh surface; without it, the
+  // service logs a data-bug warning and skips the HTTP request so we never
+  // silently fall back to the legacy `/api/indices/{num}/files` path.
   useEffect(() => {
     if (kbState.activeKnowledgeBase) {
       knowledgeBasePollingService.setActiveKnowledgeBase(
-        kbState.activeKnowledgeBase.id
+        kbState.activeKnowledgeBase.id,
+        kbState.activeKnowledgeBase.adapter_id
       );
     } else {
       knowledgeBasePollingService.setActiveKnowledgeBase(null);
@@ -1078,6 +1106,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               onCreateNew={handleCreateNew}
               onDataMateConfig={handleDataMateConfig}
               showDataMateConfig={modelEngineEnabled}
+              onAdapterManage={() => setShowAdapterModal(true)}
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
@@ -1307,6 +1336,24 @@ function DataConfig({ isActive }: DataConfigProps) {
           </div>
         </div>
       </Modal>
+
+      {/**
+       * Adapter management modal — registered KB adapters (local + external).
+       * Fires `onRegistered` after any mutation so this component refreshes
+       * its KB list (which depends on the active adapter registry).
+       */}
+      <AdapterRegistrationModal
+        visible={showAdapterModal}
+        onCancel={() => setShowAdapterModal(false)}
+        onRegistered={async () => {
+          setShowAdapterModal(false);
+          try {
+            await fetchKnowledgeBases(false, false);
+          } catch (err) {
+            log.warn("Failed to refresh KB list after adapter change:", err);
+          }
+        }}
+      />
 
     </>
   );
