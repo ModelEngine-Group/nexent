@@ -14,20 +14,11 @@ from unittest.mock import patch as _patch
 
 import pytest
 
-# Stub out mem0 and smolagents modules before anything else imports them.
-# The sdk imports these at module level, so stubs must be registered first.
-_mem0_stubs = {
-    "mem0": MagicMock(),
-    "mem0.memory": MagicMock(),
-    "mem0.memory.main": MagicMock(),
-    "mem0.embeddings": MagicMock(),
-    "mem0.embeddings.base": MagicMock(),
-    "mem0.configs": MagicMock(),
-    "mem0.configs.embeddings": MagicMock(),
-    "mem0.configs.embeddings.base": MagicMock(),
-}
+# Optional SDK stubs (xlrd, supabase, etc.) live below; see the per-section
+# comments.  The legacy mem0 stub block has been removed because the SDK
+# no longer imports mem0 at module load time.
 
-_optional_sdk_stubs = {}
+_optional_sdk_stubs: dict = {}
 
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
@@ -39,9 +30,6 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
-
-sys.modules.update({k: v for k, v in _mem0_stubs.items() if k not in sys.modules})
-sys.modules.update({k: v for k, v in _optional_sdk_stubs.items() if k not in sys.modules})
 
 # Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
 # in environments where the optional SDK is not installed.  We register a

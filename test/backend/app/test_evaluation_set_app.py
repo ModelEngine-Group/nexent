@@ -22,14 +22,8 @@ sys.modules["botocore.client"] = MagicMock()
 sys.modules["botocore.exceptions"] = MagicMock()
 
 # Pre-stub heavy nexent dependencies that are imported at module load.
-sys.modules["mem0"] = MagicMock()
-sys.modules["mem0.memory"] = MagicMock()
-sys.modules["mem0.memory.main"] = MagicMock()
-sys.modules["mem0.embeddings"] = MagicMock()
-sys.modules["mem0.embeddings.base"] = MagicMock()
-sys.modules["mem0.configs"] = MagicMock()
-sys.modules["mem0.configs.embeddings"] = MagicMock()
-sys.modules["mem0.configs.embeddings.base"] = MagicMock()
+# The legacy ``mem0`` stub chain has been removed because the SDK no
+# longer imports mem0 at module load time.
 
 # NOTE: do NOT override ``sys.modules["xlrd"]`` here.  conftest.py registers
 # a MagicMock for the module, and ``test_evaluation_set_excel_utils.py``

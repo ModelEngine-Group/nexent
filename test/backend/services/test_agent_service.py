@@ -62,6 +62,11 @@ sys.modules['nexent.core.agents.run_agent'] = MagicMock()
 sys.modules['nexent.core.agents.context'] = MagicMock()
 sys.modules['nexent.core.agents.context.history_projector'] = MagicMock()
 
+# The legacy `nexent.memory.memory_service` stub is no longer needed; the
+# production code path it guarded has been removed (mem0-era flow). Keeping
+# the stub as a MagicMock keeps older test fixtures that still ``patch`` it
+# working without import-time errors.
+
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
@@ -179,7 +184,6 @@ sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_in
 # Mock utils submodules
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.memory_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 
 # Mock str_utils with actual convert_list_to_string implementation
@@ -4318,7 +4322,7 @@ def test_save_messages(mock_submit, mock_agent_request):
 )
 @patch("backend.services.agent_service.build_memory_context")
 @patch('backend.services.agent_service.save_messages')
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 async def test_run_agent_stream(
     mock_generate_stream,
     mock_save_messages,
@@ -4352,6 +4356,7 @@ async def test_run_agent_stream(
         user_id=None,
         tenant_id=None,
         language="en",
+        enable_memory=False,
     )
 
     # Test debug mode
@@ -4365,7 +4370,7 @@ async def test_run_agent_stream(
     # In debug mode, build_memory_context is called with skip_query=True to avoid database queries
     mock_build_mem_ctx.assert_called_once_with(None, None, 1, skip_query=True)
 
-    # Memory switch should be True to trigger generate_stream_with_memory path
+    # Memory switch should be True to trigger generate_stream path
     mock_build_mem_ctx.return_value = MagicMock(
         user_config=MagicMock(memory_switch=True)
     )
@@ -4378,7 +4383,7 @@ async def test_run_agent_stream(
 )
 @patch("backend.services.agent_service.generate_conversation_title_service", new=AsyncMock())
 @patch("backend.services.agent_service.create_new_conversation")
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 @patch('backend.services.agent_service.save_messages')
 @patch("backend.services.agent_service.build_memory_context")
 async def test_run_agent_stream_auto_creates_conversation_when_missing(
@@ -4433,7 +4438,7 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
 )
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.save_messages")
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
     mock_generate_stream,
     mock_save_messages,
@@ -5280,7 +5285,7 @@ def test_insert_related_agent_impl_failure_returns_400():
 
 
 @pytest.mark.asyncio
-async def test_generate_stream_with_memory_unexpected_exception_emits_error(monkeypatch, caplog):
+async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, caplog):
     """Generic exceptions should emit an error SSE chunk and stop."""
     agent_request = AgentRequest(
         agent_id=9,
@@ -5291,16 +5296,15 @@ async def test_generate_stream_with_memory_unexpected_exception_emits_error(monk
         is_debug=False,
     )
 
-    # Cause an unexpected error inside the try block
+    # Cause an unexpected error inside the try block by patching prepare_agent_run
     monkeypatch.setattr(
-        "backend.services.agent_service.build_memory_context",
-        MagicMock(side_effect=Exception("unexpected")),
-        raising=False,
+        "backend.services.agent_service.prepare_agent_run",
+        AsyncMock(side_effect=Exception("unexpected")),
     )
 
     out = []
-    async for d in agent_service.generate_stream_with_memory(
-        agent_request, user_id="u", tenant_id="t"
+    async for d in agent_service.generate_stream(
+        agent_request, user_id="u", tenant_id="t", enable_memory=False
     ):
         out.append(d)
 
@@ -5308,12 +5312,12 @@ async def test_generate_stream_with_memory_unexpected_exception_emits_error(monk
         "data: {") and "\"type\": \"error\"" in out[0]
     assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in out[0]
     assert "unexpected" not in out[0]
-    assert "Generate stream with memory error: Exception('unexpected')" in caplog.text
+    assert "Generate stream error: Exception('unexpected')" in caplog.text
     assert "Traceback" in caplog.text
 
 
-async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
-    """generate_stream_no_memory should prepare run info, register it and stream data without memory tokens."""
+async def test_generate_stream_registers_and_streams(monkeypatch):
+    """generate_stream(enable_memory=False) should prepare run info, register it and stream data without memory tokens."""
     # Prepare AgentRequest & Request
     agent_request = AgentRequest(
         agent_id=2,
@@ -5325,16 +5329,10 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
     )
     http_request = Request(scope={"type": "http", "headers": []})
 
-    # Monkeypatch helpers
-    monkeypatch.setattr(
-        "backend.services.agent_service.build_memory_context",
-        MagicMock(return_value=MagicMock()),
-        raising=False,
-    )
+    # Monkeypatch helpers - create_agent_run_info is called by prepare_agent_run
     monkeypatch.setattr(
         "backend.services.agent_service.create_agent_run_info",
         AsyncMock(return_value=MagicMock()),
-        raising=False,
     )
 
     registered = {}
@@ -5347,7 +5345,6 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.register_agent_run",
         fake_register,
-        raising=False,
     )
 
     # Stream helper will yield chunks
@@ -5358,13 +5355,12 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
     monkeypatch.setattr(
         "backend.services.agent_service._stream_agent_chunks",
         fake_stream_chunks,
-        raising=False,
     )
 
     # Collect output
     collected = []
-    async for d in agent_service.generate_stream_no_memory(
-        agent_request, user_id="u", tenant_id="t"
+    async for d in agent_service.generate_stream(
+        agent_request, user_id="u", tenant_id="t", enable_memory=False
     ):
         collected.append(d)
 
@@ -5381,7 +5377,7 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
 )
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.save_messages")
-@patch("backend.services.agent_service.generate_stream_no_memory")
+@patch("backend.services.agent_service.generate_stream")
 async def test_run_agent_stream_no_memory(
     mock_gen_no_mem,
     mock_save_messages,
@@ -5405,6 +5401,7 @@ async def test_run_agent_stream_no_memory(
         user_id=None,
         tenant_id=None,
         language="en",
+        enable_memory=False,
     )
 
 
@@ -5415,7 +5412,7 @@ async def test_run_agent_stream_no_memory(
 )
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.save_messages")
-@patch("backend.services.agent_service.generate_stream_no_memory")
+@patch("backend.services.agent_service.generate_stream")
 async def test_run_agent_stream_skip_user_save(
     mock_gen_no_mem,
     mock_save_messages,
@@ -5441,8 +5438,8 @@ async def test_run_agent_stream_skip_user_save(
 
 
 @pytest.mark.asyncio
-async def test_generate_stream_with_memory_emits_tokens_and_unregisters(monkeypatch):
-    """generate_stream_with_memory emits start/done tokens and unregisters preprocess task."""
+async def test_generate_stream_emits_tokens_and_unregisters(monkeypatch):
+    """generate_stream emits start/done tokens and unregisters preprocess task."""
     # Prepare AgentRequest & Request
     agent_request = AgentRequest(
         agent_id=7,
@@ -5502,8 +5499,8 @@ async def test_generate_stream_with_memory_emits_tokens_and_unregisters(monkeypa
 
     # Collect output
     out = []
-    async for d in agent_service.generate_stream_with_memory(
-        agent_request, user_id="u", tenant_id="t"
+    async for d in agent_service.generate_stream(
+        agent_request, user_id="u", tenant_id="t", enable_memory=True
     ):
         out.append(d)
 
@@ -5519,8 +5516,8 @@ async def test_generate_stream_with_memory_emits_tokens_and_unregisters(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_generate_stream_with_memory_fallback_on_failure(monkeypatch):
-    """generate_stream_with_memory should emit fail token and fall back when memory prep fails."""
+async def test_generate_stream_fallback_on_failure(monkeypatch):
+    """generate_stream should emit fail token and fall back when memory prep fails."""
     agent_request = AgentRequest(
         agent_id=8,
         conversation_id=888,
@@ -5554,7 +5551,7 @@ async def test_generate_stream_with_memory_fallback_on_failure(monkeypatch):
         yield "data: fb1\n\n"
 
     monkeypatch.setattr(
-        "backend.services.agent_service.generate_stream_no_memory",
+        "backend.services.agent_service.generate_stream",
         fallback_gen,
         raising=False,
     )
@@ -5572,8 +5569,8 @@ async def test_generate_stream_with_memory_fallback_on_failure(monkeypatch):
     )
 
     out = []
-    async for d in agent_service.generate_stream_with_memory(
-        agent_request, user_id="u", tenant_id="t"
+    async for d in agent_service.generate_stream(
+        agent_request, user_id="u", tenant_id="t", enable_memory=True
     ):
         out.append(d)
 
@@ -10234,7 +10231,7 @@ async def test_update_agent_info_impl_skill_update_exception(
 @patch("backend.services.agent_service._resolve_user_tenant_language")
 @patch("backend.services.agent_service.build_memory_context")
 @patch('backend.services.agent_service.save_messages')
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 async def test_run_agent_stream_binds_agent_monitoring_context(
         mock_generate_stream, mock_save_messages, mock_build_mem_ctx,
         mock_resolve, mock_agent_metadata_cls, mock_agent_request, mock_http_request):
@@ -10265,10 +10262,10 @@ async def test_run_agent_stream_binds_agent_monitoring_context(
     assert metadata_kwargs["language"] == "en"
 
 
-def test_generate_stream_with_memory_decorated():
-    """generate_stream_with_memory exists as callable after module import."""
-    from backend.services.agent_service import generate_stream_with_memory
-    assert callable(generate_stream_with_memory)
+def test_generate_stream_decorated():
+    """generate_stream exists as callable after module import."""
+    from backend.services.agent_service import generate_stream
+    assert callable(generate_stream)
 
 
 # =============================================================================
@@ -10758,11 +10755,11 @@ async def test_update_agent_info_impl_skill_unselected(
     assert mock_create_skill.call_count == 3
 
 
-# Test for generate_stream_with_memory unexpected exception (lines 1889-1896)
+# Test for generate_stream unexpected exception (lines 1889-1896)
 @pytest.mark.asyncio
-async def test_generate_stream_with_memory_unexpected_exception():
-    """Test generate_stream_with_memory handles unexpected exceptions."""
-    from backend.services.agent_service import generate_stream_with_memory
+async def test_generate_stream_unexpected_exception():
+    """Test generate_stream handles unexpected exceptions."""
+    from backend.services.agent_service import generate_stream
 
     agent_request = MagicMock()
     agent_request.is_debug = False
@@ -10774,7 +10771,7 @@ async def test_generate_stream_with_memory_unexpected_exception():
     # Mock build_memory_context to raise unexpected exception
     with patch('backend.services.agent_service.build_memory_context', side_effect=Exception("Unexpected")):
         chunks = []
-        async for chunk in generate_stream_with_memory(agent_request, "user_1", "tenant_1"):
+        async for chunk in generate_stream(agent_request, "user_1", "tenant_1"):
             chunks.append(chunk)
 
     # Should yield error chunk
@@ -13569,13 +13566,13 @@ async def test_export_agent_by_agent_id_knowledge_base_tool(monkeypatch):
 
 
 # ============================================================================
-# Tests for generate_stream_with_memory error handling (lines 2785-2793)
+# Tests for generate_stream error handling (lines 2785-2793)
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_generate_stream_with_memory_stream_chunks_error(monkeypatch):
-    """generate_stream_with_memory should handle error from _stream_agent_chunks gracefully."""
+async def test_generate_stream_stream_chunks_error(monkeypatch):
+    """generate_stream should handle error from _stream_agent_chunks gracefully."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -13641,8 +13638,8 @@ async def test_generate_stream_with_memory_stream_chunks_error(monkeypatch):
 
     # Collect chunks
     chunks = []
-    async for chunk in agent_service.generate_stream_with_memory(
-        agent_request, "user1", "tenant1", "en"
+    async for chunk in agent_service.generate_stream(
+        agent_request, "user1", "tenant1", "en", enable_memory=True
     ):
         chunks.append(chunk)
 
@@ -14764,7 +14761,7 @@ async def test_run_agent_stream_resume_update_message_status_exception(
 
 @pytest.mark.asyncio
 @patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.create_new_conversation")
 async def test_run_agent_stream_title_generation_exception(
@@ -14826,7 +14823,7 @@ async def mock_stream_for_title_test():
 
 @pytest.mark.asyncio
 @patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "zh"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.create_new_conversation")
 async def test_run_agent_stream_title_generation_zh_language(
@@ -14863,7 +14860,7 @@ async def test_run_agent_stream_title_generation_zh_language(
 
 @pytest.mark.asyncio
 @patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.generate_stream")
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.create_new_conversation")
 async def test_run_agent_stream_title_generation_success(
