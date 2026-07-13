@@ -163,6 +163,6 @@ persistence:
   mode: local
   storageClassName: nexent-local
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   localPath: /var/lib/nexent-data
   existingClaimPrefix: ""

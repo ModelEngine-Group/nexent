@@ -25,7 +25,7 @@ data:
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
   NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
-  
+
   # Service URLs (external)
   NORTHBOUND_EXTERNAL_URL: {{ .Values.config.services.northboundExternalUrl | quote }}
 
@@ -43,6 +43,16 @@ data:
   # Redis Config
   REDIS_URL: {{ .Values.config.redis.url | quote }}
   REDIS_BACKEND_URL: {{ .Values.config.redis.backendUrl | quote }}
+  RUNTIME_STATE_REDIS_URL: {{ default .Values.config.redis.url .Values.config.runtimeState.redisUrl | quote }}
+  RUNTIME_STREAM_TTL_SECONDS: {{ .Values.config.runtimeState.streamTtlSeconds | quote }}
+  RUNTIME_STREAM_MAX_LEN: {{ .Values.config.runtimeState.streamMaxLen | quote }}
+  RUNTIME_RUN_TTL_SECONDS: {{ .Values.config.runtimeState.runTtlSeconds | quote }}
+  RUNTIME_CANCEL_TTL_SECONDS: {{ .Values.config.runtimeState.cancelTtlSeconds | quote }}
+  RUNTIME_COMPLETED_TTL_SECONDS: {{ .Values.config.runtimeState.completedTtlSeconds | quote }}
+  RUNTIME_CANCEL_POLL_INTERVAL_SECONDS: {{ .Values.config.runtimeState.cancelPollIntervalSeconds | quote }}
+  NORTHBOUND_IDEMPOTENCY_TTL_SECONDS: {{ .Values.config.northbound.idempotencyTtlSeconds | quote }}
+  NORTHBOUND_RATE_LIMIT_ENABLED: {{ .Values.config.northbound.rateLimitEnabled | quote }}
+  NORTHBOUND_RATE_LIMIT_PER_MINUTE: {{ .Values.config.northbound.rateLimitPerMinute | quote }}
 
   # Model Engine Config
   MODEL_ENGINE_ENABLED: {{ .Values.config.modelEngine.enabled | quote }}
