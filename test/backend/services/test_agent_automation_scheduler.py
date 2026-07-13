@@ -1,17 +1,22 @@
-import asyncio
 import importlib
 import sys
 import types
 
 import pytest
 
+from nexent.scheduler import ClaimedJob, ExecutionLease
+
 
 def _load_scheduler_with_runner_stub(monkeypatch):
     runner_module = types.ModuleType("services.agent_automation.runner")
 
     class _Runner:
-        async def execute_task(self, task, trigger_type="SCHEDULED"):
-            return {"task_id": task.get("task_id"), "status": "SUCCEEDED"}
+        async def execute_task(self, task, trigger_type="SCHEDULED", lease_owner=None):
+            return {
+                "task_id": task.get("task_id"),
+                "status": "SUCCEEDED",
+                "lease_owner": lease_owner,
+            }
 
     runner_module.agent_automation_runner = _Runner()
     monkeypatch.setitem(sys.modules, "services.agent_automation.runner", runner_module)
@@ -20,41 +25,58 @@ def _load_scheduler_with_runner_stub(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_scheduler_claims_only_available_capacity(monkeypatch):
+async def test_store_recovers_orphans_before_releasing_expired_locks(monkeypatch):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
-    scheduler = scheduler_module.AgentAutomationScheduler()
-    scheduler._semaphore = asyncio.Semaphore(2)
-    await scheduler._semaphore.acquire()
-    calls = {}
+    calls = []
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "recover_orphaned_runs",
+        lambda: calls.append("recover"),
+    )
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "release_expired_locks",
+        lambda: calls.append("release"),
+    )
 
-    def fake_claim_due_tasks(instance_id, batch_size, lease_seconds):
-        calls["batch_size"] = batch_size
-        scheduler._stop_event.set()
-        return []
+    await scheduler_module.AgentAutomationLeaseStore().recover()
 
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "claim_due_tasks", fake_claim_due_tasks)
-
-    await scheduler._loop()
-
-    assert calls["batch_size"] == 1
+    assert calls == ["recover", "release"]
 
 
 @pytest.mark.asyncio
-async def test_scheduler_renews_lease_while_task_is_running(monkeypatch):
+async def test_store_claims_tasks_as_sdk_jobs(monkeypatch):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
-    scheduler = scheduler_module.AgentAutomationScheduler()
-    stop_event = asyncio.Event()
-    calls = []
+    calls = {}
 
-    monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_LEASE_SECONDS", 0.03)
+    def fake_claim(owner_id, limit, lease_seconds):
+        calls.update(owner_id=owner_id, limit=limit, lease_seconds=lease_seconds)
+        return [{"task_id": 42, "instruction": "run"}]
 
-    def fake_renew(task_id, instance_id, lease_seconds):
-        calls.append((task_id, instance_id, lease_seconds))
-        stop_event.set()
-        return True
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "claim_due_tasks", fake_claim)
 
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "renew_task_lock", fake_renew)
+    jobs = await scheduler_module.AgentAutomationLeaseStore().claim_due("scheduler-a", 2, 30)
 
-    await scheduler._renew_task_lease(42, stop_event)
+    assert jobs == [ClaimedJob(job_id=42, payload={"task_id": 42, "instruction": "run"})]
+    assert calls == {"owner_id": "scheduler-a", "limit": 2, "lease_seconds": 30}
 
-    assert calls == [(42, scheduler.instance_id, 0.03)]
+
+@pytest.mark.asyncio
+async def test_executor_passes_lease_owner_as_fencing_token(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    captured = {}
+
+    async def fake_execute(task, trigger_type="SCHEDULED", lease_owner=None):
+        captured.update(task=task, trigger_type=trigger_type, lease_owner=lease_owner)
+
+    monkeypatch.setattr(scheduler_module.agent_automation_runner, "execute_task", fake_execute)
+    job = ClaimedJob(job_id=42, payload={"task_id": 42})
+    lease = ExecutionLease(job_id=42, owner_id="scheduler-a")
+
+    await scheduler_module.execute_agent_automation(job, lease)
+
+    assert captured == {
+        "task": {"task_id": 42},
+        "trigger_type": "SCHEDULED",
+        "lease_owner": "scheduler-a",
+    }

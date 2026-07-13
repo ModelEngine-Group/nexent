@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,9 @@ from services.conversation_management_service import (
 from .capability_resolver import validate_bindings_available
 from .models import AutomationRunStatus, ScheduleTrigger
 from .schedule_engine import compute_next_fire_at
+
+
+logger = logging.getLogger("agent_automation.runner")
 
 
 def _utcnow() -> datetime:
@@ -59,6 +63,7 @@ class AgentAutomationRunner:
         task: Dict[str, Any],
         trigger_type: str = "SCHEDULED",
         scheduled_fire_at: Optional[datetime] = None,
+        lease_owner: Optional[str] = None,
     ) -> Dict[str, Any]:
         scheduled = scheduled_fire_at or _parse_dt(task.get("next_fire_at"))
         if agent_automation_db.has_active_run_for_conversation(task["conversation_id"]) or is_agent_running(
@@ -81,7 +86,7 @@ class AgentAutomationRunner:
                 "error_message": "Conversation already has an active automation run.",
             }, task["user_id"])
             fire_count, next_fire_at, task_status = self._advance_scheduled_task(task, skipped_at)
-            agent_automation_db.update_task(task["task_id"], task["tenant_id"], task["user_id"], {
+            task_values = {
                 "status": task_status,
                 "last_fire_at": skipped_at,
                 "last_run_status": AutomationRunStatus.SKIPPED.value,
@@ -90,7 +95,8 @@ class AgentAutomationRunner:
                 "next_fire_at": next_fire_at,
                 "lock_owner": None,
                 "lock_until": None,
-            })
+            }
+            self._update_task_state(task, task_values, trigger_type, lease_owner)
             return run
 
         run = agent_automation_db.create_run({
@@ -104,6 +110,8 @@ class AgentAutomationRunner:
             "status": AutomationRunStatus.RUNNING.value,
             "started_at": _utcnow(),
         }, task["user_id"])
+        if lease_owner:
+            run["_lease_owner"] = lease_owner
 
         timeout_seconds = float(task.get("timeout_seconds") or AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS)
         try:
@@ -117,6 +125,15 @@ class AgentAutomationRunner:
                 "error_code": "AUTOMATION_RUN_TIMEOUT",
                 "error_message": f"Automation run exceeded {timeout_seconds} seconds.",
             })
+        except asyncio.CancelledError:
+            self.cancel_for_conversation(task["conversation_id"], task["user_id"])
+            agent_automation_db.cancel_run(
+                run["run_id"],
+                task["tenant_id"],
+                task["user_id"],
+                "Scheduler execution was interrupted before completion.",
+            )
+            raise
         except Exception as exc:
             return self._fail_run(run, task, "AUTOMATION_RUN_FAILED", str(exc), None)
 
@@ -264,7 +281,7 @@ class AgentAutomationRunner:
         }:
             task_status = current_task["status"]
 
-        agent_automation_db.update_task(task["task_id"], task["tenant_id"], task["user_id"], {
+        task_values = {
             "status": task_status,
             "last_fire_at": now,
             "last_run_status": status,
@@ -274,8 +291,43 @@ class AgentAutomationRunner:
             "next_fire_at": next_fire_at,
             "lock_owner": None,
             "lock_until": None,
-        })
+        }
+        self._update_task_state(
+            task,
+            task_values,
+            str(run.get("trigger_type") or "SCHEDULED"),
+            run.get("_lease_owner"),
+        )
         return updated_run or run
+
+    @staticmethod
+    def _update_task_state(
+        task: Dict[str, Any],
+        values: Dict[str, Any],
+        trigger_type: str,
+        lease_owner: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if trigger_type == "SCHEDULED" and lease_owner:
+            updated = agent_automation_db.update_task_if_lock_owner(
+                task["task_id"],
+                task["tenant_id"],
+                task["user_id"],
+                lease_owner,
+                values,
+            )
+            if not updated:
+                logger.warning(
+                    "Discarded stale scheduled task update after lease loss: task_id=%s owner=%s",
+                    task["task_id"],
+                    lease_owner,
+                )
+            return updated
+        return agent_automation_db.update_task(
+            task["task_id"],
+            task["tenant_id"],
+            task["user_id"],
+            values,
+        )
 
     @staticmethod
     def _advance_scheduled_task(

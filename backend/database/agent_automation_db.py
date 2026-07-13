@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc, insert, select, text, update
+from sqlalchemy import desc, func, insert, select, text, update
 
 from .client import as_dict, get_db_session
 from .db_models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
@@ -86,6 +86,35 @@ def update_task(task_id: int, tenant_id: str, user_id: str, values: Dict[str, An
                 AgentAutomationTask.task_id == task_id,
                 AgentAutomationTask.tenant_id == tenant_id,
                 AgentAutomationTask.user_id == user_id,
+                AgentAutomationTask.delete_flag == "N",
+            )
+            .values(**data)
+            .returning(AgentAutomationTask)
+        ).scalar_one_or_none()
+        return as_dict(task) if task else None
+
+
+def update_task_if_lock_owner(
+    task_id: int,
+    tenant_id: str,
+    user_id: str,
+    lock_owner: str,
+    values: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Apply a scheduled-run result only while the caller owns the task lease."""
+    data = add_update_tracking({
+        **values,
+        "update_time": _utcnow(),
+    }, user_id)
+    with get_db_session() as session:
+        task = session.execute(
+            update(AgentAutomationTask)
+            .where(
+                AgentAutomationTask.task_id == task_id,
+                AgentAutomationTask.tenant_id == tenant_id,
+                AgentAutomationTask.user_id == user_id,
+                AgentAutomationTask.lock_owner == lock_owner,
+                AgentAutomationTask.lock_until > func.now(),
                 AgentAutomationTask.delete_flag == "N",
             )
             .values(**data)
@@ -310,13 +339,9 @@ def has_active_run_for_conversation(conversation_id: int) -> bool:
         return run is not None
 
 
-def claim_due_tasks(instance_id: str, batch_size: int, lease_seconds: int) -> List[Dict[str, Any]]:
+def claim_due_tasks(instance_id: str, batch_size: int, lease_seconds: float) -> List[Dict[str, Any]]:
     sql = text("""
-        UPDATE nexent.agent_automation_task_t
-        SET lock_owner = :instance_id,
-            lock_until = now() + (:lease_seconds * interval '1 second'),
-            update_time = now()
-        WHERE task_id IN (
+        WITH due AS (
             SELECT task_id
             FROM nexent.agent_automation_task_t
             WHERE delete_flag = 'N'
@@ -326,8 +351,30 @@ def claim_due_tasks(instance_id: str, batch_size: int, lease_seconds: int) -> Li
             ORDER BY next_fire_at ASC
             LIMIT :batch_size
             FOR UPDATE SKIP LOCKED
+        ), claimed AS (
+            UPDATE nexent.agent_automation_task_t AS task
+            SET lock_owner = :instance_id,
+                lock_until = now() + (:lease_seconds * interval '1 second'),
+                update_time = now()
+            FROM due
+            WHERE task.task_id = due.task_id
+            RETURNING task.*
+        ), orphaned_runs AS (
+            UPDATE nexent.agent_automation_run_t AS run
+            SET status = 'TIMEOUT',
+                error_code = 'AUTOMATION_LEASE_EXPIRED',
+                error_message = 'The previous scheduler lease expired before the run completed.',
+                finished_at = now(),
+                update_time = now()
+            WHERE run.task_id IN (SELECT task_id FROM claimed)
+              AND run.trigger_type = 'SCHEDULED'
+              AND run.status IN ('QUEUED', 'RUNNING')
+              AND run.delete_flag = 'N'
+            RETURNING run.run_id
         )
-        RETURNING *
+        SELECT claimed.*
+        FROM claimed
+        WHERE (SELECT count(*) FROM orphaned_runs) >= 0
     """)
     with get_db_session() as session:
         rows = session.execute(sql, {
@@ -351,38 +398,49 @@ def release_task_lock(task_id: int, lock_owner: Optional[str] = None) -> bool:
         return bool(result.rowcount)
 
 
-def renew_task_lock(task_id: int, lock_owner: str, lease_seconds: int) -> bool:
-    with get_db_session() as session:
-        result = session.execute(
-            update(AgentAutomationTask)
-            .where(
-                AgentAutomationTask.task_id == task_id,
-                AgentAutomationTask.lock_owner == lock_owner,
-                AgentAutomationTask.delete_flag == "N",
-                AgentAutomationTask.status == "ACTIVE",
-            )
-            .values(
-                lock_until=_utcnow() + timedelta(seconds=lease_seconds),
-                update_time=_utcnow(),
-            )
-        )
-        return bool(result.rowcount)
-
-
-def recover_stale_runs(timeout_seconds: int) -> int:
+def renew_task_lock(task_id: int, lock_owner: str, lease_seconds: float) -> bool:
     sql = text("""
-        UPDATE nexent.agent_automation_run_t
-        SET status = 'TIMEOUT',
-            error_code = 'AUTOMATION_RUN_TIMEOUT',
-            error_message = 'Automation run timed out during runtime recovery.',
-            finished_at = now(),
+        UPDATE nexent.agent_automation_task_t
+        SET lock_until = now() + (:lease_seconds * interval '1 second'),
             update_time = now()
-        WHERE delete_flag = 'N'
-          AND status = 'RUNNING'
-          AND started_at < now() - (:timeout_seconds * interval '1 second')
+        WHERE task_id = :task_id
+          AND lock_owner = :lock_owner
+          AND lock_until > now()
+          AND delete_flag = 'N'
+          AND status = 'ACTIVE'
+        RETURNING task_id
     """)
     with get_db_session() as session:
-        result = session.execute(sql, {"timeout_seconds": timeout_seconds})
+        renewed_task_id = session.execute(sql, {
+            "task_id": task_id,
+            "lock_owner": lock_owner,
+            "lease_seconds": lease_seconds,
+        }).scalar_one_or_none()
+        return renewed_task_id is not None
+
+
+def recover_orphaned_runs() -> int:
+    """Finish runs whose task no longer has a live scheduler lease.
+
+    This is safe to run on every replica startup because a live lease is never
+    modified. Due tasks are retried after their expired lease is reclaimed.
+    """
+    sql = text("""
+        UPDATE nexent.agent_automation_run_t AS run
+        SET status = 'TIMEOUT',
+            error_code = 'AUTOMATION_LEASE_EXPIRED',
+            error_message = 'The scheduler stopped before the run completed.',
+            finished_at = now(),
+            update_time = now()
+        FROM nexent.agent_automation_task_t AS task
+        WHERE run.task_id = task.task_id
+          AND run.delete_flag = 'N'
+          AND run.trigger_type = 'SCHEDULED'
+          AND run.status IN ('QUEUED', 'RUNNING')
+          AND (task.lock_until IS NULL OR task.lock_until < now())
+    """)
+    with get_db_session() as session:
+        result = session.execute(sql)
         return result.rowcount or 0
 
 
@@ -393,7 +451,7 @@ def release_expired_locks() -> int:
             .where(
                 AgentAutomationTask.delete_flag == "N",
                 AgentAutomationTask.lock_until.is_not(None),
-                AgentAutomationTask.lock_until < _utcnow(),
+                AgentAutomationTask.lock_until < func.now(),
             )
             .values(lock_owner=None, lock_until=None, update_time=_utcnow())
         )

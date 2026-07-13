@@ -66,6 +66,42 @@ def _base_task():
     }
 
 
+def test_scheduled_task_state_update_is_fenced_by_lease_owner(monkeypatch):
+    runner_module = _load_runner_with_stubs(monkeypatch)
+    captured = {}
+
+    def fake_update_owned(task_id, tenant_id, user_id, lock_owner, values):
+        captured.update(
+            task_id=task_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            lock_owner=lock_owner,
+            values=values,
+        )
+        return {"task_id": task_id, **values}
+
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "update_task_if_lock_owner",
+        fake_update_owned,
+    )
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "update_task",
+        lambda *args, **kwargs: pytest.fail("scheduled state must use a fenced update"),
+    )
+
+    result = runner_module.AgentAutomationRunner()._update_task_state(
+        _base_task(),
+        {"status": "COMPLETED"},
+        "SCHEDULED",
+        "scheduler-a",
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert captured["lock_owner"] == "scheduler-a"
+
+
 @pytest.mark.asyncio
 async def test_runner_fails_without_calling_agent_when_capability_unavailable(monkeypatch):
     runner_module = _load_runner_with_stubs(monkeypatch)

@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from services.agent_automation import schedule_engine
 from services.agent_automation.models import ScheduleMode, ScheduleRuleType, ScheduleTrigger
 from services.agent_automation.schedule_engine import compute_next_fire_at
 from services.agent_automation.schedule_engine import is_valid_cron_expression
+from nexent.scheduler import triggers as trigger_engine
 
 
 def test_once_at_returns_start_then_none():
@@ -64,7 +64,7 @@ def test_recurring_cron_returns_matching_start_at_first():
 
 
 def test_monthly_cron_fallback_respects_day_of_month(monkeypatch):
-    monkeypatch.setattr(schedule_engine, "croniter", None)
+    monkeypatch.setattr(trigger_engine, "croniter", None)
     trigger = ScheduleTrigger(
         mode=ScheduleMode.RECURRING,
         rule_type=ScheduleRuleType.CRON,
@@ -102,7 +102,7 @@ def test_cron_validation_accepts_generated_rules_and_rejects_invalid_input():
 
 
 def test_cron_fallback_supports_multiple_times_and_last_day(monkeypatch):
-    monkeypatch.setattr(schedule_engine, "croniter", None)
+    monkeypatch.setattr(trigger_engine, "croniter", None)
     multiple_times = ScheduleTrigger(
         mode=ScheduleMode.RECURRING,
         rule_type=ScheduleRuleType.CRON,

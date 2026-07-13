@@ -1,122 +1,104 @@
+"""Backend adapter for the SDK's durable lease scheduler."""
+
 import asyncio
 import logging
-import socket
-import uuid
-from typing import Optional, Set
+from typing import Any, Dict, Hashable
 
 from consts.const import (
-    AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS,
     AGENT_AUTOMATION_ENABLED,
     AGENT_AUTOMATION_LEASE_SECONDS,
     AGENT_AUTOMATION_MAX_CONCURRENT_RUNS,
     AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
+    AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS,
 )
 from database import agent_automation_db
+from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
 
 from .runner import agent_automation_runner
+
 
 logger = logging.getLogger("agent_automation.scheduler")
 
 
-class AgentAutomationScheduler:
-    def __init__(self):
-        self.instance_id = f"{socket.gethostname()}-{uuid.uuid4()}"
-        self._task: Optional[asyncio.Task] = None
-        self._stop_event = asyncio.Event()
-        self._semaphore = asyncio.Semaphore(AGENT_AUTOMATION_MAX_CONCURRENT_RUNS)
-        self._running_tasks: Set[asyncio.Task] = set()
+class AgentAutomationLeaseStore:
+    """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
-    async def start(self):
+    async def recover(self) -> None:
+        await asyncio.to_thread(agent_automation_db.recover_orphaned_runs)
+        await asyncio.to_thread(agent_automation_db.release_expired_locks)
+
+    async def claim_due(
+        self,
+        owner_id: str,
+        limit: int,
+        lease_seconds: float,
+    ) -> list[ClaimedJob[Dict[str, Any]]]:
+        tasks = await asyncio.to_thread(
+            agent_automation_db.claim_due_tasks,
+            owner_id,
+            limit,
+            lease_seconds,
+        )
+        return [ClaimedJob(job_id=task["task_id"], payload=task) for task in tasks]
+
+    async def renew(self, job_id: Hashable, owner_id: str, lease_seconds: float) -> bool:
+        return await asyncio.to_thread(
+            agent_automation_db.renew_task_lock,
+            int(job_id),
+            owner_id,
+            lease_seconds,
+        )
+
+    async def release(self, job_id: Hashable, owner_id: str) -> bool:
+        return await asyncio.to_thread(
+            agent_automation_db.release_task_lock,
+            int(job_id),
+            owner_id,
+        )
+
+
+async def execute_agent_automation(
+    job: ClaimedJob[Dict[str, Any]],
+    lease: ExecutionLease,
+) -> None:
+    await agent_automation_runner.execute_task(
+        job.payload,
+        trigger_type="SCHEDULED",
+        lease_owner=lease.owner_id,
+    )
+
+
+class AgentAutomationScheduler:
+    """Application lifecycle wrapper around the reusable SDK scheduler."""
+
+    def __init__(self) -> None:
+        self._scheduler = LeaseScheduler(
+            store=AgentAutomationLeaseStore(),
+            executor=execute_agent_automation,
+            config=SchedulerConfig(
+                poll_interval_seconds=AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
+                lease_seconds=AGENT_AUTOMATION_LEASE_SECONDS,
+                max_concurrency=AGENT_AUTOMATION_MAX_CONCURRENT_RUNS,
+                shutdown_grace_seconds=AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS,
+            ),
+        )
+
+    @property
+    def instance_id(self) -> str:
+        return self._scheduler.owner_id
+
+    @property
+    def is_running(self) -> bool:
+        return self._scheduler.is_running
+
+    async def start(self) -> None:
         if not AGENT_AUTOMATION_ENABLED:
             logger.info("Agent automation scheduler disabled")
             return
-        if self._task and not self._task.done():
-            return
-        self._stop_event.clear()
-        agent_automation_db.recover_stale_runs(AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS)
-        agent_automation_db.release_expired_locks()
-        self._task = asyncio.create_task(self._loop(), name="agent-automation-scheduler")
-        logger.info("Agent automation scheduler started: %s", self.instance_id)
+        await self._scheduler.start()
 
-    async def stop(self):
-        self._stop_event.set()
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-        if self._running_tasks:
-            await asyncio.gather(*self._running_tasks, return_exceptions=True)
-        logger.info("Agent automation scheduler stopped")
-
-    async def _loop(self):
-        while not self._stop_event.is_set():
-            try:
-                capacity = self._available_capacity()
-                if capacity > 0:
-                    due_tasks = agent_automation_db.claim_due_tasks(
-                        instance_id=self.instance_id,
-                        batch_size=capacity,
-                        lease_seconds=AGENT_AUTOMATION_LEASE_SECONDS,
-                    )
-                    for task in due_tasks:
-                        running_task = asyncio.create_task(self._execute_claimed_task(task))
-                        self._running_tasks.add(running_task)
-                        running_task.add_done_callback(self._running_tasks.discard)
-            except Exception as exc:
-                logger.error("Agent automation scheduler tick failed: %s", exc, exc_info=True)
-            try:
-                await asyncio.wait_for(
-                    self._stop_event.wait(),
-                    timeout=AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                pass
-
-    def _available_capacity(self) -> int:
-        return max(0, getattr(self._semaphore, "_value", 0))
-
-    async def _execute_claimed_task(self, task: dict):
-        async with self._semaphore:
-            lease_stop = asyncio.Event()
-            lease_task = asyncio.create_task(
-                self._renew_task_lease(task["task_id"], lease_stop),
-                name=f"agent-automation-lease-{task['task_id']}",
-            )
-            try:
-                await agent_automation_runner.execute_task(task, trigger_type="SCHEDULED")
-            except Exception as exc:
-                logger.error(
-                    "Automation task execution failed: task_id=%s error=%s",
-                    task.get("task_id"),
-                    exc,
-                    exc_info=True,
-                )
-                agent_automation_db.release_task_lock(task["task_id"], self.instance_id)
-            finally:
-                lease_stop.set()
-                lease_task.cancel()
-                try:
-                    await lease_task
-                except asyncio.CancelledError:
-                    pass
-
-    async def _renew_task_lease(self, task_id: int, stop_event: asyncio.Event):
-        renew_interval = max(0.1, AGENT_AUTOMATION_LEASE_SECONDS / 3)
-        while not stop_event.is_set():
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=renew_interval)
-                return
-            except asyncio.TimeoutError:
-                renewed = agent_automation_db.renew_task_lock(
-                    task_id,
-                    self.instance_id,
-                    AGENT_AUTOMATION_LEASE_SECONDS,
-                )
-                if not renewed:
-                    logger.warning("Automation task lease was lost: task_id=%s", task_id)
-                    return
+    async def stop(self) -> None:
+        await self._scheduler.stop()
 
 
 agent_automation_scheduler = AgentAutomationScheduler()

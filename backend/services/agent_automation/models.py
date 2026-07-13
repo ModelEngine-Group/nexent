@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from nexent.scheduler import ScheduleMode, ScheduleRuleType
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -38,17 +39,6 @@ class AutomationProposalStatus(StrEnum):
 
 class AutomationSource(StrEnum):
     CHAT_INTENT = "CHAT_INTENT"
-
-
-class ScheduleMode(StrEnum):
-    ONCE = "ONCE"
-    RECURRING = "RECURRING"
-
-
-class ScheduleRuleType(StrEnum):
-    AT = "AT"
-    INTERVAL = "INTERVAL"
-    CRON = "CRON"
 
 
 class CapabilityType(StrEnum):

@@ -170,6 +170,16 @@ class AgentAutomationRun(TableBase):
             "status",
             postgresql_where=text("delete_flag = 'N'"),
         ),
+        Index(
+            "uq_agent_automation_active_occurrence",
+            "task_id",
+            "scheduled_fire_at",
+            unique=True,
+            postgresql_where=text(
+                "delete_flag = 'N' AND trigger_type = 'SCHEDULED' "
+                "AND status IN ('QUEUED', 'RUNNING')"
+            ),
+        ),
         {"schema": SCHEMA},
     )
 

@@ -44,9 +44,40 @@ def test_claim_due_tasks_uses_db_lease_and_skip_locked(monkeypatch):
     assert claimed == [{"task_id": 1, "lock_owner": "scheduler-a"}]
     assert "FOR UPDATE SKIP LOCKED" in fake_session.statement
     assert "lock_until = now() + (:lease_seconds * interval '1 second')" in fake_session.statement
+    assert "AUTOMATION_LEASE_EXPIRED" in fake_session.statement
+    assert "run.status IN ('QUEUED', 'RUNNING')" in fake_session.statement
     assert fake_session.params == {
         "instance_id": "scheduler-a",
         "batch_size": 2,
+        "lease_seconds": 120,
+    }
+
+
+def test_renew_rejects_expired_or_reassigned_lease(monkeypatch):
+    class ScalarResult:
+        def scalar_one_or_none(self):
+            return 1
+
+    class ScalarSession(_FakeSession):
+        def execute(self, statement, params=None):
+            self.statement = str(statement)
+            self.params = params
+            return ScalarResult()
+
+    fake_session = ScalarSession()
+
+    @contextmanager
+    def fake_get_db_session():
+        yield fake_session
+
+    monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
+
+    assert agent_automation_db.renew_task_lock(1, "scheduler-a", 120) is True
+    assert "lock_owner = :lock_owner" in fake_session.statement
+    assert "lock_until > now()" in fake_session.statement
+    assert fake_session.params == {
+        "task_id": 1,
+        "lock_owner": "scheduler-a",
         "lease_seconds": 120,
     }
 
@@ -70,3 +101,16 @@ def test_conversation_unique_active_index_exists_in_orm_and_sql():
         assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t" in sql
         assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_conversation_active" in sql
         assert "WHERE delete_flag = 'N' AND status <> 'DELETED'" in sql
+
+
+def test_active_scheduled_occurrence_has_unique_partial_index():
+    index_names = {index.name for index in AgentAutomationTask.metadata.tables[
+        "nexent.agent_automation_run_t"
+    ].indexes}
+    assert "uq_agent_automation_active_occurrence" in index_names
+
+    init_sql = Path("deploy/sql/init.sql").read_text()
+    migration_sql = Path("deploy/sql/migrations/v2.3.0_0713_add_agent_automation.sql").read_text()
+    for sql in (init_sql, migration_sql):
+        assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence" in sql
+        assert "status IN ('QUEUED', 'RUNNING')" in sql

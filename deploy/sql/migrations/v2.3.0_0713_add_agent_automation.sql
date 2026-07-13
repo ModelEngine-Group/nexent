@@ -104,6 +104,12 @@ CREATE INDEX IF NOT EXISTS idx_agent_automation_run_conversation
     ON nexent.agent_automation_run_t (conversation_id, status)
     WHERE delete_flag = 'N';
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence
+    ON nexent.agent_automation_run_t (task_id, scheduled_fire_at)
+    WHERE delete_flag = 'N'
+      AND trigger_type = 'SCHEDULED'
+      AND status IN ('QUEUED', 'RUNNING');
+
 CREATE INDEX IF NOT EXISTS idx_agent_automation_proposal_owner
     ON nexent.agent_automation_proposal_t (tenant_id, user_id, status)
     WHERE delete_flag = 'N';

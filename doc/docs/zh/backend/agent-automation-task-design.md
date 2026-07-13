@@ -37,6 +37,9 @@ backend/services/agent_automation/
   capability_resolver.py
   errors.py
 backend/database/agent_automation_db.py
+sdk/nexent/scheduler/
+  core.py
+  triggers.py
 ```
 
 模块职责：
@@ -47,12 +50,14 @@ backend/database/agent_automation_db.py
 | `facade.py` | 对外唯一服务入口，屏蔽内部 repository、scheduler、runner |
 | `models.py` | 自动化任务领域 DTO、枚举、校验模型 |
 | `repository.py` / `agent_automation_db.py` | 自动化任务与运行记录的数据库访问 |
-| `schedule_engine.py` | 统一计算一次性与周期性任务的下一次触发时间 |
-| `scheduler.py` | 后台轮询、抢占到期任务、lease 续期、恢复异常运行 |
+| `schedule_engine.py` | Backend `ScheduleTrigger` 到 SDK 调度模型的兼容适配 |
+| `scheduler.py` | PostgreSQL 与 Agent Runner 的薄适配，不实现通用调度循环 |
 | `runner.py` | 把一次触发转换成会话消息，并调用后台智能体执行入口 |
 | `intent_analyzer.py` | 使用当前选择的 LLM 判断自动任务意图，并结构化生成标题、单次指令和调度配置 |
 | `intent_parser.py` | 确定性时间解析与 LLM 不可用时的降级策略 |
 | `capability_resolver.py` | 基于 Nexent 现有 Agent 配置匹配可用技能、工具、知识库、子 Agent 和 A2A Agent |
+| `sdk/nexent/scheduler/core.py` | 独立的持久化租约调度内核：轮询、容量、续租、退避、租约丢失取消和有限停机 |
+| `sdk/nexent/scheduler/triggers.py` | 不依赖 Backend/Pydantic 的单次、间隔和 Cron 触发时间计算 |
 
 与现有模块的依赖方向：
 
@@ -64,7 +69,10 @@ flowchart LR
   Auto --> Schedule["Schedule Engine"]
   Auto --> Capability["Capability Resolver"]
   Auto --> Runner["Automation Runner"]
-  Scheduler["Automation Scheduler"] --> Auto
+  BackendScheduler["Backend Scheduler Adapter"] --> SDK["SDK Lease Scheduler"]
+  SDK --> Repo
+  SDK --> BackendScheduler
+  BackendScheduler --> Runner
   Runner --> ConvPort["Conversation Port"]
   Runner --> AgentPort["Agent Runtime Port"]
   ConvDelete["Conversation Service"] --> AutoHook["Automation Delete Hook"]
@@ -77,7 +85,7 @@ flowchart LR
 - Conversation 模块只在删除会话时调用 `AgentAutomationFacade.on_conversation_deleted(conversation_id, user_id)`。
 - Agent Runtime 只新增后台执行端口，不感知任务表和调度规则。
 - Frontend 使用独立 `agentAutomationService` 访问任务接口，不把任务 CRUD 混入 `conversationService`。
-- SDK 不读取环境变量，不新增调度逻辑；自动化任务是 Nexent backend runtime 能力。
+- SDK 不读取环境变量、不依赖 FastAPI、数据库或 Agent 业务；它提供可复用的调度内核和触发时间计算，Backend 通过 `LeaseStore` 与执行器端口注入具体能力。
 - 自然语言只生成“任务提案”，不能绕过 Nexent 当前 Agent 的技能/工具选择机制直接创建可执行任务。
 - 自动化任务保存创建时的能力快照，但每次运行仍通过 Agent Runtime 装配真实工具实例；快照用于校验、提示和审计，不复制工具执行逻辑。
 
@@ -694,15 +702,13 @@ delete_conversation_service
 | `AGENT_AUTOMATION_MAX_CONCURRENT_RUNS` | `2` | 单实例并发执行数 |
 | `AGENT_AUTOMATION_LEASE_SECONDS` | `120` | 任务抢占 lease |
 | `AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS` | `1800` | 默认执行超时 |
+| `AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS` | `30` | 停机等待运行中任务完成的最大秒数 |
 | `AGENT_AUTOMATION_MIN_INTERVAL_SECONDS` | `5` | 普通用户最小周期 |
 
 多实例抢占：
 
 ```sql
-UPDATE agent_automation_task_t
-SET lock_owner = :instance_id,
-    lock_until = now() + interval '120 seconds'
-WHERE task_id IN (
+WITH due AS (
   SELECT task_id
   FROM agent_automation_task_t
   WHERE delete_flag = 'N'
@@ -712,15 +718,40 @@ WHERE task_id IN (
   ORDER BY next_fire_at ASC
   LIMIT :batch_size
   FOR UPDATE SKIP LOCKED
+), claimed AS (
+  UPDATE agent_automation_task_t task
+  SET lock_owner = :instance_id,
+      lock_until = now() + interval '120 seconds'
+  FROM due
+  WHERE task.task_id = due.task_id
+  RETURNING task.*
+), orphaned_runs AS (
+  UPDATE agent_automation_run_t run
+  SET status = 'TIMEOUT',
+      error_code = 'AUTOMATION_LEASE_EXPIRED'
+  WHERE run.task_id IN (SELECT task_id FROM claimed)
+    AND run.trigger_type = 'SCHEDULED'
+    AND run.status IN ('QUEUED', 'RUNNING')
 )
-RETURNING *;
+SELECT * FROM claimed
+WHERE (SELECT count(*) FROM orphaned_runs) >= 0;
 ```
 
-启动恢复：
+高可用与恢复语义：
 
-- 启动时扫描 `RUNNING` 且 `started_at` 超过 timeout 的 run，标记为 `TIMEOUT`。
-- 扫描 `lock_until < now()` 的 task，释放 lock。
-- 对 `ACTIVE` 且 `next_fire_at` 已过期的任务按 `misfire_policy=RUN_ONCE` 补一次。
+- Runtime 启动不等待数据库恢复成功；SDK 调度循环对恢复和抢占失败做指数退避，数据库恢复后自动继续工作，避免调度依赖拖垮 HTTP 服务启动。
+- 正常停机最多等待 `AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS`；超时后取消执行并按 owner 释放 lease，后继实例可重新抢占同一计划时间。
+- 异常退出时数据库中的任务与 `next_fire_at` 均保留。其他实例只在 `lock_until` 过期后接管，因此不会因为一个 Runtime 重启而丢失任务。
+- 重新抢占任务时，在同一数据库语句中把上一个未完成的计划 run 标记为 `AUTOMATION_LEASE_EXPIRED`，随后由 Runner 创建新 run，避免遗留 `RUNNING` 永久阻塞任务。
+- lease 续期和有效性判断统一使用 PostgreSQL `now()`；已过期 lease 不允许“复活”。续期持续失败或 owner 已变化时，SDK 会设置 `lease.lost` 并取消旧执行器。
+- Runner 完成计划任务时必须通过 `task_id + lock_owner + lock_until > now()` fencing 条件提交任务游标；旧实例即使晚返回，也不能覆盖新 owner 的 `fire_count`、`next_fire_at` 或状态。
+- `uq_agent_automation_active_occurrence(task_id, scheduled_fire_at)` 部分唯一索引阻止同一计划时间同时存在两个活动 run。
+- 对 `ACTIVE` 且 `next_fire_at` 已过期的任务按 `misfire_policy=RUN_ONCE` 补一次；成功、失败、超时和跳过都只推进一个计划周期。
+
+交付保证：
+
+- 调度层提供持久化的“至少一次”执行与陈旧写入隔离，不承诺任意外部副作用的 exactly-once。Agent 工具若调用第三方写接口，应使用 `task_id + scheduled_fire_at` 作为幂等键，或由目标系统提供幂等能力。
+- 在正常续租条件下，同一计划时间只由一个实例执行；在进程失联、网络分区且外部调用不可取消的极端窗口中，新的 owner 可能重试该计划时间，因此业务动作仍需幂等。
 
 ## 8. 前端设计
 
