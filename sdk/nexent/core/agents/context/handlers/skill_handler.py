@@ -1,10 +1,29 @@
 """Handler for skill context items."""
 
+import hashlib
+import re
 from typing import Any, Dict, List
 
 from ..context_item import ContextItem, ContextItemType, RepresentationTier
 from ..item_handler import ContextItemHandler
 from ..reducer_models import ReductionResult
+
+
+_GENERATOR = "skill_handler_deterministic"
+_VERSION = "1.0.0"
+
+
+def _first_sentence(text: str) -> str:
+    match = re.split(r"[.\n]", text, maxsplit=1)
+    return match[0].strip() if match else text.strip()
+
+
+def _fingerprint(content: Any) -> str:
+    return hashlib.sha256(str(content).encode()).hexdigest()[:16]
+
+
+def _token_estimate(content: Any) -> int:
+    return len(str(content)) // 4
 
 
 class SkillHandler(ContextItemHandler):
@@ -14,26 +33,69 @@ class SkillHandler(ContextItemHandler):
         return [ContextItemType.SKILL]
 
     def score(self, item: ContextItem, query: str, context: Dict[str, Any]) -> float:
-        # TODO(W13): Implement scoring:
-        #   score = keyword_overlap(query, description) * 0.6
-        #         + priority * 0.4
-        #   Skills have no usage history, rely on query matching.
         return 1.0
 
     def reduce(
         self, item: ContextItem, target: RepresentationTier, budget: int
     ) -> ReductionResult:
-        # TODO(W8): Implement tiered reduction:
-        #   STRUCTURED: name + first sentence of description (truncate at 100 chars)
-        #   POINTER: keep only name
-        #   Deterministic, no LLM call needed.
+        content = item.content
+        fp = _fingerprint(content)
+
+        if target == RepresentationTier.FULL:
+            return ReductionResult(
+                representation=RepresentationTier.FULL,
+                source_fingerprint=fp,
+                token_count=_token_estimate(content),
+                generator=_GENERATOR,
+                generator_version=_VERSION,
+                admissible=True,
+                loss_metadata={},
+                content=content,
+            )
+
+        if target == RepresentationTier.COMPRESSED:
+            return ReductionResult(
+                representation=RepresentationTier.COMPRESSED,
+                source_fingerprint=fp,
+                token_count=_token_estimate(content),
+                generator=_GENERATOR,
+                generator_version=_VERSION,
+                admissible=True,
+                loss_metadata={},
+                content=content,
+            )
+
+        name = ""
+        description = ""
+
+        if isinstance(content, dict):
+            name = str(content.get("name", ""))
+            description = str(content.get("description", ""))
+        else:
+            name = str(content)
+
+        if target == RepresentationTier.STRUCTURED:
+            first_sent = _first_sentence(description)
+            reduced = {"name": name, "description": first_sent[:100]}
+            return ReductionResult(
+                representation=RepresentationTier.STRUCTURED,
+                source_fingerprint=fp,
+                token_count=_token_estimate(reduced),
+                generator=_GENERATOR,
+                generator_version=_VERSION,
+                admissible=True,
+                loss_metadata={},
+                content=reduced,
+            )
+
+        reduced = {"name": name}
         return ReductionResult(
-            representation=item.current_representation,
-            source_fingerprint="",
-            token_count=item.token_estimate,
-            generator="passthrough",
-            generator_version="0.1.0",
+            representation=RepresentationTier.POINTER,
+            source_fingerprint=fp,
+            token_count=_token_estimate(reduced),
+            generator=_GENERATOR,
+            generator_version=_VERSION,
             admissible=True,
             loss_metadata={},
-            content=item.content,
+            content=reduced,
         )

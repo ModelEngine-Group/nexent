@@ -1,10 +1,23 @@
 """Handler for tool call result context items."""
 
+import hashlib
 from typing import Any, Dict, List
 
 from ..context_item import ContextItem, ContextItemType, RepresentationTier
 from ..item_handler import ContextItemHandler
 from ..reducer_models import ReductionResult
+
+
+_GENERATOR_DETERMINISTIC = "tool_call_result_handler_deterministic"
+_VERSION = "1.0.0"
+
+
+def _fingerprint(content: Any) -> str:
+    return hashlib.sha256(str(content).encode()).hexdigest()[:16]
+
+
+def _token_estimate(content: Any) -> int:
+    return len(str(content)) // 4
 
 
 class ToolCallResultHandler(ContextItemHandler):
@@ -24,18 +37,76 @@ class ToolCallResultHandler(ContextItemHandler):
     def reduce(
         self, item: ContextItem, target: RepresentationTier, budget: int
     ) -> ReductionResult:
-        # TODO(W8): Implement tiered reduction:
-        #   STRUCTURED: tool name + result summary (deterministic)
-        #   POINTER: tool name + status only (deterministic)
+        content = item.content
+        fp = _fingerprint(content)
+
+        if target == RepresentationTier.FULL:
+            return ReductionResult(
+                representation=RepresentationTier.FULL,
+                source_fingerprint=fp,
+                token_count=_token_estimate(content),
+                generator=_GENERATOR_DETERMINISTIC,
+                generator_version=_VERSION,
+                admissible=True,
+                loss_metadata={},
+                content=content,
+            )
+
+        tool_name = ""
+        execution_result = ""
+        status = ""
+        if isinstance(content, dict):
+            tool_name = str(content.get("tool_name", ""))
+            execution_result = str(content.get("execution_result", ""))
+            status = str(content.get("status", ""))
+
+        if target == RepresentationTier.COMPRESSED:
+            # COMPRESSED falls through to STRUCTURED for tool call results
+            reduced = {
+                "tool_name": tool_name,
+                "execution_result": execution_result[:200],
+            }
+            return ReductionResult(
+                representation=RepresentationTier.COMPRESSED,
+                source_fingerprint=fp,
+                token_count=_token_estimate(reduced),
+                generator=_GENERATOR_DETERMINISTIC,
+                generator_version=_VERSION,
+                admissible=True,
+                loss_metadata={},
+                content=reduced,
+            )
+
+        if target == RepresentationTier.STRUCTURED:
+            reduced = {
+                "tool_name": tool_name,
+                "execution_result": execution_result[:200],
+            }
+            return ReductionResult(
+                representation=RepresentationTier.STRUCTURED,
+                source_fingerprint=fp,
+                token_count=_token_estimate(reduced),
+                generator=_GENERATOR_DETERMINISTIC,
+                generator_version=_VERSION,
+                admissible=True,
+                loss_metadata={},
+                content=reduced,
+            )
+
+        # POINTER: tool_name + status only
+        reduced = {
+            "tool_name": tool_name,
+            "status": status,
+        }
         return ReductionResult(
-            representation=item.current_representation,
-            source_fingerprint="",
-            token_count=item.token_estimate,
-            generator="passthrough",
-            generator_version="0.1.0",
+            representation=RepresentationTier.POINTER,
+            source_fingerprint=fp,
+            token_count=_token_estimate(reduced),
+            generator=_GENERATOR_DETERMINISTIC,
+            generator_version=_VERSION,
             admissible=True,
             loss_metadata={},
-            content=item.content,
+            content=reduced,
         )
 
     def to_messages(self, item: ContextItem) -> List[Dict[str, Any]]:

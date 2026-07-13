@@ -39,7 +39,6 @@ def _default_minimum_fidelity_by_type() -> Dict[ContextItemType, RepresentationT
         ContextItemType.EXTERNAL_AGENT: RepresentationTier.STRUCTURED,
         ContextItemType.HISTORY_TURN: RepresentationTier.STRUCTURED,
         ContextItemType.TOOL_CALL_RESULT: RepresentationTier.STRUCTURED,
-        ContextItemType.WORKING_MEMORY: RepresentationTier.STRUCTURED,
     }
 
 
@@ -50,7 +49,6 @@ def _default_authority_order() -> Tuple[AuthorityTier, ...]:
         AuthorityTier.PLATFORM,
         AuthorityTier.TENANT,
         AuthorityTier.USER,
-        AuthorityTier.WORKING_MEMORY,
         AuthorityTier.TOOL_RESULT,
         AuthorityTier.RETRIEVED_MEMORY,
         AuthorityTier.SUMMARY,

@@ -1,5 +1,6 @@
 """Context management module for fine-grained context assembly, policy, and reduction."""
 
+from .admissibility_validator import AdmissibilityValidator
 from .context_item import (
     AuthorityTier,
     ContextItem,
@@ -22,6 +23,7 @@ from .selection_engine import select_context
 
 
 __all__ = [
+    "AdmissibilityValidator",
     "AuthorityTier",
     "ContextItem",
     "ContextItemHandler",

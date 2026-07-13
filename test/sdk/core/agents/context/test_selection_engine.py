@@ -204,7 +204,7 @@ class TestSelectContext:
         items = [
             _item(
                 "user-fact",
-                ContextItemType.WORKING_MEMORY,
+                ContextItemType.MEMORY,
                 authority=AuthorityTier.USER,
                 tokens=10,
                 metadata={"conflict_key": "preference"},
@@ -212,7 +212,7 @@ class TestSelectContext:
             ),
             _item(
                 "inferred-fact",
-                ContextItemType.WORKING_MEMORY,
+                ContextItemType.MEMORY,
                 authority=AuthorityTier.AGENT_INFERENCE,
                 tokens=10,
                 metadata={"conflict_key": "preference"},
@@ -234,7 +234,7 @@ class TestSelectContext:
         items = [
             _item(
                 "first-fact",
-                ContextItemType.WORKING_MEMORY,
+                ContextItemType.MEMORY,
                 authority=AuthorityTier.USER,
                 tokens=10,
                 metadata={"conflict_key": "deadline"},
@@ -242,7 +242,7 @@ class TestSelectContext:
             ),
             _item(
                 "second-fact",
-                ContextItemType.WORKING_MEMORY,
+                ContextItemType.MEMORY,
                 authority=AuthorityTier.USER,
                 tokens=10,
                 metadata={"conflict_key": "deadline"},

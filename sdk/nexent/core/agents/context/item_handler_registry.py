@@ -1,9 +1,17 @@
 """Registry mapping ContextItemType to ContextItemHandler instances."""
 
-from typing import Dict
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Dict
 
 from .context_item import ContextItemType
 from .item_handler import ContextItemHandler
+
+
+if TYPE_CHECKING:
+    from .context_item import ContextItem, RepresentationTier
+    from .policy_models import ContextPolicy
+    from .reducer_models import ReductionResult
 
 
 class ItemHandlerRegistry:
@@ -40,3 +48,18 @@ class ItemHandlerRegistry:
     def reset(cls) -> None:
         """Clear all registered handlers. Useful for testing."""
         cls._handlers = {}
+
+    @classmethod
+    def reduce_item(
+        cls,
+        item: ContextItem,
+        target: RepresentationTier,
+        budget: int,
+        policy: ContextPolicy | None = None,
+    ) -> ReductionResult:
+        """Resolve handler, call reduce(), validate result."""
+        handler = cls.get(item.item_type)
+        result = handler.reduce(item, target, budget)
+        from .admissibility_validator import AdmissibilityValidator
+
+        return AdmissibilityValidator.validate(item, result, target, policy)

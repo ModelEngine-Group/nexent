@@ -11,15 +11,19 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
 
+
 if TYPE_CHECKING:
-    from ..agent_model import ContextComponent, ContextStrategy
-    from ...context_runtime.contracts import ContextEvidence, FinalContext
+    from ...context_runtime.contracts import FinalContext
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
-from smolagents.models import ChatMessage, MessageRole
+from smolagents.models import ChatMessage
 
-from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from ..summary_config import ContextManagerConfig, StrategyType
+from nexent.monitor import (
+    OPENINFERENCE_INPUT_VALUE,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    get_monitoring_manager,
+)
+
 from ...utils.token_estimation import (
     estimate_tokens,
     estimate_tokens_for_steps,
@@ -27,37 +31,33 @@ from ...utils.token_estimation import (
     msg_char_count,
     msg_token_count,
 )
-from nexent.monitor import (
-    get_monitoring_manager,
-    OPENINFERENCE_SPAN_KIND_CHAIN,
-    OPENINFERENCE_SPAN_KIND_LLM,
-    OPENINFERENCE_INPUT_VALUE,
-    OPENINFERENCE_OUTPUT_VALUE,
-)
-
+from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
+from ..summary_config import ContextManagerConfig
 from .budget import (
-    action_content,
-    action_fingerprint,
     extract_message_text,
     extract_pairs,
     is_curr_cache_valid,
     is_prev_cache_valid,
     message_role,
-    pair_fingerprint,
-    trim_actions_to_budget,
-    trim_pairs_to_budget,
 )
 from .current_compression import CurrentCompressor
 from .llm_summary import LLMSummary
 from .previous_compression import PreviousCompressor
 from .stats_export import (
     export_summary as _export_summary,
+)
+from .stats_export import (
     get_all_compression_stats as _get_all_compression_stats,
+)
+from .stats_export import (
     get_step_compression_stats as _get_step_compression_stats,
+)
+from .stats_export import (
     get_token_counts as _get_token_counts,
 )
 from .step_renderer import StepRenderer
 from .summary_step import ManagedRunContext, SummaryTaskStep
+
 
 logger = logging.getLogger("agent_context")
 
@@ -556,7 +556,17 @@ class ContextManager:
             if run_context is None:
                 run_context = self.prepare_run_context(memory, fallback_system_prompt="")
 
+            tools = self._canonical_tools(tools or ())
+            purpose_stable, purpose_dynamic = self._purpose_messages(
+                purpose=purpose,
+                task=task,
+                final_answer_templates=final_answer_templates,
+            )
+
             context_items_for_evidence: tuple = ()
+            selection_decision_for_evidence = None
+            reduction_warnings_for_evidence: tuple = ()
+
             if self.config.use_context_items:
                 projected_items = self.project_context_items(run_context.selected_components)
 
@@ -573,6 +583,66 @@ class ContextManager:
 
                 context_items_for_evidence = tuple(projected_items)
 
+                # Run selection engine and apply reduction
+                from ..context.context_item import ContextItem as _ContextItem
+                from ..context.item_handler_registry import ItemHandlerRegistry
+                from ..context.policy_models import resolve_policy
+                from ..context.selection_engine import select_context
+
+                safe_budget = self._calculate_safe_input_budget(model, tools, purpose_stable)
+                policy = resolve_policy()
+                decision = select_context(policy, projected_items, safe_budget)
+                selection_decision_for_evidence = decision
+
+                reduced_items = []
+                reduction_warnings = []
+                for item in projected_items:
+                    if item.item_id in decision.selected_item_ids:
+                        target_tier = decision.representation_requirements.get(
+                            item.item_id, item.current_representation
+                        )
+                        if target_tier != item.current_representation:
+                            try:
+                                result = ItemHandlerRegistry.reduce_item(
+                                    item, target_tier, safe_budget, policy
+                                )
+                                if result.admissible:
+                                    reduced_item = _ContextItem(
+                                        item_id=item.item_id,
+                                        item_type=item.item_type,
+                                        source_refs=item.source_refs,
+                                        authority_tier=item.authority_tier,
+                                        minimum_fidelity=item.minimum_fidelity,
+                                        current_representation=target_tier,
+                                        content=result.content,
+                                        token_estimate=result.token_count,
+                                        metadata={**item.metadata, "_reduced": True},
+                                        lifecycle_status=item.lifecycle_status,
+                                        recompute_cost=item.recompute_cost,
+                                    )
+                                    reduced_items.append(reduced_item)
+                                else:
+                                    reduction_warnings.append({
+                                        "item_id": item.item_id,
+                                        "reason": result.loss_metadata.get("reason", "unknown"),
+                                    })
+                                    reduced_items.append(item)
+                            except Exception:
+                                logger.warning(
+                                    "Reduction failed for item %s, using original",
+                                    item.item_id,
+                                    exc_info=True,
+                                )
+                                reduction_warnings.append({
+                                    "item_id": item.item_id,
+                                    "reason": "reduction_exception",
+                                })
+                                reduced_items.append(item)
+                        else:
+                            reduced_items.append(item)
+                reduction_warnings_for_evidence = tuple(reduction_warnings)
+                projected_items = reduced_items
+
                 seen_components = set()
                 item_messages = []
                 for item in projected_items:
@@ -584,7 +654,6 @@ class ContextManager:
 
                 for item in projected_items:
                     if item.metadata.get("_source_component") is None:
-                        from ..context.item_handler_registry import ItemHandlerRegistry
                         handler = ItemHandlerRegistry.get(item.item_type)
                         for msg in handler.to_messages(item):
                             item_messages.append(msg)
@@ -599,13 +668,6 @@ class ContextManager:
                     selected_component_types=run_context.selected_component_types,
                     selected_components=run_context.selected_components,
                 )
-
-            tools = self._canonical_tools(tools or ())
-            purpose_stable, purpose_dynamic = self._purpose_messages(
-                purpose=purpose,
-                task=task,
-                final_answer_templates=final_answer_templates,
-            )
 
             original_messages = self._messages_from_memory(memory)
             stable_messages = [*run_context.stable_messages, *purpose_stable]
@@ -666,8 +728,24 @@ class ContextManager:
                     stable_prefix_fingerprint=fingerprint,
                     prefix_change_reasons=tuple(reasons),
                     context_items=context_items_for_evidence,
+                    selection_decision=selection_decision_for_evidence,
+                    reduction_warnings=reduction_warnings_for_evidence,
                 ),
             )
+
+    def _calculate_safe_input_budget(self, model: Any, tools: Sequence[Any], purpose_stable: Sequence[Any]) -> int:
+        """Estimate remaining token budget for context items."""
+        if self.config.soft_input_budget_tokens > 0:
+            budget = self.config.soft_input_budget_tokens
+        else:
+            budget = self.config.token_threshold
+
+        overhead = (
+            self._estimate_tools_tokens(tools)
+            + self._msg_token_count(purpose_stable)
+            + 500
+        )
+        return max(0, budget - overhead)
 
     def _purpose_messages(
         self,
@@ -853,9 +931,7 @@ class ContextManager:
                 self._components.append(component)
 
     def _get_strategy(self):
-        from ..agent_model import (
-            FullStrategy, TokenBudgetStrategy, BufferedStrategy, PriorityWeightedStrategy
-        )
+        from ..agent_model import BufferedStrategy, FullStrategy, PriorityWeightedStrategy, TokenBudgetStrategy
         strategy_map = {
             "full": FullStrategy,
             "token_budget": TokenBudgetStrategy,
@@ -879,7 +955,6 @@ class ContextManager:
         if not source_components:
             return []
 
-        from ..agent_model import SystemPromptComponent
 
         budget = token_budget or self._calculate_component_budget()
         strategy = self._get_strategy()
