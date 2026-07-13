@@ -985,5 +985,257 @@ class TestCustomHeadersIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs['custom_headers'], custom_headers)
 
 
+# ============================================================================
+# _build_mcp_headers - helper function tests
+# ============================================================================
+
+class TestBuildMcpHeaders(unittest.TestCase):
+    """Test _build_mcp_headers header construction logic."""
+
+    def test_no_auth_no_custom_headers(self):
+        """Both None => empty dict."""
+        from backend.services.remote_mcp_service import _build_mcp_headers
+        result = _build_mcp_headers(None, None)
+        self.assertEqual(result, {})
+
+    def test_auth_token_only(self):
+        """Auth token sets Authorization header."""
+        from backend.services.remote_mcp_service import _build_mcp_headers
+        result = _build_mcp_headers("Bearer my-token", None)
+        self.assertEqual(result, {"Authorization": "Bearer my-token"})
+
+    def test_custom_headers_only(self):
+        """Custom headers passed through directly."""
+        from backend.services.remote_mcp_service import _build_mcp_headers
+        result = _build_mcp_headers(None, {"X-Custom": "val"})
+        self.assertEqual(result, {"X-Custom": "val"})
+
+    def test_both_merged(self):
+        """Auth token and custom headers are merged."""
+        from backend.services.remote_mcp_service import _build_mcp_headers
+        result = _build_mcp_headers("tok", {"X-One": "1", "X-Two": "2"})
+        self.assertEqual(result, {"Authorization": "tok", "X-One": "1", "X-Two": "2"})
+
+
+# ============================================================================
+# _check_mcp_connectivity - helper function tests
+# ============================================================================
+
+class TestCheckMcpConnectivity(unittest.IsolatedAsyncioTestCase):
+    """Test _check_mcp_connectivity health check wrapper."""
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    async def test_healthy_returns_tool_names(self, mock_health):
+        """Health check returns tool names => function returns them."""
+        from backend.services.remote_mcp_service import _check_mcp_connectivity
+        mock_health.return_value = ["tool1", "tool2"]
+
+        result = await _check_mcp_connectivity("https://srv/mcp", {}, False, "svc")
+
+        self.assertEqual(result, ["tool1", "tool2"])
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    async def test_container_unreachable_returns_none(self, mock_health):
+        """Container unreachable => returns None, no exception."""
+        from backend.services.remote_mcp_service import _check_mcp_connectivity
+        mock_health.return_value = []
+
+        result = await _check_mcp_connectivity("https://srv/mcp", {}, True, "container-svc")
+
+        self.assertIsNone(result)
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    async def test_non_container_unreachable_raises(self, mock_health):
+        """Non-container unreachable => raises MCPConnectionError."""
+        from backend.services.remote_mcp_service import _check_mcp_connectivity
+        mock_health.return_value = []
+
+        with self.assertRaises(MCPConnectionError):
+            await _check_mcp_connectivity("https://srv/mcp", {}, False, "svc")
+
+
+# ============================================================================
+# _mcp_protocol_connect - lightweight MCP initialize handshake
+# ============================================================================
+
+class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
+    """Test _mcp_protocol_connect transport selection and connection."""
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_sse_url_uses_sse_transport(self, mock_client_cls):
+        """URL ending in /sse => SSETransport."""
+        from unittest.mock import AsyncMock
+        from fastmcp.client.transports import SSETransport
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected.return_value = True
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        result = await _mcp_protocol_connect("https://srv/sse", {"X-Test": "1"})
+
+        self.assertTrue(result)
+        transport = mock_client_cls.call_args[1]['transport']
+        self.assertIsInstance(transport, SSETransport)
+        self.assertEqual(transport.url, "https://srv/sse")
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_mcp_url_uses_streamable_http_transport(self, mock_client_cls):
+        """URL ending in /mcp => StreamableHttpTransport."""
+        from unittest.mock import AsyncMock
+        from fastmcp.client.transports import StreamableHttpTransport
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected.return_value = True
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        result = await _mcp_protocol_connect("https://srv/mcp", {})
+
+        self.assertTrue(result)
+        transport = mock_client_cls.call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+        self.assertEqual(transport.url, "https://srv/mcp")
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_unknown_url_defaults_to_streamable_http(self, mock_client_cls):
+        """URL without /sse or /mcp suffix defaults to StreamableHttpTransport."""
+        from unittest.mock import AsyncMock
+        from fastmcp.client.transports import StreamableHttpTransport
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected.return_value = True
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        result = await _mcp_protocol_connect("https://srv/api", {})
+
+        self.assertTrue(result)
+        transport = mock_client_cls.call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_connection_failure_returns_false(self, mock_client_cls):
+        """async with client raises => returns False."""
+        from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.__aenter__.side_effect = Exception("Connection refused")
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        result = await _mcp_protocol_connect("https://srv/mcp", {})
+
+        self.assertFalse(result)
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_headers_passed_to_transport(self, mock_client_cls):
+        """Custom headers are forwarded to the transport."""
+        from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected.return_value = True
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        headers = {"Authorization": "Bearer tok", "X-Custom": "val"}
+        await _mcp_protocol_connect("https://srv/mcp", headers)
+
+        transport = mock_client_cls.call_args[1]['transport']
+        self.assertEqual(transport.headers.get("Authorization"), "Bearer tok")
+        self.assertEqual(transport.headers.get("X-Custom"), "val")
+
+
+# ============================================================================
+# test_mcp_connection - public wrapper for _mcp_protocol_connect
+# ============================================================================
+
+class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
+    """Test test_mcp_connection wrapper function."""
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    async def test_with_auth_token(self, mock_connect):
+        """Auth token is passed in Authorization header."""
+        from backend.services.remote_mcp_service import test_mcp_connection
+        mock_connect.return_value = True
+
+        result = await test_mcp_connection(
+            "https://srv/mcp",
+            authorization_token="Bearer tok",
+        )
+
+        self.assertTrue(result)
+        mock_connect.assert_called_once_with(
+            "https://srv/mcp",
+            {"Authorization": "Bearer tok"},
+        )
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    async def test_with_custom_headers(self, mock_connect):
+        """Custom headers are passed through."""
+        from backend.services.remote_mcp_service import test_mcp_connection
+        mock_connect.return_value = True
+
+        result = await test_mcp_connection(
+            "https://srv/mcp",
+            custom_headers={"X-Custom": "val"},
+        )
+
+        self.assertTrue(result)
+        mock_connect.assert_called_once_with(
+            "https://srv/mcp",
+            {"X-Custom": "val"},
+        )
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    async def test_with_both_auth_and_custom_headers(self, mock_connect):
+        """Auth token and custom headers are merged."""
+        from backend.services.remote_mcp_service import test_mcp_connection
+        mock_connect.return_value = True
+
+        result = await test_mcp_connection(
+            "https://srv/mcp",
+            authorization_token="tok",
+            custom_headers={"X-Custom": "val"},
+        )
+
+        self.assertTrue(result)
+        mock_connect.assert_called_once_with(
+            "https://srv/mcp",
+            {"Authorization": "tok", "X-Custom": "val"},
+        )
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    async def test_no_auth_or_headers(self, mock_connect):
+        """No credentials => empty headers dict."""
+        from backend.services.remote_mcp_service import test_mcp_connection
+        mock_connect.return_value = True
+
+        result = await test_mcp_connection("https://srv/mcp")
+
+        self.assertTrue(result)
+        mock_connect.assert_called_once_with("https://srv/mcp", {})
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    async def test_connection_failure_returns_false(self, mock_connect):
+        """Underlying connect fails => wrapper returns False."""
+        from backend.services.remote_mcp_service import test_mcp_connection
+        mock_connect.return_value = False
+
+        result = await test_mcp_connection("https://srv/mcp")
+
+        self.assertFalse(result)
+
+    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    async def test_url_stripped(self, mock_connect):
+        """URL whitespace is stripped before passing to connect."""
+        from backend.services.remote_mcp_service import test_mcp_connection
+        mock_connect.return_value = True
+
+        result = await test_mcp_connection("  https://srv/mcp  ")
+
+        self.assertTrue(result)
+        mock_connect.assert_called_once_with("https://srv/mcp", {})
+
+
 if __name__ == '__main__':
     unittest.main()
