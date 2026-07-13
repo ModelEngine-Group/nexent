@@ -119,29 +119,31 @@ class ContextManager:
         return (system_prompt_tokens + self._effective_prev_tokens(prev_steps)
                 + self._effective_curr_tokens(curr_steps))
 
-    def _effective_prev_tokens(self, prev_steps: List[MemoryStep]) -> int:
+    def _effective_prev_tokens(self, prev_steps: Sequence[Any]) -> int:
         if not prev_steps:
             return 0
         prev_pairs = extract_pairs(prev_steps)
         is_valid, covered_idx = is_prev_cache_valid(prev_pairs, self._previous_summary_cache)
-        if not is_valid:
-            return estimate_tokens_for_steps(prev_steps, self.config.chars_per_token)
+        previous_cache = self._previous_summary_cache
+        if not is_valid or previous_cache is None:
+            return estimate_tokens_for_steps(list(prev_steps), self.config.chars_per_token)
         uncovered = prev_pairs[covered_idx:]
         uncovered_tokens = (
             self._renderer.estimate_text_tokens(self._renderer.pairs_to_text(uncovered))
             if uncovered else 0
         )
-        return (self._renderer.estimate_text_tokens(self._previous_summary_cache.summary_text)
+        return (self._renderer.estimate_text_tokens(previous_cache.summary_text)
                 + uncovered_tokens)
 
-    def _effective_curr_tokens(self, curr_steps: List[MemoryStep]) -> int:
+    def _effective_curr_tokens(self, curr_steps: Sequence[Any]) -> int:
         if not curr_steps:
             return 0
         curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
         action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
         is_valid, covered_idx = is_curr_cache_valid(action_steps, self._current_summary_cache)
-        if not is_valid:
-            return estimate_tokens_for_steps(curr_steps, self.config.chars_per_token)
+        current_cache = self._current_summary_cache
+        if not is_valid or current_cache is None:
+            return estimate_tokens_for_steps(list(curr_steps), self.config.chars_per_token)
         task_tokens = (
             self._renderer.estimate_text_tokens(curr_task.task or "") if curr_task else 0
         )
@@ -151,7 +153,7 @@ class ContextManager:
             if uncovered else 0
         )
         return (task_tokens
-                + self._renderer.estimate_text_tokens(self._current_summary_cache.summary_text)
+                + self._renderer.estimate_text_tokens(current_cache.summary_text)
                 + uncovered_tokens)
 
     # ============================================================
@@ -232,9 +234,10 @@ class ContextManager:
                     prev_pairs = extract_pairs(prev_steps)
                     if prev_pairs:
                         is_valid, covered_idx = is_prev_cache_valid(prev_pairs, self._previous_summary_cache)
-                        if is_valid:
+                        previous_cache = self._previous_summary_cache
+                        if is_valid and previous_cache is not None:
                             prev_summary_step = SummaryTaskStep(
-                                task=self._previous_summary_cache.summary_text
+                                task=previous_cache.summary_text
                             )
                             uncovered = prev_pairs[covered_idx:]
                             prev_tail_steps = self._renderer.pairs_to_steps(uncovered)
@@ -245,11 +248,12 @@ class ContextManager:
                         curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
                         if curr_action_steps:
                             is_valid, covered_idx = is_curr_cache_valid(curr_action_steps, self._current_summary_cache)
-                            if is_valid:
+                            current_cache = self._current_summary_cache
+                            if is_valid and current_cache is not None:
                                 uncovered = curr_action_steps[covered_idx:]
                                 curr_kept_steps = (
                                     ([curr_task] if curr_task else [])
-                                    + [SummaryTaskStep(task=self._current_summary_cache.summary_text)]
+                                    + [SummaryTaskStep(task=current_cache.summary_text)]
                                     + list(uncovered)
                                 )
 
@@ -318,9 +322,10 @@ class ContextManager:
                         self._step_local_log.extend(result.records)
                 elif prev_pairs:
                     is_valid, covered_idx = is_prev_cache_valid(prev_pairs, self._previous_summary_cache)
-                    if is_valid:
+                    previous_cache = self._previous_summary_cache
+                    if is_valid and previous_cache is not None:
                         prev_summary_step = SummaryTaskStep(
-                            task=self._previous_summary_cache.summary_text
+                            task=previous_cache.summary_text
                         )
                         uncovered = prev_pairs[covered_idx:]
                         prev_tail_steps = self._renderer.pairs_to_steps(uncovered)
@@ -369,11 +374,12 @@ class ContextManager:
                             self._step_local_log.extend(result.records)
                     elif curr_action_steps:
                         is_valid, covered_idx = is_curr_cache_valid(curr_action_steps, self._current_summary_cache)
-                        if is_valid:
+                        current_cache = self._current_summary_cache
+                        if is_valid and current_cache is not None:
                             uncovered = curr_action_steps[covered_idx:]
                             curr_kept_steps = (
                                 ([curr_task] if curr_task else [])
-                                + [SummaryTaskStep(task=self._current_summary_cache.summary_text)]
+                                + [SummaryTaskStep(task=current_cache.summary_text)]
                                 + list(uncovered)
                             )
 
@@ -598,8 +604,9 @@ class ContextManager:
                 reduction_warnings = []
                 for item in projected_items:
                     if item.item_id in decision.selected_item_ids:
-                        target_tier = decision.representation_requirements.get(
-                            item.item_id, item.current_representation
+                        target_tier = (
+                            decision.representation_requirements.get(item.item_id)
+                            or item.current_representation
                         )
                         if target_tier != item.current_representation:
                             try:
@@ -843,9 +850,9 @@ class ContextManager:
             "__class__": f"{value.__class__.__module__}.{value.__class__.__qualname__}",
         }
 
-    def _fingerprint(self, messages: Sequence[Any]) -> str:
+    def _fingerprint(self, value: Any) -> str:
         encoded = json.dumps(
-            self._normalize_for_fingerprint(messages),
+            self._normalize_for_fingerprint(value),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
