@@ -108,6 +108,26 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
+  agentAutomation: {
+    list: `${API_BASE_URL}/agent/automations`,
+    detail: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    update: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    delete: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    pause: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/pause`,
+    resume: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/resume`,
+    run: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}/run`,
+    runs: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/runs`,
+    cancelRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}/cancel`,
+    proposals: `${API_BASE_URL}/agent/automations/proposals`,
+    confirmProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}/confirm`,
+    conversation: (conversationId: number) =>
+      `${API_BASE_URL}/conversation/${conversationId}/automation`,
+  },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
     update: `${API_BASE_URL}/tool/update`,

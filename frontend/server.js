@@ -184,11 +184,8 @@ function collectRequestBody(req) {
  * If no refresh_token cookie exists, return 401 immediately.
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
-  if (
-    pathname === "/api/user/refresh_token" ) {
-    const refreshToken =
-    cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ;
+  if (pathname === "/api/user/refresh_token") {
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
@@ -221,12 +218,17 @@ function forwardAuthRequest(req, res, targetUrl) {
 
   collectRequestBody(req)
     .then((rawBody) => {
-      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+      const body = prepareAuthRequestBody(
+        req.parsedPathname,
+        rawBody,
+        cookies,
+        res
+      );
 
-    // If body is null, prepareAuthRequestBody already sent the error response
-    if (body === null) {
-      return;
-    }
+      // If body is null, prepareAuthRequestBody already sent the error response
+      if (body === null) {
+        return;
+      }
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
@@ -459,6 +461,7 @@ app.prepare().then(() => {
         const isRuntime =
           pathname.startsWith("/api/agent/run") ||
           pathname.startsWith("/api/agent/stop") ||
+          pathname.startsWith("/api/agent/automations") ||
           pathname.startsWith("/api/conversation/") ||
           pathname.startsWith("/api/share/") ||
           pathname.startsWith("/api/memory/") ||

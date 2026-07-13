@@ -14,6 +14,8 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
+import { agentAutomationService } from "@/services/agentAutomationService";
+import { ApiError } from "@/services/api";
 import {
   storageService,
   convertImageUrlToApiUrl,
@@ -192,6 +194,9 @@ export function ChatInterface() {
   const [completedConversations, setCompletedConversations] = useState<
     Set<number>
   >(new Set());
+  const [automationConversationIds, setAutomationConversationIds] = useState<
+    Set<number>
+  >(new Set());
 
   // Ensure right sidebar is closed by default
   const [showRightPanel, setShowRightPanel] = useState(false);
@@ -221,6 +226,31 @@ export function ChatInterface() {
   const { agents: publishedAgents = [] } = usePublishedAgentList() as {
     agents: Agent[];
   };
+
+  const loadAutomationConversationIds = useCallback(async () => {
+    try {
+      const tasks = await agentAutomationService.list();
+      setAutomationConversationIds(
+        new Set(tasks.map((task) => task.conversation_id))
+      );
+    } catch (error) {
+      log.warn("Failed to load automation task markers", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAutomationConversationIds();
+    window.addEventListener(
+      "automationListUpdated",
+      loadAutomationConversationIds
+    );
+    return () => {
+      window.removeEventListener(
+        "automationListUpdated",
+        loadAutomationConversationIds
+      );
+    };
+  }, [loadAutomationConversationIds]);
 
   useEffect(() => {
     sessionMessagesRef.current = sessionMessages;
@@ -252,7 +282,9 @@ export function ChatInterface() {
       }
 
       const normalizedAgentId = String(agentId);
-      const agent = publishedAgents.find((item) => item.id === normalizedAgentId);
+      const agent = publishedAgents.find(
+        (item) => item.id === normalizedAgentId
+      );
 
       if (!agent && publishedAgents.length === 0) {
         setSelectedAgentId(normalizedAgentId);
@@ -418,7 +450,7 @@ export function ChatInterface() {
     if (!input.trim() && attachments.length === 0) return; // Allow sending attachments only, without text content
 
     // Flag to track if we should reset button states in finally block
-    let shouldResetButtonStates = true;
+    const shouldResetButtonStates = true;
 
     // Ensure right sidebar doesn't auto-expand when sending new message
     setSelectedMessageId(undefined);
@@ -429,7 +461,10 @@ export function ChatInterface() {
     const userMessageContent = input.trim();
 
     // Get current conversation ID (null when new conversation)
-    let currentConversationId = conversationManagement.selectedConversationId;
+    const currentConversationId = conversationManagement.selectedConversationId;
+    const selectedAgentIdForRun = selectedAgentId;
+    const agentIdForRun =
+      selectedAgentIdForRun !== null ? Number(selectedAgentIdForRun) : null;
     let cid: number | null = null; // set after guard, used in try/catch/finally
 
     // Prepare attachment information
@@ -513,6 +548,85 @@ export function ChatInterface() {
     const currentController = new AbortController();
 
     try {
+      // Handle scheduled requests as chat commands before a normal Agent run.
+      // This prevents a recurring command from executing once immediately.
+      if (
+        attachments.length === 0 &&
+        agentIdForRun !== null &&
+        userMessageContent
+      ) {
+        try {
+          const timezone =
+            Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
+          const proposal = await agentAutomationService.createProposal({
+            conversation_id: currentConversationId ?? undefined,
+            agent_id: agentIdForRun,
+            message: userMessageContent,
+            timezone,
+            model_id: selectedModelId,
+          });
+          if (proposal?.proposal_id && proposal.task) {
+            const proposalConversationId =
+              proposal.conversation_id ?? currentConversationId;
+            if (!proposalConversationId) {
+              throw new Error("Automation proposal is missing conversation_id");
+            }
+            cid = proposalConversationId;
+            setSessionMessages((prev) => ({
+              ...prev,
+              [proposalConversationId]: [
+                ...(prev[proposalConversationId] || []),
+                {
+                  ...userMessage,
+                  isComplete: true,
+                  steps: [],
+                  attachments: [],
+                  images: [],
+                },
+                {
+                  id: uuidv4(),
+                  role: ROLE_ASSISTANT,
+                  content: "",
+                  timestamp: new Date(),
+                  isComplete: true,
+                  steps: [],
+                  automationProposal: proposal,
+                },
+              ],
+            }));
+            conversationManagement.setSelectedConversationId(
+              proposalConversationId
+            );
+            const conversationTitle =
+              proposal.task.title || t("chatInterface.newConversation");
+            conversationManagement.setConversationTitle(conversationTitle);
+            if (currentConversationId == null) {
+              conversationManagement.prependConversation(
+                proposalConversationId,
+                conversationTitle,
+                agentIdForRun
+              );
+            } else {
+              conversationManagement.updateConversationAgentId(
+                proposalConversationId,
+                agentIdForRun
+              );
+            }
+            setShouldScrollToBottom(true);
+            return;
+          }
+        } catch (error) {
+          log.warn("Failed to handle automation chat command", error);
+          const errorMessage =
+            error instanceof ApiError
+              ? error.message
+              : t("agentAutomation.proposal.createFailed", "创建自动任务失败");
+          message.warning(errorMessage);
+          setInput(userMessageContent);
+          return;
+        }
+      }
+
       // For new conversations, the backend will auto-create the conversation and emit
       // a conversation_created SSE event with the real conversation_id. Until that
       // happens, store messages under a placeholder key (-1) so the UI can render them.
@@ -587,56 +701,55 @@ export function ChatInterface() {
       }
 
       // Send request to backend API, add signal parameter
-      const agentIdForRun =
-        selectedAgentId !== null ? Number(selectedAgentId) : null;
-      const runAgentParams: any = {
-        query: finalQuery, // Use preprocessed query or original query
-        history: currentMessages
-          .filter((msg) => msg.id !== userMessage.id)
-          .map((msg) => {
-            const historyItem: HistoryItem = {
-              role: msg.role,
-              content:
-                msg.role === ROLE_ASSISTANT
-                  ? msg.finalAnswer?.trim() || msg.content || ""
-                  : msg.content || "",
-            };
-            // Include attachment info for historical messages so the agent
-            // can reference files from previous turns
-            if (msg.attachments && msg.attachments.length > 0) {
-              historyItem.minio_files = msg.attachments.map((attachment) => ({
-                object_name: attachment.object_name || "",
-                name: attachment.name,
-                type: attachment.type,
-                size: attachment.size,
-                url: attachment.url || "",
-                presigned_url: attachment.presigned_url || "",
-                description: attachment.description || "",
-              }));
-            }
-            return historyItem;
-          }),
-        minio_files:
-          messageAttachments.length > 0
-            ? messageAttachments.map((attachment) => {
-                // Get file description
-                let description = "";
-                if (attachment.name in fileDescriptionsMap) {
-                  description = fileDescriptionsMap[attachment.name];
-                }
-
-                return {
-                  object_name: objectNames[attachment.name] || "",
+      const runAgentParams: Parameters<typeof conversationService.runAgent>[0] =
+        {
+          query: finalQuery, // Use preprocessed query or original query
+          history: currentMessages
+            .filter((msg) => msg.id !== userMessage.id)
+            .map((msg) => {
+              const historyItem: HistoryItem = {
+                role: msg.role,
+                content:
+                  msg.role === ROLE_ASSISTANT
+                    ? msg.finalAnswer?.trim() || msg.content || ""
+                    : msg.content || "",
+              };
+              // Include attachment info for historical messages so the agent
+              // can reference files from previous turns
+              if (msg.attachments && msg.attachments.length > 0) {
+                historyItem.minio_files = msg.attachments.map((attachment) => ({
+                  object_name: attachment.object_name || "",
                   name: attachment.name,
                   type: attachment.type,
                   size: attachment.size,
-                  url: uploadedFileUrls[attachment.name] || attachment.url,
-                  presigned_url: presignedUrls[attachment.name] || "",
-                  description: description,
-                };
-              })
-            : undefined, // Use complete attachment object structure
-      };
+                  url: attachment.url || "",
+                  presigned_url: attachment.presigned_url || "",
+                  description: attachment.description || "",
+                }));
+              }
+              return historyItem;
+            }),
+          minio_files:
+            messageAttachments.length > 0
+              ? messageAttachments.map((attachment) => {
+                  // Get file description
+                  let description = "";
+                  if (attachment.name in fileDescriptionsMap) {
+                    description = fileDescriptionsMap[attachment.name];
+                  }
+
+                  return {
+                    object_name: objectNames[attachment.name] || "",
+                    name: attachment.name,
+                    type: attachment.type,
+                    size: attachment.size,
+                    url: uploadedFileUrls[attachment.name] || attachment.url,
+                    presigned_url: presignedUrls[attachment.name] || "",
+                    description: description,
+                  };
+                })
+              : undefined, // Use complete attachment object structure
+        };
 
       // Only include conversation_id for existing conversations; omit for new ones
       // so backend can auto-create the conversation and emit conversation_created.
@@ -682,7 +795,7 @@ export function ChatInterface() {
             const realId = resolvedTargetConversationId;
             // If the target is the placeholder, also pull existing messages from
             // any real conversation_id we have migrated to.
-            let prevArr = prev[realId] || [];
+            const prevArr = prev[realId] || [];
             let nextArr: ChatMessageType[];
             if (typeof valueOrUpdater === "function") {
               nextArr = (
@@ -761,7 +874,10 @@ export function ChatInterface() {
               };
             });
             conversationControllersRef.current.delete(id);
-            conversationControllersRef.current.set(conversationId, currentController);
+            conversationControllersRef.current.set(
+              conversationId,
+              currentController
+            );
             // Clear the old timeout (which was bound to the placeholder key);
             // the active stream's resetTimeout() will re-create one as new chunks arrive.
             const oldTimeout = conversationTimeoutsRef.current.get(id);
@@ -778,7 +894,9 @@ export function ChatInterface() {
             cid = conversationId;
           }
           conversationManagement.setSelectedConversationId(conversationId);
-          conversationManagement.setConversationTitle(t("chatInterface.newConversation"));
+          conversationManagement.setConversationTitle(
+            t("chatInterface.newConversation")
+          );
           // Add the new conversation to the sidebar immediately so users see it
           // appear in the conversation list during streaming (not only after stream ends)
           conversationManagement.prependConversation(
@@ -841,7 +959,10 @@ export function ChatInterface() {
             );
           }
         } catch (error) {
-          log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
+          log.error(
+            t("chatInterface.refreshDialogListFailedButContinue"),
+            error
+          );
         }
       }
 
@@ -996,7 +1117,6 @@ export function ChatInterface() {
     });
   };
 
-
   // Helper to create a session messages updater for a specific conversation
   const createSessionMessagesUpdater = useCallback(
     (targetConversationId: number) => {
@@ -1005,9 +1125,11 @@ export function ChatInterface() {
           const prevArr = prev[targetConversationId] || [];
           const nextArr =
             typeof valueOrUpdater === "function"
-              ? (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(
-                  prevArr
-                )
+              ? (
+                  valueOrUpdater as (
+                    prev: ChatMessageType[]
+                  ) => ChatMessageType[]
+                )(prevArr)
               : valueOrUpdater;
           return {
             ...prev,
@@ -1216,8 +1338,10 @@ export function ChatInterface() {
             restoreConversationAgent(
               conversationData.agent_id ?? dialog.agent_id ?? null
             );
-            const formattedMessages =
-              formatConversationMessagesFromResponse(conversationData, t);
+            const formattedMessages = formatConversationMessagesFromResponse(
+              conversationData,
+              t
+            );
 
             // Update message array
             setSessionMessages((prev) => ({
@@ -1231,14 +1355,18 @@ export function ChatInterface() {
             );
 
             // Check if this conversation has an in-progress streaming message
-            const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
-            if (streamingMessage && streamingMessage.status === 'streaming') {
+            const streamingMessage = (
+              conversationData as ApiConversationDetail & {
+                streaming_message?: StreamingMessage;
+              }
+            ).streaming_message;
+            if (streamingMessage && streamingMessage.status === "streaming") {
               // Resume streaming - wait for state to update first
               setTimeout(() => {
                 resumeStreamingConversation(
-                dialog.conversation_id,
-                streamingMessage
-              );
+                  dialog.conversation_id,
+                  streamingMessage
+                );
               }, 100);
             }
 
@@ -1339,8 +1467,10 @@ export function ChatInterface() {
           restoreConversationAgent(
             conversationData.agent_id ?? dialog.agent_id ?? null
           );
-          const formattedMessages =
-            formatConversationMessagesFromResponse(conversationData, t);
+          const formattedMessages = formatConversationMessagesFromResponse(
+            conversationData,
+            t
+          );
 
           // Update message array
           setSessionMessages((prev) => ({
@@ -1354,9 +1484,11 @@ export function ChatInterface() {
           );
 
           // Check if this conversation has an in-progress streaming message
-          const streamingMessage = (conversationData as any).streaming_message as
-            | StreamingMessage
-            | undefined;
+          const streamingMessage = (
+            conversationData as ApiConversationDetail & {
+              streaming_message?: StreamingMessage;
+            }
+          ).streaming_message;
           if (streamingMessage && streamingMessage.status === "streaming") {
             // Resume streaming - wait for state to update first
             setTimeout(() => {
@@ -1853,6 +1985,7 @@ export function ChatInterface() {
         completedConversations={completedConversations}
         conversationManagement={conversationManagement}
         onConversationSelect={handleDialogClick}
+        automationConversationIds={automationConversationIds}
       />
 
       <Layout className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -1863,6 +1996,12 @@ export function ChatInterface() {
               onRename={handleTitleRename}
               onShareClick={toggleShareMode}
               isShareMode={isShareMode}
+              hasAutomation={
+                conversationManagement.selectedConversationId !== null &&
+                automationConversationIds.has(
+                  conversationManagement.selectedConversationId
+                )
+              }
             />
 
             {isShareMode && (

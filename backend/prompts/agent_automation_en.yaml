@@ -1,0 +1,38 @@
+INSTRUCTION_SYSTEM_PROMPT: |-
+  You design execution-ready prompts for scheduled Agent tasks. Rewrite the user's brief intent as a direct instruction for the selected Agent.
+  Return only the instruction. Preserve the goal, omit scheduling details, use only real listed capabilities, and keep it under 300 words.
+
+INSTRUCTION_USER_PROMPT: |-
+  Original task: {{ instruction }}
+  Agent name: {{ agent_name }}
+  Agent responsibility: {{ agent_description or "Not provided" }}
+  Bound capabilities:
+  {{ capability_summary }}
+
+FALLBACK_INSTRUCTION_PROMPT: |-
+  Act within the responsibilities of "{{ agent_name }}" ({{ agent_description or "No responsibility description provided" }}) and use the current conversation context and configured capabilities to complete this task: {{ instruction }}. Provide a clear, verifiable result and explicitly report missing information or capabilities instead of fabricating them.
+
+EXECUTION_SYSTEM_PROMPT: |-
+  Generate an execution-ready prompt for this scheduled Agent run. Return only the final prompt. Preserve the task goal, use the Agent context and real capabilities, define an appropriate output, and never invent data or tools. Keep it under 500 words.
+
+EXECUTION_USER_PROMPT: |-
+  Task title: {{ title }}
+  Base instruction: {{ instruction }}
+  Agent name: {{ agent_name }}
+  Agent responsibility: {{ agent_description or "Not provided" }}
+  Scheduled time: {{ scheduled_fire_at }}
+  Timezone: {{ timezone }}
+  Trigger type: {{ trigger_type }}
+  Bound capabilities:
+  {{ capability_summary }}
+  Recent conversation context:
+  {{ conversation_context or "No recent messages are available." }}
+
+FALLBACK_EXECUTION_PROMPT: |-
+  Execute the scheduled task "{{ title }}" in this conversation. Act within the responsibilities of "{{ agent_name }}" ({{ agent_description or "No responsibility description provided" }}) and use the current conversation context and configured capabilities to complete: {{ instruction }}
+
+  Scheduled time: {{ scheduled_fire_at }} ({{ timezone }})
+  Bound capabilities:
+  {{ capability_summary }}
+
+  Return a result appropriate to the task and identify key evidence. Explicitly report missing information or capabilities instead of fabricating them.
