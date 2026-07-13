@@ -547,7 +547,7 @@ class AgentInfoRequest(BaseModel):
     business_description: Optional[str] = None
     author: Optional[str] = None
     model_ids: Optional[List[int]] = None
-    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
+    max_steps: Optional[int] = Field(default=None, ge=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
@@ -717,17 +717,9 @@ class AgentRepositoryListingCreateRequest(BaseModel):
     icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
     downloads: int = Field(0, ge=0, description="Initial download/copy count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
-    category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
     tool_count: Optional[int] = Field(
         None, ge=0, description="Total tool count across all agents in the bundle"
     )
-
-
-class AgentRepositoryCategoryItem(BaseModel):
-    """Marketplace category option for agent repository filtering."""
-    id: int
-    key: str
-    name: str
 
 
 class AgentRepositoryListingDetailResponse(BaseModel):
@@ -746,6 +738,39 @@ class AgentRepositoryListingDetailResponse(BaseModel):
     model_name: Optional[str] = None
     duty_prompt: Optional[str] = None
     tools: List[str] = Field(default_factory=list)
+
+
+class SkillRepositoryListingCreateRequest(BaseModel):
+    """Request body for creating a marketplace listing from a skill snapshot."""
+    icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
+    downloads: int = Field(0, ge=0, description="Initial download count for card display")
+    tags: Optional[List[str]] = Field(None, description="Marketplace tags")
+    category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+
+
+class SkillRepositoryInstallRequest(BaseModel):
+    """Request body for installing a repository skill into current tenant."""
+    target_name: Optional[str] = Field(None, description="Target skill name in current tenant")
+
+
+class SkillRepositoryListingDetailResponse(BaseModel):
+    """Detailed marketplace listing payload for skill repository detail view."""
+    skill_repository_id: int
+    skill_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    source: Optional[str] = None
+    submitted_by: Optional[str] = None
+    icon: Optional[str] = None
+    status: str
+    category_id: Optional[int] = None
+    tags: List[str] = Field(default_factory=list)
+    downloads: int = 0
+    created_at: Optional[str] = None
+    content: Optional[str] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
+    tool_ids: List[int] = Field(default_factory=list)
 
 
 class SkillZipEntry(BaseModel):
@@ -1268,6 +1293,7 @@ class SkillFileData(BaseModel):
 
 class SkillUpdateRequest(BaseModel):
     """Request model for updating a skill."""
+    name: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
     tool_ids: Optional[List[int]] = None

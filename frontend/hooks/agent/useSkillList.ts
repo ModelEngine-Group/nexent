@@ -2,76 +2,96 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSkills } from "@/services/agentConfigService";
 import { useMemo } from "react";
 import { Skill, SkillGroup } from "@/types/agentConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useTranslation } from "react-i18next";
 
-export function useSkillList(options?: { enabled?: boolean; staleTime?: number }) {
-	const queryClient = useQueryClient();
+const OFFICIAL_SKILL_SOURCES = new Set(["official", "官方"]);
 
-	const query = useQuery({
-		queryKey: ["skills"],
-		queryFn: async () => {
-			const res = await fetchSkills();
-			if (!res || !res.success) {
-				throw new Error(res?.message || "Failed to fetch skills");
-			}
-			return res.data || [];
-		},
-		staleTime: options?.staleTime ?? 60_000,
-		enabled: options?.enabled ?? true,
-	});
+function isOfficialSkill(skill: Skill) {
+  const source = (skill.source || "").trim();
+  return OFFICIAL_SKILL_SOURCES.has(source);
+}
 
-	const skills = query.data ?? [];
+export function useSkillList(options?: {
+  enabled?: boolean;
+  staleTime?: number;
+}) {
+  const queryClient = useQueryClient();
+  const { user } = useAuthorizationContext();
+  const { t } = useTranslation("common");
 
-	const availableSkills = useMemo(() => {
-		return skills;
-	}, [skills]);
+  const query = useQuery({
+    queryKey: ["skills"],
+    queryFn: async () => {
+      const res = await fetchSkills();
+      if (!res || !res.success) {
+        throw new Error(res?.message || "Failed to fetch skills");
+      }
+      return res.data || [];
+    },
+    staleTime: options?.staleTime ?? 60_000,
+    enabled: options?.enabled ?? true,
+  });
 
-	const groupedSkills = useMemo(() => {
-		const groups: SkillGroup[] = [];
-		const groupMap = new Map<string, Skill[]>();
+  const skills = query.data ?? [];
+  const currentUserId = user?.id ?? null;
 
-		availableSkills.forEach((skill: Skill) => {
-			const source = skill.source || "custom";
-			const groupKey = source;
+  const availableSkills = useMemo(() => {
+    return skills.filter((skill: Skill) => {
+      if (isOfficialSkill(skill)) return true;
+      return Boolean(currentUserId && skill.created_by === currentUserId);
+    });
+  }, [skills, currentUserId]);
 
-			if (!groupMap.has(groupKey)) {
-				groupMap.set(groupKey, []);
-			}
-			groupMap.get(groupKey)!.push(skill);
-		});
+  const groupedSkills = useMemo(() => {
+    const groups: SkillGroup[] = [];
+    const groupMap = new Map<string, Skill[]>();
 
-		groupMap.forEach((groupSkills, key) => {
-			const sortedSkills = groupSkills.sort((a, b) => {
-				if (!a.update_time && !b.update_time) return 0;
-				if (!a.update_time) return 1;
-				if (!b.update_time) return -1;
-				return b.update_time.localeCompare(a.update_time);
-			});
+    availableSkills.forEach((skill: Skill) => {
+      const groupKey = isOfficialSkill(skill) ? "official" : "custom";
 
-			let label = key;
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, []);
+      }
+      groupMap.get(groupKey)!.push(skill);
+    });
 
-			groups.push({
-				key,
-				label,
-				skills: sortedSkills,
-			});
-		});
+    groupMap.forEach((groupSkills, key) => {
+      const sortedSkills = groupSkills.sort((a, b) => {
+        if (!a.update_time && !b.update_time) return 0;
+        if (!a.update_time) return 1;
+        if (!b.update_time) return -1;
+        return b.update_time.localeCompare(a.update_time);
+      });
 
-		return groups.sort((a, b) => {
-			const getPriority = (key: string) => {
-				if (key === "official") return 1;
-				if (key === "custom") return 2;
-				if (key === "partner") return 3;
-				return 4;
-			};
-			return getPriority(a.key) - getPriority(b.key);
-		});
-	}, [availableSkills]);
+      const label =
+        key === "official"
+          ? t("skillPool.group.official")
+          : t("skillPool.group.custom");
 
-	return {
-		...query,
-		skills,
-		availableSkills,
-		groupedSkills,
-		invalidate: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
-	};
+      groups.push({
+        key,
+        label,
+        skills: sortedSkills,
+      });
+    });
+
+    return groups.sort((a, b) => {
+      const getPriority = (key: string) => {
+        if (key === "official") return 1;
+        if (key === "custom") return 2;
+        if (key === "partner") return 3;
+        return 4;
+      };
+      return getPriority(a.key) - getPriority(b.key);
+    });
+  }, [availableSkills, t]);
+
+  return {
+    ...query,
+    skills,
+    availableSkills,
+    groupedSkills,
+    invalidate: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+  };
 }

@@ -204,7 +204,7 @@ class AgentConfig(BaseModel):
         default=None,
     )
     tools: List[ToolConfig] = Field(description="List of tool information")
-    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
+    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1)
     requested_output_tokens: Optional[int] = Field(
         description=(
             "Per-agent W2 output reserve override. None means inherit the "

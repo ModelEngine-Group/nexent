@@ -3,8 +3,8 @@ import threading
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, Union
 
-from services.agent_runtime.models import ActiveRunHandle, RunControl, RunStatus
 from services.agent_runtime.config import get_deployment_agent_runtime_provider
+from services.agent_runtime.models import ActiveRunHandle, RunControl, RunStatus
 from services.runtime_state_service import runtime_state_service
 
 if TYPE_CHECKING:

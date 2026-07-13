@@ -1884,6 +1884,34 @@ class TestCreateAgentConfig:
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
+        """Managed path should describe the same builtin tools that AgentConfig exposes."""
+        builtin_tools = [
+            types.SimpleNamespace(name="run_skill_script"),
+            types.SimpleNamespace(name="read_skill_md"),
+            types.SimpleNamespace(name="read_skill_config"),
+            types.SimpleNamespace(name="write_skill_file"),
+        ]
+        with patch(
+            'backend.agents.create_agent_info._get_skill_script_tools',
+            return_value=builtin_tools,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                template="legacy {{duty}}",
+                prepared_prompt="",
+            )
+
+        context_tools = mocks["build_components"].call_args.kwargs["tools"]
+        agent_tools = mocks["agent_config"].call_args.kwargs["tools"]
+
+        assert "run_skill_script" in context_tools
+        assert "read_skill_md" in context_tools
+        assert "read_skill_config" in context_tools
+        assert "write_skill_file" in context_tools
+        assert set(context_tools) == {tool.name for tool in agent_tools}
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
         """Legacy path should render the Jinja prompt and not build managed components."""
         mocks = await self._run_context_manager_case(
