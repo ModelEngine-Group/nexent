@@ -308,6 +308,13 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
+  aidpMgmt: {
+    knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
+    kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
+    kbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,

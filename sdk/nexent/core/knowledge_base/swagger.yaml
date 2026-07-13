@@ -1,0 +1,872 @@
+openapi: 3.0.3
+info:
+  title: AIDP Knowledge Base Adapter API
+  description: |
+    Nexent SDK 知识库适配器，实现了 Nexent 标准接口与 AIDP 原生知识库 API 之间的转换适配。
+
+    ## 架构说明
+    - **标准接口层** (FastAPI): 对外暴露统一的 RESTful 知识库管理接口
+    - **映射层** (mapper): 双向数据转换 - 标准 Schema ↔ AIDP Schema
+    - **客户端层** (aidp_client): 封装 AIDP 原生 HTTP API 调用
+
+    ## 统一响应格式
+    所有接口返回统一的 JSON 结构:
+    ```json
+    {
+      "code": 0,
+      "data": { ... },
+      "message": "success"
+    }
+    ```
+    - `code = 0` 表示成功
+    - `code != 0` 表示业务错误，具体含义见各接口错误码说明
+
+    ## 错误码定义
+    | 错误码 | 含义 |
+    |--------|------|
+    | 40001  | 请求参数无效 (400/422) |
+    | 40002  | 资源不存在 (404) |
+    | 40003  | 资源冲突 (409) |
+    | 50001  | 上游服务内部错误 (500) |
+    | 50002  | 上游服务不可用 (503) |
+    | 50004  | 功能未实现 (501) |
+  version: 1.0.0
+  contact:
+    name: Nexent Team
+    url: https://nexent.tech
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+tags:
+  - name: System
+    description: 系统健康检查与能力发现
+  - name: Knowledge Bases
+    description: 知识库 CRUD 管理
+  - name: Documents
+    description: 知识库文档管理
+  - name: Retrieval
+    description: 知识库检索
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: 健康检查
+      description: |
+        检查适配器运行状态及上游 AIDP 知识库服务的连通性。
+        内部通过调用 AIDP 的 Count 接口作为探针。
+      operationId: healthCheck
+      responses:
+        "200":
+          description: 健康检查结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, error]
+                    description: 适配器状态
+                  platform:
+                    type: string
+                    example: aidp
+                    description: 适配平台标识
+                  version:
+                    type: string
+                    example: "1.0.0"
+                    description: 适配器版本
+                  external_kb_reachable:
+                    type: boolean
+                    description: 上游知识库服务是否可达
+              example:
+                status: ok
+                platform: aidp
+                version: "1.0.0"
+                external_kb_reachable: true
+
+  /capabilities:
+    get:
+      tags: [System]
+      summary: 能力发现
+      description: |
+        声明当前适配器支持和不支持的功能特性。
+        调用方可据此动态调整 UI 或逻辑分支。
+      operationId: getCapabilities
+      responses:
+        "200":
+          description: 能力清单
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  create_knowledge_base:
+                    type: boolean
+                  delete_knowledge_base:
+                    type: boolean
+                  update_knowledge_base:
+                    type: boolean
+                  upload_document:
+                    type: boolean
+                  delete_document:
+                    type: boolean
+                  list_documents:
+                    type: boolean
+                  query_document_status:
+                    type: boolean
+                  download_document:
+                    type: boolean
+                  list_models:
+                    type: boolean
+                  search_modes:
+                    type: array
+                    items:
+                      type: string
+                    description: 支持的搜索模式列表
+                  supports_rerank:
+                    type: boolean
+                  supports_multimodal:
+                    type: boolean
+                  supports_batch_search:
+                    type: boolean
+                  max_kb_ids_per_search:
+                    type: integer
+                    description: 单次搜索最大知识库 ID 数量
+                  requires_embedding_model:
+                    type: boolean
+                  supports_custom_embedding_model:
+                    type: boolean
+              example:
+                create_knowledge_base: true
+                delete_knowledge_base: true
+                update_knowledge_base: true
+                upload_document: true
+                delete_document: false
+                list_documents: true
+                query_document_status: false
+                download_document: false
+                list_models: false
+                search_modes: [semantic_search, keyword_search, hybrid_search]
+                supports_rerank: true
+                supports_multimodal: true
+                supports_batch_search: true
+                max_kb_ids_per_search: 10
+                requires_embedding_model: false
+                supports_custom_embedding_model: false
+
+  /api/v1/knowledge-bases:
+    post:
+      tags: [Knowledge Bases]
+      summary: 创建知识库
+      description: |
+        创建一个新的知识库。
+
+        **AIDP 映射**: 标准 `POST` → AIDP `PUT /KnowledgeBase/Tenants/{tenant_id}/KnowledgeBases`
+        创建后自动查询详情以获取完整信息返回。
+      operationId: createKnowledgeBase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeBaseCreateRequest"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/KnowledgeBase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+    get:
+      tags: [Knowledge Bases]
+      summary: 知识库列表
+      description: |
+        分页获取知识库列表。
+
+        **AIDP 映射**: 标准 `GET` → AIDP `GET /KnowledgeBase/Tenants/{tenant_id}/KnowledgeBases` + `POST .../Count`
+        需要额外调用 Count 接口获取总数（AIDP List 接口不返回总数）。
+      operationId: listKnowledgeBases
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 页码（从 1 开始）
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: 每页数量
+      responses:
+        "200":
+          description: 知识库列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/KnowledgeBaseList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+  /api/v1/knowledge-bases/{knowledge_base_id}:
+    get:
+      tags: [Knowledge Bases]
+      summary: 获取知识库详情
+      description: |
+        根据 ID 获取单个知识库的详细信息。
+
+        **AIDP 映射**: 标准 `GET` → AIDP `GET /KnowledgeBase/Tenants/{tenant_id}/KnowledgeBases/{id}`
+      operationId: getKnowledgeBase
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeBaseId"
+      responses:
+        "200":
+          description: 知识库详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/KnowledgeBase"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+    put:
+      tags: [Knowledge Bases]
+      summary: 更新知识库
+      description: |
+        更新知识库的名称或描述。仅传递需要更新的字段。
+
+        **AIDP 映射**: 标准 `PUT` → AIDP `PATCH /KnowledgeBase/Tenants/{tenant_id}/KnowledgeBases/{id}`
+        更新后自动重新查询返回最新详情。
+      operationId: updateKnowledgeBase
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeBaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeBaseUpdateRequest"
+      responses:
+        "200":
+          description: 更新后的知识库详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/KnowledgeBase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+    delete:
+      tags: [Knowledge Bases]
+      summary: 删除知识库
+      description: |
+        删除指定知识库及其所有文档。
+
+        **AIDP 映射**: 标准 `DELETE` → AIDP `DELETE /KnowledgeBase/Tenants/{tenant_id}/KnowledgeBases/{id}`
+      operationId: deleteKnowledgeBase
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeBaseId"
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          success:
+                            type: boolean
+                            example: true
+              example:
+                code: 0
+                data:
+                  success: true
+                message: success
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+  /api/v1/knowledge-bases/{knowledge_base_id}/documents:
+    post:
+      tags: [Documents]
+      summary: 上传文档
+      description: |
+        向知识库上传一个或多个文档文件（multipart/form-data）。
+
+        **AIDP 映射**: 标准 `POST` → AIDP `POST .../KnowledgeFiles/Upload`
+        - 文档 ID 为复合编码：将 file_name + file_ino_no + file_system_id + import_source_dir 进行 Base64 编码
+      operationId: uploadDocuments
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeBaseId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: 上传的文件列表
+      responses:
+        "200":
+          description: 上传结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UploadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+    get:
+      tags: [Documents]
+      summary: 文档列表
+      description: |
+        分页获取知识库下的文档列表。
+
+        **AIDP 映射**: 标准 `GET` → AIDP `GET .../KnowledgeFiles`
+        - status 过滤：仅支持 `completed` 状态，其他状态返回空列表
+      operationId: listDocuments
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeBaseId"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 页码
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: 每页数量
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            example: completed
+          description: 文档状态过滤（当前仅支持 completed，其他值返回空列表）
+      responses:
+        "200":
+          description: 文档列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DocumentList"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+  /api/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}:
+    delete:
+      tags: [Documents]
+      summary: 删除文档（未实现）
+      description: |
+        删除指定文档。当前 AIDP 适配器尚未实现此功能，返回 501。
+
+        **AIDP 映射**: 未实现
+      operationId: deleteDocument
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeBaseId"
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 文档 ID（Base64 编码的复合 ID）
+      responses:
+        "501":
+          description: 功能未实现
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: 50004
+                data: null
+                message: Document deletion is not implemented for the AIDP adapter yet.
+
+  /api/v1/retrieve:
+    post:
+      tags: [Retrieval]
+      summary: 知识库检索（融合搜索）
+      description: |
+        在一个或多个知识库中执行语义/关键词/混合检索，返回相关文档片段。
+
+        **AIDP 映射**: 标准 `POST` → AIDP `POST .../Retrieval/FusionSearch`
+
+        **搜索方法映射**:
+        | 标准接口 | AIDP 原生 |
+        |----------|-----------|
+        | semantic_search | vector_search |
+        | keyword_search | full_text_search |
+        | hybrid_search | hybrid_search |
+      operationId: retrieve
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetrieveRequest"
+      responses:
+        "200":
+          description: 检索结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/RetrieveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/UpstreamError"
+
+components:
+  parameters:
+    KnowledgeBaseId:
+      name: knowledge_base_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 知识库 ID（对应 AIDP 的 kds_id）
+
+  schemas:
+    BaseResponse:
+      type: object
+      description: 统一响应包装
+      properties:
+        code:
+          type: integer
+          description: "0 = 成功, 非 0 = 业务错误码"
+          example: 0
+        data:
+          description: 响应数据
+        message:
+          type: string
+          example: success
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 业务错误码
+        data:
+          nullable: true
+          description: 始终为 null
+        message:
+          type: string
+          description: 错误描述
+
+    KnowledgeBaseCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: 知识库名称
+        description:
+          type: string
+          default: ""
+          description: 知识库描述
+        embedding_model:
+          type: string
+          nullable: true
+          description: Embedding 模型名称（不传则使用 default）
+        is_multimodal:
+          type: boolean
+          default: false
+          description: 是否启用多模态（图像描述）
+        vision_model:
+          type: string
+          nullable: true
+          description: 视觉模型名称（仅 is_multimodal=true 时有效）
+
+    KnowledgeBaseUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+          description: 知识库名称（null 表示不更新）
+        description:
+          type: string
+          nullable: true
+          description: 知识库描述（null 表示不更新）
+
+    KnowledgeBase:
+      type: object
+      description: 知识库详情
+      properties:
+        id:
+          type: string
+          description: 知识库 ID（对应 AIDP kds_id）
+        name:
+          type: string
+          description: 知识库名称
+        description:
+          type: string
+          description: 知识库描述
+        embedding_model:
+          type: string
+          description: Embedding 模型
+        document_count:
+          type: integer
+          description: 文档数量
+        status:
+          type: string
+          enum: [active, inactive]
+          description: "知识库状态（AIDP state=4 → active, 其他 → inactive）"
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间（ISO 8601 UTC）
+        updated_at:
+          type: string
+          format: date-time
+          description: 更新时间（ISO 8601 UTC）
+      example:
+        id: "12345"
+        name: "产品知识库"
+        description: "产品文档和设计稿"
+        embedding_model: default
+        document_count: 42
+        status: active
+        created_at: "2025-01-15T08:30:00Z"
+        updated_at: "2025-06-20T14:22:00Z"
+
+    KnowledgeBaseList:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeBase"
+        total:
+          type: integer
+          description: 总数
+        page:
+          type: integer
+          description: 当前页码
+        page_size:
+          type: integer
+          description: 每页数量
+        has_more:
+          type: boolean
+          description: 是否有更多数据
+
+    UploadResponse:
+      type: object
+      properties:
+        document_ids:
+          type: array
+          items:
+            type: string
+          description: "成功上传的文档 ID 列表（Base64 编码复合 ID）"
+        failed_files:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: 失败文件名
+              error:
+                type: string
+                description: 失败原因
+          description: 上传失败的文件列表
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "文档 ID（Base64 编码的 file_name + file_ino_no + file_system_id + import_source_dir）"
+        name:
+          type: string
+          description: 文件名
+        knowledge_base_id:
+          type: string
+          description: 所属知识库 ID
+        size:
+          type: integer
+          description: 文件大小（字节）
+        type:
+          type: string
+          description: 文件类型/扩展名
+        status:
+          type: string
+          enum: [completed]
+          description: 文档处理状态（当前固定为 completed）
+        chunk_count:
+          type: integer
+          description: 分块数量（当前固定为 0）
+        token_count:
+          type: integer
+          description: Token 数量（当前固定为 0）
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          description: 更新时间
+
+    DocumentList:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/Document"
+        total:
+          type: integer
+          description: 总数
+        page:
+          type: integer
+          description: 当前页码
+        page_size:
+          type: integer
+          description: 每页数量
+        has_more:
+          type: boolean
+          description: 是否有更多数据
+
+    RerankingModel:
+      type: object
+      properties:
+        provider:
+          type: string
+          default: ""
+          description: Reranking 模型提供商
+        model:
+          type: string
+          default: ""
+          description: Reranking 模型名称
+
+    RetrievalModel:
+      type: object
+      description: 检索参数配置
+      properties:
+        search_method:
+          type: string
+          enum: [semantic_search, keyword_search, hybrid_search]
+          default: semantic_search
+          description: |
+            搜索方法:
+            - semantic_search → AIDP vector_search
+            - keyword_search → AIDP full_text_search
+            - hybrid_search → AIDP hybrid_search
+        top_k:
+          type: integer
+          default: 5
+          description: 返回结果数量上限
+        score_threshold:
+          type: number
+          format: float
+          default: 0.0
+          description: 相关性得分阈值
+        score_threshold_enabled:
+          type: boolean
+          default: false
+          description: 是否启用得分阈值过滤
+        reranking_enable:
+          type: boolean
+          default: false
+          description: 是否启用重排序
+        reranking_model:
+          $ref: "#/components/schemas/RerankingModel"
+
+    RetrieveRequest:
+      type: object
+      required: [query, knowledge_base_ids]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 检索查询文本
+        knowledge_base_ids:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 10
+          description: 要检索的知识库 ID 列表（最多 10 个）
+        retrieval_model:
+          $ref: "#/components/schemas/RetrievalModel"
+
+    RetrieveRecord:
+      type: object
+      properties:
+        segment:
+          type: object
+          properties:
+            id:
+              type: string
+              description: 片段 ID
+            position:
+              type: integer
+              description: 排序位置
+            document_id:
+              type: string
+              description: 所属文档 ID
+            document_name:
+              type: string
+              description: 所属文档名称
+            knowledge_base_id:
+              type: string
+              description: 所属知识库 ID
+            knowledge_base_name:
+              type: string
+              description: 所属知识库名称
+            content:
+              type: string
+              description: 片段文本内容
+            keywords:
+              type: array
+              items:
+                type: string
+              description: 关键词（当前固定为空数组）
+            tokens:
+              type: integer
+              description: Token 数（当前固定为 0）
+            index_node_id:
+              type: string
+              description: 索引节点 ID
+            hit_count:
+              type: integer
+              description: 命中次数（当前固定为 0）
+            enabled:
+              type: boolean
+              description: 是否启用
+        score:
+          type: number
+          format: float
+          description: 相关性得分
+
+    RetrieveResponse:
+      type: object
+      properties:
+        query:
+          type: string
+          description: 原始查询文本
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetrieveRecord"
+          description: 检索结果列表（按 score 降序排列）
+
+  responses:
+    BadRequest:
+      description: 请求参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: 40001
+            data: null
+            message: Invalid request parameters
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: 40002
+            data: null
+            message: Resource not found
+
+    UpstreamError:
+      description: 上游服务错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: 50001
+            data: null
+            message: Upstream service error
