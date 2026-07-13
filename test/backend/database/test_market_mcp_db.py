@@ -56,7 +56,7 @@ class _MockColumn:
     def __radd__(self, other): return MagicMock()
     def __hash__(self): return 0
     def desc(self): return MagicMock()
-    def ilike(self, key): return MagicMock()
+    def ilike(self, key): return True
     def any(self, val): return MagicMock()
 
 
@@ -92,6 +92,8 @@ from backend.database.market_mcp_db import (
     list_mcp_market_records_by_tenant_and_user,
     increment_mcp_market_download_count,
     get_mcp_market_tag_stats_by_tenant,
+    update_mcp_market_status,
+    list_mcp_market_records_by_status,
 )
 
 # Override as_dict in the module to avoid MagicProxy descriptor bug in mock 3.15.1
@@ -421,3 +423,172 @@ class TestGetMcpMarketTagStatsByTenant:
 
         result = get_mcp_market_tag_stats_by_tenant("tid")
         assert len(result) == 1
+
+
+class TestUpdateMcpMarketStatus:
+    """Test update_mcp_market_status."""
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_status_only(self, mock_session):
+        session = MockSession()
+        session.update = MagicMock()
+        session.first = lambda: MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_status(
+            market_id=1, user_id="uid", review_status="shared",
+        )
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_status_with_submitter(self, mock_session):
+        session = MockSession()
+        session.update = MagicMock()
+        session.first = lambda: MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_status(
+            market_id=1, user_id="uid", review_status="pending_review",
+            submitted_by="user@example.com",
+        )
+
+
+class TestListMcpMarketRecordsByStatus:
+    """Test list_mcp_market_records_by_status."""
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_empty(self, mock_session):
+        session = MockSession()
+        session.all = lambda: []
+        session.limit = lambda x: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(review_status="pending_review")
+        assert result["count"] == 0
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_with_records(self, mock_session):
+        row = MagicMock()
+        row.market_id = 1
+        row.mcp_name = "svc1"
+        row.delete_flag = "N"
+        row.review_status = "pending_review"
+        row.transport_type = "url"
+        row.tags = ["test"]
+
+        session = MockSession()
+        session.all = lambda: [row]
+        session.limit = lambda x: session
+        session.order_by = lambda *a: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(
+            tenant_id="tid", review_status="pending_review",
+        )
+        assert result["count"] == 1
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_cursor_pagination(self, mock_session):
+        rows = [MagicMock() for i in range(3)]
+        for i, r in enumerate(rows, start=1):
+            r.market_id = i
+            r.mcp_name = f"svc{i}"
+            r.delete_flag = "N"
+
+        def all_fn():
+            return rows
+
+        def limit_fn(val):
+            q = MockQuery(rows[:val])
+            q.all = lambda: rows[:val]
+            return q
+
+        session = MockSession()
+        session.all = all_fn
+        session.limit = limit_fn
+        session.order_by = lambda *a: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(
+            review_status="pending_review", cursor="2", limit=2,
+        )
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_filter_by_transport(self, mock_session):
+        row = MagicMock()
+        row.market_id = 1
+        row.mcp_name = "svc1"
+        row.delete_flag = "N"
+        row.review_status = "shared"
+        row.transport_type = "container"
+        row.tags = ["ai"]
+
+        session = MockSession()
+        session.all = lambda: [row]
+        session.limit = lambda x: session
+        session.order_by = lambda *a: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(
+            review_status="shared", transport_type="container",
+        )
+        assert result["count"] == 1
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_filter_by_search(self, mock_session):
+        row = MagicMock()
+        row.market_id = 1
+        row.mcp_name = "my-service"
+        row.delete_flag = "N"
+        row.review_status = "shared"
+        row.transport_type = "url"
+        row.tags = ["python"]
+
+        session = MockSession()
+        session.all = lambda: [row]
+        session.limit = lambda x: session
+        session.order_by = lambda *a: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(
+            review_status="shared", search="my-service",
+        )
+        assert result["count"] == 1
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_filter_by_tag(self, mock_session):
+        row = MagicMock()
+        row.market_id = 1
+        row.mcp_name = "svc1"
+        row.delete_flag = "N"
+        row.review_status = "shared"
+        row.transport_type = "url"
+        row.tags = ["python"]
+
+        session = MockSession()
+        session.all = lambda: [row]
+        session.limit = lambda x: session
+        session.order_by = lambda *a: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(
+            review_status="shared", tag="python",
+        )
+        assert result["count"] == 1
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_invalid_cursor(self, mock_session):
+        row = MagicMock()
+        row.market_id = 1
+        row.mcp_name = "svc1"
+        row.delete_flag = "N"
+
+        session = MockSession()
+        session.all = lambda: [row]
+        session.limit = lambda x: session
+        session.order_by = lambda *a: session
+        mock_session.return_value = session
+
+        result = list_mcp_market_records_by_status(
+            review_status="shared", cursor="invalid",
+        )
+        assert result["count"] == 1

@@ -132,6 +132,7 @@ from backend.services.remote_mcp_service import (
     list_mcp_service_tools_by_id,
     upload_and_start_mcp_image,
     attach_mcp_container_permissions,
+    refresh_mcp_service_tool_count,
 )
 # Patch exception classes to ensure tests use correct exceptions
 import backend.services.remote_mcp_service as remote_service
@@ -1235,6 +1236,104 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result)
         mock_connect.assert_called_once_with("https://srv/mcp", {})
+
+
+# ============================================================================
+# refresh_mcp_service_tool_count (NEW)
+# ============================================================================
+
+class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
+    """Test refresh_mcp_service_tool_count."""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
+    async def test_success(self, mock_update, mock_health, mock_get):
+        """Tool names fetched and persisted successfully."""
+        mock_get.return_value = {
+            "mcp_server": "https://srv/mcp",
+            "authorization_token": None,
+            "custom_headers": None,
+            "registry_json": {},
+        }
+        mock_health.return_value = ["tool1", "tool2"]
+
+        result = await refresh_mcp_service_tool_count(
+            tenant_id="tid", user_id="uid", mcp_id=1,
+        )
+
+        self.assertEqual(result, ["tool1", "tool2"])
+        mock_update.assert_called_once_with(
+            mcp_id=1, tenant_id="tid", user_id="uid",
+            registry_json={"_toolNames": ["tool1", "tool2"]},
+        )
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_record_not_found(self, mock_get):
+        """Missing record raises McpNotFoundError."""
+        mock_get.return_value = None
+
+        with self.assertRaises(McpNotFoundError):
+            await refresh_mcp_service_tool_count(
+                tenant_id="tid", user_id="uid", mcp_id=999,
+            )
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_no_server_url(self, mock_get):
+        """Record without server URL raises McpValidationError."""
+        mock_get.return_value = {
+            "mcp_server": None,
+            "authorization_token": None,
+            "custom_headers": None,
+        }
+
+        with self.assertRaises(McpValidationError):
+            await refresh_mcp_service_tool_count(
+                tenant_id="tid", user_id="uid", mcp_id=1,
+            )
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    async def test_server_unreachable(self, mock_health, mock_get):
+        """Server unreachable raises MCPConnectionError."""
+        mock_get.return_value = {
+            "mcp_server": "https://srv/mcp",
+            "authorization_token": None,
+            "custom_headers": None,
+        }
+        mock_health.return_value = []
+
+        with self.assertRaises(MCPConnectionError):
+            await refresh_mcp_service_tool_count(
+                tenant_id="tid", user_id="uid", mcp_id=1,
+            )
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
+    async def test_with_auth_token_and_custom_headers(self, mock_update, mock_health, mock_get):
+        """Auth token and custom headers are passed to health check."""
+        mock_get.return_value = {
+            "mcp_server": "https://srv/mcp",
+            "authorization_token": "Bearer tok",
+            "custom_headers": {"X-Custom": "val"},
+            "registry_json": None,
+        }
+        mock_health.return_value = ["tool1"]
+
+        result = await refresh_mcp_service_tool_count(
+            tenant_id="tid", user_id="uid", mcp_id=1,
+        )
+
+        self.assertEqual(result, ["tool1"])
+        mock_health.assert_called_once_with(
+            "https://srv/mcp",
+            {"Authorization": "Bearer tok", "X-Custom": "val"},
+        )
+        mock_update.assert_called_once_with(
+            mcp_id=1, tenant_id="tid", user_id="uid",
+            registry_json={"_toolNames": ["tool1"]},
+        )
 
 
 if __name__ == '__main__':
