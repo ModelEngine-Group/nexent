@@ -26,6 +26,7 @@ export const API_ENDPOINTS = {
     updatePassword: `${API_BASE_URL}/user/password`,
   },
   oauth: {
+    config: `${API_BASE_URL}/user/oauth/config`,
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
     link: `${API_BASE_URL}/user/oauth/link`,
