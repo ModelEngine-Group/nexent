@@ -524,8 +524,24 @@ export const API_ENDPOINTS = {
   },
   nl2agent: {
     sessionStart: `${API_BASE_URL}/nl2agent/session/start`,
+    selectModels: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/models`,
+    installMcp: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/mcp/install`,
+    bindMcpTools: (agentId: number, mcpId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/mcp/${mcpId}/bind-tools`,
+    skipMcpTools: (agentId: number, mcpId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/mcp/${mcpId}/skip-tools`,
     applyLocalResources: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/apply-local-resources`,
+    registerLocalResources: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/local-resources/register`,
+    skipLocalResources: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/local-resources/skip`,
+    sessionState: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/state`,
+    saveIdentity: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/identity`,
     installWebSkill: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/install-web-skill`,
     finalize: (agentId: number) =>

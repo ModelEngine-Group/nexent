@@ -1391,7 +1391,16 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     }
                   }
                 } catch (error) {
-                  // Handle error silently
+                  const language = /language-([^\s]+)/.exec(
+                    className || ""
+                  )?.[1];
+                  if (language?.trim().toLowerCase().startsWith("nl2agent-")) {
+                    return (
+                      <div className="my-2 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                        Failed to render NL2AGENT card: {String(error)}
+                      </div>
+                    );
+                  }
                 }
                 return (
                   <code className="markdown-code" {...props}>

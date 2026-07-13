@@ -1,10 +1,14 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Checkbox, Button, message as AntMessage } from "antd";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import { applyLocalResources } from "@/services/nl2agentService";
+import {
+  applyLocalResources,
+  registerLocalResourceRecommendations,
+  skipLocalResourceRecommendations,
+} from "@/services/nl2agentService";
 
 export interface LocalResourceItem {
   tool_id?: number;
@@ -20,6 +24,7 @@ export interface LocalResourceItem {
 export interface LocalResourcesCardProps {
   /** The draft agent_id being built by the NL2AGENT session. */
   agentId: number;
+  recommendationBatchId: string;
   tools: LocalResourceItem[];
   skills: LocalResourceItem[];
 }
@@ -34,6 +39,7 @@ export interface LocalResourcesCardProps {
  */
 export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   agentId,
+  recommendationBatchId,
   tools,
   skills,
 }) => {
@@ -45,7 +51,19 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     return s;
   });
   const [applied, setApplied] = useState(false);
+  const [skipped, setSkipped] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!recommendationBatchId) return;
+    void registerLocalResourceRecommendations(agentId, {
+      recommendation_batch_id: recommendationBatchId,
+      tool_ids: tools.flatMap((item) => item.tool_id == null ? [] : [item.tool_id]),
+      skill_ids: skills.flatMap((item) => item.skill_id == null ? [] : [item.skill_id]),
+    }).catch((error) => {
+      AntMessage.error(error?.message || "Failed to register resource recommendations.");
+    });
+  }, [agentId, recommendationBatchId, skills, tools]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -73,6 +91,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     setLoading(true);
     try {
       const res = await applyLocalResources(agentId, {
+        recommendation_batch_id: recommendationBatchId,
         tool_ids: selectedToolIds,
         skill_ids: selectedSkillIds,
       });
@@ -86,6 +105,21 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
       setApplied(true);
     } catch (e: any) {
       AntMessage.error(e?.message || "Failed to apply resources.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    setLoading(true);
+    try {
+      await skipLocalResourceRecommendations(agentId, recommendationBatchId);
+      setSkipped(true);
+      AntMessage.success(
+        t("nl2agent.localResources.skipped", "Continuing without these local resources.")
+      );
+    } catch (e: any) {
+      AntMessage.error(e?.message || "Failed to skip resources.");
     } finally {
       setLoading(false);
     }
@@ -160,13 +194,13 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           </div>
         )}
       </div>
-      <div className="px-3 py-2 border-t border-gray-200 bg-white">
+      <div className="px-3 py-2 border-t border-gray-200 bg-white flex gap-2">
         <Button
           type="primary"
           size="small"
           onClick={handleApplyAll}
           loading={loading}
-          disabled={applied || (selectedToolIds.length === 0 && selectedSkillIds.length === 0)}
+          disabled={!recommendationBatchId || applied || skipped || (selectedToolIds.length === 0 && selectedSkillIds.length === 0)}
         >
           {applied ? (
             <>
@@ -181,6 +215,16 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           ) : (
             t("nl2agent.localResources.applyAll", "Apply All")
           )}
+        </Button>
+        <Button
+          size="small"
+          onClick={handleSkip}
+          loading={loading}
+          disabled={!recommendationBatchId || applied || skipped}
+        >
+          {skipped
+            ? t("nl2agent.localResources.skippedShort", "Skipped")
+            : t("nl2agent.localResources.continueWithout", "Continue Without Resources")}
         </Button>
       </div>
     </div>

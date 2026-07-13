@@ -10,7 +10,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 
 from consts.exceptions import AgentRunException, UnauthorizedError
@@ -18,17 +18,135 @@ from consts.model import (
     Nl2AgentApplyLocalResourcesRequest,
     Nl2AgentFinalizeRequest,
     Nl2AgentInstallWebSkillRequest,
+    Nl2AgentIdentityRequest,
+    Nl2AgentMcpBindToolsRequest,
+    Nl2AgentMcpInstallRequest,
+    Nl2AgentModelSelectionRequest,
+    Nl2AgentRecommendationBatchRequest,
+    Nl2AgentRecommendationSkipRequest,
 )
 from services.nl2agent_service import (
     apply_local_resources_batch,
     finalize_agent,
     install_web_skill,
+    bind_mcp_tools,
+    install_recommended_mcp,
+    get_session_state,
+    register_local_resource_recommendations,
+    save_agent_identity,
+    select_models,
+    skip_mcp_tool_binding,
+    skip_local_resource_recommendations,
     start_session,
 )
 from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/nl2agent")
 logger = logging.getLogger("nl2agent_app")
+
+
+def _current_user(authorization, http_request):
+    return get_current_user_info(authorization, http_request)
+
+
+def _session_http_error(exc: Exception) -> HTTPException:
+    message = str(exc)
+    if "draft agent not found" in message:
+        return HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=message)
+    if any(
+        marker in message
+        for marker in (
+            "before finalizing",
+            "cannot be empty",
+            "incomplete",
+            "Select a primary LLM",
+            "Reopen the model-selection card",
+            "Apply or skip",
+            "Show the local resource",
+            "display name is missing",
+        )
+    ):
+        return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
+    if isinstance(exc, AgentRunException):
+        return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
+    logger.exception("NL2AGENT session operation failed")
+    return HTTPException(
+        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        detail="Failed to load or update NL2AGENT session state.",
+    )
+
+
+@router.put("/session/{agent_id}/models")
+async def select_models_api(
+    agent_id: int,
+    payload: Nl2AgentModelSelectionRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    return await select_models(
+        agent_id=agent_id,
+        primary_model_id=payload.primary_model_id,
+        fallback_model_ids=payload.fallback_model_ids,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+
+
+@router.post("/session/{agent_id}/mcp/install")
+async def install_recommended_mcp_api(
+    agent_id: int,
+    payload: Nl2AgentMcpInstallRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await install_recommended_mcp(
+            agent_id=agent_id,
+            recommendation_id=payload.recommendation_id,
+            option_id=payload.option_id,
+            config_values=payload.config_values,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post("/session/{agent_id}/mcp/{mcp_id}/bind-tools")
+async def bind_mcp_tools_api(
+    agent_id: int,
+    mcp_id: int,
+    payload: Nl2AgentMcpBindToolsRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await bind_mcp_tools(
+            agent_id=agent_id,
+            mcp_id=mcp_id,
+            tool_ids=payload.tool_ids,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post("/session/{agent_id}/mcp/{mcp_id}/skip-tools")
+async def skip_mcp_tools_api(
+    agent_id: int,
+    mcp_id: int,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await skip_mcp_tool_binding(agent_id, mcp_id, tenant_id)
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/start")
@@ -88,6 +206,7 @@ async def apply_local_resources_api(
     try:
         result = await apply_local_resources_batch(
             agent_id=agent_id,
+            recommendation_batch_id=payload.recommendation_batch_id,
             tool_ids=payload.tool_ids,
             skill_ids=payload.skill_ids,
             tenant_id=tenant_id,
@@ -104,6 +223,65 @@ async def apply_local_resources_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to apply local resources.",
         )
+
+
+@router.post("/session/{agent_id}/local-resources/register")
+async def register_local_resources_api(
+    agent_id: int,
+    payload: Nl2AgentRecommendationBatchRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    return await register_local_resource_recommendations(
+        agent_id,
+        payload.recommendation_batch_id,
+        payload.tool_ids,
+        payload.skill_ids,
+        tenant_id,
+    )
+
+
+@router.post("/session/{agent_id}/local-resources/skip")
+async def skip_local_resources_api(
+    agent_id: int,
+    payload: Nl2AgentRecommendationSkipRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    return await skip_local_resource_recommendations(
+        agent_id, payload.recommendation_batch_id, tenant_id
+    )
+
+
+@router.get("/session/{agent_id}/state")
+async def get_session_state_api(
+    agent_id: int,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await get_session_state(agent_id, tenant_id)
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.put("/session/{agent_id}/identity")
+async def save_agent_identity_api(
+    agent_id: int,
+    payload: Nl2AgentIdentityRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await save_agent_identity(
+            agent_id, payload.display_name, tenant_id, user_id
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/install-web-skill")
@@ -191,12 +369,7 @@ async def finalize_agent_api(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AgentRunException as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-        )
+        raise _session_http_error(exc) from exc
     except Exception as exc:
         logger.exception(f"Failed to finalize agent {agent_id}: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to finalize agent.",
-        )
+        raise _session_http_error(exc) from exc

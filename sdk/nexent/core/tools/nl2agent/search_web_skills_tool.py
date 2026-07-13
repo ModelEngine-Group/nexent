@@ -4,16 +4,17 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from smolagents import tool
+from smolagents.tools import Tool
 
 from ._context import (
+    Nl2AgentContext,
     _score_candidates,
+    create_nl2agent_context,
     error_response,
     get_cached_search,
-    get_nl2agent_context,
     set_cached_search,
-    set_nl2agent_context,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,8 @@ def get_search_web_skills_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
     official_skills: Optional[List[Dict[str, Any]]] = None,
-) -> Any:
-    return set_nl2agent_context(
+) -> Tool:
+    context = create_nl2agent_context(
         agent_id=agent_id,
         user_id=user_id,
         tenant_id=tenant_id,
@@ -34,10 +35,10 @@ def get_search_web_skills_tool(
         draft_agent_id=draft_agent_id,
         official_skills=official_skills,
     )
+    return NL2AgentSearchWebSkillsTool(context)
 
 
-@tool
-def nl2agent_search_web_skills(query: str) -> str:
+class NL2AgentSearchWebSkillsTool(Tool):
     """Search the official/web skills marketplace for skills matching the user's intent.
 
     Returns a frontend card JSON string with ``agent_id`` and ``items``. The
@@ -56,36 +57,47 @@ def nl2agent_search_web_skills(query: str) -> str:
         JSON string ``{"agent_id": 123, "items": [...]}`` containing web skill
         cards.
     """
-    ctx = get_nl2agent_context()
-    if ctx is None or ctx.tenant_id is None:
-        return error_response("NL2AGENT session context not initialized.")
-    if ctx.official_skills is None:
-        return error_response("skills catalog not available in context")
 
-    q = query.lower().strip()
-    cache_key = ("nl2agent_search_web_skills", q)
+    name = "nl2agent_search_web_skills"
+    description = __doc__ or "Search official web skills."
+    inputs = {"query": {"type": "string", "description": "Concise skill search keywords."}}
+    output_type = "string"
 
-    if (cached := get_cached_search(*cache_key)):
-        logger.info(f"nl2agent_search_web_skills cache hit for query: {query}")
-        return cached
+    def __init__(self, context: Nl2AgentContext):
+        super().__init__()
+        self.context = context
 
-    # Guard: if already searched, return cached + applied state
-    if ctx.was_searched("nl2agent_search_web_skills", query):
+    def forward(self, query: str) -> str:
+        ctx = self.context
+        if ctx.tenant_id is None:
+            return error_response("NL2AGENT session context not initialized.")
+        if ctx.official_skills is None:
+            return error_response("skills catalog not available in context")
+
+        q = query.lower().strip()
+        cache_key = ("nl2agent_search_web_skills", q)
+
+        if cached := get_cached_search(ctx, *cache_key):
+            logger.info(f"nl2agent_search_web_skills cache hit for query: {query}")
+            return cached
+
+        # Guard: if already searched, return cached + applied state
+        if ctx.was_searched("nl2agent_search_web_skills", query):
+            scored = _score_candidates(ctx.official_skills, query, "skill_name")[:5]
+            result = json.dumps(
+                {
+                    "agent_id": ctx.target_agent_id,
+                    "items": scored,
+                    "already_searched": True,
+                    "applied_skill_ids": list(ctx.applied_skill_ids),
+                },
+                ensure_ascii=False,
+            )
+            set_cached_search(ctx, *cache_key, result)
+            return result
+
         scored = _score_candidates(ctx.official_skills, query, "skill_name")[:5]
-        result = json.dumps({
-            "agent_id": ctx.target_agent_id,
-            "items": scored,
-            "already_searched": True,
-            "applied_skill_ids": list(ctx.applied_skill_ids),
-        }, ensure_ascii=False)
-        set_cached_search(*cache_key, result)
+        result = json.dumps({"agent_id": ctx.target_agent_id, "items": scored}, ensure_ascii=False)
+        set_cached_search(ctx, *cache_key, result)
+        ctx.mark_searched("nl2agent_search_web_skills", query)
         return result
-
-    scored = _score_candidates(ctx.official_skills, query, "skill_name")[:5]
-    result = json.dumps({
-        "agent_id": ctx.target_agent_id,
-        "items": scored,
-    }, ensure_ascii=False)
-    set_cached_search(*cache_key, result)
-    ctx.mark_searched("nl2agent_search_web_skills", query)
-    return result

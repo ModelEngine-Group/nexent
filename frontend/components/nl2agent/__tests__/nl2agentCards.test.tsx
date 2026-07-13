@@ -4,6 +4,8 @@ import React from "react";
 
 import { tryRenderNl2AgentCard } from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
+import { ModelSelectionCard } from "../ModelSelectionCard";
+import { AgentIdentityCard } from "../AgentIdentityCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
 import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
 
@@ -14,11 +16,44 @@ function assertElement(
 }
 
 describe("tryRenderNl2AgentCard", () => {
+  it("routes model-selection fenced data to ModelSelectionCard", () => {
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-model-selection",
+      JSON.stringify({ agent_id: 202 })
+    );
+
+    assertElement(node);
+    assert.equal(node.type, ModelSelectionCard);
+    assert.equal(node.props.agentId, 202);
+  });
+
+  it("normalizes model-selection language tags", () => {
+    const node = tryRenderNl2AgentCard(
+      " NL2AGENT-MODEL-SELECTION ",
+      JSON.stringify({ agent_id: 202 })
+    );
+
+    assertElement(node);
+    assert.equal(node.type, ModelSelectionCard);
+  });
+
+  it("routes agent-identity fenced data to AgentIdentityCard", () => {
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-agent-identity",
+      JSON.stringify({ agent_id: 202 })
+    );
+
+    assertElement(node);
+    assert.equal(node.type, AgentIdentityCard);
+    assert.equal(node.props.agentId, 202);
+  });
+
   it("routes local-resource fenced data to LocalResourcesCard", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-local-resources",
       JSON.stringify({
         agent_id: 202,
+        recommendation_batch_id: "local_test",
         tools: [{ tool_id: 1, name: "Search" }],
         skills: [{ skill_id: 7, name: "Summarize" }],
       })
@@ -27,6 +62,7 @@ describe("tryRenderNl2AgentCard", () => {
     assertElement(node);
     assert.equal(node.type, LocalResourcesCard);
     assert.equal(node.props.agentId, 202);
+    assert.equal(node.props.recommendationBatchId, "local_test");
     assert.deepEqual(node.props.tools, [
       { tool_id: 1, name: "Search", kind: "tool" },
     ]);
@@ -95,6 +131,22 @@ describe("tryRenderNl2AgentCard", () => {
       assert.equal(child.props.agentId, 202);
       assert.deepEqual(child.props.item, items[index]);
     });
+  });
+
+  it("recovers the draft agent ID from MCP list items", () => {
+    const items = [
+      { agent_id: 202, name: "Browser MCP", source: "community" },
+    ];
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-web-mcps",
+      JSON.stringify({ items })
+    );
+
+    assertElement(node);
+    const child = React.Children.only(node.props.children);
+    assertElement(child);
+    assert.equal(child.type, WebMcpCard);
+    assert.equal(child.props.agentId, 202);
   });
 
   it("routes web skill list fenced data to WebSkillCard items", () => {

@@ -1,13 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, message, Flex, Divider, Tag } from "antd";
+import { Alert, Button, message, Flex, Divider, Tag } from "antd";
 import { CheckCircle2, ArrowRight, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useParams } from "next/navigation";
 
-import { finalizeNl2Agent } from "@/services/nl2agentService";
+import {
+  finalizeNl2Agent,
+  getNl2AgentSessionState,
+  type Nl2AgentSessionState,
+} from "@/services/nl2agentService";
 
 /** Full agent spec produced by the nl2agent_finalize_proposal skill. */
 export interface FinalizeCardData {
@@ -89,18 +93,43 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const params = useParams<{ locale: string }>();
   const locale = params?.locale || "en";
   const [loading, setLoading] = useState(false);
+  const [sessionState, setSessionState] = useState<Nl2AgentSessionState | null>(null);
+  const [stateLoading, setStateLoading] = useState(true);
+  const [stateError, setStateError] = useState<string | null>(null);
 
   const agentId = data.agent_id;
+
+  const loadState = useCallback(async () => {
+    setStateLoading(true);
+    setStateError(null);
+    try {
+      setSessionState(await getNl2AgentSessionState(agentId));
+    } catch (error: any) {
+      setSessionState(null);
+      setStateError(error?.message || "Failed to load persisted agent state.");
+    } finally {
+      setStateLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => {
+    void loadState();
+  }, [loadState]);
+
+  const proposalComplete = Boolean(
+    data.business_description?.trim() &&
+      data.duty_prompt?.trim() &&
+      data.greeting_message?.trim()
+  );
+  const canPublish = Boolean(
+    sessionState?.identity_confirmed && proposalComplete && !stateLoading && !stateError
+  );
 
   const handlePublish = async () => {
     setLoading(true);
     try {
       await finalizeNl2Agent(agentId, {
-        name: data.name,
-        display_name: data.display_name,
         description: data.description,
-        business_logic_model_id: data.business_logic_model_id,
-        model_ids: data.model_ids ?? [],
         business_description: data.business_description,
         prompt_template_id: data.prompt_template_id,
         duty_prompt: data.duty_prompt,
@@ -113,26 +142,43 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
         provide_run_summary: data.provide_run_summary,
         verification_config: data.verification_config,
         enable_context_manager: data.enable_context_manager,
-        tool_ids: data.selected_tools ?? [],
-        skill_ids: data.selected_skills ?? [],
         sub_agent_ids: data.sub_agent_ids ?? [],
-        tool_configs: data.tool_configs ?? {},
-        skill_configs: data.skill_configs ?? {},
       });
       message.success(
         t("nl2agent.finalize.published", "Agent published successfully!")
       );
       router.push(`/${locale}/agents?agent_id=${agentId}`);
-    } catch {
+    } catch (error: any) {
       message.error(
-        t("nl2agent.finalize.error", "Failed to publish agent. Please try again.")
+        error?.message || t("nl2agent.finalize.error", "Failed to publish agent. Please try again.")
       );
     } finally {
       setLoading(false);
     }
   };
 
-  const displayName = data.display_name || data.name || `Agent #${agentId}`;
+  if (stateLoading) {
+    return (
+      <div className="my-3 rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
+        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+        Loading persisted agent state...
+      </div>
+    );
+  }
+
+  if (stateError || !sessionState) {
+    return (
+      <div className="my-3 rounded-lg border border-red-200 bg-red-50 p-4">
+        <Alert
+          type="error"
+          showIcon
+          message="Persisted agent state could not be loaded"
+          description={stateError || "No persisted state was returned."}
+          action={<Button size="small" onClick={() => void loadState()}>Retry</Button>}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="my-3 border border-emerald-200 rounded-lg p-4 bg-emerald-50/50 max-h-[480px] overflow-y-auto">
@@ -142,6 +188,24 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           <div className="font-medium text-emerald-800 text-sm mb-1">
             {t("nl2agent.finalize.title", "Your agent is ready")}
           </div>
+
+          {!sessionState.identity_confirmed ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="Agent identity has not been saved"
+              description="Return to the identity card and save the display name before publishing."
+              className="mb-3"
+            />
+          ) : !proposalComplete ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="The generated proposal is incomplete"
+              description="Business description, duty prompt, and greeting message are required."
+              className="mb-3"
+            />
+          ) : null}
           <div className="text-xs text-emerald-700 mb-3">
             {t("nl2agent.finalize.description", {
               defaultValue:
@@ -151,26 +215,29 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
 
           {/* Identity */}
           <Section title={t("nl2agent.finalize.identity", "Identity")}>
-            <FieldLine label="Name" value={data.name} />
-            <FieldLine label="Display Name" value={data.display_name} />
+            <FieldLine label="Agent Display Name" value={sessionState.display_name} />
+            <FieldLine
+              label="Internal Variable Name"
+              value={sessionState?.internal_name}
+            />
             <FieldLine label="Description" value={data.description} />
           </Section>
 
           <Divider className="my-2" />
 
           {/* Models */}
-          {data.business_logic_model_id || (data.model_ids?.length ?? 0) > 0 ? (
+          {sessionState?.business_logic_model_id || (sessionState?.model_ids?.length ?? 0) > 0 ? (
             <>
               <Section title={t("nl2agent.finalize.models", "LLM Models")}>
                 <FieldLine
                   label="Logic Model ID"
-                  value={data.business_logic_model_id}
+                  value={sessionState?.business_logic_model_id}
                 />
                 <FieldLine
                   label="Runtime Model IDs"
                   value={
-                    data.model_ids?.length
-                      ? data.model_ids.join(", ")
+                    sessionState?.model_ids?.length
+                      ? sessionState.model_ids.join(", ")
                       : undefined
                   }
                 />
@@ -250,23 +317,23 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           ) : null}
 
           {/* Resources */}
-          {(data.selected_tools?.length ?? 0) > 0 ||
-          (data.selected_skills?.length ?? 0) > 0 ? (
+          {(sessionState?.tools?.length ?? 0) > 0 ||
+          (sessionState?.skills?.length ?? 0) > 0 ? (
             <>
               <Section title={t("nl2agent.finalize.resources", "Selected Resources")}>
                 <FieldLine
                   label="Tools"
                   value={
-                    data.selected_tools?.length
-                      ? data.selected_tools.join(", ")
+                    sessionState?.tools?.length
+                      ? sessionState.tools.map((item: any) => item.tool_id).join(", ")
                       : "None"
                   }
                 />
                 <FieldLine
                   label="Skills"
                   value={
-                    data.selected_skills?.length
-                      ? data.selected_skills.join(", ")
+                    sessionState?.skills?.length
+                      ? sessionState.skills.map((item: any) => item.skill_id).join(", ")
                       : "None"
                   }
                 />
@@ -329,6 +396,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
               type="primary"
               onClick={handlePublish}
               loading={loading}
+              disabled={!canPublish}
               icon={
                 loading ? (
                   <Loader2 className="h-3.5 w-3.5" />

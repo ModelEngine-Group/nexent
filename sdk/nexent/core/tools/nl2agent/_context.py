@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+
 # Alias for type-annotation clarity in this module.
 _StrStrDict = Dict[str, str]
 
@@ -107,16 +108,12 @@ class Nl2AgentContext:
     def has_applied_mcp(self, mcp_name: str) -> bool:
         return mcp_name in self.applied_mcp_names
 
-    def mark_tool_applied(
-        self, tool_id: int, params: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def mark_tool_applied(self, tool_id: int, params: Optional[Dict[str, Any]] = None) -> None:
         self.applied_tool_ids.add(tool_id)
         if params:
             self.tool_configs[tool_id] = params
 
-    def mark_skill_applied(
-        self, skill_id: int, config: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def mark_skill_applied(self, skill_id: int, config: Optional[Dict[str, Any]] = None) -> None:
         self.applied_skill_ids.add(skill_id)
         if config:
             self.skill_configs[skill_id] = config
@@ -143,11 +140,7 @@ class Nl2AgentContext:
         return sorted(self.applied_skill_ids)
 
 
-# Module-level context singleton. Set by the `get_*_tool()` initializers.
-_context: Optional[Nl2AgentContext] = None
-
-
-def set_nl2agent_context(
+def create_nl2agent_context(
     agent_id: Optional[int] = None,
     user_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
@@ -159,13 +152,8 @@ def set_nl2agent_context(
     community_results: Optional[List[Dict[str, Any]]] = None,
     official_skills: Optional[List[Dict[str, Any]]] = None,
 ) -> Nl2AgentContext:
-    """Set the global NL2AGENT session context. Idempotent; overwrites prior values.
-
-    Applied resources state is reset on each call so the context always starts
-    fresh for a new conversation turn.
-    """
-    global _context
-    _context = Nl2AgentContext(
+    """Create isolated context for one NL2AGENT tool instance."""
+    return Nl2AgentContext(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
         tenant_id=tenant_id,
@@ -177,39 +165,32 @@ def set_nl2agent_context(
         community_results=community_results,
         official_skills=official_skills,
     )
-    return _context
-
-
-def get_nl2agent_context() -> Optional[Nl2AgentContext]:
-    """Return the current NL2AGENT session context, or None if not set."""
-    return _context
 
 
 # Cache for search tool results. Module-level (not a field on the dataclass)
-# because set_nl2agent_context() runs on every agent build, which happens once
-# per chat message; cache entries must survive those resets to deduplicate
-# searches across turns. Keys include tenant and target agent ids so
-# concurrent sessions never read each other's results.
+# so entries survive agent rebuilds across chat turns. Every operation receives
+# its owning context explicitly; tool instances never depend on mutable global
+# session state.
 _SEARCH_CACHE_TTL_SECONDS = 600.0
 _SEARCH_CACHE_MAX_ENTRIES = 128
-_search_cache: Dict[
-    Tuple[Optional[str], Optional[int], str, str], Tuple[float, str]
-] = {}
+_search_cache: Dict[Tuple[Optional[str], Optional[int], str, str], Tuple[float, str]] = {}
 
 
 def _search_cache_key(
-    tool_name: str, query: str
+    context: Nl2AgentContext, tool_name: str, query: str
 ) -> Optional[Tuple[Optional[str], Optional[int], str, str]]:
-    """Build the cache key for a search call, or None when context is unset."""
-    ctx = get_nl2agent_context()
-    if ctx is None:
-        return None
-    return (ctx.tenant_id, ctx.target_agent_id, tool_name, query.strip().lower())
+    """Build a cache key scoped to the tool instance's session context."""
+    return (
+        context.tenant_id,
+        context.target_agent_id,
+        tool_name,
+        query.strip().lower(),
+    )
 
 
-def get_cached_search(tool_name: str, query: str) -> Optional[str]:
+def get_cached_search(context: Nl2AgentContext, tool_name: str, query: str) -> Optional[str]:
     """Return the cached result for this search, or None on miss or expiry."""
-    key = _search_cache_key(tool_name, query)
+    key = _search_cache_key(context, tool_name, query)
     if key is None:
         return None
     entry = _search_cache.get(key)
@@ -222,9 +203,9 @@ def get_cached_search(tool_name: str, query: str) -> Optional[str]:
     return result
 
 
-def set_cached_search(tool_name: str, query: str, result: str) -> None:
+def set_cached_search(context: Nl2AgentContext, tool_name: str, query: str, result: str) -> None:
     """Cache a successful search result for the current session context."""
-    key = _search_cache_key(tool_name, query)
+    key = _search_cache_key(context, tool_name, query)
     if key is None:
         return
     _search_cache[key] = (time.monotonic(), result)

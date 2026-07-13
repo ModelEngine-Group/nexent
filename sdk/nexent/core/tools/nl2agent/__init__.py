@@ -7,6 +7,6 @@ injected by the backend at session start via ToolConfig.metadata.
 Dispatched by `NexentAgent.create_builtin_tool` when the tool's `class_name`
 matches one of the NL2AGENT_* class names.
 
-Each tool stores its session context (draft agent_id, user_id, tenant_id,
-language, catalogs) in module-level globals via a `get_*_tool()` initializer.
+Each tool instance owns its session context (draft agent_id, user_id, tenant_id,
+language, and catalogs), so concurrent agent runs cannot overwrite each other.
 """

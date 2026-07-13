@@ -443,8 +443,50 @@ class GeneratePromptRequest(BaseModel):
 
 class Nl2AgentApplyLocalResourcesRequest(BaseModel):
     """Request body for bulk-binding local tools and skills to a draft agent."""
+    recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
     tool_ids: List[int] = Field(default_factory=list)
     skill_ids: List[int] = Field(default_factory=list)
+
+
+class Nl2AgentRecommendationBatchRequest(BaseModel):
+    """Register a local-resource recommendation card rendered by the client."""
+
+    recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
+    tool_ids: List[int] = Field(default_factory=list)
+    skill_ids: List[int] = Field(default_factory=list)
+
+
+class Nl2AgentRecommendationSkipRequest(BaseModel):
+    """Explicitly skip one rendered local-resource recommendation batch."""
+
+    recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
+
+
+class Nl2AgentModelSelectionRequest(BaseModel):
+    """Persist the ordered LLM selection for an NL2AGENT draft."""
+
+    primary_model_id: int = Field(..., ge=1)
+    fallback_model_ids: List[int] = Field(default_factory=list, max_length=4)
+
+
+class Nl2AgentIdentityRequest(BaseModel):
+    """Persist the user-confirmed display name for an NL2AGENT draft."""
+
+    display_name: str = Field(..., min_length=1, max_length=50)
+
+
+class Nl2AgentMcpInstallRequest(BaseModel):
+    """Install a recommended MCP using user-confirmed configuration."""
+
+    recommendation_id: str = Field(..., min_length=1, max_length=300)
+    option_id: str = Field(default="remote", min_length=1, max_length=100)
+    config_values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class Nl2AgentMcpBindToolsRequest(BaseModel):
+    """Bind selected tools from an installed MCP to an NL2AGENT draft."""
+
+    tool_ids: List[int] = Field(default_factory=list, max_length=100)
 
 
 class Nl2AgentInstallWebSkillRequest(BaseModel):

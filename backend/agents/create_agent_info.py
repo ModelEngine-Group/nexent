@@ -52,7 +52,10 @@ from utils.prompt_template_utils import (
     get_nl2agent_system_prompt,
 )
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from .nl2agent_session_catalog import get_nl2agent_session_catalogs
+from .nl2agent_session_catalog import (
+    get_nl2agent_session_catalogs,
+    get_nl2agent_session_state,
+)
 from utils.context_utils import build_context_components, build_system_prompt_component
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.model import ToolParamsRequest
@@ -768,6 +771,17 @@ async def create_agent_config(
     nl2agent_system_prompt = (
         _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
     )
+    if nl2agent_system_prompt and draft_agent_id is not None:
+        resource_state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+        nl2agent_system_prompt += (
+            "\n\n### Current Session\n"
+            f"The exact draft agent_id is `{int(draft_agent_id)}`. "
+            "Use it in every NL2AGENT card. Model selection is incomplete until "
+            "the model-selection card confirms that it was saved.\n"
+            "Authoritative local resource review state: "
+            f"{json.dumps(resource_state, ensure_ascii=False)}. "
+            "Finalization is forbidden until at least one batch exists and every batch is applied or skipped."
+        )
 
     # Get template content (use manager template if has any sub-agents)
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
@@ -993,7 +1007,11 @@ async def create_agent_config(
         "NL2AgentSearchWebMcpsTool",
         "NL2AgentSearchWebSkillsTool",
     }
-    nl2agent_catalogs = get_nl2agent_session_catalogs(tenant_id, draft_agent_id)
+    nl2agent_catalogs = (
+        get_nl2agent_session_catalogs(tenant_id, draft_agent_id)
+        if draft_agent_id is not None
+        else {}
+    )
     for tool_cfg in tool_list:
         try:
             class_name = tool_cfg.class_name

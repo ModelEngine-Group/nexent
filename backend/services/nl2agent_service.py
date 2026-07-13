@@ -13,17 +13,36 @@ After the SDK decoupling refactor:
   draft agent row and upserts tool/skill instances with per-agent config overrides.
 """
 
+import json
 import logging
 import re
+import unicodedata
 import uuid
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
-from agents.nl2agent_session_catalog import set_nl2agent_session_catalogs
+from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
+
+from agents.nl2agent_session_catalog import (
+    assert_identity_confirmed,
+    assert_mcp_workflows_resolved,
+    assert_resource_review_complete,
+    confirm_agent_identity,
+    find_mcp_workflow_by_id,
+    get_nl2agent_session_catalogs,
+    get_nl2agent_session_state,
+    register_recommendation_batch,
+    resolve_recommendation_batch,
+    set_nl2agent_session_catalogs,
+    update_mcp_workflow,
+)
 from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import AgentRunException
 from consts.model import (
     AgentInfoRequest,
+    MCPConfigRequest,
     ModelConnectStatusEnum,
     SkillInstanceInfoRequest,
     ToolInstanceInfoRequest,
@@ -41,16 +60,28 @@ from database.skill_db import (
     create_or_update_skill_by_skill_info,
     get_skill_by_id as get_tenant_skill_by_id,
     list_skills as list_tenant_skills,
+    query_enabled_skill_instances,
 )
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
+    query_all_enabled_tool_instances,
     query_tools_by_ids,
     seed_nl2agent_builtin_tools,
+    upsert_discovered_mcp_tools,
+)
+from database.remote_mcp_db import (
+    get_mcp_record_by_id_and_tenant,
+    get_mcp_records_by_tenant,
 )
 from services.mcp_management_service import (
     list_community_mcp_services,
     list_registry_mcp_services,
 )
+from services.remote_mcp_service import (
+    add_container_mcp_service,
+    add_mcp_service,
+)
+from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.skill_service import (
     get_official_skills_with_status,
     install_skills_for_tenant,
@@ -116,6 +147,27 @@ _NL2AGENT_VERIFICATION_CONFIG = {
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
+
+
+def _generate_internal_agent_name(display_name: str, agent_id: int, tenant_id: str) -> str:
+    """Generate a valid, tenant-unique internal identifier from a display title."""
+    ascii_name = unicodedata.normalize("NFKD", display_name).encode("ascii", "ignore").decode()
+    candidate = re.sub(r"[^A-Za-z0-9]+", "_", ascii_name).strip("_").lower()
+    if not candidate or not re.match(r"^[A-Za-z_]", candidate):
+        candidate = f"agent_{agent_id}"
+    candidate = candidate[:50].rstrip("_") or f"agent_{agent_id}"
+    try:
+        existing_id = search_agent_id_by_agent_name(candidate, tenant_id)
+    except ValueError as exc:
+        if str(exc) != "agent not found":
+            raise
+        existing_id = None
+    if existing_id not in (None, agent_id):
+        suffix = f"_{agent_id}"
+        candidate = f"{candidate[:50 - len(suffix)].rstrip('_')}{suffix}"
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,49}", candidate):
+        candidate = f"agent_{agent_id}"[:50]
+    return candidate
 
 
 def _load_nl2agent_seed_fields() -> Dict[str, str]:
@@ -382,7 +434,9 @@ async def start_session(
     try:
         registry_data = await list_registry_mcp_services(search=None, limit=30)
         if isinstance(registry_data, dict):
-            registry_results = registry_data.get("servers", registry_data) or []
+            registry_results = _redact_mcp_marketplace_metadata(
+                registry_data.get("servers", registry_data) or []
+            )
     except Exception as exc:
         logger.warning(f"Failed to pre-fetch registry MCP results: {exc}")
 
@@ -390,7 +444,9 @@ async def start_session(
     try:
         community_data = list_community_mcp_services(search=None, limit=30)
         if isinstance(community_data, dict):
-            community_results = community_data.get("items", community_data) or []
+            community_results = _redact_mcp_marketplace_metadata(
+                community_data.get("items", community_data) or []
+            )
     except Exception as exc:
         logger.warning(f"Failed to pre-fetch community MCP results: {exc}")
 
@@ -424,8 +480,501 @@ def _validate_draft_agent_id(agent_id: int) -> None:
         raise AgentRunException("Invalid NL2AGENT draft agent_id.")
 
 
+def _get_owned_draft(agent_id: int, tenant_id: str) -> Dict[str, Any]:
+    _validate_draft_agent_id(agent_id)
+    try:
+        agent = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
+    except ValueError as exc:
+        if str(exc) != "agent not found":
+            raise
+        raise AgentRunException("NL2AGENT draft agent not found.") from exc
+    if not agent or not _is_draft_agent_name(agent.get("name") or ""):
+        raise AgentRunException("NL2AGENT draft agent not found.")
+    return agent
+
+
+async def select_models(
+    agent_id: int,
+    primary_model_id: int,
+    fallback_model_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Validate and persist an ordered model selection on a draft agent."""
+    _get_owned_draft(agent_id, tenant_id)
+    ordered_ids = [int(primary_model_id), *[int(x) for x in fallback_model_ids]]
+    if len(ordered_ids) > 5 or len(set(ordered_ids)) != len(ordered_ids):
+        raise AgentRunException("Select one primary model and up to four distinct fallbacks.")
+
+    display_names = _validate_available_llm_ids(tenant_id, ordered_ids)
+
+    update_agent(
+        agent_id=agent_id,
+        agent_info=AgentInfoRequest(
+            business_logic_model_id=ordered_ids[0],
+            model_ids=ordered_ids,
+        ),
+        user_id=user_id,
+        version_no=0,
+    )
+    return {
+        "agent_id": agent_id,
+        "primary_model_id": ordered_ids[0],
+        "fallback_model_ids": ordered_ids[1:],
+        "models": [
+            {"model_id": model_id, "display_name": display_names[model_id]}
+            for model_id in ordered_ids
+        ],
+    }
+
+
+def _validate_available_llm_ids(
+    tenant_id: str,
+    model_ids: List[int],
+    *,
+    finalizing: bool = False,
+) -> Dict[int, str]:
+    """Validate IDs against the tenant's platform LLM inventory."""
+    records = get_model_records(None, tenant_id) or []
+    records_by_id = {int(record["model_id"]): record for record in records}
+    display_names: Dict[int, str] = {}
+    for model_id in model_ids:
+        record = records_by_id.get(int(model_id))
+        if record is None:
+            reason = f"Model {model_id} does not exist in this tenant."
+        elif str(record.get("model_type") or "").lower() != "llm":
+            reason = f"Model {model_id} is not an LLM."
+        elif ModelConnectStatusEnum.get_value(
+            record.get("connect_status")
+        ) != ModelConnectStatusEnum.AVAILABLE.value:
+            reason = f"Model {model_id} is currently unavailable."
+        else:
+            display_names[int(model_id)] = (
+                record.get("display_name") or record.get("model_name") or str(model_id)
+            )
+            continue
+        if finalizing:
+            reason += " Reopen the model-selection card and choose an available LLM."
+        raise AgentRunException(reason)
+    return display_names
+
+
+def _recommendation_id(source: str, item: Dict[str, Any]) -> str:
+    if source == "registry":
+        server = item.get("server") if isinstance(item.get("server"), dict) else item
+        identity = server.get("name") or server.get("id")
+    else:
+        identity = item.get("communityId") or item.get("community_id") or item.get("name")
+    return f"{source}:{identity}"
+
+
+def _redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
+    """Remove credential defaults before marketplace metadata enters Redis or API responses."""
+    if isinstance(value, list):
+        return [_redact_mcp_marketplace_metadata(item, parent_key) for item in value]
+    if not isinstance(value, dict):
+        return deepcopy(value)
+
+    declared_secret = bool(value.get("isSecret"))
+    sanitized: Dict[str, Any] = {}
+    for key, item in value.items():
+        key_text = str(key)
+        secret_container_value = parent_key.lower() in {"env", "headers", "customheaders"} and bool(
+            re.search(r"token|secret|password|api[_-]?key|authorization", key_text, re.I)
+        )
+        if (declared_secret and key_text in {"value", "default"}) or secret_container_value:
+            sanitized[key_text] = None
+        else:
+            sanitized[key_text] = _redact_mcp_marketplace_metadata(item, key_text)
+    return sanitized
+
+
+def _resolve_mcp_recommendation(
+    catalogs: Dict[str, List[Dict[str, Any]]], recommendation_id: str
+) -> tuple[str, Dict[str, Any]]:
+    for source, key in (("registry", "registry_results"), ("community", "community_results")):
+        for item in catalogs.get(key, []):
+            if _recommendation_id(source, item) == recommendation_id:
+                return source, item
+    raise AgentRunException("MCP recommendation is not part of this NL2AGENT session.")
+
+
+async def _install_recommended_mcp(
+    agent_id: int,
+    recommendation_id: str,
+    option_id: str,
+    config_values: Dict[str, Any],
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Install a server-side resolved MCP recommendation and discover its tools."""
+    _get_owned_draft(agent_id, tenant_id)
+    catalogs = get_nl2agent_session_catalogs(tenant_id, agent_id)
+    source, raw = _resolve_mcp_recommendation(catalogs, recommendation_id)
+    normalized = normalize_mcp_candidate(source, raw)
+    option = next(
+        (
+            candidate
+            for candidate in normalized.get("install_options", [])
+            if candidate.get("option_id") == option_id
+        ),
+        None,
+    )
+    if not option:
+        raise AgentRunException("Invalid MCP installation option.")
+    if not option.get("supported", True):
+        raise AgentRunException(
+            option.get("unsupported_reason") or "This MCP installation option is unsupported."
+        )
+    update_mcp_workflow(
+        tenant_id,
+        agent_id,
+        recommendation_id,
+        option_id=option_id,
+        status="installing",
+    )
+
+    registry_json = raw.get("registryJson") or raw.get("registry_json")
+    registry_root = registry_json if isinstance(registry_json, dict) else raw
+    server = (
+        registry_root.get("server")
+        if isinstance(registry_root.get("server"), dict)
+        else registry_root
+    )
+    name = str(server.get("name") or raw.get("name") or "recommended-mcp")[:100]
+    description = str(server.get("description") or raw.get("description") or "")
+    field_values = config_values.get("fields") or {}
+    if not isinstance(field_values, dict):
+        raise AgentRunException("MCP configuration fields must be an object.")
+    resolved_values: Dict[str, Any] = {}
+    for field in option.get("fields", []):
+        value = field_values.get(field.get("key"))
+        if value in (None, ""):
+            value = field.get("default")
+        if field.get("required") and value in (None, ""):
+            raise AgentRunException(
+                f"Missing required MCP configuration: {field.get('label') or field.get('name')}"
+            )
+        if value not in (None, ""):
+            field_type = field.get("type")
+            if field_type == "json" and isinstance(value, str):
+                try:
+                    json.loads(value)
+                except json.JSONDecodeError as exc:
+                    raise AgentRunException(
+                        f"Invalid JSON for MCP configuration: {field.get('label') or field.get('name')}"
+                    ) from exc
+            if field_type == "number":
+                try:
+                    float(value)
+                except (TypeError, ValueError) as exc:
+                    raise AgentRunException(
+                        f"Invalid number for MCP configuration: {field.get('label') or field.get('name')}"
+                    ) from exc
+            if field_type == "url":
+                parsed_field_url = urlparse(str(value))
+                if (
+                    parsed_field_url.scheme not in {"http", "https"}
+                    or not parsed_field_url.netloc
+                    or re.search(r"\{[^{}]+\}", str(value))
+                ):
+                    raise AgentRunException(
+                        f"Invalid URL for MCP configuration: {field.get('label') or field.get('name')}"
+                    )
+            choices = field.get("choices") or []
+            if choices and str(value) not in set(map(str, choices)):
+                raise AgentRunException(
+                    f"Invalid choice for MCP configuration: {field.get('label') or field.get('name')}"
+                )
+            resolved_values[field.get("key")] = value
+
+    authorization_token = None
+    custom_headers: Dict[str, str] = {}
+    persisted_source = "mcp_registry" if source == "registry" else source
+    for field in option.get("fields", []):
+        value = resolved_values.get(field.get("key"))
+        if value in (None, ""):
+            continue
+        if field.get("category") == "header":
+            if str(field.get("name") or "").lower() == "authorization":
+                authorization_token = str(value)
+            else:
+                custom_headers[str(field.get("name"))] = str(value)
+
+    if option.get("type") == "remote":
+        server_url = option.get("server_url_template")
+        if not server_url:
+            url_field = next(
+                (field for field in option.get("fields", []) if field.get("name") == "server_url"),
+                None,
+            )
+            server_url = resolved_values.get(url_field.get("key")) if url_field else None
+        for field in option.get("fields", []):
+            if field.get("category") == "variable":
+                value = resolved_values.get(field.get("key"))
+                if value not in (None, ""):
+                    variable_name = str(field.get("name"))
+                    server_url = str(server_url).replace(
+                        "${" + variable_name + "}", str(value)
+                    )
+                    server_url = str(server_url).replace(
+                        "{" + variable_name + "}", str(value)
+                    )
+        if not server_url or re.search(r"\{[^{}]+\}", str(server_url)):
+            raise AgentRunException("MCP server URL contains unresolved configuration variables.")
+        parsed_url = urlparse(str(server_url))
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
+        await add_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=name,
+            description=description,
+            source=persisted_source,
+            server_url=server_url,
+            tags=raw.get("tags") or [],
+            authorization_token=authorization_token,
+            custom_headers=custom_headers or None,
+            container_config=None,
+            registry_json=raw,
+            enabled=True,
+        )
+    else:
+        config_json = deepcopy(raw.get("configJson") or raw.get("config_json"))
+        if option_id.startswith("package-"):
+            identifier = option.get("package_identifier")
+            runtime = str(option.get("runtime_hint") or option.get("registry_type") or "npx").lower()
+            command_map = {"npm": "npx", "npx": "npx", "pypi": "uvx", "uvx": "uvx"}
+            command = command_map.get(runtime, runtime)
+            if not identifier or command not in {"npx", "uvx"}:
+                raise AgentRunException("Unsupported MCP package runtime.")
+            env = {}
+            runtime_args = []
+            package_args = []
+            for field in option.get("fields", []):
+                value = resolved_values.get(field.get("key"))
+                if value in (None, ""):
+                    continue
+                category = field.get("category")
+                if category == "environment":
+                    env[str(field.get("name"))] = str(value)
+                elif category in {"runtime_argument", "package_argument"}:
+                    rendered = str(value)
+                    if field.get("argument_type") == "named" and field.get("argument_name"):
+                        rendered = f"{field.get('argument_name')}={rendered}"
+                    (runtime_args if category == "runtime_argument" else package_args).append(rendered)
+            args = runtime_args
+            args.append(identifier)
+            args.extend(package_args)
+            config_json = {"mcpServers": {name: {"command": command, "args": args, "env": env}}}
+        elif isinstance(config_json, dict):
+            server_configs = config_json.get("mcpServers")
+            target_config = next(
+                (
+                    server_config
+                    for server_config in server_configs.values()
+                    if isinstance(server_config, dict)
+                ),
+                None,
+            ) if isinstance(server_configs, dict) else None
+            if target_config is not None:
+                environment = target_config.setdefault("env", {})
+                if not isinstance(environment, dict):
+                    raise AgentRunException("MCP container environment configuration must be an object.")
+                for field in option.get("fields", []):
+                    if field.get("category") != "environment":
+                        continue
+                    value = resolved_values.get(field.get("key"))
+                    if value not in (None, ""):
+                        environment[str(field.get("name"))] = str(value)
+        config_field = next(
+            (field for field in option.get("fields", []) if field.get("name") == "config_json"),
+            None,
+        )
+        if not isinstance(config_json, dict) and config_field:
+            submitted_config = resolved_values.get(config_field.get("key"))
+            try:
+                config_json = json.loads(submitted_config) if isinstance(submitted_config, str) else submitted_config
+            except json.JSONDecodeError as exc:
+                raise AgentRunException("MCP container configuration must be valid JSON.") from exc
+        port_field = next(
+            (field for field in option.get("fields", []) if field.get("name") == "port"),
+            None,
+        )
+        port = resolved_values.get(port_field.get("key")) if port_field else None
+        try:
+            port_number = int(port)
+        except (TypeError, ValueError) as exc:
+            raise AgentRunException("MCP container port must be an integer.") from exc
+        if not 1 <= port_number <= 65535:
+            raise AgentRunException("MCP container port must be between 1 and 65535.")
+        if not isinstance(config_json, dict):
+            raise AgentRunException("This MCP requires container configuration and a port.")
+        await add_container_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=name,
+            description=description,
+            source=persisted_source,
+            tags=raw.get("tags") or [],
+            authorization_token=authorization_token,
+            registry_json=raw,
+            port=port_number,
+            mcp_config=MCPConfigRequest(**config_json),
+        )
+
+    record = next(
+        (r for r in get_mcp_records_by_tenant(tenant_id) if r.get("mcp_name") == name),
+        None,
+    )
+    if not record:
+        raise AgentRunException("Installed MCP record could not be resolved.")
+    mcp_id = int(record["mcp_id"])
+    discovered = await get_tool_from_remote_mcp_server(
+        mcp_server_name=name,
+        remote_mcp_server=record.get("mcp_server"),
+        tenant_id=tenant_id,
+        authorization_token=authorization_token,
+        custom_headers=custom_headers or None,
+    )
+    tools = upsert_discovered_mcp_tools(tenant_id, user_id, discovered)
+    update_mcp_workflow(
+        tenant_id,
+        agent_id,
+        recommendation_id,
+        option_id=option_id,
+        status="connected",
+        mcp_id=mcp_id,
+        discovered_tool_ids=[int(tool["tool_id"]) for tool in tools],
+        bound_tool_ids=[],
+        error=None,
+    )
+    catalog_key = "registry_results" if source == "registry" else "community_results"
+    catalogs[catalog_key] = [
+        item
+        for item in catalogs.get(catalog_key, [])
+        if _recommendation_id(source, item) != recommendation_id
+    ]
+    set_nl2agent_session_catalogs(tenant_id, agent_id, catalogs)
+    return {
+        "agent_id": agent_id,
+        "mcp_id": mcp_id,
+        "status": "connected",
+        "tools": [
+            {"tool_id": t["tool_id"], "name": t["name"], "description": t.get("description")}
+            for t in tools
+        ],
+    }
+
+
+async def install_recommended_mcp(
+    agent_id: int,
+    recommendation_id: str,
+    option_id: str,
+    config_values: Dict[str, Any],
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Install an MCP and persist redacted success or failure state."""
+    try:
+        return await _install_recommended_mcp(
+            agent_id,
+            recommendation_id,
+            option_id,
+            config_values,
+            tenant_id,
+            user_id,
+        )
+    except Exception as exc:
+        try:
+            update_mcp_workflow(
+                tenant_id,
+                agent_id,
+                recommendation_id,
+                option_id=option_id,
+                status="failed",
+                error="MCP installation failed. Review the option configuration and retry.",
+            )
+        except Exception:
+            logger.exception("Failed to persist NL2AGENT MCP failure state")
+        if isinstance(exc, AgentRunException):
+            raise
+        raise AgentRunException(
+            "MCP installation failed during connection or tool discovery."
+        ) from exc
+
+
+async def bind_mcp_tools(
+    agent_id: int,
+    mcp_id: int,
+    tool_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Bind user-selected tools belonging to an installed MCP."""
+    _get_owned_draft(agent_id, tenant_id)
+    if not tool_ids:
+        raise AgentRunException("Select at least one discovered MCP tool to bind.")
+    record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not record:
+        raise AgentRunException("Installed MCP not found.")
+    rows = query_tools_by_ids(tool_ids) if tool_ids else []
+    valid = {
+        int(row["tool_id"]): row
+        for row in rows
+        if row.get("author") == tenant_id
+        and row.get("source") == "mcp"
+        and row.get("usage") == record.get("mcp_name")
+    }
+    if set(map(int, tool_ids)) != set(valid):
+        raise AgentRunException("One or more tools do not belong to the selected MCP.")
+    for tool_id in valid:
+        create_or_update_tool_by_tool_info(
+            ToolInstanceInfoRequest(
+                tool_id=tool_id, agent_id=agent_id, params={}, enabled=True, version_no=0
+            ),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=0,
+        )
+    recommendation_id, _ = find_mcp_workflow_by_id(tenant_id, agent_id, mcp_id)
+    update_mcp_workflow(
+        tenant_id,
+        agent_id,
+        recommendation_id,
+        status="tools_bound",
+        bound_tool_ids=sorted(valid),
+    )
+    return {"agent_id": agent_id, "mcp_id": mcp_id, "bound_tool_ids": sorted(valid)}
+
+
+async def skip_mcp_tool_binding(
+    agent_id: int,
+    mcp_id: int,
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Explicitly resolve an installed MCP without binding discovered tools."""
+    _get_owned_draft(agent_id, tenant_id)
+    if not get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id):
+        raise AgentRunException("Installed MCP not found.")
+    recommendation_id, workflow = find_mcp_workflow_by_id(
+        tenant_id, agent_id, mcp_id
+    )
+    if workflow.get("status") != "connected":
+        raise AgentRunException("MCP tool binding is already resolved.")
+    update_mcp_workflow(
+        tenant_id,
+        agent_id,
+        recommendation_id,
+        status="binding_skipped",
+        bound_tool_ids=[],
+    )
+    return {"agent_id": agent_id, "mcp_id": mcp_id, "status": "binding_skipped"}
+
+
 async def apply_local_resources_batch(
     agent_id: int,
+    recommendation_batch_id: str,
     tool_ids: List[int],
     skill_ids: List[int],
     tenant_id: str,
@@ -439,7 +988,17 @@ async def apply_local_resources_batch(
 
     Returns counts of bound items.
     """
-    _validate_draft_agent_id(agent_id)
+    _get_owned_draft(agent_id, tenant_id)
+
+    # Validate the selection against the card that the frontend actually rendered.
+    session_state = get_nl2agent_session_state(tenant_id, agent_id)
+    batch = session_state["recommendation_batches"].get(recommendation_batch_id)
+    if batch is None:
+        raise AgentRunException("The local resource recommendation card was not registered.")
+    if not set(map(int, tool_ids or [])).issubset(set(batch.get("tool_ids", []))) or not set(
+        map(int, skill_ids or [])
+    ).issubset(set(batch.get("skill_ids", []))):
+        raise AgentRunException("Selected resources do not belong to this recommendation batch.")
 
     bound_tools = 0
     bound_skills = 0
@@ -508,11 +1067,121 @@ async def apply_local_resources_batch(
         except Exception as exc:
             logger.error(f"Failed to bind skill {skill_id} to agent {agent_id}: {exc}")
 
+    resolve_recommendation_batch(
+        tenant_id,
+        agent_id,
+        recommendation_batch_id,
+        "applied",
+        tool_ids,
+        skill_ids,
+    )
     return {
+        "recommendation_batch_id": recommendation_batch_id,
+        "status": "applied",
         "bound_tool_count": bound_tools,
         "bound_skill_count": bound_skills,
         "tool_ids": bound_tool_ids,
         "skill_ids": bound_skill_ids,
+    }
+
+
+async def register_local_resource_recommendations(
+    agent_id: int,
+    recommendation_batch_id: str,
+    tool_ids: List[int],
+    skill_ids: List[int],
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Record that the frontend rendered a local-resource card."""
+    _get_owned_draft(agent_id, tenant_id)
+    batch = register_recommendation_batch(
+        tenant_id, agent_id, recommendation_batch_id, tool_ids, skill_ids
+    )
+    return {"recommendation_batch_id": recommendation_batch_id, **batch}
+
+
+async def skip_local_resource_recommendations(
+    agent_id: int,
+    recommendation_batch_id: str,
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Record the user's explicit decision to continue without a shown batch."""
+    _get_owned_draft(agent_id, tenant_id)
+    batch = resolve_recommendation_batch(
+        tenant_id, agent_id, recommendation_batch_id, "skipped"
+    )
+    return {"recommendation_batch_id": recommendation_batch_id, **batch}
+
+
+async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
+    """Return authoritative draft models, resource bindings, and review state."""
+    draft = _get_owned_draft(agent_id, tenant_id)
+    tools = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
+    skills = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
+    workflow_state = get_nl2agent_session_state(tenant_id, agent_id)
+    for workflow in workflow_state.get("mcp_workflows", {}).values():
+        discovered_ids = [int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])]
+        discovered_rows = query_tools_by_ids(discovered_ids) if discovered_ids else []
+        discovered_by_id = {int(row["tool_id"]): row for row in discovered_rows}
+        workflow["discovered_tools"] = [
+            {
+                "tool_id": tool_id,
+                "name": discovered_by_id.get(tool_id, {}).get("name") or str(tool_id),
+                "description": discovered_by_id.get(tool_id, {}).get("description") or "",
+            }
+            for tool_id in discovered_ids
+        ]
+    return {
+        "agent_id": agent_id,
+        "display_name": draft.get("display_name"),
+        "internal_name": _generate_internal_agent_name(
+            draft.get("display_name") or "", agent_id, tenant_id
+        ),
+        "business_logic_model_id": draft.get("business_logic_model_id"),
+        "model_ids": _normalize_model_ids(draft.get("model_ids")),
+        "tools": tools,
+        "skills": skills,
+        "identity_confirmed": workflow_state.get("identity_confirmed", False),
+        "resource_review": workflow_state,
+    }
+
+
+async def save_agent_identity(
+    agent_id: int,
+    display_name: str,
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Persist an explicitly confirmed display name without publishing the draft."""
+    _get_owned_draft(agent_id, tenant_id)
+    normalized_display_name = display_name.strip()
+    if not normalized_display_name:
+        raise AgentRunException("Agent display name cannot be empty.")
+    try:
+        update_agent(
+            agent_id=agent_id,
+            agent_info=AgentInfoRequest(display_name=normalized_display_name),
+            user_id=user_id,
+            version_no=0,
+        )
+        confirm_agent_identity(tenant_id, agent_id)
+    except AgentRunException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Failed to save NL2AGENT identity: tenant_id=%s draft_agent_id=%s",
+            tenant_id,
+            agent_id,
+            exc_info=True,
+        )
+        raise AgentRunException("Failed to save the agent display name.") from exc
+    return {
+        "agent_id": agent_id,
+        "display_name": normalized_display_name,
+        "internal_name": _generate_internal_agent_name(
+            normalized_display_name, agent_id, tenant_id
+        ),
+        "identity_confirmed": True,
     }
 
 
@@ -632,17 +1301,57 @@ async def finalize_agent(
     """
     _validate_draft_agent_id(agent_id)
 
+    # Persisted model selection is authoritative. The LLM-generated proposal
+    # must never invent or replace model IDs during publication.
+    current_draft = _get_owned_draft(agent_id, tenant_id)
+    stored_primary_model_id = current_draft.get("business_logic_model_id")
+    stored_model_ids = _normalize_model_ids(current_draft.get("model_ids"))
+    if not stored_primary_model_id or stored_primary_model_id not in stored_model_ids:
+        raise AgentRunException("Select a primary LLM before finalizing the agent.")
+    _validate_available_llm_ids(
+        tenant_id,
+        stored_model_ids,
+        finalizing=True,
+    )
+    try:
+        assert_resource_review_complete(tenant_id, agent_id)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
+    try:
+        assert_mcp_workflows_resolved(tenant_id, agent_id)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
+    try:
+        assert_identity_confirmed(tenant_id, agent_id)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
+    business_logic_model_id = int(stored_primary_model_id)
+    model_ids = stored_model_ids
+
     # Build the agent update payload from whatever the skill provided.
     agent_update: Dict[str, Any] = {}
-    if display_name is not None:
-        agent_update["display_name"] = str(display_name)[:50]
-    if name is not None:
-        agent_update["name"] = str(name)[:50]
-    elif display_name is not None:
-        # Fallback programmatic name: snake_case of display_name.
-        s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", display_name)
-        snake = re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
-        agent_update["name"] = re.sub(r"[^a-zA-Z0-9_]", "_", snake)[:50]
+    missing_proposal_fields = [
+        field_name
+        for field_name, field_value in (
+            ("business_description", business_description),
+            ("duty_prompt", duty_prompt),
+            ("greeting_message", greeting_message),
+        )
+        if not isinstance(field_value, str) or not field_value.strip()
+    ]
+    if missing_proposal_fields:
+        raise AgentRunException(
+            "The final proposal is incomplete: " + ", ".join(missing_proposal_fields)
+        )
+
+    final_display_name = str(current_draft.get("display_name") or "").strip()[:50]
+    if not final_display_name:
+        raise AgentRunException("The persisted agent display name is missing.")
+    agent_update["display_name"] = final_display_name
+    # The LLM is never authoritative for the internal variable identifier.
+    agent_update["name"] = _generate_internal_agent_name(
+        final_display_name, agent_id, tenant_id
+    )
     if description is not None:
         agent_update["description"] = str(description)[:500]
     if business_description is not None:
@@ -687,85 +1396,19 @@ async def finalize_agent(
             logger.error(f"Failed to update draft agent {agent_id}: {exc}")
             raise AgentRunException("Failed to finalize agent.") from exc
 
-    # Upsert tool instances with per-agent param overrides.
-    tool_configs = tool_configs or {}
-    for tool_id in tool_ids or []:
-        tid = int(tool_id)
-        # Per-agent overrides from skill output; merge with catalog defaults.
-        override_params: Dict[str, Any] = {}
-        key = str(tid)
-        if key in tool_configs:
-            override_params = tool_configs[key]
-        else:
-            # Fall back: fetch catalog defaults for merge.
-            try:
-                rows = query_tools_by_ids([tid])
-                if rows:
-                    override_params = rows[0].get("params") or {}
-            except Exception:
-                pass
+    # Existing enabled instance rows are authoritative. Do not bind or rewrite
+    # resources from IDs/configuration emitted by the LLM proposal.
+    persisted_tools = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
+    persisted_skills = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
 
-        try:
-            instance_req = ToolInstanceInfoRequest(
-                tool_id=tid,
-                agent_id=agent_id,
-                params=override_params,
-                enabled=True,
-                version_no=0,
-            )
-            create_or_update_tool_by_tool_info(
-                tool_info=instance_req,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-            )
-        except Exception as exc:
-            logger.error(f"Failed to upsert tool instance {tid} on agent {agent_id}: {exc}")
-
-    # Upsert skill instances with per-skill config overrides.
-    skill_configs = skill_configs or {}
-    for skill_id in skill_ids or []:
-        sid = int(skill_id)
-        override_config: Optional[Dict[str, Any]] = None
-        key = str(sid)
-        if key in skill_configs:
-            override_config = skill_configs[key]
-
-        try:
-            instance_req = SkillInstanceInfoRequest(
-                skill_id=sid,
-                agent_id=agent_id,
-                enabled=True,
-                version_no=0,
-                config_values=override_config,
-            )
-            create_or_update_skill_by_skill_info(
-                skill_info=instance_req,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-            )
-        except Exception as exc:
-            logger.error(f"Failed to upsert skill instance {sid} on agent {agent_id}: {exc}")
-
-    # Rename the draft agent away from the draft_ prefix so it appears in the main list.
-    try:
-        current = search_agent_info_by_agent_id(
-            agent_id=agent_id, tenant_id=tenant_id
-        )
-        current_name = (current or {}).get("name") or ""
-        if _is_draft_agent_name(current_name):
-            final_name = current_name.replace(DRAFT_AGENT_NAME_PREFIX, "agent_")
-            update_agent(
-                agent_id=agent_id,
-                agent_info={"name": final_name},
-                user_id=user_id,
-                version_no=0,
-            )
-    except Exception as exc:
-        logger.warning(f"Failed to rename draft agent {agent_id}: {exc}")
-
-    return {"agent_id": agent_id, "status": "draft_ready"}
+    return {
+        "agent_id": agent_id,
+        "status": "draft_ready",
+        "name": agent_update["name"],
+        "display_name": final_display_name,
+        "tool_ids": [row["tool_id"] for row in persisted_tools],
+        "skill_ids": [row["skill_id"] for row in persisted_skills],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -856,3 +1499,4 @@ def seed_nl2agent_default_agent(
         f"{len(tool_ids)} builtin tools for tenant {tenant_id}"
     )
     return agent_id
+    find_mcp_workflow_by_id,

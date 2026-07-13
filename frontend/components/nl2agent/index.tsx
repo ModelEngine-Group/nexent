@@ -5,6 +5,8 @@ import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
 import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
 import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
 import { FinalizeCard } from "./FinalizeCard";
+import { ModelSelectionCard } from "./ModelSelectionCard";
+import { AgentIdentityCard } from "./AgentIdentityCard";
 
 /**
  * Registry that maps fenced-code-block language tags to NL2AGENT card
@@ -48,7 +50,8 @@ export const tryRenderNl2AgentCard = (
   content: string,
   onInstallMcp?: (item: WebMcpCardItem) => void
 ): React.ReactNode | null => {
-  if (!language || !language.startsWith("nl2agent-")) {
+  const normalizedLanguage = language?.trim().toLowerCase();
+  if (!normalizedLanguage || !normalizedLanguage.startsWith("nl2agent-")) {
     return null;
   }
 
@@ -63,33 +66,56 @@ export const tryRenderNl2AgentCard = (
     );
   }
 
-  const agentId = parseAgentId(parsed.agent_id);
+  const nestedAgentId = Array.isArray(parsed.items)
+    ? parsed.items.map((item: any) => parseAgentId(item?.agent_id)).find(Boolean)
+    : null;
+  const agentId = parseAgentId(parsed.agent_id) ?? nestedAgentId ?? null;
   if (agentId == null) {
     return renderInvalidAgentId();
   }
 
-  switch (language) {
+  switch (normalizedLanguage) {
+    case "nl2agent-model-selection":
+      return <ModelSelectionCard agentId={agentId} />;
+    case "nl2agent-agent-identity":
+      return <AgentIdentityCard agentId={agentId} />;
     case "nl2agent-local-resources": {
       const tools: LocalResourceItem[] = (parsed.tools || []).map((x: any) => ({
         ...x,
         kind: "tool" as const,
       }));
-      const skills: LocalResourceItem[] = (parsed.skills || []).map((x: any) => ({
-        ...x,
-        kind: "skill" as const,
-      }));
-      return <LocalResourcesCard agentId={agentId} tools={tools} skills={skills} />;
+      const skills: LocalResourceItem[] = (parsed.skills || []).map(
+        (x: any) => ({
+          ...x,
+          kind: "skill" as const,
+        })
+      );
+      return (
+        <LocalResourcesCard
+          agentId={agentId}
+          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          tools={tools}
+          skills={skills}
+        />
+      );
     }
     case "nl2agent-web-mcp": {
       const item: WebMcpCardItem = parsed;
-      return <WebMcpCard agentId={agentId} item={item} onInstall={onInstallMcp} />;
+      return (
+        <WebMcpCard agentId={agentId} item={item} onInstall={onInstallMcp} />
+      );
     }
     case "nl2agent-web-mcps": {
       const items: WebMcpCardItem[] = parsed.items || [];
       return (
         <>
           {items.map((item, i) => (
-            <WebMcpCard key={i} agentId={agentId} item={item} onInstall={onInstallMcp} />
+            <WebMcpCard
+              key={i}
+              agentId={agentId}
+              item={item}
+              onInstall={onInstallMcp}
+            />
           ))}
         </>
       );

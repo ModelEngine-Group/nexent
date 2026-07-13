@@ -9,7 +9,6 @@ import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { McpTransportType } from "@/const/mcpTools";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -27,7 +26,6 @@ import { FilePreview } from "@/types/chat";
 import { ChatHeader } from "../components/chatHeader";
 import { ChatRightPanel } from "../components/chatRightPanel";
 import { ChatStreamMain } from "../streaming/chatStreamMain";
-import AddMcpServiceModal from "../../mcp-space/components/add/AddMcpServiceModal";
 
 import {
   preprocessAttachments,
@@ -43,9 +41,11 @@ import {
   HistoryItem,
 } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
-import type { LocalAddMcpDraft } from "@/types/mcpTools";
-import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
-import { handleStreamResponse, ResumeConfig, StreamingMessage } from "@/app/chat/streaming/chatStreamHandler";
+import {
+  handleStreamResponse,
+  ResumeConfig,
+  StreamingMessage,
+} from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 
 import { Button, Checkbox, Layout, message } from "antd";
@@ -86,22 +86,6 @@ const getNl2AgentDraftForConversation = (
 ): number | null => {
   if (conversationId == null) return null;
   return readNl2AgentDraftMap()[String(conversationId)] ?? null;
-};
-
-const createNl2AgentMcpDraft = (
-  item: WebMcpCardItem
-): Partial<LocalAddMcpDraft> => {
-  const tags = ["nl2agent", item.source].filter(
-    (tag): tag is string => Boolean(tag)
-  );
-
-  return {
-    name: item.name,
-    description: item.description || item.reason || "",
-    transportType: McpTransportType.URL,
-    serverUrl: item.url || "",
-    tags,
-  };
 };
 
 // Get internationalization key based on message type
@@ -195,10 +179,6 @@ export function ChatInterface() {
   const [nl2agentConversationId, setNl2agentConversationId] = useState<
     number | null
   >(null);
-  const [mcpInstallModalOpen, setMcpInstallModalOpen] = useState(false);
-  const [mcpInstallInitialDraft, setMcpInstallInitialDraft] = useState<
-    Partial<LocalAddMcpDraft> | undefined
-  >();
   const [agentGreeting, setAgentGreeting] = useState<string | null>(null);
   const [agentExampleQuestions, setAgentExampleQuestions] = useState<string[]>(
     []
@@ -381,15 +361,6 @@ export function ChatInterface() {
       });
     }
   }, [conversationManagement.selectedConversationId]);
-
-  const handleInstallNl2AgentMcp = useCallback((item: WebMcpCardItem) => {
-    setMcpInstallInitialDraft(createNl2AgentMcpDraft(item));
-    setMcpInstallModalOpen(true);
-  }, []);
-
-  const handleCloseNl2AgentMcpModal = useCallback(() => {
-    setMcpInstallModalOpen(false);
-  }, []);
 
   // Add useEffect to clear completed conversation indicator when user is viewing the current conversation
   useEffect(() => {
@@ -577,7 +548,8 @@ export function ChatInterface() {
               currentConversationId
             );
             conversationManagement.setConversationTitle(
-              createData.conversation_title || t("chatInterface.newConversation")
+              createData.conversation_title ||
+                t("chatInterface.newConversation")
             );
 
             // After creating new conversation, add it to streaming list
@@ -1021,7 +993,6 @@ export function ChatInterface() {
     });
   };
 
-
   // Helper to create a session messages updater for a specific conversation
   const createSessionMessagesUpdater = useCallback(
     (targetConversationId: number) => {
@@ -1030,9 +1001,11 @@ export function ChatInterface() {
           const prevArr = prev[targetConversationId] || [];
           const nextArr =
             typeof valueOrUpdater === "function"
-              ? (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(
-                  prevArr
-                )
+              ? (
+                  valueOrUpdater as (
+                    prev: ChatMessageType[]
+                  ) => ChatMessageType[]
+                )(prevArr)
               : valueOrUpdater;
           return {
             ...prev,
@@ -1247,8 +1220,10 @@ export function ChatInterface() {
 
           if (data.code === 0 && data.data && data.data.length > 0) {
             const conversationData = data.data[0] as ApiConversationDetail;
-            const formattedMessages =
-              formatConversationMessagesFromResponse(conversationData, t);
+            const formattedMessages = formatConversationMessagesFromResponse(
+              conversationData,
+              t
+            );
 
             // Update message array
             setSessionMessages((prev) => ({
@@ -1262,11 +1237,15 @@ export function ChatInterface() {
             );
 
             // Check if this conversation has an in-progress streaming message
-            const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
-            if (streamingMessage && streamingMessage.status === 'streaming') {
+            const streamingMessage = (conversationData as any)
+              .streaming_message as StreamingMessage | undefined;
+            if (streamingMessage && streamingMessage.status === "streaming") {
               // Resume streaming - wait for state to update first
               setTimeout(() => {
-                resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+                resumeStreamingConversation(
+                  dialog.conversation_id,
+                  streamingMessage
+                );
               }, 100);
             }
 
@@ -1364,8 +1343,10 @@ export function ChatInterface() {
 
         if (data.code === 0 && data.data && data.data.length > 0) {
           const conversationData = data.data[0] as ApiConversationDetail;
-          const formattedMessages =
-            formatConversationMessagesFromResponse(conversationData, t);
+          const formattedMessages = formatConversationMessagesFromResponse(
+            conversationData,
+            t
+          );
 
           // Update message array
           setSessionMessages((prev) => ({
@@ -1379,11 +1360,15 @@ export function ChatInterface() {
           );
 
           // Check if this conversation has an in-progress streaming message
-          const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
-          if (streamingMessage && streamingMessage.status === 'streaming') {
+          const streamingMessage = (conversationData as any)
+            .streaming_message as StreamingMessage | undefined;
+          if (streamingMessage && streamingMessage.status === "streaming") {
             // Resume streaming - wait for state to update first
             setTimeout(() => {
-              resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+              resumeStreamingConversation(
+                dialog.conversation_id,
+                streamingMessage
+              );
             }, 100);
           }
 
@@ -1854,98 +1839,99 @@ export function ChatInterface() {
 
   return (
     <>
-    <Layout hasSider className="flex h-full">
-      <ChatSidebar
-        streamingConversations={streamingConversations}
-        completedConversations={completedConversations}
-        conversationManagement={conversationManagement}
-        onConversationSelect={handleDialogClick}
-      />
+      <Layout hasSider className="flex h-full">
+        <ChatSidebar
+          streamingConversations={streamingConversations}
+          completedConversations={completedConversations}
+          conversationManagement={conversationManagement}
+          onConversationSelect={handleDialogClick}
+        />
 
-      <Layout className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 flex flex-col">
-            <ChatHeader
-              title={conversationManagement.conversationTitle}
-              onRename={handleTitleRename}
-              onShareClick={toggleShareMode}
-              isShareMode={isShareMode}
-            />
+        <Layout className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div className="flex flex-1 overflow-hidden">
+            <div className="flex-1 flex flex-col">
+              <ChatHeader
+                title={conversationManagement.conversationTitle}
+                onRename={handleTitleRename}
+                onShareClick={toggleShareMode}
+                isShareMode={isShareMode}
+              />
 
-            {isShareMode && (
-              <div className="mx-4 mb-2 flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                <Checkbox
-                  checked={
-                    shareableUserMessageIds.length > 0 &&
-                    selectedShareMessageIds.size ===
-                      shareableUserMessageIds.length
-                  }
-                  indeterminate={
-                    selectedShareMessageIds.size > 0 &&
-                    selectedShareMessageIds.size <
-                      shareableUserMessageIds.length
-                  }
-                  onChange={handleToggleShareAll}
-                >
-                  {t("common.selectAll", "Select all")}
-                </Checkbox>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-500">
-                    {t("chatInterface.selectedShareCount", {
-                      defaultValue: "Selected {{count}}",
-                      count: selectedShareMessageIds.size,
-                    })}
-                  </span>
-                  <Button onClick={toggleShareMode}>
-                    {t("common.cancel", "Cancel")}
-                  </Button>
-                  <Button
-                    type="primary"
-                    loading={isCreatingShare}
-                    onClick={handleCreateShare}
+              {isShareMode && (
+                <div className="mx-4 mb-2 flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                  <Checkbox
+                    checked={
+                      shareableUserMessageIds.length > 0 &&
+                      selectedShareMessageIds.size ===
+                        shareableUserMessageIds.length
+                    }
+                    indeterminate={
+                      selectedShareMessageIds.size > 0 &&
+                      selectedShareMessageIds.size <
+                        shareableUserMessageIds.length
+                    }
+                    onChange={handleToggleShareAll}
                   >
-                    {t("chatInterface.copyShareLink", "Copy link")}
-                  </Button>
+                    {t("common.selectAll", "Select all")}
+                  </Checkbox>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-500">
+                      {t("chatInterface.selectedShareCount", {
+                        defaultValue: "Selected {{count}}",
+                        count: selectedShareMessageIds.size,
+                      })}
+                    </span>
+                    <Button onClick={toggleShareMode}>
+                      {t("common.cancel", "Cancel")}
+                    </Button>
+                    <Button
+                      type="primary"
+                      loading={isCreatingShare}
+                      onClick={handleCreateShare}
+                    >
+                      {t("chatInterface.copyShareLink", "Copy link")}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            <ChatStreamMain
-              messages={currentMessages}
-              input={input}
-              isLoading={isLoading}
-              isStreaming={isCurrentConversationStreaming}
-              isLoadingHistoricalConversation={isLoadingHistoricalConversation}
-              conversationLoadError={
-                conversationManagement.conversationLoadError[
-                  conversationManagement.selectedConversationId || 0
-                ]
-              }
-              onInputChange={(value: string) => setInput(value)}
-              onSend={handleSend}
-              onStop={handleStop}
-              onKeyDown={handleKeyDown}
-              onSelectMessage={handleMessageSelect}
-              selectedMessageId={selectedMessageId}
-              attachments={attachments}
-              onAttachmentsChange={handleAttachmentsChange}
-              onFileUpload={handleFileUpload}
-              onImageUpload={handleImageUpload}
-              onOpinionChange={handleOpinionChange}
-              currentConversationId={
-                conversationManagement.selectedConversationId ?? undefined
-              }
-              shouldScrollToBottom={shouldScrollToBottom}
-              selectedAgentId={selectedAgentId}
-              onAgentSelect={handleAgentSelectWithGreeting}
-              onCitationHover={clearCompletedIndicator}
-              onInstallNl2AgentMcp={handleInstallNl2AgentMcp}
-              onScroll={clearCompletedIndicator}
-              agentGreeting={agentGreeting}
-              agentExampleQuestions={agentExampleQuestions}
-              shareMode={isShareMode}
-              selectedShareMessageIds={selectedShareMessageIds}
-              onToggleShareMessage={toggleShareMessage}
+              <ChatStreamMain
+                messages={currentMessages}
+                input={input}
+                isLoading={isLoading}
+                isStreaming={isCurrentConversationStreaming}
+                isLoadingHistoricalConversation={
+                  isLoadingHistoricalConversation
+                }
+                conversationLoadError={
+                  conversationManagement.conversationLoadError[
+                    conversationManagement.selectedConversationId || 0
+                  ]
+                }
+                onInputChange={(value: string) => setInput(value)}
+                onSend={handleSend}
+                onStop={handleStop}
+                onKeyDown={handleKeyDown}
+                onSelectMessage={handleMessageSelect}
+                selectedMessageId={selectedMessageId}
+                attachments={attachments}
+                onAttachmentsChange={handleAttachmentsChange}
+                onFileUpload={handleFileUpload}
+                onImageUpload={handleImageUpload}
+                onOpinionChange={handleOpinionChange}
+                currentConversationId={
+                  conversationManagement.selectedConversationId ?? undefined
+                }
+                shouldScrollToBottom={shouldScrollToBottom}
+                selectedAgentId={selectedAgentId}
+                onAgentSelect={handleAgentSelectWithGreeting}
+                onCitationHover={clearCompletedIndicator}
+                onScroll={clearCompletedIndicator}
+                agentGreeting={agentGreeting}
+                agentExampleQuestions={agentExampleQuestions}
+                shareMode={isShareMode}
+                selectedShareMessageIds={selectedShareMessageIds}
+                onToggleShareMessage={toggleShareMessage}
                 agentModelIds={agentModelIds}
                 agentModelNames={agentModelNames}
                 availableModels={availableModels}
@@ -1954,22 +1940,17 @@ export function ChatInterface() {
               />
             </div>
 
-          <ChatRightPanel
-            messages={currentMessages}
-            onImageError={handleImageError}
-            maxInitialImages={14}
-            isVisible={showRightPanel}
-            toggleRightPanel={toggleRightPanel}
-            selectedMessageId={selectedMessageId}
-          />
-        </div>
+            <ChatRightPanel
+              messages={currentMessages}
+              onImageError={handleImageError}
+              maxInitialImages={14}
+              isVisible={showRightPanel}
+              toggleRightPanel={toggleRightPanel}
+              selectedMessageId={selectedMessageId}
+            />
+          </div>
+        </Layout>
       </Layout>
-    </Layout>
-    <AddMcpServiceModal
-      open={mcpInstallModalOpen}
-      onClose={handleCloseNl2AgentMcpModal}
-      initialDraft={mcpInstallInitialDraft}
-    />
     </>
   );
 }

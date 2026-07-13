@@ -1,6 +1,6 @@
 import re
 import json
-from typing import List
+from typing import Dict, List
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
@@ -308,6 +308,40 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 new_tool = ToolInfo(**filtered_tool_data)
                 session.add(new_tool)
     logger.info("Updated tool table in PG database")
+
+
+def upsert_discovered_mcp_tools(
+    tenant_id: str, user_id: str, tool_list: List[ToolInfo]
+) -> List[Dict]:
+    """Upsert tools discovered from one MCP without changing other tools."""
+    result = []
+    with get_db_session() as session:
+        for tool in tool_list:
+            row = session.query(ToolInfo).filter(
+                ToolInfo.name == tool.name,
+                ToolInfo.source == ToolSourceEnum.MCP.value,
+                ToolInfo.usage == tool.usage,
+                ToolInfo.author == tenant_id,
+                ToolInfo.delete_flag != 'Y',
+            ).first()
+            data = filter_property(tool.__dict__, ToolInfo)
+            if row is None:
+                data.update({
+                    "author": tenant_id,
+                    "created_by": user_id,
+                    "updated_by": user_id,
+                    "is_available": True,
+                })
+                row = ToolInfo(**data)
+                session.add(row)
+            else:
+                for key, value in data.items():
+                    setattr(row, key, value)
+                row.updated_by = user_id
+                row.is_available = True
+            session.flush()
+            result.append(as_dict(row))
+    return result
 
 
 def add_tool_field(tool_info):

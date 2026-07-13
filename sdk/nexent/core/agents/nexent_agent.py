@@ -385,7 +385,7 @@ class NexentAgent:
             )
             metadata = tool_config.metadata or {}
             draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
-            get_search_local_resources_tool(
+            return get_search_local_resources_tool(
                 agent_id=metadata.get("agent_id"),
                 draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
@@ -394,17 +394,13 @@ class NexentAgent:
                 tool_catalog=metadata.get("tool_catalog"),
                 skill_catalog=metadata.get("skill_catalog"),
             )
-            from ..tools.nl2agent.search_local_resources_tool import (
-                nl2agent_search_local_resources,
-            )
-            return nl2agent_search_local_resources
         elif class_name == "NL2AgentSearchWebMcpsTool":
             from ..tools.nl2agent.search_web_mcps_tool import (
                 get_search_web_mcps_tool,
             )
             metadata = tool_config.metadata or {}
             draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
-            get_search_web_mcps_tool(
+            return get_search_web_mcps_tool(
                 agent_id=metadata.get("agent_id"),
                 draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
@@ -413,15 +409,13 @@ class NexentAgent:
                 registry_results=metadata.get("registry_results"),
                 community_results=metadata.get("community_results"),
             )
-            from ..tools.nl2agent.search_web_mcps_tool import nl2agent_search_web_mcps
-            return nl2agent_search_web_mcps
         elif class_name == "NL2AgentSearchWebSkillsTool":
             from ..tools.nl2agent.search_web_skills_tool import (
                 get_search_web_skills_tool,
             )
             metadata = tool_config.metadata or {}
             draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
-            get_search_web_skills_tool(
+            return get_search_web_skills_tool(
                 agent_id=metadata.get("agent_id"),
                 draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
@@ -429,10 +423,6 @@ class NexentAgent:
                 language=metadata.get("language"),
                 official_skills=metadata.get("official_skills"),
             )
-            from ..tools.nl2agent.search_web_skills_tool import (
-                nl2agent_search_web_skills,
-            )
-            return nl2agent_search_web_skills
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

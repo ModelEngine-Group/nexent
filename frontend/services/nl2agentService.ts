@@ -11,6 +11,25 @@ import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
 
+export const getAvailablePlatformLlms = async (): Promise<
+  Array<{ id: number; displayName: string }>
+> => {
+  const response = await fetchWithAuth(API_ENDPOINTS.model.llmModelList);
+  const result = await response.json();
+  if (!response.ok || !Array.isArray(result.data)) {
+    throw new Error("Failed to load available platform LLMs.");
+  }
+  return result.data
+    .filter((model: any) => model.connect_status === "available")
+    .map((model: any) => ({
+      id: Number(model.model_id),
+      displayName: model.display_name || model.model_name,
+    }))
+    .filter(
+      (model: { id: number }) => Number.isInteger(model.id) && model.id > 0
+    );
+};
+
 export interface Nl2AgentSessionStartResponse {
   nl2agent_agent_id: number;
   draft_agent_id: number;
@@ -21,9 +40,105 @@ export interface Nl2AgentSessionStartResponse {
 }
 
 export interface Nl2AgentApplyLocalResourcesPayload {
+  recommendation_batch_id: string;
   tool_ids: number[];
   skill_ids: number[];
 }
+
+export const registerLocalResourceRecommendations = async (
+  agentId: number,
+  payload: Nl2AgentApplyLocalResourcesPayload
+) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.registerLocalResources(agentId),
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const skipLocalResourceRecommendations = async (
+  agentId: number,
+  recommendationBatchId: string
+) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.skipLocalResources(agentId),
+    {
+      method: "POST",
+      body: JSON.stringify({ recommendation_batch_id: recommendationBatchId }),
+    }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export interface Nl2AgentSessionState {
+  agent_id: number;
+  display_name?: string;
+  internal_name: string;
+  identity_confirmed: boolean;
+  business_logic_model_id?: number;
+  model_ids: number[];
+  tools: Array<{ tool_id: number; [key: string]: unknown }>;
+  skills: Array<{ skill_id: number; [key: string]: unknown }>;
+  resource_review: {
+    identity_confirmed: boolean;
+    recommendation_batches: Record<string, unknown>;
+    mcp_workflows: Record<
+      string,
+      {
+        recommendation_id: string;
+        option_id?: string;
+        status?:
+          | "configuration_required"
+          | "installing"
+          | "connected"
+          | "tools_bound"
+          | "binding_skipped"
+          | "failed";
+        mcp_id?: number;
+        discovered_tool_ids?: number[];
+        bound_tool_ids?: number[];
+        discovered_tools?: Array<{
+          tool_id: number;
+          name: string;
+          description?: string;
+        }>;
+        error?: string;
+      }
+    >;
+  };
+}
+
+export const getNl2AgentSessionState = async (
+  agentId: number
+): Promise<Nl2AgentSessionState> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.sessionState(agentId)
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const saveNl2AgentIdentity = async (
+  agentId: number,
+  displayName: string
+): Promise<{
+  agent_id: number;
+  display_name: string;
+  internal_name: string;
+  identity_confirmed: boolean;
+}> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.saveIdentity(agentId),
+    {
+      method: "PUT",
+      body: JSON.stringify({ display_name: displayName }),
+    }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
 
 export interface Nl2AgentApplyLocalResourcesResponse {
   bound_tool_count: number;
@@ -31,6 +146,66 @@ export interface Nl2AgentApplyLocalResourcesResponse {
   tool_ids: number[];
   skill_ids: number[];
 }
+
+export const selectNl2AgentModels = async (
+  agentId: number,
+  primaryModelId: number,
+  fallbackModelIds: number[]
+) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.selectModels(agentId),
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        primary_model_id: primaryModelId,
+        fallback_model_ids: fallbackModelIds,
+      }),
+    }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const installNl2AgentMcp = async (
+  agentId: number,
+  payload: {
+    recommendation_id: string;
+    option_id: string;
+    config_values: Record<string, unknown>;
+  }
+) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.installMcp(agentId),
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const bindNl2AgentMcpTools = async (
+  agentId: number,
+  mcpId: number,
+  toolIds: number[]
+) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.bindMcpTools(agentId, mcpId),
+    { method: "POST", body: JSON.stringify({ tool_ids: toolIds }) }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const skipNl2AgentMcpTools = async (agentId: number, mcpId: number) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.skipMcpTools(agentId, mcpId),
+    { method: "POST" }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
 
 export interface Nl2AgentInstallWebSkillResponse {
   skill_id: number;
@@ -91,16 +266,19 @@ export interface Nl2AgentFinalizeResponse {
 /**
  * Start a new NL2AGENT session. Creates a draft agent and a conversation.
  */
-export const startNl2AgentSession = async (): Promise<Nl2AgentSessionStartResponse> => {
-  const response = await fetchWithAuth(API_ENDPOINTS.nl2agent.sessionStart, {
-    method: "POST",
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Failed to start NL2AGENT session: ${response.status} ${text}`);
-  }
-  return response.json();
-};
+export const startNl2AgentSession =
+  async (): Promise<Nl2AgentSessionStartResponse> => {
+    const response = await fetchWithAuth(API_ENDPOINTS.nl2agent.sessionStart, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Failed to start NL2AGENT session: ${response.status} ${text}`
+      );
+    }
+    return response.json();
+  };
 
 /**
  * Bulk-bind local tools and skills to the draft agent ("Apply All").
@@ -119,7 +297,9 @@ export const applyLocalResources = async (
     );
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(`Failed to apply local resources: ${response.status} ${text}`);
+      throw new Error(
+        `Failed to apply local resources: ${response.status} ${text}`
+      );
     }
     return response.json();
   } catch (error) {
@@ -153,7 +333,9 @@ export const installWebSkill = async (
     );
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(`Failed to install web skill: ${response.status} ${text}`);
+      throw new Error(
+        `Failed to install web skill: ${response.status} ${text}`
+      );
     }
     return response.json();
   } catch (error) {
@@ -170,10 +352,13 @@ export const finalizeNl2Agent = async (
   payload: Nl2AgentFinalizePayload
 ): Promise<Nl2AgentFinalizeResponse> => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.nl2agent.finalize(agentId), {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.nl2agent.finalize(agentId),
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(`Failed to finalize agent: ${response.status} ${text}`);
