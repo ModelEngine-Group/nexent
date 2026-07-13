@@ -2768,6 +2768,7 @@
   "aidpKnowledge.kbNameRequired": "名称是必填项",
   "aidpKnowledge.kbDescription": "描述",
   "aidpKnowledge.kbDescriptionPlaceholder": "可选描述信息",
+  "aidpKnowledge.kbDescriptionRequired": "请输入知识库描述",
   "aidpKnowledge.embeddingModel": "向量模型",
   "aidpKnowledge.embeddingModelPlaceholder": "可选的向量模型名称",
   "aidpKnowledge.fetchKbsFailed": "获取知识库列表失败",
@@ -2798,5 +2799,12 @@
   "aidpKnowledge.createCreating": "正在创建知识库...",
   "aidpKnowledge.createUploading": "正在上传文档...",
   "aidpKnowledge.createSelectedFiles": "已选择 {{count}} 个文件",
-  "aidpKnowledge.createNoFiles": "未选择文件，可点击「跳过上传」直接创建"
+  "aidpKnowledge.createNoFiles": "未选择文件，可点击「跳过上传」直接创建",
+  "aidpKnowledge.createAdvancedOptions": "高级选项",
+  "aidpKnowledge.createChunkTokenNum": "分块 Token 数",
+  "aidpKnowledge.createChunkTokenNumRequired": "请输入分块 Token 数",
+  "aidpKnowledge.createChunkTokenNumMin": "分块 Token 数必须大于 0",
+  "aidpKnowledge.createChunkOverlapNum": "分块重叠 Token 数",
+  "aidpKnowledge.createChunkOverlapNumRequired": "请输入分块重叠 Token 数",
+  "aidpKnowledge.createChunkOverlapNumMin": "分块重叠 Token 数必须 ≥ 0"
 }

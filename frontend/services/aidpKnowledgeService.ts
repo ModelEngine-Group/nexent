@@ -46,6 +46,18 @@ export interface AidpCreateKbPayload {
   embedding_model?: string;
   is_multimodal?: boolean;
   vision_model?: string;
+  /**
+   * AIDP requires chunk_token_num (string, > 0) and chunk_overlap_num (string, >= 0).
+   * Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload defaults.
+   */
+  chunk_token_num?: string;
+  chunk_overlap_num?: string;
+  vlm_model?: string;
+  is_personal?: string;
+  topk?: number;
+  similarity?: number;
+  smartsplit?: number;
+  caption_enable?: number;
 }
 
 export interface AidpUpdateKbPayload {
