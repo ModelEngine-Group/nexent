@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
 import { App, Row, Col, Modal } from "antd";
@@ -35,13 +35,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
   // ---- KB list state ----
   const [kbs, setKbs] = useState<AidpKnowledgeBaseItem[]>([]);
-  // kbsRef mirrors `kbs` state so fetchKbs can read cached document_counts
-  // without needing `kbs` in its useCallback deps (which would cause the
-  // auto-fetch effect to re-trigger on every kbs change).
-  const kbsRef = useRef<AidpKnowledgeBaseItem[]>([]);
-  useEffect(() => {
-    kbsRef.current = kbs;
-  }, [kbs]);
   const [loadingKbs, setLoadingKbs] = useState(false);
 
   // ---- Active KB / document state ----
@@ -73,62 +66,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     setLoadingKbs(true);
     try {
       const result = await aidpKnowledgeService.listKbs(serverUrl, apiKey);
-      const listFromApi = result.value;
-
-      // Read cached document_counts from kbsRef (closure-safe, no re-render,
-      // no need to add `kbs` to useCallback deps).
-      const cachedCounts = new Map<string, number>();
-      kbsRef.current.forEach((kb) => {
-        if (typeof kb.document_count === "number") {
-          cachedCounts.set(kb.kds_id, kb.document_count);
-        }
-      });
-
-      // Identify KBs whose document_count is still unknown.
-      const unknown = listFromApi.filter((kb) => {
-        const hasApi =
-          typeof kb.document_count === "number" && kb.document_count > 0;
-        return !hasApi && !cachedCounts.has(kb.kds_id);
-      });
-
-      // Fetch counts for unknown KBs in parallel (cheap: page_size=1).
-      // Awaited BEFORE setKbs so the list renders only once with accurate numbers.
-      const fetchedCounts = new Map<string, number>();
-      if (unknown.length > 0) {
-        const settled = await Promise.allSettled(
-          unknown.map((kb) =>
-            aidpKnowledgeService.listDocs(
-              serverUrl,
-              apiKey,
-              kb.kds_id,
-              1,
-              1
-            )
-          )
-        );
-        settled.forEach((r, i) => {
-          if (r.status === "fulfilled") {
-            const c = r.value.total_count ?? r.value.value.length;
-            fetchedCounts.set(unknown[i].kds_id, c);
-          }
-        });
-      }
-
-      // Single setKbs — list renders once, never flashes "0".
-      setKbs(
-        listFromApi.map((kb) => {
-          const apiValid =
-            typeof kb.document_count === "number" && kb.document_count > 0;
-          if (apiValid) return kb;
-          const fetched = fetchedCounts.get(kb.kds_id);
-          if (typeof fetched === "number")
-            return { ...kb, document_count: fetched };
-          const cached = cachedCounts.get(kb.kds_id);
-          if (typeof cached === "number")
-            return { ...kb, document_count: cached };
-          return kb;
-        })
-      );
+      setKbs(result.value);
     } catch (error) {
       log.error("Failed to fetch AIDP knowledge bases:", error);
       appMessage.error(t("aidpKnowledge.fetchKbsFailed"));
@@ -159,13 +97,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         const count = result.total_count ?? result.value.length;
         setDocuments(result.value);
         setTotalDocs(count);
-        // Patch the matching KB's document_count in the list so the card badge
-        // reflects the actual count (real AIDP list API does not return this field).
-        setKbs((prev) =>
-          prev.map((kb) =>
-            kb.kds_id === kbId ? { ...kb, document_count: count } : kb
-          )
-        );
       } catch (error) {
         log.error("Failed to fetch AIDP documents:", error);
         appMessage.error(t("aidpKnowledge.fetchDocsFailed"));

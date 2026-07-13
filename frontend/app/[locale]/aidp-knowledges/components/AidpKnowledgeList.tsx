@@ -123,11 +123,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                         </p>
                       )}
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 border border-gray-200">
-                          {t("aidpKnowledge.tagDocs", {
-                            count: kb.document_count ?? 0,
-                          })}
-                        </span>
                         {kb.chunk_count !== undefined && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 border border-gray-200">
                             {t("aidpKnowledge.tagChunks", {
