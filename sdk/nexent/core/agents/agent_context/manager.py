@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import threading
+from collections.abc import Iterable as IterableABC
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
 
 
@@ -654,10 +655,10 @@ class ContextManager:
                 item_messages = []
                 for item in projected_items:
                     source_component = item.metadata.get("_source_component")
-                    if source_component and id(source_component) not in seen_components:
+                    to_messages = getattr(source_component, "to_messages", None)
+                    if source_component and id(source_component) not in seen_components and callable(to_messages):
                         seen_components.add(id(source_component))
-                        for msg in source_component.to_messages():
-                            item_messages.append(msg)
+                        item_messages.extend(self._message_sequence(to_messages()))
 
                 for item in projected_items:
                     if item.metadata.get("_source_component") is None:
@@ -780,6 +781,13 @@ class ContextManager:
             [{"role": "user", "content": [{"type": "text", "text": post_messages}]}],
         )
 
+
+    @staticmethod
+    def _message_sequence(value: Any) -> List[Any]:
+        if isinstance(value, IterableABC) and not isinstance(value, (str, bytes, dict)):
+            return list(value)
+        return []
+
     @staticmethod
     def _messages_from_memory(memory: AgentMemory) -> List[Any]:
         messages: List[Any] = []
@@ -871,7 +879,7 @@ class ContextManager:
             if not callable(to_messages):
                 continue
             stable = [
-                message for message in to_messages()
+                message for message in self._message_sequence(to_messages())
                 if message_role(message) in {"system", "developer"}
             ]
             if stable:
