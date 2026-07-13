@@ -178,7 +178,7 @@ class AgentAutomationRunner:
         )
         generated_prompt = await automation_prompt_generator.generate_execution_prompt(AutomationPromptContext(
             tenant_id=task["tenant_id"],
-            instruction=runtime_snapshot["original_instruction"],
+            instruction=task["instruction"],
             agent_snapshot=runtime_snapshot,
             capability_bindings=current_capability_bindings,
             title=task["title"],

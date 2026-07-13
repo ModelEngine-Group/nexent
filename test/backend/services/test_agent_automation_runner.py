@@ -207,7 +207,7 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_runner_uses_current_agent_metadata_and_capabilities_for_each_prompt(monkeypatch):
+async def test_runner_uses_confirmed_instruction_with_current_runtime_configuration(monkeypatch):
     runner_module = _load_runner_with_stubs(monkeypatch)
     captured = {}
 
@@ -283,7 +283,7 @@ async def test_runner_uses_current_agent_metadata_and_capabilities_for_each_prom
 
     assert run["status"] == "SUCCEEDED"
     context = captured["prompt_context"]
-    assert context.instruction == "发送一份管理周报"
+    assert context.instruction == task["instruction"]
     assert context.agent_snapshot["name"] == "最新周报智能体"
     assert context.agent_snapshot["description"] == "使用最新配置生成管理周报"
     assert context.agent_snapshot["model_id"] == 55

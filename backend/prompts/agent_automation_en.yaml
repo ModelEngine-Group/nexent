@@ -1,38 +1,18 @@
 INSTRUCTION_SYSTEM_PROMPT: |-
-  You design execution-ready prompts for scheduled Agent tasks. Rewrite the user's brief intent as a direct instruction for the selected Agent.
-  Return only the instruction. Preserve the goal, omit scheduling details, use only real listed capabilities, and keep it under 300 words.
+  Turn the business action extracted from a natural-language schedule request into the instruction sent to the Agent on each run.
+  Return only the action. Preserve the exact intent and make only necessary wording changes. Do not add schedule metadata, Agent details, capabilities, tools, configuration, retries, error handling, sources, steps, output formats, or quality requirements that the user did not request. Prefer one short imperative sentence and keep it under 60 words.
 
 INSTRUCTION_USER_PROMPT: |-
-  Original task: {{ instruction }}
-  Agent name: {{ agent_name }}
-  Agent responsibility: {{ agent_description or "Not provided" }}
-  Bound capabilities:
-  {{ capability_summary }}
+  Business action: {{ instruction }}
 
 FALLBACK_INSTRUCTION_PROMPT: |-
-  Act within the responsibilities of "{{ agent_name }}" ({{ agent_description or "No responsibility description provided" }}) and use the current conversation context and configured capabilities to complete this task: {{ instruction }}. Provide a clear, verifiable result and explicitly report missing information or capabilities instead of fabricating them.
+  {{ instruction }}
 
 EXECUTION_SYSTEM_PROMPT: |-
-  Generate an execution-ready prompt for this scheduled Agent run. Return only the final prompt. Preserve the task goal, use the Agent context and real capabilities, define an appropriate output, and never invent data or tools. Keep it under 500 words.
+  Return the confirmed automation instruction exactly as provided. Do not add schedule metadata, Agent details, capabilities, tools, configuration, retries, or error handling.
 
 EXECUTION_USER_PROMPT: |-
-  Task title: {{ title }}
-  Base instruction: {{ instruction }}
-  Agent name: {{ agent_name }}
-  Agent responsibility: {{ agent_description or "Not provided" }}
-  Scheduled time: {{ scheduled_fire_at }}
-  Timezone: {{ timezone }}
-  Trigger type: {{ trigger_type }}
-  Bound capabilities:
-  {{ capability_summary }}
-  Recent conversation context:
-  {{ conversation_context or "No recent messages are available." }}
+  {{ instruction }}
 
 FALLBACK_EXECUTION_PROMPT: |-
-  Execute the scheduled task "{{ title }}" in this conversation. Act within the responsibilities of "{{ agent_name }}" ({{ agent_description or "No responsibility description provided" }}) and use the current conversation context and configured capabilities to complete: {{ instruction }}
-
-  Scheduled time: {{ scheduled_fire_at }} ({{ timezone }})
-  Bound capabilities:
-  {{ capability_summary }}
-
-  Return a result appropriate to the task and identify key evidence. Explicitly report missing information or capabilities instead of fabricating them.
+  {{ instruction }}

@@ -14,6 +14,44 @@ from utils.prompt_template_utils import get_prompt_template
 logger = logging.getLogger("agent_automation.prompt_generator")
 
 
+_ORCHESTRATION_TERMS = (
+    "定时任务",
+    "自动任务",
+    "计划时间",
+    "触发类型",
+    "时区",
+    "已绑定",
+    "工具能力",
+    "配置文件",
+    "重试",
+    "失败",
+    "错误",
+    "异常",
+    "日志",
+    "当前会话",
+    "会话上下文",
+    "不要编造",
+    "scheduled task",
+    "automation task",
+    "scheduled time",
+    "trigger type",
+    "timezone",
+    "bound capabilities",
+    "configuration file",
+    "retry",
+    "if it fails",
+    "on failure",
+    "error handling",
+    "error log",
+    "current conversation",
+    "conversation context",
+    "do not fabricate",
+    "agent",
+    "tool",
+    "utc",
+)
+
+
 @dataclass(frozen=True)
 class AutomationPromptContext:
     """Data required to generate a task instruction or a single-run prompt."""
@@ -45,12 +83,20 @@ def _capability_summary(bindings: List[Dict[str, Any]], language: str) -> str:
     return "\n".join(lines)
 
 
-def _normalize_model_output(content: str, fallback: str, max_length: int) -> str:
+def _normalize_model_output(content: str, fallback: str, max_length: int, source: str = "") -> str:
     normalized = re.sub(r"<think>[\s\S]*?</think>", "", content or "", flags=re.IGNORECASE).strip()
     normalized = normalized.removeprefix("```text").removeprefix("```markdown").strip("`\n ")
     if not normalized:
         return fallback
-    return normalized[:max_length].rstrip()
+    normalized_lower = normalized.casefold()
+    source_lower = source.casefold()
+    if any(term in normalized_lower and term not in source_lower for term in _ORCHESTRATION_TERMS):
+        logger.warning("Generated automation instruction added orchestration details; using direct fallback")
+        return fallback
+    if len(normalized) > max_length:
+        logger.warning("Generated automation instruction exceeded the length limit; using direct fallback")
+        return fallback
+    return normalized
 
 
 class AutomationPromptStrategy(ABC):
@@ -105,18 +151,14 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
             system_key="INSTRUCTION_SYSTEM_PROMPT",
             user_key="INSTRUCTION_USER_PROMPT",
             fallback=fallback,
-            max_length=1200,
+            max_length=300,
         )
 
     async def generate_execution_prompt(self, context: AutomationPromptContext) -> str:
-        fallback = await self._fallback.generate_execution_prompt(context)
-        return await self._generate(
-            context,
-            system_key="EXECUTION_SYSTEM_PROMPT",
-            user_key="EXECUTION_USER_PROMPT",
-            fallback=fallback,
-            max_length=2000,
-        )
+        # The task instruction is already generated and confirmed when the task is created.
+        # Reusing it keeps scheduled runs stable and prevents runtime metadata from leaking
+        # into the user-facing prompt.
+        return await self._fallback.generate_execution_prompt(context)
 
     async def _generate(
         self,
@@ -179,7 +221,12 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
             {"role": MESSAGE_ROLE["SYSTEM"], "content": prompt_template[system_key]},
             {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
         ])
-        return _normalize_model_output(getattr(response, "content", "") or "", fallback, max_length)
+        return _normalize_model_output(
+            getattr(response, "content", "") or "",
+            fallback,
+            max_length,
+            source=context.instruction,
+        )
 
 
 class AutomationPromptStrategyFactory:
