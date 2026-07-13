@@ -145,6 +145,7 @@ export default function McpToolsPage() {
   });
   const isRepositoryInstalled = useCallback((service: CommunityMcpCard) => {
     return localList.services.some((localService) => {
+      if (localService.permission !== "EDIT") return false;
       if (
         service.communityId &&
         localService.communityId === service.communityId
@@ -412,6 +413,7 @@ function RepositoryView({
 
   const isInstalled = (service: CommunityMcpCard) => {
     return localServices.some((localService) => {
+      if (localService.permission !== "EDIT") return false;
       if (
         service.communityId &&
         localService.communityId === service.communityId

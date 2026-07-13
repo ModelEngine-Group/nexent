@@ -57,6 +57,7 @@ from backend.services.mcp_management_service import (
     _get_mcp_review_admin_scope,
     _resolve_author_display_name,
     _resolve_user_email,
+    _validate_market_status_transition,
     list_community_mcp_services,
     list_community_mcp_tag_stats,
     list_community_mcp_review_services,
@@ -207,6 +208,142 @@ class TestResolveAuthorDisplayName(unittest.TestCase):
         mock_get.return_value = {}
         result = _resolve_author_display_name("uid")
         self.assertIsNone(result)
+
+
+# ============================================================================
+# _validate_market_status_transition (NEW)
+# ============================================================================
+
+class TestValidateMarketStatusTransition(unittest.TestCase):
+    """Test _validate_market_status_transition covers role, ownership, and transitions."""
+
+    def make_record(self, **overrides):
+        return {"tenant_id": "tid", "user_id": "uid", **overrides}
+
+    # --- SU role ---
+
+    def test_su_valid_transition_pending_to_shared(self):
+        result = _validate_market_status_transition(
+            user_role="SU", current_status="pending_review", new_status="shared",
+            record=self.make_record(), user_id="suid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    def test_su_valid_transition_pending_to_rejected(self):
+        result = _validate_market_status_transition(
+            user_role="SU", current_status="pending_review", new_status="rejected",
+            record=self.make_record(), user_id="suid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    def test_su_valid_transition_shared_to_not_shared(self):
+        result = _validate_market_status_transition(
+            user_role="SU", current_status="shared", new_status="not_shared",
+            record=self.make_record(), user_id="suid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    def test_su_invalid_transition_raises(self):
+        with self.assertRaises(ValueError):
+            _validate_market_status_transition(
+                user_role="SU", current_status="shared", new_status="rejected",
+                record=self.make_record(), user_id="suid", tenant_id="tid",
+            )
+
+    # --- ADMIN role ---
+
+    def test_admin_cross_tenant_raises(self):
+        with self.assertRaises(UnauthorizedError):
+            _validate_market_status_transition(
+                user_role="ADMIN", current_status="pending_review", new_status="shared",
+                record=self.make_record(tenant_id="other_tid"),
+                user_id="admin_uid", tenant_id="tid",
+            )
+
+    def test_admin_valid_review_transition_shared(self):
+        result = _validate_market_status_transition(
+            user_role="ADMIN", current_status="pending_review", new_status="shared",
+            record=self.make_record(), user_id="admin_uid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    def test_admin_valid_review_transition_rejected(self):
+        result = _validate_market_status_transition(
+            user_role="ADMIN", current_status="pending_review", new_status="rejected",
+            record=self.make_record(), user_id="admin_uid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    @patch('backend.services.mcp_management_service._resolve_user_email', return_value="admin@test.com")
+    def test_admin_publisher_transition_submit(self, mock_email):
+        result = _validate_market_status_transition(
+            user_role="ADMIN", current_status="not_shared", new_status="pending_review",
+            record=self.make_record(), user_id="admin_uid", tenant_id="tid",
+        )
+        self.assertEqual(result, "admin@test.com")
+
+    def test_admin_publisher_transition_withdraw(self):
+        result = _validate_market_status_transition(
+            user_role="ADMIN", current_status="pending_review", new_status="not_shared",
+            record=self.make_record(), user_id="admin_uid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    def test_admin_invalid_transition_raises(self):
+        with self.assertRaises(ValueError):
+            _validate_market_status_transition(
+                user_role="ADMIN", current_status="shared", new_status="pending_review",
+                record=self.make_record(), user_id="admin_uid", tenant_id="tid",
+            )
+
+    # --- DEV role ---
+
+    def test_dev_cross_tenant_raises(self):
+        with self.assertRaises(UnauthorizedError):
+            _validate_market_status_transition(
+                user_role="DEV", current_status="not_shared", new_status="pending_review",
+                record=self.make_record(tenant_id="other_tid"),
+                user_id="uid", tenant_id="tid",
+            )
+
+    def test_dev_cross_user_raises(self):
+        with self.assertRaises(UnauthorizedError):
+            _validate_market_status_transition(
+                user_role="DEV", current_status="not_shared", new_status="pending_review",
+                record=self.make_record(user_id="other_uid"),
+                user_id="uid", tenant_id="tid",
+            )
+
+    @patch('backend.services.mcp_management_service._resolve_user_email', return_value="user@test.com")
+    def test_dev_valid_submit(self, mock_email):
+        result = _validate_market_status_transition(
+            user_role="DEV", current_status="not_shared", new_status="pending_review",
+            record=self.make_record(), user_id="uid", tenant_id="tid",
+        )
+        self.assertEqual(result, "user@test.com")
+
+    def test_dev_valid_withdraw(self):
+        result = _validate_market_status_transition(
+            user_role="DEV", current_status="pending_review", new_status="not_shared",
+            record=self.make_record(), user_id="uid", tenant_id="tid",
+        )
+        self.assertIsNone(result)
+
+    def test_dev_invalid_transition_raises(self):
+        with self.assertRaises(ValueError):
+            _validate_market_status_transition(
+                user_role="DEV", current_status="shared", new_status="pending_review",
+                record=self.make_record(), user_id="uid", tenant_id="tid",
+            )
+
+    # --- Unauthorized role ---
+
+    def test_unknown_role_raises(self):
+        with self.assertRaises(UnauthorizedError):
+            _validate_market_status_transition(
+                user_role="USER", current_status="not_shared", new_status="pending_review",
+                record=self.make_record(), user_id="uid", tenant_id="tid",
+            )
 
 
 # ============================================================================
