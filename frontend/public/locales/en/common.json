@@ -1747,7 +1747,7 @@
   "sidebar.modelManagement": "Model Management",
   "sidebar.memoryManagement": "Memory Management",
   "sidebar.resourceManage": "Resource Management",
-  "sidebar.ownerManage": "Owner Management",
+  "sidebar.ownerManage": "Asset Administrator Resource Management",
   "sidebar.userManagement": "Profile",
   "sidebar.tenantResources": "Tenant Resources",
   "sidebar.assetOwnerResources": "Asset Administrator Resources",
