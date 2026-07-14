@@ -65,12 +65,39 @@ async def list_knowledge_bases(
             page=page,
             page_size=page_size,
         )
-        # AIDP list API does not return total; call Count endpoint separately.
-        total_count = count_aidp_kbs_impl(
-            server_url=server_url,
-            api_key=api_key,
+        # AIDP list API may not return total; try Count endpoint separately.
+        # If Count fails, fall back to total_count from list response or page length.
+        page_items = result.get("value", [])
+        page_count = len(page_items) if isinstance(page_items, list) else 0
+
+        count_reliable = False
+        try:
+            total_count = count_aidp_kbs_impl(
+                server_url=server_url,
+                api_key=api_key,
+            )
+            count_reliable = True
+        except Exception as count_err:
+            logger.warning(
+                "AIDP Count API failed, falling back to list total_count: %s", count_err
+            )
+            list_total = result.get("total_count")
+            total_count = (
+                int(list_total)
+                if isinstance(list_total, (int, float)) and list_total is not None
+                else page_count
+            )
+
+        # has_more: reliable signal derived from page fullness (works even when
+        # Count API is unavailable). A full page strongly implies more data exists.
+        has_more = (
+            total_count > page * page_size
+            if count_reliable
+            else page_count >= page_size
         )
-        result["total_count"] = total_count
+
+        result["total_count"] = int(total_count)
+        result["has_more"] = has_more
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AppException:
         raise
@@ -252,6 +279,16 @@ async def list_documents(
             page=page,
             page_size=page_size,
         )
+        # Compute has_more: AIDP doc list may or may not return reliable total_count.
+        page_items = result.get("value", [])
+        page_count = len(page_items) if isinstance(page_items, list) else 0
+        doc_total = result.get("total_count")
+        has_more = (
+            int(doc_total) > page * page_size
+            if isinstance(doc_total, (int, float)) and doc_total is not None
+            else page_count >= page_size
+        )
+        result["has_more"] = has_more
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AppException:
         raise

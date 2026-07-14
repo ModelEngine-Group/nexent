@@ -38,6 +38,7 @@ export interface AidpDocumentItem {
 export interface AidpDocumentListResponse {
   value: AidpDocumentItem[];
   total_count?: number;
+  has_more?: boolean;
 }
 
 export interface AidpCreateKbPayload {
@@ -111,6 +112,8 @@ class AidpKnowledgeService {
         typeof result.total_count === "number" ? result.total_count : undefined,
       next_link:
         typeof result.next_link === "string" ? result.next_link : null,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
     };
   }
 
@@ -315,6 +318,8 @@ class AidpKnowledgeService {
       value: Array.isArray(result.value) ? result.value : [],
       total_count:
         typeof result.total_count === "number" ? result.total_count : undefined,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
     };
   }
 }
