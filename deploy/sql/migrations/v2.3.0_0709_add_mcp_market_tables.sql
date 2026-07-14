@@ -30,8 +30,7 @@ COMMENT ON COLUMN nexent.mcp_community_record_t.review_type IS 'Review submissio
 -- 3) Create mcp_market_record_t (single-table design)
 -- ============================================================================
 
-CREATE SEQUENCE IF NOT EXISTS nexent.mcp_market_record_t_market_id_seq
-    OWNED BY nexent.mcp_market_record_t.market_id;
+CREATE SEQUENCE IF NOT EXISTS nexent.mcp_market_record_t_market_id_seq;
 
 CREATE TABLE IF NOT EXISTS nexent.mcp_market_record_t (
     market_id       BIGINT NOT NULL DEFAULT nextval('nexent.mcp_market_record_t_market_id_seq'),
@@ -105,6 +104,8 @@ FOR EACH ROW
 EXECUTE FUNCTION update_mcp_market_record_update_time();
 
 COMMENT ON TRIGGER update_mcp_market_record_update_time_trigger ON nexent.mcp_market_record_t IS 'Trigger to maintain update_time';
+
+ALTER SEQUENCE nexent.mcp_market_record_t_market_id_seq OWNED BY nexent.mcp_market_record_t.market_id;
 
 -- ============================================================================
 -- 4) Backfill: migrate old community records to the market table
