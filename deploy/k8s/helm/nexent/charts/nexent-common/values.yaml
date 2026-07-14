@@ -159,6 +159,8 @@ config:
     sslVerify: "true"
     caBundle: ""
     callbackBaseUrl: "http://localhost:30000"
+    # Supported values: disabled, button, force.
+    loginMode: "button"
   cas:
     enabled: "false"
     serverUrl: ""
