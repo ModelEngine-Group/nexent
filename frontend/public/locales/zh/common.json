@@ -1733,6 +1733,18 @@
   "agentRepository.page.tab.review": "审核中心",
   "agentRepository.page.searchPlaceholder": "搜索智能体名称、描述或标签",
   "agentRepository.page.categoryAll": "全部",
+
+  "skillRepository.action.status.notShared": "下架",
+  "skillRepository.action.status.shared": "通过并上架",
+  "skillRepository.action.status.rejected": "驳回",
+  "skillRepository.action.success": "已{{action}}",
+  "skillRepository.action.confirmTitle": "确认{{action}}？",
+  "skillRepository.mine.confirmApplyTitle": "确认上架 {{name}}？",
+  "skillRepository.mine.confirmApplyContent": "上架后将提交管理员审批，审批通过后会出现在 Skill 仓库。",
+  "skillRepository.mine.applyForbidden": "当前账号只能上架自己创建的 Skill",
+  "skillRepository.mine.button.apply": "上架",
+  "skillRepository.mine.button.listed": "已上架",
+
   "agentRepository.page.repositoryHint": "同租户内的智能体需先「复制为我的智能体」后才能编辑",
   "agentRepository.page.resultCount": "共 {{count}} 个智能体",
   "agentRepository.page.empty": "没有找到匹配的智能体",

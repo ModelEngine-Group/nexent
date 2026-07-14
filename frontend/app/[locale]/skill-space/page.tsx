@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { App, ConfigProvider, Input, Modal } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -48,7 +49,16 @@ const skillRepositoryTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
 };
 
+const STATUS_ACTION_LABEL_KEYS: Partial<
+  Record<SkillRepositoryListingStatus, string>
+> = {
+  not_shared: "skillRepository.action.status.notShared",
+  shared: "skillRepository.action.status.shared",
+  rejected: "skillRepository.action.status.rejected",
+};
+
 export default function SkillRepositoryPage() {
+  const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const { user } = useAuthorizationContext();
   const { message, modal } = App.useApp();
@@ -252,7 +262,13 @@ export default function SkillRepositoryPage() {
         skillRepositoryId: listing.skill_repository_id,
         status,
       });
-      message.success(`已${STATUS_LABELS[status]}`);
+      message.success(
+        t("skillRepository.action.success", {
+          action: STATUS_ACTION_LABEL_KEYS[status]
+            ? t(STATUS_ACTION_LABEL_KEYS[status])
+            : STATUS_LABELS[status],
+        })
+      );
     } catch (error) {
       message.error(error instanceof Error ? error.message : "状态更新失败");
     }
@@ -329,7 +345,11 @@ export default function SkillRepositoryPage() {
     status: SkillRepositoryListingStatus
   ) => {
     modal.confirm({
-      title: `确认${STATUS_LABELS[status]}？`,
+      title: t("skillRepository.action.confirmTitle", {
+        action: STATUS_ACTION_LABEL_KEYS[status]
+          ? t(STATUS_ACTION_LABEL_KEYS[status])
+          : STATUS_LABELS[status],
+      }),
       content: listing.name,
       okText: "确认",
       cancelText: "取消",
@@ -491,7 +511,7 @@ export default function SkillRepositoryPage() {
                         error instanceof ApiError &&
                         Number(error.code) === 403
                       ) {
-                        message.error("当前账号只能启用自己创建的 Skill");
+                        message.error(t("skillRepository.mine.applyForbidden"));
                         return;
                       }
                       message.error(

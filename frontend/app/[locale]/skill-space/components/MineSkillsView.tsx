@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { App, Button, Dropdown, Input } from "antd";
 import type { MenuProps } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   Bot,
   ClipboardCheck,
@@ -86,6 +87,7 @@ export function MineSkillsView({
   isUpdatingStatus: boolean;
   onSetNotShared: (repositoryInfo: MySkillRepositoryInfoItem) => Promise<void>;
 }) {
+  const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalSkill, setReviewModalSkill] =
@@ -124,8 +126,8 @@ export function MineSkillsView({
   const handleEnableSkill = (skill: MyEditableSkillItem) => {
     const title = skill.name?.trim() || "未命名 Skill";
     modal.confirm({
-      title: `确认启用 ${title}？`,
-      content: "启用后将提交管理员审批，审批通过后会出现在 Skill 仓库。",
+      title: t("skillRepository.mine.confirmApplyTitle", { name: title }),
+      content: t("skillRepository.mine.confirmApplyContent"),
       centered: true,
       okText: "提交审批",
       cancelText: "取消",
@@ -263,6 +265,7 @@ function MineSkillCard({
   onApplyListing: () => void;
   onViewReview: () => void;
 }) {
+  const { t } = useTranslation("common");
   const latestRepository = pickReviewDisplayRepositoryInfo(
     skill.repository_info ?? []
   );
@@ -402,7 +405,9 @@ function MineSkillCard({
             }
             onClick={canApplyListing ? onApplyListing : onViewReview}
           >
-            {isEnabled ? "已启用" : "启用"}
+            {isEnabled
+              ? t("skillRepository.mine.button.listed")
+              : t("skillRepository.mine.button.apply")}
           </Button>
         </div>
       </div>

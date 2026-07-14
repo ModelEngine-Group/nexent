@@ -1765,6 +1765,18 @@
   "agentRepository.page.tab.review": "Review Center",
   "agentRepository.page.searchPlaceholder": "Search by name, description, or tags",
   "agentRepository.page.categoryAll": "All",
+
+  "skillRepository.action.status.notShared": "take down",
+  "skillRepository.action.status.shared": "approve and list",
+  "skillRepository.action.status.rejected": "reject",
+  "skillRepository.action.success": "Action completed: {{action}}",
+  "skillRepository.action.confirmTitle": "Confirm {{action}}?",
+  "skillRepository.mine.confirmApplyTitle": "List {{name}}?",
+  "skillRepository.mine.confirmApplyContent": "Listing will submit this Skill for admin review. After approval, it will appear in the Skill Repository.",
+  "skillRepository.mine.applyForbidden": "The current account can only list Skills created by itself",
+  "skillRepository.mine.button.apply": "List",
+  "skillRepository.mine.button.listed": "Listed",
+
   "agentRepository.page.repositoryHint": "Agents in the shared repository must be copied to your workspace before you can edit them.",
   "agentRepository.page.resultCount": "{{count}} agents",
   "agentRepository.page.empty": "No matching agents found",
