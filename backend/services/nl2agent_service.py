@@ -452,7 +452,23 @@ async def start_session(
 
     official_skills: List[Dict[str, Any]] = []
     try:
-        official_skills = get_official_skills_with_status(tenant_id=tenant_id) or []
+        official_skill_catalog = get_official_skills_with_status(tenant_id=tenant_id) or []
+        resource_missing_names = [
+            str(item.get("skill_name") or item.get("name") or "")
+            for item in official_skill_catalog
+            if item.get("status") == "resource_missing"
+        ]
+        if resource_missing_names:
+            logger.warning(
+                "Excluded resource-missing official Skills from NL2AGENT search: "
+                "tenant_id=%s draft_agent_id=%s skills=%s",
+                tenant_id,
+                draft_agent_id,
+                resource_missing_names,
+            )
+        official_skills = [
+            item for item in official_skill_catalog if item.get("status") == "installable"
+        ]
     except Exception as exc:
         logger.warning(f"Failed to pre-fetch official skills: {exc}")
 
@@ -1185,7 +1201,68 @@ async def save_agent_identity(
     }
 
 
+def _refresh_official_skill_catalog_after_install(
+    agent_id: int,
+    tenant_id: str,
+    *,
+    skill_id: Optional[int],
+    skill_name: Optional[str],
+    installed_ids: Optional[List[int]] = None,
+) -> None:
+    """Remove an installed Skill from one draft's Redis recommendation catalog."""
+    catalogs = get_nl2agent_session_catalogs(tenant_id, agent_id)
+    removed_ids = {int(value) for value in [skill_id, *(installed_ids or [])] if value}
+    normalized_name = unicodedata.normalize("NFKC", str(skill_name or "")).casefold().strip()
+
+    def is_installed_recommendation(item: Dict[str, Any]) -> bool:
+        item_id = item.get("skill_id")
+        try:
+            matches_id = item_id is not None and int(item_id) in removed_ids
+        except (TypeError, ValueError):
+            matches_id = False
+        item_name = unicodedata.normalize(
+            "NFKC", str(item.get("skill_name") or item.get("name") or "")
+        ).casefold().strip()
+        return matches_id or bool(normalized_name and item_name == normalized_name)
+
+    catalogs["official_skills"] = [
+        item
+        for item in catalogs.get("official_skills", [])
+        if not is_installed_recommendation(item)
+    ]
+    set_nl2agent_session_catalogs(tenant_id, agent_id, catalogs)
+
+
+def _require_installable_official_skill_recommendation(
+    agent_id: int,
+    tenant_id: str,
+    *,
+    skill_id: Optional[int],
+    skill_name: Optional[str],
+) -> Dict[str, Any]:
+    """Resolve an install request from the draft's trusted Skill catalog."""
+    catalogs = get_nl2agent_session_catalogs(tenant_id, agent_id)
+    normalized_name = unicodedata.normalize("NFKC", str(skill_name or "")).casefold().strip()
+    for item in catalogs.get("official_skills", []):
+        item_name = unicodedata.normalize(
+            "NFKC", str(item.get("skill_name") or item.get("name") or "")
+        ).casefold().strip()
+        try:
+            matches_id = bool(skill_id and int(item.get("skill_id")) == int(skill_id))
+        except (TypeError, ValueError):
+            matches_id = False
+        if not matches_id and not (normalized_name and item_name == normalized_name):
+            continue
+        if item.get("status") != "installable":
+            break
+        return item
+    raise AgentRunException(
+        "The requested Skill is not available for installation in this NL2AGENT session."
+    )
+
+
 async def install_web_skill(
+    agent_id: int,
     skill_id: Optional[int],
     tenant_id: str,
     user_id: str,
@@ -1193,6 +1270,13 @@ async def install_web_skill(
     locale: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Install a single official/web skill into the tenant."""
+    _get_owned_draft(agent_id, tenant_id)
+    _require_installable_official_skill_recommendation(
+        agent_id,
+        tenant_id,
+        skill_id=skill_id,
+        skill_name=skill_name,
+    )
     if skill_name:
         try:
             installed_names = install_skills_from_zip_for_tenant(
@@ -1205,13 +1289,30 @@ async def install_web_skill(
             logger.error(f"Failed to install web skill {skill_name}: {exc}")
             raise AgentRunException(f"Failed to install skill {skill_name}.") from exc
 
-        return {
+        result = {
             "skill_id": skill_id or 0,
             "skill_name": skill_name,
             "installed": bool(installed_names),
             "installed_ids": [],
             "installed_names": installed_names,
         }
+        if installed_names:
+            try:
+                _refresh_official_skill_catalog_after_install(
+                    agent_id,
+                    tenant_id,
+                    skill_id=skill_id,
+                    skill_name=skill_name,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to refresh NL2AGENT Skill catalog after installation: "
+                    "tenant_id=%s draft_agent_id=%s skill_name=%s",
+                    tenant_id,
+                    agent_id,
+                    skill_name,
+                )
+        return result
 
     if not skill_id or skill_id <= 0:
         raise AgentRunException("Either skill_name or a positive skill_id is required.")
@@ -1224,11 +1325,29 @@ async def install_web_skill(
         logger.error(f"Failed to install web skill {skill_id}: {exc}")
         raise AgentRunException(f"Failed to install skill {skill_id}.") from exc
 
-    return {
+    result = {
         "skill_id": skill_id,
         "installed": bool(installed),
         "installed_ids": installed,
     }
+    if installed:
+        try:
+            _refresh_official_skill_catalog_after_install(
+                agent_id,
+                tenant_id,
+                skill_id=skill_id,
+                skill_name=None,
+                installed_ids=installed,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to refresh NL2AGENT Skill catalog after installation: "
+                "tenant_id=%s draft_agent_id=%s skill_id=%s",
+                tenant_id,
+                agent_id,
+                skill_id,
+            )
+    return result
 
 
 async def finalize_agent(

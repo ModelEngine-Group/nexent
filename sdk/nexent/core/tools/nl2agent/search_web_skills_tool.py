@@ -1,5 +1,6 @@
 """NL2AGENT tool: search official/web skills for individual install."""
 
+import hashlib
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -20,9 +21,35 @@ from ._context import (
 logger = logging.getLogger(__name__)
 
 
+def _catalog_fingerprint(candidates: List[Dict[str, Any]]) -> str:
+    """Return a stable cache namespace for the current Skill catalog snapshot."""
+    serialized_items = sorted(
+        json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+        for item in candidates
+    )
+    serialized = json.dumps(serialized_items, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
 def _rank_web_skills(candidates: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
     """Score and deduplicate web skills before applying the result limit."""
-    scored = _score_candidates(candidates, query, "skill_name")
+    eligible: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        status = str(candidate.get("status") or "").strip().lower()
+        if status != "installable":
+            continue
+        skill_name = str(candidate.get("skill_name") or candidate.get("name") or "").strip()
+        if not skill_name:
+            continue
+        eligible.append(
+            {
+                **candidate,
+                "skill_name": skill_name,
+                "name": str(candidate.get("name") or skill_name),
+            }
+        )
+
+    scored = _score_candidates(eligible, query, "skill_name")
     result: List[Dict[str, Any]] = []
     seen_ids = set()
     seen_names = set()
@@ -101,14 +128,17 @@ class NL2AgentSearchWebSkillsTool(Tool):
         if ctx.official_skills is None:
             return error_response("skills catalog not available in context")
 
-        cache_key = ("nl2agent_search_web_skills", query)
+        cache_tool_name = (
+            f"nl2agent_search_web_skills:{_catalog_fingerprint(ctx.official_skills)}"
+        )
+        cache_key = (cache_tool_name, query)
 
         if cached := get_cached_search(ctx, *cache_key):
             logger.info(f"nl2agent_search_web_skills cache hit for query: {query}")
             return cached
 
         # Guard: if already searched, return cached + applied state
-        if ctx.was_searched("nl2agent_search_web_skills", query):
+        if ctx.was_searched(cache_tool_name, query):
             scored = _rank_web_skills(ctx.official_skills, query)
             result = json.dumps(
                 {
@@ -125,5 +155,5 @@ class NL2AgentSearchWebSkillsTool(Tool):
         scored = _rank_web_skills(ctx.official_skills, query)
         result = json.dumps({"agent_id": ctx.target_agent_id, "items": scored}, ensure_ascii=False)
         set_cached_search(ctx, *cache_key, result)
-        ctx.mark_searched("nl2agent_search_web_skills", query)
+        ctx.mark_searched(cache_tool_name, query)
         return result

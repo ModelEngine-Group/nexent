@@ -1,6 +1,12 @@
-# NL2AGENT 对话式智能体构建助手 设计文档
+# NL2AGENT 对话式智能体构建助手设计文档
 
-> 版本：v1.0 ｜ 对应实现分支：`dyx/nl2a` ｜ 最后更新：2026-07-07
+> 版本：v2.0
+>
+> 对应实现：`96f8b800`（Jujutsu change `pznswxmy`）
+>
+> 对比基线：`4e7d9fe1`（Jujutsu change `lvnqqsqn`）
+>
+> 最后更新：2026-07-14
 
 ---
 
@@ -8,415 +14,838 @@
 
 ### 1.1 背景
 
-Nexent 现有的智能体构建流程是表单驱动的单次输入：用户填写业务描述、选择模型、点击"生成提示词"、在弹窗中手动挑选工具，然后保存。该流程缺乏引导性，用户面对空白表单往往不知从何入手，工具与技能的挑选也依赖用户预先知道全租户有哪些资源可用。
+传统智能体创建流程依赖用户直接填写业务描述、模型、提示词和资源配置。用户需要预先理解平台中的模型、工具、技能和 MCP，面对空白表单时缺少引导，也容易把推荐资源误认为已经安装或绑定。
 
-### 1.2 目标
+NL2AGENT 在既有 Agent、Conversation、ToolInstance、SkillInstance 和 MCP 基础设施上增加一套对话式构建流程，引导用户完成需求澄清、模型选择、资源审查、MCP 安装、身份确认和最终方案生成。
 
-NL2AGENT 是一个**默认智能体**（DB 中一行 `name="nl2agent"` 的记录），通过多轮自然语言对话引导用户从模糊想法到可发布的智能体草稿。核心能力：
+NL2AGENT 本身是平台内部默认智能体，数据库名称为 `nl2agent`。每次构建会话创建独立的草稿 Agent，所有用户确认和资源绑定均作用于该草稿。
 
-1. 多轮提问，逐步澄清目标、场景、约束、数据源。
-2. 基于用户描述，搜索并推荐**本地**工具/技能（SDK 工具 + 租户已安装 MCP 工具 + LangChain 工具 + 租户已安装技能），支持"**全部应用**"一键批量绑定到草稿。
-3. 当本地资源不足时，搜索并推荐**网络** MCP 市场（官方 Registry + 社区）与官方技能市场，由用户**逐个安装**。
-4. 用户表示完成后，调用既有 `generate_and_save_system_prompt_impl` 生成完整提示词集，产出可发布的草稿。
+### 1.2 当前能力
+
+1. 通过多轮对话理解目标、场景、输入、输出和约束。
+2. 强制用户从平台当前可用 LLM 中选择一个主模型，并可配置最多四个有序备用模型。
+3. 搜索租户本地 Tool 和 Skill，以推荐批次卡片让用户全部应用或明确跳过。
+4. 搜索官方 Registry、社区 Marketplace 中的 MCP，支持在聊天卡片内完成配置、安装、健康检查、工具发现和选择性绑定。
+5. 搜索并安装在线 Skill。
+6. 根据需求自动生成 Agent 显示名称，由用户在身份卡片中检查、修改并保存。
+7. 从数据库和 Redis 加载权威草稿状态，完成最终审核和草稿配置。
 
 ### 1.3 设计原则
 
-- **最大化复用**：NL2AGENT 走既有 `POST /agent/run` → `run_agent_stream` 主循环，不新建聊天/流式推送基础设施。
-- **薄包装工具**：6 个 SDK builtin 工具仅是对既有 service 方法的薄包装，无新业务逻辑。
-- **会话上下文注入**：draft `agent_id`、`user_id`、`tenant_id`、`model_id`、`language` 通过 `ToolConfig.metadata` 在构建期注入，复用既有 `ReadSkillConfigTool` 模式。
-- **卡片渲染**：LLM 在最终回答中以带特定语言标签的代码围栏块输出 JSON，前端 `markdownRenderer.tsx` 拦截并渲染交互卡片，不侵入 SSE 流式管道。
+- **复用既有运行链路**：聊天继续使用 `POST /agent/run` 和现有 SSE 流式执行链路。
+- **显式阶段确认**：模型、资源、MCP、身份和最终配置均有明确的进入条件与完成状态。
+- **持久化状态优先**：数据库和 Redis 是发布时的权威来源，不能使用 LLM 生成的资源 ID 或安装状态替代。
+- **最小可调用工具集**：运行时只注册三个 NL2AGENT 搜索工具；应用、安装、绑定和最终配置通过用户操作卡片调用后端 API。
+- **租户和草稿隔离**：Catalog、缓存、工作流状态和资源实例均按 tenant/draft 作用域隔离。
+- **用户显式授权**：安装 MCP、提交凭据、绑定工具、跳过资源和最终发布必须由用户操作卡片确认。
+- **不兼容已删除旧工具**：不为历史测试 Agent 或已移除的 NL2AGENT action tools 增加运行时兼容逻辑。
 
 ---
 
-## 2. 系统架构
+## 2. 总体架构
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                         前端 (Next.js :3000)                   │
-│  AgentManageComp ──click──► startNl2AgentSession()            │
-│                                  │                             │
-│                                  ▼                             │
-│   /chat  ◄── sessionStorage.selectedAgentId ◄── POST /session │
-│     │                                                          │
-│     ▼                                                          │
-│   chatInterface (run_agent_stream SSE)                         │
-│     │                                                          │
-│     ▼                                                          │
-│   markdownRenderer.tsx ──► tryRenderNl2AgentCard()             │
-│     │                              │                            │
-│     ▼                              ▼                            │
-│   LocalResourcesCard  WebMcpCard  WebSkillCard  FinalizeCard   │
-└──────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ HTTP /api/*
-┌──────────────────────────────────────────────────────────────┐
-│                     后端 (FastAPI 多服务)                       │
-│                                                                │
-│   config_app (:5010) ──startup──► seed_nl2agent_default_agent │
-│                                                                │
-│   nl2agent_app (router)                                        │
-│     POST /nl2agent/session/start                               │
-│     POST /nl2agent/session/{id}/apply-local-resources         │
-│     POST /nl2agent/session/{id}/install-web-skill             │
-│     POST /nl2agent/session/{id}/finalize                      │
-│                                                                │
-│   agent_app  POST /agent/run  (现有主循环)                     │
-│     └─► run_agent_stream                                       │
-│           └─► create_agent_config                              │
-│                 └─► create_builtin_tool (6 个 NL2Agent 分支)   │
-│                       └─► get_*_tool() 设置 Nl2AgentContext   │
-│                                                                │
-│   nl2agent_service.py (核心业务逻辑)                           │
-│     start_session / recommend_local_resources /                │
-│     search_web_mcps / search_web_skills /                      │
-│     apply_local_resources_batch / install_web_skill /          │
-│     finalize_agent / seed_nl2agent_default_agent              │
-└──────────────────────────────────────────────────────────────┘
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│ Frontend                                                            │
+│                                                                     │
+│ Agent Builder 入口                                                   │
+│      │                                                              │
+│      ├─ POST /nl2agent/session/start                                │
+│      └─ 保存 conversation_id → draft_agent_id 映射                   │
+│                                                                     │
+│ Chat / SSE                                                          │
+│      │                                                              │
+│      ├─ MarkdownRenderer                                            │
+│      └─ NL2AGENT Cards                                              │
+│         ├─ ModelSelectionCard                                       │
+│         ├─ LocalResourcesCard                                       │
+│         ├─ WebMcpCard                                               │
+│         ├─ WebSkillCard                                             │
+│         ├─ AgentIdentityCard                                        │
+│         └─ FinalizeCard                                             │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ HTTP / SSE
+┌───────────────────────────────▼─────────────────────────────────────┐
+│ Backend                                                             │
+│                                                                     │
+│ config service                                                      │
+│      └─ Seed NL2AGENT 默认 Agent 和三个 builtin tools               │
+│                                                                     │
+│ runtime service                                                     │
+│      ├─ /agent/run：既有聊天执行链路                                │
+│      └─ /nl2agent/*：会话、模型、资源、MCP、身份、最终配置 API       │
+│                                                                     │
+│ nl2agent_service                                                    │
+│      ├─ 校验租户与草稿所有权                                        │
+│      ├─ 读写 Agent / ToolInstance / SkillInstance / MCP             │
+│      └─ 读写 Redis Catalog 和工作流状态                              │
+└───────────────────┬────────────────────────────┬────────────────────┘
+                    │                            │
+             ┌──────▼──────┐              ┌──────▼──────┐
+             │ PostgreSQL  │              │ Redis       │
+             │ Agent/资源  │              │ Catalog/状态│
+             └─────────────┘              └─────────────┘
+                    │
+┌───────────────────▼────────────────────────────────────────────────┐
+│ SDK Runtime                                                         │
+│                                                                     │
+│ NL2AgentSearchLocalResourcesTool                                    │
+│ NL2AgentSearchWebMcpsTool                                           │
+│ NL2AgentSearchWebSkillsTool                                         │
+│                                                                     │
+│ 每个 Tool 实例持有独立 Nl2AgentContext，不共享可变全局会话上下文     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. 核心概念
+## 3. 核心对象与状态
 
 ### 3.1 NL2AGENT 默认智能体
 
-一行 `ag_tenant_agent_t` 记录，`name="nl2agent"`，绑定 6 个 builtin 工具实例。由启动钩子 `seed_nl2agent_default_agent()` 幂等创建。用户点击"Agent Builder"后，前端导航到 `/chat` 并以该 `agent_id` 运行主循环。
+NL2AGENT 默认智能体是一条 `name="nl2agent"` 的内部 Agent 记录。它只负责运行构建对话，不是最终产物。
 
-### 3.2 草稿智能体（Draft Agent）
+当前默认 Agent 只绑定三个 builtin tools：
 
-每个会话启动时通过 `create_agent()` 创建的占位智能体：`name="draft_<uuid8>"`，`version_no=0`。它不出现在主列表中（被 `list_all_agent_info_impl` 过滤）。`finalize_agent` 完成后会被重命名（移除 `draft_` 前缀），用户在草稿配置页评审并发布为 v1。
-
-### 3.3 资源分类
-
-| 类别 | 范围 | 安装方式 |
+| class_name | 运行时名称 | 职责 |
 |---|---|---|
-| **本地工具** | SDK 工具、租户已安装 MCP 工具、LangChain 工具 | "全部应用"批量绑定 |
-| **本地技能** | 租户已安装技能 | "全部应用"批量绑定 |
-| **网络 MCP** | 官方 Registry + 社区市场 | 逐个安装（既有 `AddMcpServiceModal`） |
-| **网络技能** | 官方技能市场 | 逐个安装（`POST /install-web-skill`） |
+| `NL2AgentSearchLocalResourcesTool` | `nl2agent_search_local_resources` | 搜索当前租户本地 Tool 和 Skill |
+| `NL2AgentSearchWebMcpsTool` | `nl2agent_search_web_mcps` | 搜索 Registry 和社区 MCP |
+| `NL2AgentSearchWebSkillsTool` | `nl2agent_search_web_skills` | 搜索在线 Skill |
 
-### 3.4 卡片输出协议
+默认 NL2AGENT 和 `draft_*` Agent 不出现在普通 Agent 列表中。
 
-NL2AGENT LLM 在最终回答中以带特定语言标签的代码围栏块输出 JSON，前端拦截渲染。支持的标签：
+### 3.2 草稿 Agent
 
-| 语言标签 | 渲染组件 | 用途 |
-|---|---|---|
-| `nl2agent-local-resources` | `LocalResourcesCard` | 本地工具+技能，带"全部应用" |
-| `nl2agent-web-mcp` | `WebMcpCard`（单个） | 单个网络 MCP，带"安装" |
-| `nl2agent-web-mcps` | `WebMcpCard` 列表 | 多个网络 MCP |
-| `nl2agent-web-skill` | `WebSkillCard`（单个） | 单个网络技能，带"安装" |
-| `nl2agent-web-skills` | `WebSkillCard` 列表 | 多个网络技能 |
-| `nl2agent-finalize` | `FinalizeCard` | 终步确认，带"评审并发布" |
+每次调用 session start 都会创建独立草稿：
 
-每张卡片的 JSON 必须包含 `agent_id`，以便前端调用 apply/install/finalize 接口。
+- 内部名称初始为 `draft_<uuid>`。
+- 使用 `version_no=0` 保存草稿字段和资源实例。
+- 草稿 ID 通过 `draft_agent_id` 传入运行链路和三个 SDK Tool。
+- 最终配置时才根据持久化显示名称生成正式内部名称。
 
----
+名称语义严格区分：
 
-## 4. 后端设计
+- `display_name`：用户可见标题，可在身份卡片中编辑。
+- `name`：内部变量标识符，由后端生成，用户和 LLM 均不能指定。
 
-### 4.1 服务层：`backend/services/nl2agent_service.py`
+内部名称必须满足：
 
-| 函数 | 签名 | 职责 |
-|---|---|---|
-| `start_session` | `(user_id, tenant_id, language) -> {agent_id, conversation_id, draft_name}` | 创建 draft AgentInfo（v0）+ conversation 行 |
-| `recommend_local_resources` | `(query, agent_id, tenant_id, model_id, top_n=5) -> {tools, skills}` | LLM 评分本地工具+技能，返回 top-N，每项含 `score`/`reason` |
-| `search_web_mcps` | `(query, tenant_id, model_id, top_n=5) -> [mcp]` | 调既有 Registry/社区端点，LLM 筛选 top-N |
-| `search_web_skills` | `(query, tenant_id, model_id, top_n=5) -> [skill]` | 调既有官方技能列表，LLM 评分 top-N |
-| `apply_local_resources_batch` | `(agent_id, tool_ids, skill_ids, tenant_id, user_id) -> {bound_tool_count, bound_skill_count}` | 批量创建 ToolInstance + SkillInstance |
-| `install_web_skill` | `(skill_id, tenant_id, user_id) -> {skill_id, status}` | 复用 `skill_service.install_official_skill` |
-| `finalize_agent` | `(agent_id, model_id, task_description, tool_ids, skill_ids, sub_agent_ids, knowledge_base_display_names, user_id, tenant_id, language) -> {agent_id, status:"draft_ready"}` | 调 `generate_and_save_system_prompt_impl` 生成完整提示词集，重命名 draft |
-| `seed_nl2agent_default_agent` | `(tenant_id=DEFAULT, user_id=DEFAULT) -> agent_id \| None` | 启动时幂等插入 6 个 builtin 工具行 + 创建 NL2AGENT 默认智能体 + 绑定工具实例 |
-
-**LLM 评分机制**：`_score_candidates_with_llm` 发送紧凑的工具/技能描述（id、name、description）给 `call_llm_for_system_prompt`，要求返回 0-10 评分与一句话理由。`_parse_scored_json` 容忍 LLM 输出中的代码围栏包裹。
-
-### 4.2 API 路由：`backend/apps/nl2agent_app.py`
-
-| 方法 | 路径 | 请求体 | 调用 |
-|---|---|---|---|
-| POST | `/nl2agent/session/start` | 无（仅 auth 头） | `start_session` |
-| POST | `/nl2agent/session/{agent_id}/apply-local-resources` | `Nl2AgentApplyLocalResourcesRequest` | `apply_local_resources_batch` |
-| POST | `/nl2agent/session/{agent_id}/install-web-skill` | `Nl2AgentInstallWebSkillRequest` | `install_web_skill` |
-| POST | `/nl2agent/session/{agent_id}/finalize` | `Nl2AgentFinalizeRequest` | `finalize_agent` |
-
-聊天本身复用既有 `POST /agent/run`，无新聊天端点。鉴权通过 `get_current_user_info(authorization, http_request)`；错误映射遵循 CLAUDE.md：`UnauthorizedError`→401，校验错误→400，`AgentRunException`→500。
-
-### 4.3 请求模型：`backend/consts/model.py`
-
-```python
-class Nl2AgentApplyLocalResourcesRequest(BaseModel):
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
-
-class Nl2AgentInstallWebSkillRequest(BaseModel):
-    skill_id: int
-
-class Nl2AgentFinalizeRequest(BaseModel):
-    model_id: int
-    task_description: str
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
-    sub_agent_ids: List[int] = Field(default_factory=list)
-    knowledge_base_display_names: List[str] = Field(default_factory=list)
+```regex
+^[A-Za-z_][A-Za-z0-9_]*$
 ```
 
-### 4.4 SDK Builtin 工具：`sdk/nexent/core/tools/nl2agent/`
+生成策略：
 
-每个工具模块遵循 `ReadSkillConfigTool` 模式：`get_*_tool()` 初始化器调用 `set_nl2agent_context()` 设置模块级单例上下文，模块级 `@tool` 装饰的可调用对象在执行时通过 `get_nl2agent_context()` 读取上下文并以 `asyncio.run()` 调用异步 service。
+1. 将可转换的 ASCII 显示名称规范化为 snake_case。
+2. 冲突时追加 Agent ID。
+3. 无法生成有效标识符时使用 `agent_{agent_id}`。
+4. 最终长度不超过 50 个字符。
 
-| 模块 | `@tool` 可调用 | `get_*` 初始化器 |
-|---|---|---|
-| `search_local_resources_tool.py` | `search_local_resources(query: str) -> str` | `get_search_local_resources_tool(agent_id, user_id, tenant_id, model_id, language)` |
-| `search_web_mcps_tool.py` | `search_web_mcps(query: str) -> str` | `get_search_web_mcps_tool(...)` |
-| `search_web_skills_tool.py` | `search_web_skills(query: str) -> str` | `get_search_web_skills_tool(...)` |
-| `apply_local_resources_tool.py` | `apply_local_resources(tool_ids: str, skill_ids: str) -> str` | `get_apply_local_resources_tool(...)` |
-| `install_web_skill_tool.py` | `install_web_skill(skill_id: int) -> str` | `get_install_web_skill_tool(...)` |
-| `finalize_agent_tool.py` | `finalize_agent(task_description, tool_ids, skill_ids, sub_agent_ids, knowledge_base_names) -> str` | `get_finalize_agent_tool(...)` |
+### 3.3 Redis Catalog
 
-**上下文数据结构**（`_context.py`）：
+session start 拉取资源目录后写入 Redis：
 
-```python
-@dataclass
-class Nl2AgentContext:
-    agent_id: Optional[int]
-    user_id: Optional[str]
-    tenant_id: Optional[str]
-    model_id: Optional[int]
-    language: Optional[str]
-
-def set_nl2agent_context(agent_id, user_id, tenant_id, model_id, language) -> Nl2AgentContext
-def get_nl2agent_context() -> Optional[Nl2AgentContext]
+```text
+nl2agent:session_catalog:{tenant_id}:{draft_agent_id}
 ```
 
-### 4.5 工具分发：`sdk/nexent/core/agents/nexent_agent.py`
+Catalog 包含：
 
-`create_builtin_tool`（line 300）在既有 `ReadSkillConfigTool` 分支之后新增 6 个 `elif class_name == "NL2Agent*Tool"` 分支（lines 359-450）。每个分支：
-1. 读取 `metadata = tool_config.metadata or {}`
-2. 调用对应 `get_*_tool(agent_id=..., user_id=..., tenant_id=..., model_id=..., language=...)` 设置上下文
-3. 返回模块级 `@tool` 可调用对象
-
-### 4.6 上下文注入：`backend/agents/create_agent_info.py`
-
-在模型解析后（line 925 起），定义 `_NL2AGENT_TOOL_CLASS_NAMES` 集合（6 个 class_name）。遍历 `tool_list`，对 `class_name` 命中的 `tool_cfg` 设置：
-
-```python
-tool_cfg.metadata = {
-    "agent_id": agent_id,       # 草稿 agent_id（非 NL2AGENT 自身）
-    "user_id": user_id,
-    "tenant_id": tenant_id,
-    "model_id": model_id_to_use,
-    "language": language,
+```json
+{
+  "tool_catalog": [],
+  "skill_catalog": [],
+  "registry_results": [],
+  "community_results": [],
+  "official_skills": []
 }
 ```
 
-**关键**：注入的 `agent_id` 是**草稿目标智能体**的 ID，不是 NL2AGENT 自身的 ID。这样所有工具调用（apply/install/finalize）都作用于草稿。
+Catalog TTL 为 24 小时。SDK Tool 的构造数据来自该 Catalog，因此 session start 和 agent execution 可以运行在不同 worker。
 
-### 4.7 启动播种：`backend/apps/config_app.py`
+Catalog 缺失、格式错误或 tenant/draft 标识不完整时必须显式报错并记录上下文，不能静默替换为空目录。
 
-```python
-@app.on_event("startup")
-async def seed_nl2agent_on_startup():
-    try:
-        seed_nl2agent_default_agent()
-    except Exception as exc:
-        logger.error(f"Failed to seed NL2AGENT default agent: {str(exc)}")
+### 3.4 Redis 工作流状态
+
+工作流状态使用独立 key：
+
+```text
+nl2agent:session_state:{tenant_id}:{draft_agent_id}
 ```
 
-`seed_nl2agent_default_agent()` 顺序：
-1. 调 `seed_nl2agent_builtin_tools(tenant_id, user_id)` 幂等插入 6 行 `ag_tool_info_t`（按 `(name, source)` 去重）。
-2. 创建 `ag_tenant_agent_t` 行（`name="nl2agent"`），若已存在则跳过。
-3. 为该智能体绑定 6 个 ToolInstance。
+基础结构：
 
-### 4.8 草稿过滤：`backend/services/agent_service.py`
-
-`list_all_agent_info_impl`（line 2330）签名新增 `include_drafts: bool = False`。line 2382 过滤：
-
-```python
-if not include_drafts and (agent.get("name") or "").startswith("draft_"):
-    continue
+```json
+{
+  "recommendation_batches": {},
+  "identity_confirmed": false,
+  "mcp_workflows": {}
+}
 ```
 
-`agent_app.py`（line 297）新增 `include_drafts: bool = Query(False)` 查询参数并透传。草稿仍可通过直接 `agent_id` 访问（用于聊天与 finalize 流程）。
+本地推荐批次状态：
 
-### 4.9 系统提示词
+- `recommendations_ready`
+- `applied`
+- `skipped`
 
-`backend/prompts/nl2agent_system_prompt_{zh,en}.yaml` 定义对话流程、工具调用准则、卡片输出格式、语气与重要约束。提示词指导 LLM：
+MCP 工作流状态：
 
-1. **第 1 轮**：开放式问候，询问目标。
-2. **第 2-N 轮**：每次 1-2 个聚焦问题，覆盖场景/数据源/输出格式/约束/子智能体。能写出一段式任务描述时停止提问。
-3. **能力映射**：调 `search_local_resources`；本地不足时调 `search_web_mcps` / `search_web_skills`。
-4. **卡片输出**：调用搜索工具后，**必须**以 `nl2agent-*` 代码围栏块呈现 JSON，围栏内只放 JSON。
-5. **终步**：用户表示完成时调 `finalize_agent`。
+- `configuration_required`
+- `installing`
+- `connected`
+- `tools_bound`
+- `binding_skipped`
+- `failed`
+
+Redis 中不得保存用户提交的 secret 值。
 
 ---
 
-## 5. 前端设计
+## 4. 对话构建流程
 
-### 5.1 入口：`frontend/app/[locale]/agents/components/AgentManageComp.tsx`
+### 4.1 启动会话
 
-在"创建智能体"与"导入智能体"卡片旁新增"Agent Builder"卡片（紫色，Sparkles 图标）。点击行为：
+1. 用户在 Agent 管理页点击 Agent Builder。
+2. 前端调用 `POST /nl2agent/session/start`。
+3. 后端确保当前租户存在 NL2AGENT 默认 Agent 和三个 builtin tools。
+4. 后端创建草稿 Agent 和 Conversation。
+5. 后端加载 Tool、Skill、Registry MCP、Community MCP 和在线 Skill Catalog。
+6. Catalog 按 tenant/draft 写入 Redis。
+7. 前端保存 Conversation 到 draft ID 的映射，并进入聊天。
 
-```typescript
-const handleStartAgentBuilder = async () => {
-  const res = await startNl2AgentSession();
-  sessionStorage.setItem("selectedAgentId", String(res.agent_id));
-  router.push(`/${locale}/chat`);
-};
+主要返回字段：
+
+```json
+{
+  "nl2agent_agent_id": 1,
+  "draft_agent_id": 52,
+  "conversation_id": 100,
+  "draft_name": "draft_ab12cd34"
+}
 ```
 
-`chatInterface.tsx`（line 167）在挂载时读取 `sessionStorage.getItem("selectedAgentId")` 并设为当前选中智能体。
+### 4.2 需求澄清
 
-<div align="center">
-  <img src="./assets/nl2agent-frontend-entry.svg" alt="NL2AGENT 前端入口与聊天跳转设计" style="width: 90%; height: auto;" />
-</div>
+NL2AGENT 通过多轮对话理解：
 
-_图 5-1：Agent Builder 入口复用现有智能体管理页和聊天页，只在点击后补充会话启动、`selectedAgentId` 写入与路由跳转。_
+- Agent 目标和使用者
+- 输入数据和数据来源
+- 期望输出
+- 业务限制和安全约束
+- 是否需要本地资源、在线 MCP 或在线 Skill
 
-### 5.2 服务层：`frontend/services/nl2agentService.ts`
+每轮只询问一个聚焦问题。任务信息足够后进入模型选择阶段。
 
-| 导出 | 签名 |
+### 4.3 模型选择
+
+NL2AGENT 不得说出、推荐、比较或编造模型。模型选项只能来自平台实时模型列表。
+
+前端模型卡调用现有 `/model/llm_list`，只展示 `connect_status="available"` 的 LLM。用户必须选择：
+
+- 一个主模型
+- 零到四个有序备用模型
+
+保存时后端再次校验：
+
+- 模型属于当前租户
+- 模型存在且类型为 LLM
+- 当前连接状态可用
+- 不存在重复 ID
+- 总数不超过五个
+
+保存结果写入草稿：
+
+```text
+business_logic_model_id = primary_model_id
+model_ids = [primary_model_id, ...fallback_model_ids]
+```
+
+最终配置前会再次校验可用性；已删除或变为不可用的模型会阻止继续。
+
+### 4.4 本地资源搜索和审查
+
+模型确认后必须进行至少一次本地资源搜索。NL2AGENT 将完整需求提取为一组去重的原子关键词，并在一次调用中传入：
+
+```html
+<code>
+result = nl2agent_search_local_resources(query="docx presentation generation")
+print(result)
+</code>
+```
+
+SDK 返回稳定批次 ID：
+
+```json
+{
+  "agent_id": 52,
+  "recommendation_batch_id": "local_...",
+  "tools": [],
+  "skills": []
+}
+```
+
+前端卡片实际渲染后调用 register API。用户可以：
+
+- Apply All：绑定卡片中的 Tool 和 Skill，并将批次标记为 `applied`。
+- Continue Without Resources：将批次标记为 `skipped`。
+
+推荐 ID 只表示候选，不表示已经选择。最终阶段只读取数据库中启用的 ToolInstance 和 SkillInstance。
+
+### 4.5 在线 MCP 搜索、配置和绑定
+
+本地资源不足时，NL2AGENT 可以调用一次 MCP 搜索。当前实现不是在 Tool 每次执行时携带用户关键词实时请求 Marketplace，而是在 session start 时预取候选目录：
+
+| 来源 | 预取调用 | 当前上限 |
+|---|---|---:|
+| 官方 Registry | `list_registry_mcp_services(search=None, limit=30)` | 30 |
+| Community Marketplace | `list_community_mcp_services(search=None, limit=30)` | 30 |
+
+经过敏感信息清理后，两组数据分别保存为 Redis Catalog 中的 `registry_results` 和 `community_results`。`nl2agent_search_web_mcps` 实际在该会话快照中执行关键词匹配，因此搜索范围是两个来源默认排序下各自前 30 条，而不是整个远程 Marketplace。
+
+Registry 和 Community 数据会统一规范化为安全的推荐与安装结构：
+
+- Remote URL 或 URL template
+- Transport 类型
+- URL variables
+- Headers
+- Environment variables
+- Package/runtime
+- Runtime arguments
+- Package arguments
+- Port 和 container configuration
+
+字段元数据包含：
+
+```text
+name / label / description / type / required / secret / default / placeholder
+```
+
+当前 MCP 评分实际匹配规范化后的：
+
+- `name`
+- `description`
+- `tags`（如果候选存在）
+
+目前规范化 MCP 候选没有保留 Marketplace tags，因此生产数据主要按 MCP 名称和描述匹配。URL、transport、package identifier、环境变量、header、runtime arguments 和 container configuration 只用于安装配置，不参与搜索评分。
+
+搜索前按 `recommendation_id` 和规范化名称去重；Registry 与 Community 同名时保留先进入候选集的 Registry 记录。评分后最多返回 5 条。
+
+流程：
+
+1. MCP 搜索返回 `recommendation_id` 和安装选项。
+2. NL2AGENT 可以在聊天中逐个询问必填的非敏感字段。
+3. Secret 只能由用户在 MCP 卡片中填写，不得在聊天中询问。
+4. 用户选择安装选项并确认安装。
+5. 后端从 Redis Catalog 解析 recommendation，不信任 LLM 提供的 URL、命令或 package。
+6. 后端校验配置、安装 MCP、执行健康检查并发现工具。
+7. 卡片展示发现的工具。
+8. 用户选择绑定部分工具，或者显式跳过绑定。
+
+已安装但仅处于 `connected` 的 MCP 仍然未解决，必须进入 `tools_bound` 或 `binding_skipped` 才能最终配置。
+
+### 4.6 在线 Skill
+
+当前“在线 Skill”不是在搜索时访问外部 Skill Marketplace，而是调用 `get_official_skills_with_status(tenant_id)` 扫描部署环境中的 official skills ZIP 目录：
+
+1. 枚举目录中的 `.zip` 文件，文件名作为 Skill 名称。
+2. 查询当前租户是否已经存在同名 Skill。
+3. 检查已安装 Skill 的本地资源目录是否存在。
+4. 按“当前租户数据库记录 → 全局官方数据库记录 → ZIP 内 `SKILL.md`”的优先级补充 description 和 tags。
+5. ZIP 或元数据解析失败时记录警告并使用空 description/tags，不中断整个目录加载。
+
+候选结构为：
+
+```json
+{
+  "skill_id": 10,
+  "skill_name": "document-parser",
+  "name": "document-parser",
+  "description": "Parse common document formats.",
+  "tags": ["document", "parser"],
+  "source": "official",
+  "status": "installable"
+}
+```
+
+状态包括：
+
+- `installable`
+- `installed`
+- `resource_missing`
+
+session start 只把 `status="installable"` 的候选保存到 Redis `official_skills`。`installed` 会被完全过滤，避免重复推荐；`resource_missing` 也会被过滤，并记录包含 tenant、draft 和 Skill 名称的 warning。当前流程不会把缺失资源误报为已修复，也不提供自动修复能力。
+
+后续 `nl2agent_search_web_skills` 只在这份会话快照中评分，并再次防御性过滤非 `installable` 状态。SDK 使用 `skill_name or name` 统一名称字段，名称、description 和 tags 都参与 OR fuzzy 匹配。评分后按 Skill ID 和规范化名称去重，最多返回 5 条。
+
+安装成功后，后端从对应 tenant/draft 的 Redis `official_skills` 中移除同 ID 或同规范化名称的候选。Skill 搜索缓存键包含稳定的 Catalog 指纹，因此工具实例重建或使用等价关键词时可以复用未变化 Catalog 的缓存，而安装导致 Catalog 变化后不会复用旧结果。
+
+安装结果进入当前租户的 Skill catalog；需要作为草稿资源使用时，仍应通过对应资源绑定流程形成 SkillInstance。在线 Skill 搜索的是当前部署已经提供的官方 Skill ZIP 包，不会发现 ZIP 目录之外的新 Skill。
+
+### 4.7 Agent 身份确认
+
+资源审查完成后，NL2AGENT 根据已确认需求自动生成简洁的 `display_name`，并预填身份卡片。不得要求用户在聊天中构思名称。
+
+用户可以在卡片中修改并保存。保存后：
+
+- `display_name` 写入草稿 Agent。
+- Redis 设置 `identity_confirmed=true`。
+- 后端返回只读的内部名称预览。
+
+草稿数据库名称在此阶段仍保持 `draft_*`。
+
+### 4.8 最终审核和配置
+
+满足以下条件后，NL2AGENT 直接输出 `nl2agent-finalize` 卡片，不调用 Skill 名称或不存在的 finalize Tool：
+
+- 模型选择有效
+- 至少一张本地资源卡已经注册
+- 所有推荐批次已经 applied 或 skipped
+- 所有已安装 MCP 已经绑定工具或显式跳过
+- 身份已经确认
+- 用户明确要求完成
+
+最终 proposal 必须包含：
+
+- `business_description`
+- `duty_prompt`
+- `greeting_message`
+
+可以包含描述、约束、few shots、示例问题和运行参数，但不得包含或编造身份、模型、Tool、Skill、MCP ID 或资源配置。
+
+FinalizeCard 会先读取权威 session state：
+
+- 加载中显示 loading。
+- 加载失败显示后端错误和 Retry。
+- 身份未确认或 proposal 不完整时禁用操作。
+- 显示名称、内部名称、模型和资源只使用持久化状态。
+- 描述和 Prompt 字段使用 proposal。
+
+后端最终生成正式内部名称、保存 proposal 字段，并保留数据库中现有的启用资源实例。返回状态为 `draft_ready`，随后进入既有 Agent 配置和版本发布流程。
+
+---
+
+## 5. 后端 API
+
+所有接口前缀为 `/nl2agent`，聊天本身继续使用既有 `/agent/run`。
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| POST | `/session/start` | 创建 NL2AGENT 会话、草稿和 Redis Catalog |
+| PUT | `/session/{id}/models` | 保存主模型和备用模型 |
+| POST | `/session/{id}/local-resources/register` | 注册已经渲染的本地推荐批次 |
+| POST | `/session/{id}/apply-local-resources` | 应用指定批次中的本地资源 |
+| POST | `/session/{id}/local-resources/skip` | 显式跳过指定批次 |
+| POST | `/session/{id}/mcp/install` | 安装 Redis 推荐目录中的 MCP |
+| POST | `/session/{id}/mcp/{mcp_id}/bind-tools` | 绑定用户选择的 MCP tools |
+| POST | `/session/{id}/mcp/{mcp_id}/skip-tools` | 显式跳过 MCP tool binding |
+| POST | `/session/{id}/install-web-skill` | 安装在线 Skill |
+| PUT | `/session/{id}/identity` | 保存显示名称并确认身份 |
+| GET | `/session/{id}/state` | 读取权威草稿和工作流状态 |
+| POST | `/session/{id}/finalize` | 校验状态并完成草稿配置 |
+
+### 5.1 关键请求结构
+
+模型选择：
+
+```json
+{
+  "primary_model_id": 1,
+  "fallback_model_ids": [2, 3]
+}
+```
+
+本地资源应用：
+
+```json
+{
+  "recommendation_batch_id": "local_...",
+  "tool_ids": [10, 11],
+  "skill_ids": [20]
+}
+```
+
+MCP 安装：
+
+```json
+{
+  "recommendation_id": "registry:example",
+  "option_id": "remote-0",
+  "config_values": {
+    "region": "cn"
+  }
+}
+```
+
+MCP 工具绑定：
+
+```json
+{
+  "tool_ids": [101, 102]
+}
+```
+
+身份保存：
+
+```json
+{
+  "display_name": "文档演示生成助手"
+}
+```
+
+### 5.2 鉴权和错误语义
+
+每个操作都从认证信息获取 user/tenant，并校验草稿所有权。
+
+- 草稿不存在：404
+- 工作流未完成或状态冲突：409
+- 非预期数据库、Redis 或安装错误：500，并记录 tenant/draft 上下文
+
+---
+
+## 6. SDK 搜索工具设计
+
+### 6.1 独立上下文
+
+每个 Tool 实例持有独立 `Nl2AgentContext`，包含：
+
+- `agent_id`
+- `draft_agent_id`
+- `tenant_id`
+- `user_id`
+- `language`
+- 本地 Tool/Skill catalog
+- Registry/Community MCP catalog
+- 在线 Skill catalog
+- 已应用资源状态
+
+构造一个 Tool 不得覆盖其他 Tool 的状态。SDK 不读取环境变量，所有上下文由 backend metadata 注入。
+
+### 6.2 统一关键词匹配
+
+三个搜索工具共用以下处理：
+
+1. Unicode NFKC 归一化。
+2. 大小写归一化。
+3. 按空格、中英文标点和中英文边界提取原子关键词。
+4. 删除空值、重复词和常见连接词。
+5. 每个关键词分别匹配名称、描述和标签。
+6. 使用 OR 语义，任一关键词达到阈值即可进入候选。
+7. 多关键词命中获得更高排名。
+8. 过滤弱相关结果，允许返回空结果。
+9. `reason` 记录实际命中的关键词。
+
+评分公式为：
+
+```text
+0.85 × 最佳关键词分数 + 0.15 × 关键词覆盖率
+```
+
+名称直接匹配权重最高，description/tags 匹配乘以 `0.9`，最低候选阈值为 `0.62`。长度不超过三个字符的关键词只允许精确子串匹配，避免 `ppt` 模糊命中 `http`。
+
+上述是共享评分器的能力。当前各目录实际可搜索字段如下：
+
+| 搜索类型 | 当前实际评分字段 | 不参与评分的字段 |
+|---|---|---|
+| MCP | `name`、`description` | URL、transport、package、headers、env、arguments、container config |
+| 在线 Skill | `skill_name or name`、`description`、`tags` | 安装配置、ZIP 正文和其他未规范化元数据 |
+
+结果限制和去重：
+
+- 本地 Tool 和 Skill 统一排序，合计最多 5 条。
+- 在线 MCP 最多 5 条，按 recommendation ID 和规范化名称去重；Registry 优先于同名 Community 记录。
+- 在线 Skill 最多 5 条，按 Skill ID 和规范化名称去重。
+
+### 6.3 搜索缓存
+
+SDK 搜索缓存按以下维度隔离：
+
+```text
+tenant_id + draft_agent_id + tool_name + canonical_keyword_set
+```
+
+关键词集合与顺序、大小写和分隔符无关，因此 `DOCX PPT` 与 `ppt, docx` 使用同一缓存。缓存 TTL 为 10 分钟，MCP 搜索在 Tool 实例重建后也可复用同一会话缓存。
+
+本地 `recommendation_batch_id` 由 draft ID、canonical query 和结果资源 ID 生成，等价查询产生稳定批次 ID。
+
+---
+
+## 7. Prompt 状态机与执行协议
+
+中英文 YAML Prompt 定义一致的阶段顺序和卡片协议。
+
+### 7.1 可执行 Tool 与卡片的区别
+
+下划线名称是可执行 Tool：
+
+```text
+nl2agent_search_local_resources
+nl2agent_search_web_mcps
+nl2agent_search_web_skills
+```
+
+连字符名称是前端卡片：
+
+```text
+nl2agent-model-selection
+nl2agent-local-resources
+nl2agent-web-mcps
+nl2agent-web-skills
+nl2agent-agent-identity
+nl2agent-finalize
+```
+
+不存在 `nl2agent-search-*` 卡片。Skill 名称是执行说明，不是 Python 函数。
+
+### 7.2 工具执行协议
+
+运行时只执行字面量 `<code>...</code>` 中的调用。工具调用步骤必须只包含一个执行块，并始终保存、打印结果：
+
+```html
+<code>
+result = nl2agent_search_web_mcps(query="docx parser extraction")
+print(result)
+</code>
+```
+
+模型必须等待真实 Observation，下一步才能把返回 JSON 原样放入对应卡片。不得把工具调用显示为普通 Markdown、行内代码或伪卡片。
+
+一次资源审查中，每种搜索工具最多调用一次。所有相关关键词必须合并到一个 query；只有用户明确修改需求或搜索方向后才能再次搜索。
+
+### 7.3 模型和最终方案约束
+
+- 不得命名、推荐、比较或编造 LLM。
+- 不得根据对话文字推断模型已保存，只读取注入的 current session state。
+- 不得声称 MCP 安装或工具绑定成功，除非对应 API 已确认。
+- 不得请求用户在聊天中提交 secret。
+- 不得调用 `nl2agent_finalize_proposal(...)` 或任何 Skill 名称。
+- 最终卡片是回复内容，不通过代码解释器执行。
+
+---
+
+## 8. 前端设计
+
+### 8.1 Conversation 级 draft ID
+
+前端维护 `conversation_id → draft_agent_id` 映射。运行 Agent、渲染流式消息、最终消息、任务窗口和 Markdown 卡片时都使用当前 Conversation 对应的 draft ID。
+
+卡片 ID 解析规则：
+
+1. Payload 有 ID 时使用 Payload ID。
+2. Payload 缺失 ID 时使用可信 Conversation draft ID。
+3. 两者冲突时拒绝渲染并显示 mismatch 错误。
+4. 普通或历史 Conversation 没有映射时不得猜测 ID。
+
+### 8.2 卡片组件
+
+| 卡片 | 主要职责 |
 |---|---|
-| `startNl2AgentSession` | `() => Promise<{agent_id, conversation_id, draft_name}>` |
-| `applyLocalResources` | `(agentId, {tool_ids, skill_ids}) => Promise<{bound_tool_count, ...}>` |
-| `installWebSkill` | `(agentId, skillId) => Promise<{skill_id, ...}>` |
-| `finalizeNl2Agent` | `(agentId, payload) => Promise<{agent_id, status}>` |
+| `ModelSelectionCard` | 加载平台可用 LLM，保存主模型和备用模型 |
+| `LocalResourcesCard` | 注册推荐批次，Apply All 或 Continue Without Resources |
+| `WebMcpCard` | 展示配置字段，安装、重试、发现和绑定 MCP tools |
+| `WebSkillCard` | 安装在线 Skill |
+| `AgentIdentityCard` | 展示预填名称，允许修改并保存身份 |
+| `FinalizeCard` | 加载权威状态，展示最终审核并完成草稿配置 |
 
-均通过 `fetchWithAuth` 调用 `/api/nl2agent/*`，端点定义在 `frontend/services/api.ts` 的 `API_ENDPOINTS.nl2agent`。
+### 8.3 MCP 卡片字段
 
-### 5.3 卡片渲染：`frontend/components/nl2agent/`
+根据 option schema 动态渲染：
 
-`index.tsx` 导出 `tryRenderNl2AgentCard(language, content, onInstallMcp?)`：解析围栏块 JSON，按语言标签路由到对应组件，非 `nl2agent-` 前缀返回 `null`（交回默认代码块渲染器），JSON 解析失败渲染红色错误框。
+- text
+- secret
+- number
+- URL
+- JSON
 
-| 组件 | Props | 交互按钮 | 行为 |
-|---|---|---|---|
-| `LocalResourcesCard` | `agentId`, `tools`, `skills` | "全部应用" | 调 `applyLocalResources`，成功后禁用 |
-| `WebMcpCard` | `agentId`, `item`, `onInstall?` | "安装" | 触发 `onInstall` 回调打开既有 `AddMcpServiceModal`（预填 url/server_name），不直接调 API |
-| `WebSkillCard` | `agentId`, `item` | "安装" | 调 `installWebSkill`，成功后显示"已安装" |
-| `FinalizeCard` | `agentId`, `status?` | "评审并发布" | `router.push('/${locale}/agents?agent_id=${agentId}')` |
+安装按钮启用前检查：
 
-<div align="center">
-  <img src="./assets/nl2agent-frontend-cards.svg" alt="NL2AGENT 聊天卡片设计" style="width: 90%; height: auto;" />
-</div>
+- 所有必填值已填写
+- JSON 语法正确
+- Port 在有效范围内
+- URL template 不存在未解析变量
+- 安装选项不是 unsupported
 
-_图 5-2：NL2AGENT 在聊天消息中渲染四类交互卡片。本地资源卡片负责批量应用，网络 MCP 卡片复用现有安装弹窗，网络技能卡片逐个安装，终步卡片引导进入评审发布。_
+安装失败后保留用户输入并显示后端错误，允许修改后重试。
 
-### 5.4 Markdown 拦截：`frontend/components/common/markdownRenderer.tsx`
+### 8.4 FinalizeCard
 
-在 `code` 渲染器中，先于 mermaid 检查：若 `match[1].startsWith("nl2agent-")`，调 `tryRenderNl2AgentCard`，返回非 null 则直接渲染。该方案不侵入 SSE 流式管道，卡片从 LLM 最终回答的围栏块渲染。
+FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 
-<div align="center">
-  <img src="./assets/nl2agent-frontend-rendering-flow.svg" alt="NL2AGENT Markdown 卡片渲染流程" style="width: 90%; height: auto;" />
-</div>
+- 身份、内部名称、模型、Tool、Skill 和 MCP 状态来自 session-state API。
+- 描述、提示词、欢迎语、示例问题和运行参数来自 proposal。
+- state 加载失败时显示错误和 Retry，并禁用最终操作。
+- `identity_confirmed=false` 或必要 proposal 字段为空时禁用最终操作。
 
-_图 5-3：前端只在 Markdown 代码块渲染阶段识别 `nl2agent-*` 标签；无法识别或解析失败的内容不会影响普通 Markdown 与 mermaid 渲染。_
+### 8.5 Markdown 路由
 
----
-
-## 6. 数据流
-
-1. **打开聊天**：前端 `POST /nl2agent/session/start` → 后端创建 draft AgentInfo（v0）+ conversation → 返回 `{agent_id, conversation_id}`。
-2. **构建智能体**：前端加载 `/chat`，`run_agent_stream` → `create_agent_config` → 6 个 builtin 工具通过 `metadata` 注入 draft `agent_id` 等上下文。
-3. **每轮对话**：`POST /agent/run`，LLM 按系统提示词提问或调工具。
-4. **本地资源推荐**：LLM 调 `search_local_resources(query)` → service LLM 评分 → 返回 top-N JSON → LLM 以 `nl2agent-local-resources` 围栏块输出 → 前端渲染 `LocalResourcesCard`。
-5. **全部应用（本地）**：用户勾选 → 点"全部应用" → `POST /apply-local-resources` → 后端批量创建 ToolInstance + SkillInstance。
-6. **网络 MCP（逐个安装）**：LLM 调 `search_web_mcps` → 前端渲染 `WebMcpCard` 列表 → 用户点"安装" → 既有 `AddMcpServiceModal` 打开预填 → 用户确认 → 既有 `POST /mcp/add`。安装后下次 `search_local_resources` 即可见新 MCP 工具为本地工具。
-7. **网络技能（逐个安装）**：LLM 调 `search_web_skills` → 前端渲染 `WebSkillCard` → 用户点"安装" → `POST /install-web-skill` → 复用 `skill_service.install_official_skill`。
-8. **终步**：用户说"完成" → LLM 调 `finalize_agent(task_description, tool_ids, skill_ids, ...)` → service 调 `generate_and_save_system_prompt_impl` 填充 `duty_prompt`/`constraint_prompt`/`few_shots_prompt`/`greeting_message`/`example_questions`/`name`/`display_name`/`description` → 重命名 draft → 前端渲染 `FinalizeCard`。
-9. **评审与发布**：用户点"评审并发布" → 跳转草稿配置页 → 评审 → 点"发布"（`publish_version_impl`）→ draft 变为 v1，出现在主列表。
+`MarkdownRenderer` 识别 `nl2agent-*` fenced language，并交给 `tryRenderNl2AgentCard`。解析失败或 ID 不合法时渲染明确错误，不影响普通 Markdown、代码块和 Mermaid。
 
 ---
 
-## 7. 复用映射
+## 9. 权威数据与安全边界
 
-| 既有资产 | NL2AGENT 复用为 |
+| 数据 | 权威来源 |
 |---|---|
-| `run_agent_stream` (`agent_service.py:2912`) | NL2AGENT 聊天主循环 |
-| `create_agent_config` (`create_agent_info.py:659`) | 构建 NexentAgent + 6 个 builtin 工具 |
-| `create_builtin_tool` (`nexent_agent.py:300`) | 6 个新工具分发分支 |
-| `ReadSkillConfigTool` 模式 (`read_skill_config_tool.py`) | 新工具模块模板 |
-| `call_llm_for_system_prompt` (`llm_utils.py`) | 工具/技能 LLM 评分 |
-| `generate_and_save_system_prompt_impl` (`prompt_service.py:99`) | 终步 finalize |
-| `load_default_agents_json_file` (`agent_service.py:2300`) | 从 JSON fixture 加载 NL2AGENT |
-| `create_agent` (`agent_db.py:191`) | 会话启动创建 draft |
-| `list_all_tools` (`tool_configuration_service.py:492`) | 本地工具目录 |
-| `skill_service` 列表/安装逻辑 | 本地技能列表 + 官方技能安装 |
-| `create_or_update_tool_by_tool_info` | 批量绑定本地工具 |
-| `ToolConfig.metadata` (`agent_model.py:125`) | 上下文注入 |
-| `ToolSourceEnum.BUILTIN` (`model.py:611`) | NL2AGENT 工具来源 |
-| `AddMcpServiceModal` (前端) | 网络 MCP 安装，预填打开 |
-| `markdownRenderer.tsx` (前端) | 围栏块拦截 → 卡片渲染 |
-| `prepare_prompt_templates` (`create_agent_info.py:1169`) | 加载 NL2AGENT YAML 提示词 |
-| `prompt_template_service.py` | 模板解析 |
+| 主模型和备用模型 | 草稿 Agent 数据库字段 |
+| Agent 显示名称 | 草稿 Agent `display_name` |
+| 内部名称 | 后端根据持久化显示名称生成 |
+| 本地 Tool/Skill 推荐状态 | Redis recommendation batches |
+| 已绑定 Tool | 启用的 ToolInstance |
+| 已绑定 Skill | 启用的 SkillInstance |
+| MCP 安装和绑定状态 | Redis workflow + MCP/Tool 数据库记录 |
+| MCP recommendation 和安装参数 | Redis session Catalog |
+| Agent 描述和 Prompt | Finalize proposal，经后端字段校验后保存 |
+
+安全规则：
+
+- 所有资源操作校验 tenant 和 draft ownership。
+- MCP 安装不接受 LLM 自由构造的 URL、命令或 package。
+- Secret 不出现在搜索结果、Redis、日志和 API 响应中。
+- Finalize 忽略 LLM 提供的模型和资源 ID。
+- Finalize 重新校验模型当前可用性。
+- 数据库或 Redis 非预期异常不能被解释为“无数据”或“名称可用”。
 
 ---
 
-## 8. 关键文件清单
+## 10. 数据库、部署与兼容性
 
-### 后端
-- `backend/services/nl2agent_service.py`（新）
-- `backend/apps/nl2agent_app.py`（新）
-- `backend/agents/default_agents/nl2agent.json`（新）
-- `backend/prompts/nl2agent_system_prompt_zh.yaml`、`_en.yaml`（新）
-- `backend/database/tool_db.py`（新增 `NL2AGENT_BUILTIN_TOOL_DEFINITIONS` + `seed_nl2agent_builtin_tools`）
-- `backend/consts/model.py`（新增 3 个请求模型）
-- `backend/apps/runtime_app.py`（注册 nl2agent_router）
-- `backend/apps/config_app.py`（新增 startup 钩子）
-- `backend/apps/agent_app.py`（新增 `include_drafts` 查询参数）
-- `backend/services/agent_service.py`（`list_all_agent_info_impl` 新增 `include_drafts` 过滤）
-- `backend/agents/create_agent_info.py`（新增 `_NL2AGENT_TOOL_CLASS_NAMES` + metadata 注入）
+### 10.1 数据库
+
+当前方案没有新增数据库表或字段，也没有 SQL migration。复用：
+
+- Agent 和 AgentVersion
+- Conversation
+- Tool catalog 和 ToolInstance
+- Skill catalog 和 SkillInstance
+- Model 配置
+- MCP 服务与发现工具记录
+
+### 10.2 启动顺序
+
+配置服务负责启动 Seed，runtime 使用 Seed 后的 Agent 和 Tool catalog。部署或更新后推荐顺序：
+
+1. 启动或重启 config service。
+2. 确认日志中三个 NL2AGENT builtin tools 和默认 Agent Seed 成功。
+3. 启动或重启 runtime service。
+4. 使用新的 NL2AGENT Conversation 验证。
+
+### 10.3 兼容性
+
+- 不支持已删除的 `NL2AgentApplyLocalResourcesTool` 等旧 builtin tools。
+- 不对旧测试 Agent 自动做 legacy reconciliation。
+- 历史 Conversation 如果没有 conversation/draft 映射，不得猜测草稿 ID。
+- Finalize request 暂时保留部分旧字段以维持接口形状，但服务端不会将其作为可信身份、模型或资源来源。
+
+---
+
+## 11. 关键文件
+
+### Backend
+
+- `backend/apps/nl2agent_app.py`
+- `backend/services/nl2agent_service.py`
+- `backend/agents/nl2agent_session_catalog.py`
+- `backend/agents/create_agent_info.py`
+- `backend/agents/default_agents/nl2agent.json`
+- `backend/database/tool_db.py`
+- `backend/prompts/nl2agent_system_prompt_en.yaml`
+- `backend/prompts/nl2agent_system_prompt_zh.yaml`
 
 ### SDK
-- `sdk/nexent/core/tools/nl2agent/`（新，6 个工具模块 + `_context.py` + `__init__.py`）
-- `sdk/nexent/core/tools/__init__.py`（导出 6 个可调用对象）
-- `sdk/nexent/core/agents/nexent_agent.py`（`create_builtin_tool` 新增 6 个分支）
 
-### 前端
-- `frontend/components/nl2agent/`（新，4 个卡片组件 + `index.tsx`）
-- `frontend/services/nl2agentService.ts`（新）
-- `frontend/services/api.ts`（新增 `nl2agent` 端点段）
-- `frontend/components/common/markdownRenderer.tsx`（拦截 `nl2agent-` 围栏块）
-- `frontend/app/[locale]/agents/components/AgentManageComp.tsx`（新增"Agent Builder"卡片）
-- `frontend/public/locales/{en,zh}/common.json`（新增 i18n 键）
+- `sdk/nexent/core/tools/nl2agent/_context.py`
+- `sdk/nexent/core/tools/nl2agent/search_local_resources_tool.py`
+- `sdk/nexent/core/tools/nl2agent/search_web_mcps_tool.py`
+- `sdk/nexent/core/tools/nl2agent/search_web_skills_tool.py`
+- `sdk/nexent/core/agents/nexent_agent.py`
+
+### Frontend
+
+- `frontend/services/nl2agentService.ts`
+- `frontend/lib/chat/nl2agentDraftContext.ts`
+- `frontend/components/nl2agent/`
+- `frontend/components/common/markdownRenderer.tsx`
+- `frontend/app/[locale]/chat/internal/chatInterface.tsx`
+
+### Tests
+
+- `test/backend/services/test_nl2agent_service.py`
+- `test/backend/agents/test_nl2agent_session_catalog.py`
+- `test/backend/utils/test_prompt_template_utils.py`
+- `test/sdk/core/tools/test_nl2agent_search_tools.py`
+- `frontend/components/nl2agent/__tests__/nl2agentCards.test.tsx`
 
 ---
 
-## 9. 风险与后续事项
+## 12. 验证清单
 
-1. **工具目录规模**：租户内若有 100+ 工具，评分 LLM 提示词会膨胀。缓解：先按 label/category 预筛（复用 `query_tools_by_labels`），或分页。待实测后优化。
-2. **Registry/社区搜索端点**：`search_web_mcps` 直接调用既有后端端点，需确认其稳定性与分页参数。
-3. **草稿清理**：用户中途放弃的 draft 会累积。后续应加 TTL 清理任务或在 NL2AGENT 聊天中提供"丢弃"按钮。
-4. **播种顺序**：`ag_tool_info_t` 行必须在 fixture 的 `enabled_tool_ids` 解析前存在。当前 `seed_nl2agent_default_agent` 在 startup 钩子中先插工具行再创建智能体，顺序正确。
-5. **发布流程**：finalize 后 draft 停在 v0，用户需手动发布。是否自动发布属于产品决策，建议保持手动（用户先评审）。
-6. **跨轮状态**：draft `agent_id` 在 `ToolConfig.metadata` 中于构建期固定，会话内不变；对话历史作为 LLM 记忆。足够支撑单会话场景。
-7. **并发会话**：多标签页开多个会话时，每个会话独立获得 draft `agent_id`，`Nl2AgentContext` 模块级单例在每次 `create_agent_config` 时被覆盖——由于每次 `run_agent_stream` 都会重建，不会跨会话泄漏。
+### Seed 与会话
+
+- [ ] 每个目标租户存在三个 `category='nl2agent'` builtin Tool catalog rows。
+- [ ] 默认 `nl2agent` Agent 只绑定三个搜索工具。
+- [ ] session start 返回 NL2AGENT Agent ID、draft ID 和 Conversation ID。
+- [ ] Catalog 已按 tenant/draft 写入 Redis。
+- [ ] 普通 Agent 列表不展示默认 NL2AGENT 和 `draft_*` Agent。
+
+### 模型
+
+- [ ] 模型卡只展示平台当前可用 LLM。
+- [ ] 不存在、非 LLM、不可用、重复或跨租户模型均无法保存。
+- [ ] 最终配置时模型变为不可用会被拒绝。
+
+### 本地资源
+
+- [ ] 搜索按原子关键词 OR 模糊匹配并过滤弱结果。
+- [ ] Tool 和 Skill 合计最多返回 5 条。
+- [ ] 卡片渲染后 recommendation batch 只注册一次。
+- [ ] Apply All 和 Skip 只解决指定批次。
+- [ ] 未展示卡片或存在未解决批次时无法最终配置。
+
+### MCP
+
+- [ ] Registry 和 Community 数据规范化为统一安装 option。
+- [ ] Secret 默认值不会进入响应、Redis 或日志。
+- [ ] 缺少必填配置、非法 JSON/Port、未解析 URL template 会被拒绝。
+- [ ] 安装、健康检查和工具发现成功后显示稳定 tool ID。
+- [ ] 用户可以选择性绑定或显式跳过。
+- [ ] `connected` 状态会阻止最终配置。
+
+### 身份与最终配置
+
+- [ ] NL2AGENT 自动生成并预填显示名称。
+- [ ] 用户保存身份后 Redis 记录 `identity_confirmed=true`。
+- [ ] 内部名称由后端生成并处理冲突、纯中文和数字开头情况。
+- [ ] FinalizeCard 加载失败时显示 Retry 且不能继续。
+- [ ] 最终配置忽略 proposal 中伪造的身份、模型和资源 ID。
+- [ ] 最终配置只使用启用的 ToolInstance 和 SkillInstance。
+
+### 会话隔离与卡片
+
+- [ ] Conversation 切换时使用各自映射的 draft ID。
+- [ ] Payload ID 与 Conversation draft ID 冲突时拒绝卡片。
+- [ ] `nl2agent-search-*` 伪卡片不会被当成结果卡片。
+- [ ] 三个搜索工具每种资源审查只调用一次并输出一张合并卡片。
 
 ---
 
-## 10. 验证清单
+## 13. 已知限制与后续事项
 
-### 启动验证
-- [ ] `ag_tool_info_t` 存在 6 行 `category='nl2agent'` 记录
-- [ ] `ag_tenant_agent_t` 存在 `name='nl2agent'` 记录
-- [ ] 重启后端，播种幂等无报错
+1. Redis Catalog 和工作流状态 TTL 为 24 小时，超时的未完成会话需要重新开始或增加产品级恢复策略。
+2. SDK 搜索缓存当前为单进程内 10 分钟缓存；Catalog 已跨 worker 持久化，但搜索结果缓存本身不是分布式缓存。
+3. 放弃的 `draft_*` Agent 仍可能累积，后续可增加显式丢弃操作或定时清理策略。
+4. 在线 Skill 安装和草稿 SkillInstance 绑定是不同概念，交互上应继续明确区分“已安装到租户”和“已应用到当前草稿”。
+5. 最终配置返回 `draft_ready`，正式版本发布继续复用平台既有评审和发布流程，不自动发布。
+6. SDK 中仍保留 `nl2agent_finalize_proposal` Skill 资料作为历史/辅助资产，但它不是 runtime callable tool；系统 Prompt 也禁止把 Skill 名称作为函数执行。
+7. MCP 搜索只覆盖 session start 时获取的 Registry 和 Community 各前 30 条，用户查询不会实时下推到远程 Marketplace；默认排序之外的 MCP 可能无法被发现。
+8. 在线 Skill 搜索实际扫描 official ZIP 目录，不是远程互联网检索；目录之外的 Skill 不会成为候选。
+9. `resource_missing` Skill 当前只会被过滤并记录上下文 warning，不提供重新安装或资源修复按钮；修复能力不在当前范围。
 
-### 会话验证
-- [ ] `POST /nl2agent/session/start` 返回 `{agent_id, conversation_id, draft_name}`
-- [ ] draft 行 `name` 以 `draft_` 开头，不出现在 `GET /agents` 默认响应中
-- [ ] 前端点击"Agent Builder"后跳转 `/chat`，NL2AGENT 智能体被选中
+### 13.1 在线 Skill 搜索实现保证
 
-### 对话验证
-- [ ] 第 1 轮开放式问候并询问目标
-- [ ] 后续轮次每次 1-2 个聚焦问题
-- [ ] 提及能力需求时调 `search_local_resources` 并渲染 `LocalResourcesCard`
-- [ ] 点"全部应用"后 DB 出现对应 ToolInstance/SkillInstance
-- [ ] 本地不足时调 `search_web_mcps`/`search_web_skills` 渲染卡片
-- [ ] 网络 MCP "安装"打开既有 modal 预填
-- [ ] 网络技能"安装"调 `POST /install-web-skill` 成功
-- [ ] 用户说"完成"后调 `finalize_agent`，渲染 `FinalizeCard`
-- [ ] "评审并发布"跳转草稿配置页，提示词字段已填充
-- [ ] 发布后智能体出现在主列表，可经 `POST /agent/run` 运行
-
-### 边界验证
-- [ ] 无 token 调 `/nl2agent/session/start` → 401
-- [ ] 空本地目录的租户调 `search_local_resources` 返回空列表不崩溃
-- [ ] LLM 输出非法 JSON 围栏块时渲染红色错误框而非崩溃
-- [ ] 用户改主意可重新搜索/移除资源
+- [x] Skill 名称中的关键词能够参与精确和模糊匹配。
+- [x] Skill description 和 tags 参与匹配。
+- [x] Backend Catalog 同时提供 `name` 和 `skill_name`，SDK 使用统一回退规则。
+- [x] 已安装 Skill 不会被当作新的可安装推荐重复展示。
+- [x] `resource_missing` 不会与 `installable` 混淆，并会产生 tenant/draft 上下文 warning。
+- [x] 名称、描述、tags、状态过滤、元数据容错和安装后缓存失效均有聚焦测试覆盖。

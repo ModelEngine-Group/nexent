@@ -303,6 +303,7 @@ async def install_web_skill_api(
 
     try:
         result = await install_web_skill(
+            agent_id=agent_id,
             skill_id=payload.skill_id,
             skill_name=payload.skill_name,
             tenant_id=tenant_id,

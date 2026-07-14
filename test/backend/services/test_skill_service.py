@@ -6,6 +6,7 @@ import os
 import io
 import json
 import types
+import zipfile
 
 # Add backend path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -4851,3 +4852,100 @@ class TestOfficialSkillsZipDirectory:
 
         names = {skill["name"] for skill in skills}
         assert "search-web-tavily" in names
+
+    def test_official_skill_metadata_uses_tenant_global_then_zip_priority(
+        self, tmp_path, monkeypatch
+    ):
+        from backend.services import skill_service
+
+        for name in ("tenant-meta", "global-meta", "zip-meta"):
+            with zipfile.ZipFile(tmp_path / f"{name}.zip", "w") as archive:
+                archive.writestr("SKILL.md", f"metadata for {name}")
+        (tmp_path / "tenant-meta").mkdir()
+
+        def get_skill_by_name(name, tenant_id):
+            records = {
+                ("tenant-meta", "tenant_1"): {
+                    "skill_id": 10,
+                    "description": "Tenant description",
+                    "tags": ["Tenant", "tenant"],
+                },
+                ("tenant-meta", None): {
+                    "skill_id": 11,
+                    "description": "Global ignored",
+                    "tags": ["global"],
+                },
+                ("global-meta", None): {
+                    "skill_id": 12,
+                    "description": "Global description",
+                    "tags": "[\"global\", \"docs\", \"global\"]",
+                },
+            }
+            return records.get((name, tenant_id))
+
+        monkeypatch.setattr(skill_service, "_get_official_skills_zip_dir", lambda: str(tmp_path))
+        monkeypatch.setattr(skill_service.skill_db, "get_skill_by_name", get_skill_by_name)
+        monkeypatch.setattr(
+            skill_service,
+            "SkillManager",
+            lambda **kwargs: MagicMock(local_skills_dir=str(tmp_path)),
+        )
+        monkeypatch.setattr(
+            skill_service.SkillLoader,
+            "parse",
+            MagicMock(return_value={
+                "description": "ZIP description",
+                "tags": ["zip", "docs", "ZIP"],
+            }),
+        )
+
+        skills = skill_service.get_official_skills_with_status(tenant_id="tenant_1")
+        by_name = {item["name"]: item for item in skills}
+
+        assert by_name["tenant-meta"] == {
+            "skill_id": 10,
+            "skill_name": "tenant-meta",
+            "name": "tenant-meta",
+            "description": "Tenant description",
+            "tags": ["Tenant"],
+            "source": "official",
+            "status": "installed",
+        }
+        assert by_name["global-meta"]["description"] == "Global description"
+        assert by_name["global-meta"]["tags"] == ["global", "docs"]
+        assert by_name["global-meta"]["status"] == "installable"
+        assert by_name["zip-meta"]["description"] == "ZIP description"
+        assert by_name["zip-meta"]["tags"] == ["zip", "docs"]
+
+    def test_official_skill_catalog_tolerates_invalid_zip_metadata(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        from backend.services import skill_service
+
+        (tmp_path / "broken.zip").write_bytes(b"not a zip")
+        monkeypatch.setattr(skill_service, "_get_official_skills_zip_dir", lambda: str(tmp_path))
+        monkeypatch.setattr(
+            skill_service.skill_db, "get_skill_by_name", MagicMock(return_value=None)
+        )
+
+        with caplog.at_level("WARNING"):
+            skills = skill_service.get_official_skills_with_status(tenant_id="tenant_1")
+
+        assert skills == [{
+            "skill_id": 0,
+            "skill_name": "broken",
+            "name": "broken",
+            "description": "",
+            "tags": [],
+            "source": "official",
+            "status": "installable",
+        }]
+        assert "broken.zip" in caplog.text
+
+    def test_official_skill_tags_are_normalized_and_deduplicated(self):
+        from backend.services import skill_service
+
+        assert skill_service._normalize_official_skill_tags("docs，PPT,docs") == [
+            "docs",
+            "PPT",
+        ]

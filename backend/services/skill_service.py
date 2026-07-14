@@ -2620,6 +2620,71 @@ def _get_official_skills_zip_dir() -> Optional[str]:
     return None
 
 
+def _normalize_official_skill_tags(value: Any) -> List[str]:
+    """Return stable, distinct string tags for an official skill catalog item."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raw_tags: List[Any] = []
+        else:
+            try:
+                parsed = json.loads(stripped)
+                raw_tags = parsed if isinstance(parsed, list) else re.split("[,\uFF0C]", stripped)
+            except json.JSONDecodeError:
+                raw_tags = re.split("[,\uFF0C]", stripped)
+    elif isinstance(value, (list, tuple, set)):
+        raw_tags = list(value)
+    else:
+        raw_tags = []
+
+    tags: List[str] = []
+    seen = set()
+    for raw_tag in raw_tags:
+        tag = str(raw_tag).strip()
+        key = tag.casefold()
+        if not tag or key in seen:
+            continue
+        seen.add(key)
+        tags.append(tag)
+    return tags
+
+
+def _read_official_skill_zip_metadata(zip_path: str) -> Dict[str, Any]:
+    """Read description and tags from the first SKILL.md in an official ZIP."""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            members = [name for name in archive.namelist() if not name.endswith("/")]
+            skill_md_path = next(
+                (
+                    name
+                    for name in members
+                    if "/" not in _normalize_zip_entry_path(name)
+                    and _normalize_zip_entry_path(name).lower() == "skill.md"
+                ),
+                None,
+            )
+            if skill_md_path is None:
+                skill_md_path = next(
+                    (
+                        name
+                        for name in members
+                        if _normalize_zip_entry_path(name).lower().endswith("/skill.md")
+                    ),
+                    None,
+                )
+            if skill_md_path is None:
+                raise ValueError("SKILL.md not found")
+            content = archive.read(skill_md_path).decode("utf-8")
+        parsed = SkillLoader.parse(content)
+        return {
+            "description": str(parsed.get("description") or ""),
+            "tags": _normalize_official_skill_tags(parsed.get("tags")),
+        }
+    except Exception as exc:
+        logger.warning("Failed to read official Skill metadata from %s: %s", zip_path, exc)
+        return {"description": "", "tags": []}
+
+
 def install_skills_from_zip_for_tenant(
     skill_names: List[str],
     tenant_id: str,
@@ -2740,14 +2805,14 @@ def get_official_skills_with_status(
             continue
 
         skill_id: Optional[int] = None
-        is_installed = False
+        tenant_skill: Optional[Dict[str, Any]] = None
+        global_skill: Optional[Dict[str, Any]] = None
         has_resources = True
 
         if tenant_id:
-            existing = skill_db_module.get_skill_by_name(skill_name, tenant_id)
-            if existing:
-                skill_id = existing.get("skill_id")
-                is_installed = True
+            tenant_skill = skill_db_module.get_skill_by_name(skill_name, tenant_id)
+            if tenant_skill:
+                skill_id = tenant_skill.get("skill_id")
                 skill_manager = SkillManager(
                     base_skills_dir=CONTAINER_SKILLS_PATH,
                     tenant_id=tenant_id
@@ -2758,32 +2823,37 @@ def get_official_skills_with_status(
                 )
                 has_resources = os.path.isdir(skill_dir)
 
-        if skill_id is None:
-            global_skill = skill_db_module.get_skill_by_name(skill_name, None)
-            if global_skill:
-                skill_id = global_skill.get("skill_id")
+        global_skill = skill_db_module.get_skill_by_name(skill_name, None)
+        if skill_id is None and global_skill:
+            skill_id = global_skill.get("skill_id")
 
-        if is_installed and not has_resources:
+        if tenant_skill and not has_resources:
             status = "resource_missing"
-        elif is_installed:
+        elif tenant_skill:
             status = "installed"
         else:
             status = "installable"
 
-        description = ""
-        if skill_id:
-            db_skill = skill_db_module.get_skill_by_id(skill_id, tenant_id) if tenant_id else None
-            if db_skill:
-                description = db_skill.get("description", "")
+        zip_metadata: Dict[str, Any] = {}
+        description = str((tenant_skill or {}).get("description") or "")
+        tags = _normalize_official_skill_tags((tenant_skill or {}).get("tags"))
         if not description:
-            db_global = skill_db_module.get_skill_by_name(skill_name, None)
-            if db_global:
-                description = db_global.get("description", "")
+            description = str((global_skill or {}).get("description") or "")
+        if not tags:
+            tags = _normalize_official_skill_tags((global_skill or {}).get("tags"))
+        if not description or not tags:
+            zip_metadata = _read_official_skill_zip_metadata(os.path.join(zip_dir, zip_file))
+        if not description:
+            description = str(zip_metadata.get("description") or "")
+        if not tags:
+            tags = _normalize_official_skill_tags(zip_metadata.get("tags"))
 
         result.append({
             "skill_id": skill_id if skill_id is not None else 0,
+            "skill_name": skill_name,
             "name": skill_name,
             "description": description,
+            "tags": tags,
             "source": "official",
             "status": status,
         })

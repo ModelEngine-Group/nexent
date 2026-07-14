@@ -66,7 +66,17 @@ _EXPECTED_SKILL_CATALOG = [
 ]
 _REGISTRY_RESULTS = [{"name": "github-mcp", "description": "Repository automation"}]
 _COMMUNITY_RESULTS = [{"communityId": 55, "name": "browser-mcp"}]
-_OFFICIAL_SKILLS = [{"skill_id": 12, "skill_name": "code-review"}]
+_OFFICIAL_SKILLS = [
+    {
+        "skill_id": 12,
+        "skill_name": "code-review",
+        "name": "code-review",
+        "description": "Review source changes.",
+        "tags": ["code", "review"],
+        "source": "official",
+        "status": "installable",
+    }
+]
 _EXPECTED_SESSION_CATALOGS = {
     "tool_catalog": _EXPECTED_TOOL_CATALOG,
     "skill_catalog": _EXPECTED_SKILL_CATALOG,
@@ -237,6 +247,54 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
     create_conversation.assert_called_once_with(
         conversation_title="NL2AGENT - draft_abcdef12", user_id="user_1"
     )
+
+
+@pytest.mark.asyncio
+async def test_start_session_keeps_only_installable_official_skills(
+    monkeypatch, caplog
+):
+    official_skills = [
+        {"skill_id": 1, "name": "ready", "status": "installable"},
+        {"skill_id": 2, "name": "already-installed", "status": "installed"},
+        {"skill_id": 3, "name": "missing-files", "status": "resource_missing"},
+    ]
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_official_skills_with_status",
+        MagicMock(return_value=official_skills),
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "search_agent_id_by_agent_name", MagicMock(return_value=101)
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value=_seeded_nl2agent_info()),
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "create_agent", MagicMock(return_value={"agent_id": 202})
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_conversation",
+        MagicMock(return_value={"conversation_id": 303}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
+    )
+
+    with caplog.at_level("WARNING"):
+        result = await nl2agent_service.start_session(
+            user_id="user_1", tenant_id="tenant_1", language="en"
+        )
+
+    assert result["official_skills"] == [official_skills[0]]
+    assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
+        official_skills[0]
+    ]
+    assert "tenant_id=tenant_1" in caplog.text
+    assert "draft_agent_id=202" in caplog.text
+    assert "missing-files" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -693,10 +751,35 @@ async def test_install_community_container_merges_card_secret_without_persisting
 async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     install_from_zip = MagicMock(return_value=["search-web-tavily"])
     monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
         nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1",
+        202,
+        {
+            **_EXPECTED_SESSION_CATALOGS,
+            "official_skills": [
+                {
+                    "skill_id": 12,
+                    "skill_name": "search-web-tavily",
+                    "status": "installable",
+                },
+                {
+                    "skill_id": 13,
+                    "skill_name": "code-review",
+                    "status": "installable",
+                },
+            ],
+        },
     )
 
     result = await nl2agent_service.install_web_skill(
+        agent_id=202,
         skill_id=0,
         skill_name="search-web-tavily",
         tenant_id="tenant_1",
@@ -717,14 +800,46 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         "installed_ids": [],
         "installed_names": ["search-web-tavily"],
     }
+    assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
+        {
+            "skill_id": 13,
+            "skill_name": "code-review",
+            "status": "installable",
+        }
+    ]
 
 
 @pytest.mark.asyncio
 async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
     install_by_id = MagicMock(return_value=[107])
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
     monkeypatch.setattr(nl2agent_service, "install_skills_for_tenant", install_by_id)
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1",
+        202,
+        {
+            **_EXPECTED_SESSION_CATALOGS,
+            "official_skills": [
+                {
+                    "skill_id": 77,
+                    "skill_name": "legacy-source",
+                    "status": "installable",
+                },
+                {
+                    "skill_id": 88,
+                    "skill_name": "keep-me",
+                    "status": "installable",
+                },
+            ],
+        },
+    )
 
     result = await nl2agent_service.install_web_skill(
+        agent_id=202,
         skill_id=77,
         tenant_id="tenant_1",
         user_id="user_1",
@@ -738,6 +853,71 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
         "installed": True,
         "installed_ids": [107],
     }
+    assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
+        {"skill_id": 88, "skill_name": "keep-me", "status": "installable"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_install_web_skill_validates_draft_ownership(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(side_effect=ValueError("agent not found")),
+    )
+    install_from_zip = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+    )
+
+    with pytest.raises(nl2agent_service.AgentRunException, match="draft agent not found"):
+        await nl2agent_service.install_web_skill(
+            agent_id=202,
+            skill_id=0,
+            skill_name="search-web-tavily",
+            tenant_id="other_tenant",
+            user_id="user_1",
+        )
+
+    install_from_zip.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_install_web_skill_rejects_resource_missing_catalog_item(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    install_from_zip = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1",
+        202,
+        {
+            **_EXPECTED_SESSION_CATALOGS,
+            "official_skills": [{
+                "skill_id": 12,
+                "skill_name": "missing-files",
+                "status": "resource_missing",
+            }],
+        },
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException, match="not available for installation"
+    ):
+        await nl2agent_service.install_web_skill(
+            agent_id=202,
+            skill_id=12,
+            skill_name="missing-files",
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    install_from_zip.assert_not_called()
 
 
 @pytest.mark.asyncio

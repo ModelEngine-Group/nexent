@@ -404,6 +404,7 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
                 "name": "Code Review",
                 "description": "Review pull requests and source changes.",
                 "tags": ["code", "review"],
+                "status": "installable",
             },
             {
                 "skill_id": 13,
@@ -411,6 +412,7 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
                 "name": "Invoice Reader",
                 "description": "Extract totals from invoices.",
                 "tags": ["finance"],
+                "status": "installable",
             },
         ],
     )
@@ -420,6 +422,77 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
     assert payload["agent_id"] == 202
     assert payload["items"][0]["skill_id"] == 12
     assert len(payload["items"]) == 1
+
+
+def test_web_skill_search_accepts_backend_name_field_and_searches_metadata():
+    tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=[
+            {
+                "skill_id": 20,
+                "name": "presentation-builder",
+                "description": "Create polished slide decks.",
+                "tags": ["ppt", "design"],
+                "status": "installable",
+            },
+            {
+                "skill_id": 21,
+                "name": "invoice-reader",
+                "description": "Extract finance totals.",
+                "tags": ["accounting"],
+                "status": "installable",
+            },
+        ],
+    )
+
+    assert _loads(tool(query="presentation"))["items"][0]["skill_id"] == 20
+    assert _loads(tool(query="slide"))["items"][0]["skill_id"] == 20
+    assert _loads(tool(query="ppt"))["items"][0]["skill_id"] == 20
+
+
+def test_web_skill_search_defensively_filters_non_installable_statuses():
+    tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=[
+            {"skill_id": 1, "name": "document-ready", "status": "installable"},
+            {"skill_id": 2, "name": "document-installed", "status": "installed"},
+            {
+                "skill_id": 3,
+                "name": "document-missing",
+                "status": "resource_missing",
+            },
+            {"skill_id": 4, "name": "document-unknown"},
+        ],
+    )
+
+    payload = _loads(tool(query="document"))
+
+    assert [item["skill_id"] for item in payload["items"]] == [1]
+
+
+def test_web_skill_cache_changes_when_catalog_fingerprint_changes():
+    first_tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=[
+            {"skill_id": 1, "name": "first-document-skill", "status": "installable"}
+        ],
+    )
+    second_tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=[
+            {"skill_id": 2, "name": "second-document-skill", "status": "installable"}
+        ],
+    )
+
+    first = _loads(first_tool(query="document"))
+    second = _loads(second_tool(query="DOCUMENT"))
+
+    assert [item["skill_id"] for item in first["items"]] == [1]
+    assert [item["skill_id"] for item in second["items"]] == [2]
 
 
 def test_local_search_limits_tools_and_skills_to_five_combined():
@@ -446,9 +519,24 @@ def test_web_skill_search_deduplicates_ids_and_normalized_names():
         draft_agent_id=202,
         tenant_id="tenant_1",
         official_skills=[
-            {"skill_id": 1, "skill_name": "docx-reader", "description": "Read DOCX."},
-            {"skill_id": 1, "skill_name": "docx-reader-copy", "description": "Duplicate ID."},
-            {"skill_id": 2, "skill_name": "DOCX Reader", "description": "Duplicate name."},
+            {
+                "skill_id": 1,
+                "skill_name": "docx-reader",
+                "description": "Read DOCX.",
+                "status": "installable",
+            },
+            {
+                "skill_id": 1,
+                "skill_name": "docx-reader-copy",
+                "description": "Duplicate ID.",
+                "status": "installable",
+            },
+            {
+                "skill_id": 2,
+                "skill_name": "DOCX Reader",
+                "description": "Duplicate name.",
+                "status": "installable",
+            },
         ],
     )
 
@@ -501,7 +589,12 @@ def test_constructing_all_search_tools_preserves_each_tool_context():
         agent_id=101,
         draft_agent_id=202,
         tenant_id="tenant_1",
-        official_skills=[{"skill_id": 9, "skill_name": "code-review", "description": "Review code."}],
+        official_skills=[{
+            "skill_id": 9,
+            "skill_name": "code-review",
+            "description": "Review code.",
+            "status": "installable",
+        }],
     )
 
     assert _loads(local_tool(query="document"))["tools"][0]["tool_id"] == 1
