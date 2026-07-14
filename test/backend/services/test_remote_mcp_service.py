@@ -941,7 +941,7 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
             tenant_id='tid', user_id='uid', name='test-svc',
             description='desc', source='local', tags=[],
             authorization_token='tok', registry_json=None,
-            version=None, market_id=None,
+            market_id=None,
             port=8080, mcp_config=self._make_mcp_config(),
         )
 

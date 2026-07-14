@@ -423,7 +423,6 @@ async def add_container_mcp_service(
     tags: list | None,
     authorization_token: str | None,
     registry_json: dict | None,
-    version: str | None,
     market_id: int | None,
     port: int,
     mcp_config: MCPConfigRequest,
@@ -439,7 +438,6 @@ async def add_container_mcp_service(
         tags: MCP tags
         authorization_token: Authorization token
         registry_json: Registry metadata JSON
-        version: MCP version
         community_id: Linked community record ID
         port: Host port for the container
         mcp_config: MCP server configuration
@@ -511,7 +509,6 @@ async def add_container_mcp_service(
             authorization_token=auth_token,
             container_config=container_config,
             registry_json=registry_json,
-            version=version,
             market_id=market_id,
             enabled=True,
             container_id=container_info.get("container_id"),

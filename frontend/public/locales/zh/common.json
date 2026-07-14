@@ -3262,7 +3262,7 @@
   "systemPrompt.finetune.modeSelect": "替换选中",
   "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围",
   "mcpTools.page.tab.repository": "仓库",
-  "mcpTools.page.tab.mine": "我的",
+  "mcpTools.page.tab.mine": "我的MCP",
   "mcpTools.page.tab.review": "审核中心",
   "mcpTools.page.searchNameTagPlaceholder": "按名称或标签检索 MCP 服务",
   "mcpTools.deploymentType.all": "全部类型",

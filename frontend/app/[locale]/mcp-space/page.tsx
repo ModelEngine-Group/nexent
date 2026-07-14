@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, ConfigProvider, Empty, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { CheckCircle, ChevronLeft, ChevronRight, Clock, CloudUpload, Download, Eye, Inbox, Plus, Puzzle, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle, ChevronLeft, ChevronRight, Clock, CloudUpload, Download, Eye, Inbox, Plus, Puzzle, ShieldCheck, User, XCircle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
@@ -37,7 +37,6 @@ import type {
 import {
   FILTER_ALL,
   McpDeploymentType,
-  McpSource,
   MCP_TOOLS_QUERY_KEYS,
   McpToolsServicesTab,
   McpTransportType,
@@ -121,9 +120,6 @@ export default function McpToolsPage() {
     McpToolsServicesTab.REPOSITORY
   );
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addModalInitialTab, setAddModalInitialTab] = useState<McpSource>(
-    McpSource.LOCAL
-  );
   const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(
     null
   );
@@ -163,12 +159,6 @@ export default function McpToolsPage() {
   }, [isAdmin, tab]);
 
   const openAddModal = () => {
-    setAddModalInitialTab(McpSource.LOCAL);
-    setShowAddModal(true);
-  };
-
-  const openImportModal = () => {
-    setAddModalInitialTab(McpSource.REGISTRY);
     setShowAddModal(true);
   };
 
@@ -227,7 +217,14 @@ export default function McpToolsPage() {
   ).length;
 
   const searchActions = tab === McpToolsServicesTab.MINE ? (
-    <></>
+    <Button
+      type="primary"
+      className="flex h-11 shrink-0 items-center gap-1.5"
+      icon={<Plus className="size-4" />}
+      onClick={openAddModal}
+    >
+      添加 MCP
+    </Button>
   ) : null;
 
 
@@ -244,27 +241,21 @@ export default function McpToolsPage() {
             className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10"
           >
             <div className="flex flex-col gap-6">
-              <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-              >
-                <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex items-start gap-4">
-                    <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
-                      <Puzzle className="size-7" />
-                    </div>
-                    <div>
-                      <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
-                        {t("mcpTools.page.title")}
-                      </h1>
-                      <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                        {t("mcpTools.page.subtitle")}
-                      </p>
-                    </div>
+              <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                    <Puzzle className="size-7" />
                   </div>
-                </section>
-              </motion.div>
+                  <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
+                      {t("mcpTools.page.title")}
+                    </h1>
+                    <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                      {t("mcpTools.page.subtitle")}
+                    </p>
+                  </div>
+                </div>
+              </section>
 
               <Tabs value={tab} onValueChange={(value) => setTab(value as McpToolsServicesTab)} className="w-full">
                 <TabsList className={cn("mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
@@ -274,7 +265,7 @@ export default function McpToolsPage() {
                     <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{repositoryCount}</span>
                   </TabsTrigger>
                   <TabsTrigger value={McpToolsServicesTab.MINE} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
-                    <CloudUpload className="size-4" aria-hidden />
+                    <User className="size-4" aria-hidden />
                     {t("mcpTools.page.tab.mine")}
                     <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{mineCount}</span>
                   </TabsTrigger>
@@ -368,7 +359,6 @@ export default function McpToolsPage() {
 
               <AddMcpServiceModal
                 open={showAddModal}
-                initialTab={addModalInitialTab}
                 onClose={() => setShowAddModal(false)}
               />
             </div>
@@ -458,15 +448,17 @@ function RepositoryView({
         </ResponsiveCardGrid>
       )}
 
-      <McpToolsPagination
-        mode="cursor"
-        page={browser.page}
-        resultCount={filteredServices.length}
-        hasPrevPage={browser.hasPrevPage}
-        hasNextPage={browser.hasNextPage}
-        onPrevPage={browser.prevPage}
-        onNextPage={browser.nextPage}
-      />
+      {filteredServices.length > 0 ? (
+        <McpToolsPagination
+          mode="cursor"
+          page={browser.page}
+          resultCount={filteredServices.length}
+          hasPrevPage={browser.hasPrevPage}
+          hasNextPage={browser.hasNextPage}
+          onPrevPage={browser.prevPage}
+          onNextPage={browser.nextPage}
+        />
+      ) : null}
     </div>
   );
 }
@@ -803,9 +795,9 @@ function MineView({
           <Spin />
         </PlaceholderBox>
       ) : filteredItems.length === 0 ? (
-        <PlaceholderBox>
-          <Empty description={t("mcpTools.mine.empty")} />
-        </PlaceholderBox>
+        <ResponsiveCardGrid>
+          <AddMcpServiceCard onClick={onAdd} />
+        </ResponsiveCardGrid>
       ) : (
         <ResponsiveCardGrid>
           {page === 1 ? <AddMcpServiceCard onClick={onAdd} /> : null}

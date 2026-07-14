@@ -65,7 +65,11 @@ export default function McpToolsPagination(props: McpToolsPaginationProps) {
     );
   }
 
-  return (
+  if (props.mode === "cursor") {
+    // Hide pagination when there is only one page
+    if (props.page === 1 && !props.hasPrevPage && !props.hasNextPage) return null;
+
+    return (
     <div className="flex items-center justify-center gap-2 pt-2">
       <span className="text-sm text-slate-600">
         {t("mcpTools.community.pageResult", {
@@ -93,4 +97,5 @@ export default function McpToolsPagination(props: McpToolsPaginationProps) {
       </Button>
     </div>
   );
+  }
 }
