@@ -507,6 +507,7 @@ render_k8s_runtime_config_values() {
     printf '      sslVerify: %s\n' "$(yaml_quote "$(env_or_default OAUTH_SSL_VERIFY "true")")"
     printf '      caBundle: %s\n' "$(yaml_quote "$(env_or_default OAUTH_CA_BUNDLE "")")"
     printf '      callbackBaseUrl: %s\n' "$(yaml_quote "$(env_or_default OAUTH_CALLBACK_BASE_URL "http://localhost:30000")")"
+    printf '      loginMode: %s\n' "$(yaml_quote "$(env_or_default OAUTH_LOGIN_MODE "button")")"
     echo "    cas:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default CAS_ENABLED "false")")"
     printf '      serverUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_SERVER_URL "")")"
