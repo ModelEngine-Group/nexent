@@ -331,7 +331,8 @@ helm upgrade --install nexent nexent \
   --set nexent-supabase-db.enabled=true \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
-  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret
+  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
+  --set nexent-common.config.oauth.loginMode=force
 ```
 
 Configurable OAuth values:
@@ -349,6 +350,9 @@ Configurable OAuth values:
 | `nexent-common.config.oauth.wechatClientSecret` | `WECHAT_OAUTH_APP_SECRET` | WeChat App Secret |
 | `nexent-common.config.oauth.sslVerify` | `OAUTH_SSL_VERIFY` | Whether to verify provider TLS certificates |
 | `nexent-common.config.oauth.caBundle` | `OAUTH_CA_BUNDLE` | Custom CA bundle path |
+| `nexent-common.config.oauth.loginMode` | `OAUTH_LOGIN_MODE` | `disabled`, `button`, or `force` |
+
+`loginMode` defaults to `button`. In `force` mode, OAuth is disabled when no provider is available, while multiple providers fall back to login buttons. CAS `force` mode takes precedence over OAuth auto login.
 
 Provider callback URLs:
 

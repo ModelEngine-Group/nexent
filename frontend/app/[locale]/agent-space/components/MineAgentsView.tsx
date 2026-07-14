@@ -113,7 +113,7 @@ export function MineAgentsView({
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const handleCreateAgent = () => {
-    router.push(`/${locale}/agents?create=true`);
+    router.push(`/${locale}/agents?create=true&from=agent-space&tab=mine`);
   };
 
   const handleImportAgent = async () => {
