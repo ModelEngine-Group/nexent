@@ -124,8 +124,8 @@ export function MineSkillsView({
   const handleEnableSkill = (skill: MyEditableSkillItem) => {
     const title = skill.name?.trim() || "未命名 Skill";
     modal.confirm({
-      title: `确认启用 ${title}？`,
-      content: "启用后将提交管理员审批，审批通过后会出现在 Skill 仓库。",
+      title: `确认上架 ${title}？`,
+      content: "上架后将提交管理员审批，审批通过后会出现在 Skill 仓库。",
       centered: true,
       okText: "提交审批",
       cancelText: "取消",
@@ -402,7 +402,7 @@ function MineSkillCard({
             }
             onClick={canApplyListing ? onApplyListing : onViewReview}
           >
-            {isEnabled ? "已启用" : "启用"}
+            {isEnabled ? "已上架" : "上架"}
           </Button>
         </div>
       </div>

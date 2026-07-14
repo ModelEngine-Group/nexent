@@ -48,6 +48,14 @@ const skillRepositoryTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
 };
 
+const STATUS_ACTION_LABELS: Partial<
+  Record<SkillRepositoryListingStatus, string>
+> = {
+  not_shared: "下架",
+  shared: "通过并上架",
+  rejected: "驳回",
+};
+
 export default function SkillRepositoryPage() {
   const { pageVariants, pageTransition } = useSetupFlow();
   const { user } = useAuthorizationContext();
@@ -252,7 +260,9 @@ export default function SkillRepositoryPage() {
         skillRepositoryId: listing.skill_repository_id,
         status,
       });
-      message.success(`已${STATUS_LABELS[status]}`);
+      message.success(
+        `已${STATUS_ACTION_LABELS[status] ?? STATUS_LABELS[status]}`
+      );
     } catch (error) {
       message.error(error instanceof Error ? error.message : "状态更新失败");
     }
@@ -329,7 +339,7 @@ export default function SkillRepositoryPage() {
     status: SkillRepositoryListingStatus
   ) => {
     modal.confirm({
-      title: `确认${STATUS_LABELS[status]}？`,
+      title: `确认${STATUS_ACTION_LABELS[status] ?? STATUS_LABELS[status]}？`,
       content: listing.name,
       okText: "确认",
       cancelText: "取消",
@@ -491,7 +501,7 @@ export default function SkillRepositoryPage() {
                         error instanceof ApiError &&
                         Number(error.code) === 403
                       ) {
-                        message.error("当前账号只能启用自己创建的 Skill");
+                        message.error("当前账号只能上架自己创建的 Skill");
                         return;
                       }
                       message.error(
