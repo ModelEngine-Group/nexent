@@ -334,10 +334,12 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+    refreshTools: `${API_BASE_URL}/mcp/refresh-tools`,
     portCheck: `${API_BASE_URL}/mcp/port/check`,
     portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
     enable: `${API_BASE_URL}/mcp/enable`,
     disable: `${API_BASE_URL}/mcp/disable`,
+    testConnection: `${API_BASE_URL}/mcp/test-connection`,
   },
   // A2A Client endpoints
   a2a: {
@@ -409,7 +411,12 @@ export const API_ENDPOINTS = {
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
+    communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
+    communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
+    communityDownload: (marketId: number) =>
+      `${API_BASE_URL}/mcp-tools/community/${marketId}/download`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
