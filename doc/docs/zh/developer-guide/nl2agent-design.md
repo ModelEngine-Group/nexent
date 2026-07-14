@@ -28,7 +28,8 @@ NL2AGENT 本身是平台内部默认智能体，数据库名称为 `nl2agent`。
 4. 搜索官方 Registry、社区 Marketplace 中的 MCP，支持在聊天卡片内完成配置、安装、健康检查、工具发现和选择性绑定。
 5. 搜索并安装在线 Skill。
 6. 根据需求自动生成 Agent 显示名称，由用户在身份卡片中检查、修改并保存。
-7. 从数据库和 Redis 加载权威草稿状态，完成最终审核和草稿配置。
+7. 模型、本地资源、联网资源和身份卡片确认后自动触发下一轮生成，无需用户手工输入“请继续”。
+8. 从数据库和 Redis 加载权威草稿状态，完成最终审核和草稿配置。
 
 ### 1.3 设计原则
 
@@ -61,6 +62,7 @@ NL2AGENT 本身是平台内部默认智能体，数据库名称为 `nl2agent`。
 │         ├─ LocalResourcesCard                                       │
 │         ├─ WebMcpCard                                               │
 │         ├─ WebSkillCard                                             │
+│         ├─ OnlineConfigurationBar（会话级完成配置）                  │
 │         ├─ AgentIdentityCard                                        │
 │         └─ FinalizeCard                                             │
 └───────────────────────────────┬─────────────────────────────────────┘
@@ -180,7 +182,9 @@ nl2agent:session_state:{tenant_id}:{draft_agent_id}
 {
   "recommendation_batches": {},
   "identity_confirmed": false,
-  "mcp_workflows": {}
+  "mcp_workflows": {},
+  "online_recommendation_batches": {},
+  "online_configuration_confirmed": false
 }
 ```
 
@@ -200,6 +204,8 @@ MCP 工作流状态：
 - `failed`
 
 Redis 中不得保存用户提交的 secret 值。
+
+联网推荐批次按 `recommendation_batch_id` 保存，记录 `resource_type`、去重后的结果键和 `recommendations_ready`/`completed` 状态。MCP 或 Skill 卡片实际渲染时幂等注册批次；出现新的批次会把 `online_configuration_confirmed` 重置为 `false`。当前流程强制审查 MCP 和在线 Skill 两个目录；即使搜索结果为空，也必须分别注册空结果批次后才能完成联网配置。
 
 ---
 
@@ -228,15 +234,13 @@ Redis 中不得保存用户提交的 secret 值。
 
 ### 4.2 需求澄清
 
-NL2AGENT 通过多轮对话理解：
+需求关卡只要求确认三个事实：
 
-- Agent 目标和使用者
-- 输入数据和数据来源
+- Agent 目标
+- 主要输入；明确无输入的任务记为“无”
 - 期望输出
-- 业务限制和安全约束
-- 是否需要本地资源、在线 MCP 或在线 Skill
 
-每轮只询问一个聚焦问题。任务信息足够后进入模型选择阶段。
+每轮只询问第一个缺失事实。三项齐全后立即进入模型选择，不继续追问可选场景、约束、实现细节或资源偏好；这些内容可在后续已有对话信息中用于生成最终方案。
 
 ### 4.3 模型选择
 
@@ -295,7 +299,7 @@ SDK 返回稳定批次 ID：
 
 ### 4.5 在线 MCP 搜索、配置和绑定
 
-本地资源不足时，NL2AGENT 可以调用一次 MCP 搜索。当前实现不是在 Tool 每次执行时携带用户关键词实时请求 Marketplace，而是在 session start 时预取候选目录：
+本地资源审查完成后，NL2AGENT 必须调用一次 MCP 搜索，即使本地资源已经足够。当前实现不是在 Tool 每次执行时携带用户关键词实时请求 Marketplace，而是在 session start 时预取候选目录：
 
 | 来源 | 预取调用 | 当前上限 |
 |---|---|---:|
@@ -334,9 +338,9 @@ name / label / description / type / required / secret / default / placeholder
 
 流程：
 
-1. MCP 搜索返回 `recommendation_id` 和安装选项。
-2. NL2AGENT 可以在聊天中逐个询问必填的非敏感字段。
-3. Secret 只能由用户在 MCP 卡片中填写，不得在聊天中询问。
+1. MCP 搜索返回 `recommendation_id` 和安装选项，并立即渲染汇总卡片。
+2. URL、变量、Header、环境变量、JSON、端口、容器配置和凭据全部在 MCP 卡片内填写；NL2AGENT 不在聊天中逐项询问配置。
+3. Secret 只能由用户在 MCP 卡片中填写，不得进入聊天、Prompt、Redis、日志或搜索响应。
 4. 用户选择安装选项并确认安装。
 5. 后端从 Redis Catalog 解析 recommendation，不信任 LLM 提供的 URL、命令或 package。
 6. 后端校验配置、安装 MCP、执行健康检查并发现工具。
@@ -395,7 +399,59 @@ session start 只把 `status="installable"` 的候选保存到 Redis `official_s
 
 草稿数据库名称在此阶段仍保持 `draft_*`。
 
-### 4.8 最终审核和配置
+### 4.8 卡片确认后的自动续跑
+
+模型选择保存、本地资源 Apply/Skip、联网资源全局完成以及身份保存成功后，对应后端接口返回固定的 `chat_injection_text`：
+
+```text
+[[NL2AGENT_AUTO_CONTINUE]]
+The previous card action completed successfully. Re-read the authoritative Current Session state and continue naturally from the next incomplete stage. Do not ask the user to type continue.
+```
+
+该文本不包含用户输入、模型或资源 ID、凭据以及下一阶段指令。后端只返回文本，不调用 `/agent/run`、不选择下一阶段，也不主动执行搜索或生成卡片。
+
+前端使用 Conversation/draft 级 continuation coordinator 处理成功响应：
+
+1. 校验当前 Conversation 和 draft 与发起卡片操作时一致。
+2. 防止重复或并发续跑。
+3. 将回调文本作为普通 user message 加入现有历史，并调用既有 `/agent/run` 流式链路。
+4. 保留前缀消息正常持久化并参与消息索引，但聊天气泡和分享选择中隐藏。
+5. 自动运行失败时保留同一回调文本，由全局 Retry continuation 操作重试；不要求用户输入“请继续”。
+
+卡片重新挂载、历史会话恢复或读取到已保存状态不会触发续跑。只有用户本次操作的 API 成功返回回调文本时才会注入。
+
+联网资源采用会话级全局确认，而不是每个推荐卡片分别推进：
+
+- MCP 和 Skill 搜索响应都包含稳定的 `recommendation_batch_id`，空结果也形成批次。
+- 所有已注册批次在输入区上方只显示一个“完成配置”栏，并汇总 MCP/Skill 批次数量。
+- 缺少 MCP 或 Skill 任一批次时，“完成配置”按钮禁用并显示仍待展示的目录。
+- 单项安装、绑定、跳过或失败只刷新权威状态，不自动触发下一轮。
+- 存在 `installing` 或 `connected` MCP 时禁用完成操作；`connected` MCP 必须先绑定工具或显式跳过。
+- 未尝试、未安装或安装失败的推荐允许通过全局完成操作统一放弃。
+- 只有 MCP 和 Skill 两类批次都存在时，全局完成才把所有批次标记为 `completed`，设置 `online_configuration_confirmed=true`，然后返回固定回调文本。
+
+每次自动续跑时，NL2AGENT 都重新读取注入到 system prompt 的 Current Session。回调文本只是新一轮生成的触发器，模型必须自行选择第一个未完成阶段，不能把文本本身当作状态成功证明。
+
+运行时不把完整 Redis JSON 交给模型解释，而是注入不含模型、Tool、Skill 或 MCP ID 的阶段摘要：
+
+```json
+{
+  "draft_agent_id": 54,
+  "model_selection_confirmed": true,
+  "local_review_status": "missing|pending|complete",
+  "online_review": {
+    "mcp_batch_registered": false,
+    "skill_batch_registered": false,
+    "configuration_confirmed": false
+  },
+  "unresolved_mcp_count": 0,
+  "identity_confirmed": false
+}
+```
+
+该摘要是本次 Agent Run 开始时的快照。若本轮工具执行刚产生新 Observation，模型必须优先把 Observation 原样渲染为卡片，不能因为快照中的批次尚未注册而重复搜索。
+
+### 4.9 最终审核和配置
 
 满足以下条件后，NL2AGENT 直接输出 `nl2agent-finalize` 卡片，不调用 Skill 名称或不存在的 finalize Tool：
 
@@ -403,8 +459,9 @@ session start 只把 `status="installable"` 的候选保存到 Redis `official_s
 - 至少一张本地资源卡已经注册
 - 所有推荐批次已经 applied 或 skipped
 - 所有已安装 MCP 已经绑定工具或显式跳过
+- MCP 和在线 Skill 两类推荐批次均已注册，包括空结果批次
+- `online_configuration_confirmed=true`
 - 身份已经确认
-- 用户明确要求完成
 
 最终 proposal 必须包含：
 
@@ -437,6 +494,8 @@ FinalizeCard 会先读取权威 session state：
 | POST | `/session/{id}/local-resources/register` | 注册已经渲染的本地推荐批次 |
 | POST | `/session/{id}/apply-local-resources` | 应用指定批次中的本地资源 |
 | POST | `/session/{id}/local-resources/skip` | 显式跳过指定批次 |
+| POST | `/session/{id}/online-recommendations/register` | 幂等注册已渲染的 MCP/Skill 推荐批次 |
+| POST | `/session/{id}/online-configuration/complete` | 全局完成当前联网资源审查并返回自动续跑文本 |
 | POST | `/session/{id}/mcp/install` | 安装 Redis 推荐目录中的 MCP |
 | POST | `/session/{id}/mcp/{mcp_id}/bind-tools` | 绑定用户选择的 MCP tools |
 | POST | `/session/{id}/mcp/{mcp_id}/skip-tools` | 显式跳过 MCP tool binding |
@@ -463,6 +522,25 @@ FinalizeCard 会先读取权威 session state：
   "recommendation_batch_id": "local_...",
   "tool_ids": [10, 11],
   "skill_ids": [20]
+}
+```
+
+联网推荐注册：
+
+```json
+{
+  "recommendation_batch_id": "online_...",
+  "resource_type": "mcp",
+  "item_keys": ["registry:example"]
+}
+```
+
+模型、本地资源、联网全局完成和身份接口的成功响应包含固定的可选字段：
+
+```json
+{
+  "agent_id": 54,
+  "chat_injection_text": "[[NL2AGENT_AUTO_CONTINUE]]\nThe previous card action completed successfully..."
 }
 ```
 
@@ -575,7 +653,24 @@ tenant_id + draft_agent_id + tool_name + canonical_keyword_set
 
 中英文 YAML Prompt 定义一致的阶段顺序和卡片协议。
 
-### 7.1 可执行 Tool 与卡片的区别
+### 7.1 唯一下一动作
+
+模型必须从上到下判断并只执行第一个匹配动作：
+
+1. 本轮存在新搜索 Observation：原样输出对应结果卡，不再次搜索。
+2. 目标、主要输入或期望输出缺失：只询问第一个缺失项。
+3. 三项齐全但模型未确认：只输出固定说明和模型选择卡。
+4. 模型已确认但本地审查缺失：调用一次本地搜索。
+5. 本地卡已展示但未 Apply/Skip：只提示处理现有卡片。
+6. 本地审查完成但在线目录不完整：同时搜索缺失的 MCP/Skill 目录；两类都缺失时在同一 `<code>` 块各调用一次。
+7. 两类在线批次已展示但未全局完成：只提示使用会话级“完成配置”。
+8. 在线配置完成但身份未确认：生成显示名称并输出身份卡。
+9. 身份已确认：直接输出 final review 卡，不自动发布。
+10. 状态不一致：提示重新加载，不猜测阶段或生成卡片。
+
+新 Observation 的卡片渲染优先级高于运行开始时的 Current Session 快照。工具调用与结果卡必须处于不同模型步骤，避免调用时序、重复搜索和伪造 Observation。
+
+### 7.2 可执行 Tool 与卡片的区别
 
 下划线名称是可执行 Tool：
 
@@ -598,7 +693,7 @@ nl2agent-finalize
 
 不存在 `nl2agent-search-*` 卡片。Skill 名称是执行说明，不是 Python 函数。
 
-### 7.2 工具执行协议
+### 7.3 工具执行协议
 
 运行时只执行字面量 `<code>...</code>` 中的调用。工具调用步骤必须只包含一个执行块，并始终保存、打印结果：
 
@@ -613,12 +708,12 @@ print(result)
 
 一次资源审查中，每种搜索工具最多调用一次。所有相关关键词必须合并到一个 query；只有用户明确修改需求或搜索方向后才能再次搜索。
 
-### 7.3 模型和最终方案约束
+### 7.4 模型和最终方案约束
 
 - 不得命名、推荐、比较或编造 LLM。
 - 不得根据对话文字推断模型已保存，只读取注入的 current session state。
 - 不得声称 MCP 安装或工具绑定成功，除非对应 API 已确认。
-- 不得请求用户在聊天中提交 secret。
+- 不得在聊天中请求 MCP URL、变量、Header、环境变量、JSON、端口、容器配置或 secret；全部由 MCP 卡片收集。
 - 不得调用 `nl2agent_finalize_proposal(...)` 或任何 Skill 名称。
 - 最终卡片是回复内容，不通过代码解释器执行。
 
@@ -645,6 +740,7 @@ print(result)
 | `LocalResourcesCard` | 注册推荐批次，Apply All 或 Continue Without Resources |
 | `WebMcpCard` | 展示配置字段，安装、重试、发现和绑定 MCP tools |
 | `WebSkillCard` | 安装在线 Skill |
+| `OnlineConfigurationBar` | 会话级汇总联网批次，校验 MCP 已解决并显式完成配置 |
 | `AgentIdentityCard` | 展示预填名称，允许修改并保存身份 |
 | `FinalizeCard` | 加载权威状态，展示最终审核并完成草稿配置 |
 
@@ -764,6 +860,7 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 
 - `frontend/services/nl2agentService.ts`
 - `frontend/lib/chat/nl2agentDraftContext.ts`
+- `frontend/lib/chat/nl2agentContinuation.ts`
 - `frontend/components/nl2agent/`
 - `frontend/components/common/markdownRenderer.tsx`
 - `frontend/app/[locale]/chat/internal/chatInterface.tsx`
@@ -826,6 +923,12 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 - [ ] Payload ID 与 Conversation draft ID 冲突时拒绝卡片。
 - [ ] `nl2agent-search-*` 伪卡片不会被当成结果卡片。
 - [ ] 三个搜索工具每种资源审查只调用一次并输出一张合并卡片。
+- [ ] 模型、本地资源、联网全局完成和身份保存后自动注入隐藏 user message 并续跑。
+- [ ] 隐藏续跑消息正常持久化，但不显示气泡且不进入分享选择。
+- [ ] 卡片重挂载和状态恢复不会重复续跑，Conversation 切换不会跨会话注入。
+- [ ] 自动续跑失败可用原文本重试，不要求用户输入“请继续”。
+- [ ] MCP/Skill 联网批次只显示一个全局完成栏，新批次会重置完成状态。
+- [ ] 单项联网操作不会自动续跑，未解决的 `connected` MCP 会禁用全局完成。
 
 ---
 

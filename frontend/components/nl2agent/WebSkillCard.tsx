@@ -8,6 +8,7 @@ import {
   installWebSkill,
   type Nl2AgentInstallWebSkillPayload,
 } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export interface WebSkillCardItem {
   skill_id?: number;
@@ -33,12 +34,17 @@ export interface WebSkillCardProps {
  *
  * Rendered from a ```nl2agent-web-skill fenced JSON block.
  */
-export const WebSkillCard: React.FC<WebSkillCardProps> = ({ agentId, item }) => {
+export const WebSkillCard: React.FC<WebSkillCardProps> = ({
+  agentId,
+  item,
+}) => {
+  const workflow = useNl2AgentWorkflow();
   const { t } = useTranslation("common");
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(item.status === "installed");
 
   const handleInstall = async () => {
+    workflow.beginAction();
     setInstalling(true);
     try {
       const payload: Nl2AgentInstallWebSkillPayload = {
@@ -55,10 +61,12 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({ agentId, item }) => 
         })
       );
       setInstalled(true);
+      workflow.notifyStateChanged();
     } catch (e: any) {
       AntMessage.error(e?.message || "Failed to install skill.");
     } finally {
       setInstalling(false);
+      workflow.endAction();
     }
   };
 
@@ -69,7 +77,9 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({ agentId, item }) => 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-sm">{item.name}</span>
             {typeof item.score === "number" && (
-              <span className="text-[10px] text-gray-500">score: {item.score}</span>
+              <span className="text-[10px] text-gray-500">
+                score: {item.score}
+              </span>
             )}
             {item.tags && item.tags.length > 0 && (
               <div className="flex gap-1 flex-wrap">
@@ -88,12 +98,14 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({ agentId, item }) => 
             <div className="text-xs text-gray-600 mt-1">{item.description}</div>
           )}
           {item.reason && (
-            <div className="text-xs text-gray-400 mt-1 italic">{item.reason}</div>
+            <div className="text-xs text-gray-400 mt-1 italic">
+              {item.reason}
+            </div>
           )}
         </div>
         <Button
           size="small"
-          disabled={installed || installing}
+          disabled={installed || installing || workflow.busy}
           loading={installing}
           icon={
             installed ? (

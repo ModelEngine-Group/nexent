@@ -148,6 +148,98 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_r
     assert "config_values" not in workflow
 
 
+def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_redis):
+    first = catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_mcp", "mcp", ["registry:b", "registry:a"]
+    )
+    second = catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_mcp", "mcp", ["registry:a", "registry:b"]
+    )
+    assert first == second
+    assert first == {
+        "resource_type": "mcp",
+        "item_keys": ["registry:a", "registry:b"],
+        "status": "recommendations_ready",
+    }
+
+    catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_skill", "skill", []
+    )
+
+    assert catalog_module.complete_online_configuration("tenant_1", 202) == [
+        "online_mcp",
+        "online_skill",
+    ]
+    catalog_module.assert_online_configuration_complete("tenant_1", 202)
+
+    catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_skill_new", "skill", ["skill:new"]
+    )
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert not state["online_configuration_confirmed"]
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError, match="Complete the online"
+    ):
+        catalog_module.assert_online_configuration_complete("tenant_1", 202)
+
+
+def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
+    catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_mcp", "mcp", []
+    )
+    catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_skill", "skill", []
+    )
+    catalog_module.update_mcp_workflow(
+        "tenant_1", 202, "registry:github", status="connected", mcp_id=5
+    )
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"
+    ):
+        catalog_module.complete_online_configuration("tenant_1", 202)
+
+    catalog_module.update_mcp_workflow(
+        "tenant_1", 202, "registry:github", status="failed"
+    )
+    catalog_module.complete_online_configuration("tenant_1", 202)
+
+
+def test_online_completion_requires_both_catalogs(fake_redis):
+    catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, "online_mcp", "mcp", []
+    )
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="both MCP and Skill",
+    ):
+        catalog_module.complete_online_configuration("tenant_1", 202)
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="both MCP and Skill",
+    ):
+        catalog_module.assert_online_configuration_complete("tenant_1", 202)
+
+
+def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
+    fake_redis.data[catalog_module._state_key("tenant_1", 202)] = json.dumps(
+        {
+            "recommendation_batches": {},
+            "online_recommendation_batches": {
+                "online_bad": {"resource_type": "mcp", "item_keys": "not-a-list"}
+            },
+        }
+    )
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="tenant=tenant_1, draft_agent_id=202",
+    ):
+        catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert "Malformed NL2AGENT session state" in caplog.text
+
+
 def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
     catalog_module.register_recommendation_batch(
         "tenant_1", 202, "batch_1", [1], []
@@ -156,9 +248,13 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
         "recommendation_batches": {},
         "identity_confirmed": False,
         "mcp_workflows": {},
+        "online_recommendation_batches": {},
+        "online_configuration_confirmed": False,
     }
     assert catalog_module.get_nl2agent_session_state("tenant_2", 202) == {
         "recommendation_batches": {},
         "identity_confirmed": False,
         "mcp_workflows": {},
+        "online_recommendation_batches": {},
+        "online_configuration_confirmed": False,
     }

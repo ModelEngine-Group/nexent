@@ -462,6 +462,14 @@ class Nl2AgentRecommendationSkipRequest(BaseModel):
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
 
 
+class Nl2AgentOnlineRecommendationBatchRequest(BaseModel):
+    """Register a rendered MCP or web-Skill recommendation batch."""
+
+    recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
+    resource_type: Literal["mcp", "skill"]
+    item_keys: List[str] = Field(default_factory=list, max_length=100)
+
+
 class Nl2AgentModelSelectionRequest(BaseModel):
     """Persist the ordered LLM selection for an NL2AGENT draft."""
 

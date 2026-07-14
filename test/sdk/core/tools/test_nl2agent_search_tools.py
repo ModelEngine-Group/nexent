@@ -16,6 +16,7 @@ from nexent.core.tools.nl2agent._context import (
     _score_candidates,
     canonical_search_query,
     normalize_search_keywords,
+    online_recommendation_batch_id,
 )
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
@@ -47,6 +48,23 @@ def test_search_keyword_normalization_handles_mixed_text_and_equivalent_order():
         "ppt",
     ]
     assert canonical_search_query("PPT, DOCX") == canonical_search_query(" docx ppt ")
+
+
+def test_online_batch_ids_are_stable_and_session_scoped():
+    first = online_recommendation_batch_id(
+        202, "mcp", "DOCX, ppt", ["registry:b", "registry:a"]
+    )
+    equivalent = online_recommendation_batch_id(
+        202, "mcp", "ppt docx", ["registry:a", "registry:b"]
+    )
+
+    assert first == equivalent
+    assert first != online_recommendation_batch_id(
+        303, "mcp", "ppt docx", ["registry:a", "registry:b"]
+    )
+    assert first != online_recommendation_batch_id(
+        202, "skill", "ppt docx", ["registry:a", "registry:b"]
+    )
 
 
 def test_candidate_scoring_uses_keyword_or_matching_and_filters_weak_results():
@@ -129,7 +147,10 @@ def test_nl2agent_search_web_mcps_returns_empty_results_for_empty_catalogs():
         community_results=[],
     )
 
-    assert _loads(tool(query="github")) == {"agent_id": 202, "items": []}
+    result = _loads(tool(query="github"))
+    assert result["agent_id"] == 202
+    assert result["items"] == []
+    assert result["recommendation_batch_id"].startswith("online_")
 
 
 def test_nl2agent_search_web_skills_returns_empty_results_for_empty_catalog():
@@ -142,7 +163,10 @@ def test_nl2agent_search_web_skills_returns_empty_results_for_empty_catalog():
         official_skills=[],
     )
 
-    assert _loads(tool(query="code review")) == {"agent_id": 202, "items": []}
+    result = _loads(tool(query="code review"))
+    assert result["agent_id"] == 202
+    assert result["items"] == []
+    assert result["recommendation_batch_id"].startswith("online_")
 
 
 def test_nl2agent_search_local_resources_scores_and_ranks_catalog_candidates():

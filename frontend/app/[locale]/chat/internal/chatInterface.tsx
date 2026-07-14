@@ -48,6 +48,14 @@ import {
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 import { resolveNl2AgentDraftAgentId } from "@/lib/chat/nl2agentDraftContext";
+import {
+  NL2AGENT_AUTO_CONTINUE_PREFIX,
+  Nl2AgentWorkflowProvider,
+} from "@/components/nl2agent/Nl2AgentWorkflowContext";
+import {
+  isNl2AgentAutoContinueText,
+  nl2AgentContinuationScopeKey,
+} from "@/lib/chat/nl2agentContinuation";
 
 import { Button, Checkbox, Layout, message } from "antd";
 import log from "@/lib/logger";
@@ -180,6 +188,17 @@ export function ChatInterface() {
   const [nl2agentConversationId, setNl2agentConversationId] = useState<
     number | null
   >(null);
+  const activeNl2AgentDraftAgentId = resolveNl2AgentDraftAgentId(
+    conversationManagement.selectedConversationId,
+    readNl2AgentDraftMap(),
+    nl2agentConversationId,
+    nl2agentDraftAgentId
+  );
+  const activeConversationIdRef = useRef<number | null>(null);
+  const activeNl2AgentDraftIdRef = useRef<number | null>(null);
+  activeConversationIdRef.current =
+    conversationManagement.selectedConversationId;
+  activeNl2AgentDraftIdRef.current = activeNl2AgentDraftAgentId;
   const [agentGreeting, setAgentGreeting] = useState<string | null>(null);
   const [agentExampleQuestions, setAgentExampleQuestions] = useState<string[]>(
     []
@@ -403,8 +422,31 @@ export function ChatInterface() {
     };
   }, []);
 
-  const handleSend = async () => {
-    if (!input.trim() && attachments.length === 0) return; // Allow sending attachments only, without text content
+  const handleSend = async (
+    autoContinueText?: string,
+    expectedConversationId?: number | null,
+    expectedDraftAgentId?: number | null
+  ) => {
+    const isAutoContinue = Boolean(
+      autoContinueText?.startsWith(NL2AGENT_AUTO_CONTINUE_PREFIX)
+    );
+    if (
+      isAutoContinue &&
+      (activeConversationIdRef.current !== expectedConversationId ||
+        activeNl2AgentDraftIdRef.current !== expectedDraftAgentId)
+    ) {
+      throw new Error(
+        "The active NL2AGENT conversation changed before automatic continuation."
+      );
+    }
+    const outgoingText = isAutoContinue
+      ? autoContinueText!.trim()
+      : input.trim();
+    const outgoingAttachments = isAutoContinue ? [] : attachments;
+    if (!outgoingText && outgoingAttachments.length === 0) return;
+    if (isAutoContinue && (isLoading || isCurrentConversationStreaming)) {
+      throw new Error("The conversation is already running.");
+    }
 
     // Flag to track if we should reset button states in finally block
     let shouldResetButtonStates = true;
@@ -422,7 +464,7 @@ export function ChatInterface() {
 
     // Handle user message content
     const userMessageId = uuidv4();
-    const userMessageContent = input.trim();
+    const userMessageContent = outgoingText;
 
     // Get current conversation ID (null when new conversation)
     let currentConversationId = conversationManagement.selectedConversationId;
@@ -434,12 +476,12 @@ export function ChatInterface() {
     let objectNames: Record<string, string> = {}; // Add object name mapping
     let presignedUrls: Record<string, string> = {}; // Store presigned URLs for external MCP tool access
 
-    if (attachments.length > 0) {
+    if (outgoingAttachments.length > 0) {
       // Show loading state
       setIsLoading(true);
 
       // Use preprocessing function to upload attachments
-      const uploadResult = await uploadAttachments(attachments, t);
+      const uploadResult = await uploadAttachments(outgoingAttachments, t);
       if (uploadResult.error) {
         message.error(
           `${t("chatPreprocess.fileUploadFailed")} ${uploadResult.error}`
@@ -451,7 +493,7 @@ export function ChatInterface() {
       objectNames = uploadResult.objectNames; // Get object name mapping
       presignedUrls = uploadResult.presignedUrls; // Get presigned URLs for external access
 
-      const missingUploads = attachments.filter(
+      const missingUploads = outgoingAttachments.filter(
         (attachment) =>
           !uploadedFileUrls[attachment.file.name] ||
           !objectNames[attachment.file.name]
@@ -467,7 +509,7 @@ export function ChatInterface() {
 
     // Use preprocessing function to create message attachments
     const messageAttachments = createMessageAttachments(
-      attachments,
+      outgoingAttachments,
       uploadedFileUrls,
       fileUrls,
       objectNames,
@@ -485,8 +527,10 @@ export function ChatInterface() {
     };
 
     // Clear input box and attachments
-    setInput("");
-    setAttachments([]);
+    if (!isAutoContinue) {
+      setInput("");
+      setAttachments([]);
+    }
 
     // Create initial AI reply message
     const assistantMessageId = uuidv4();
@@ -640,12 +684,12 @@ export function ChatInterface() {
       // Declare a variable to save file description information
       let fileDescriptionsMap: Record<string, string> = {};
 
-      if (attachments.length > 0) {
+      if (outgoingAttachments.length > 0) {
         // Skip preprocessing - directly use original content
         // No preprocessing UI will be shown
         const result = await preprocessAttachments(
           userMessage.content,
-          attachments,
+          outgoingAttachments,
           currentController.signal,
           () => {}, // Empty progress callback - won't be called
           t,
@@ -882,7 +926,6 @@ export function ChatInterface() {
           });
         }
       }
-
       setIsLoading(false);
       setIsStreaming(false);
 
@@ -910,6 +953,7 @@ export function ChatInterface() {
           });
         }
       }
+      if (isAutoContinue) throw error;
     } finally {
       // Only reset button states if we should (not when preprocessing fails)
       if (shouldResetButtonStates) {
@@ -1672,7 +1716,9 @@ export function ChatInterface() {
   const shareableUserMessageIds = currentMessages
     .filter(
       (msg) =>
-        msg.role === MESSAGE_ROLES.USER && typeof msg.message_id === "number"
+        msg.role === MESSAGE_ROLES.USER &&
+        typeof msg.message_id === "number" &&
+        !isNl2AgentAutoContinueText(msg.content)
     )
     .map((msg) => msg.message_id as number);
 
@@ -1842,13 +1888,6 @@ export function ChatInterface() {
     // Both admin and regular users now use dropdown menus
   };
 
-  const activeNl2AgentDraftAgentId = resolveNl2AgentDraftAgentId(
-    conversationManagement.selectedConversationId,
-    readNl2AgentDraftMap(),
-    nl2agentConversationId,
-    nl2agentDraftAgentId
-  );
-
   return (
     <>
       <Layout hasSider className="flex h-full">
@@ -1907,50 +1946,65 @@ export function ChatInterface() {
                 </div>
               )}
 
-              <ChatStreamMain
-                messages={currentMessages}
-                input={input}
-                isLoading={isLoading}
-                isStreaming={isCurrentConversationStreaming}
-                isLoadingHistoricalConversation={
-                  isLoadingHistoricalConversation
+              <Nl2AgentWorkflowProvider
+                enabled={activeNl2AgentDraftAgentId != null}
+                scopeKey={nl2AgentContinuationScopeKey(
+                  conversationManagement.selectedConversationId,
+                  activeNl2AgentDraftAgentId
+                )}
+                onContinue={(text) =>
+                  handleSend(
+                    text,
+                    conversationManagement.selectedConversationId,
+                    activeNl2AgentDraftAgentId
+                  )
                 }
-                conversationLoadError={
-                  conversationManagement.conversationLoadError[
-                    conversationManagement.selectedConversationId || 0
-                  ]
-                }
-                onInputChange={(value: string) => setInput(value)}
-                onSend={handleSend}
-                onStop={handleStop}
-                onKeyDown={handleKeyDown}
-                onSelectMessage={handleMessageSelect}
-                selectedMessageId={selectedMessageId}
-                attachments={attachments}
-                onAttachmentsChange={handleAttachmentsChange}
-                onFileUpload={handleFileUpload}
-                onImageUpload={handleImageUpload}
-                onOpinionChange={handleOpinionChange}
-                currentConversationId={
-                  conversationManagement.selectedConversationId ?? undefined
-                }
-                shouldScrollToBottom={shouldScrollToBottom}
-                selectedAgentId={selectedAgentId}
-                onAgentSelect={handleAgentSelectWithGreeting}
-                onCitationHover={clearCompletedIndicator}
-                nl2AgentDraftAgentId={activeNl2AgentDraftAgentId}
-                onScroll={clearCompletedIndicator}
-                agentGreeting={agentGreeting}
-                agentExampleQuestions={agentExampleQuestions}
-                shareMode={isShareMode}
-                selectedShareMessageIds={selectedShareMessageIds}
-                onToggleShareMessage={toggleShareMessage}
-                agentModelIds={agentModelIds}
-                agentModelNames={agentModelNames}
-                availableModels={availableModels}
-                selectedModelId={selectedModelId}
-                onModelSelect={setSelectedModelId}
-              />
+              >
+                <ChatStreamMain
+                  messages={currentMessages}
+                  input={input}
+                  isLoading={isLoading}
+                  isStreaming={isCurrentConversationStreaming}
+                  isLoadingHistoricalConversation={
+                    isLoadingHistoricalConversation
+                  }
+                  conversationLoadError={
+                    conversationManagement.conversationLoadError[
+                      conversationManagement.selectedConversationId || 0
+                    ]
+                  }
+                  onInputChange={(value: string) => setInput(value)}
+                  onSend={handleSend}
+                  onStop={handleStop}
+                  onKeyDown={handleKeyDown}
+                  onSelectMessage={handleMessageSelect}
+                  selectedMessageId={selectedMessageId}
+                  attachments={attachments}
+                  onAttachmentsChange={handleAttachmentsChange}
+                  onFileUpload={handleFileUpload}
+                  onImageUpload={handleImageUpload}
+                  onOpinionChange={handleOpinionChange}
+                  currentConversationId={
+                    conversationManagement.selectedConversationId ?? undefined
+                  }
+                  shouldScrollToBottom={shouldScrollToBottom}
+                  selectedAgentId={selectedAgentId}
+                  onAgentSelect={handleAgentSelectWithGreeting}
+                  onCitationHover={clearCompletedIndicator}
+                  nl2AgentDraftAgentId={activeNl2AgentDraftAgentId}
+                  onScroll={clearCompletedIndicator}
+                  agentGreeting={agentGreeting}
+                  agentExampleQuestions={agentExampleQuestions}
+                  shareMode={isShareMode}
+                  selectedShareMessageIds={selectedShareMessageIds}
+                  onToggleShareMessage={toggleShareMessage}
+                  agentModelIds={agentModelIds}
+                  agentModelNames={agentModelNames}
+                  availableModels={availableModels}
+                  selectedModelId={selectedModelId}
+                  onModelSelect={setSelectedModelId}
+                />
+              </Nl2AgentWorkflowProvider>
             </div>
 
             <ChatRightPanel

@@ -5,19 +5,30 @@ import {
   resolveNl2AgentCardAgentId,
   resolveNl2AgentDraftAgentId,
 } from "@/lib/chat/nl2agentDraftContext";
+import {
+  isNl2AgentAutoContinueText,
+  nl2AgentContinuationScopeKey,
+} from "@/lib/chat/nl2agentContinuation";
 
-import { tryRenderNl2AgentCard } from "..";
+import { OnlineRecommendationGroup, tryRenderNl2AgentCard } from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
 import { ModelSelectionCard } from "../ModelSelectionCard";
 import { AgentIdentityCard } from "../AgentIdentityCard";
 import { FinalizeCard } from "../FinalizeCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
 import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
+import { getOnlineConfigurationBlockers } from "../OnlineConfigurationBar";
 
 function assertElement(
   node: React.ReactNode
 ): asserts node is React.ReactElement<any> {
   assert.equal(React.isValidElement(node), true);
+}
+
+function onlineChildren(node: React.ReactNode): React.ReactNode[] {
+  assertElement(node);
+  assert.equal(node.type, OnlineRecommendationGroup);
+  return React.Children.toArray(node.props.children);
 }
 
 describe("tryRenderNl2AgentCard", () => {
@@ -134,18 +145,24 @@ describe("tryRenderNl2AgentCard", () => {
 
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcp",
-      JSON.stringify({ agent_id: 202, ...item }),
+      JSON.stringify({
+        agent_id: 202,
+        recommendation_batch_id: "online_mcp",
+        ...item,
+      }),
       (nextItem) => {
         installedItem = nextItem;
       }
     );
 
     assertElement(node);
-    assert.equal(node.type, WebMcpCard);
-    assert.equal(node.props.agentId, 202);
-    assert.equal(node.props.item.name, item.name);
-    node.props.onInstall(node.props.item);
-    assert.deepEqual(installedItem, node.props.item);
+    const [card] = onlineChildren(node);
+    assertElement(card);
+    assert.equal(card.type, WebMcpCard);
+    assert.equal(card.props.agentId, 202);
+    assert.equal(card.props.item.name, item.name);
+    card.props.onInstall(card.props.item);
+    assert.deepEqual(installedItem, card.props.item);
   });
 
   it("routes web MCP list fenced data to WebMcpCard items", () => {
@@ -156,11 +173,15 @@ describe("tryRenderNl2AgentCard", () => {
 
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
-      JSON.stringify({ agent_id: 202, items })
+      JSON.stringify({
+        agent_id: 202,
+        recommendation_batch_id: "online_mcp",
+        items,
+      })
     );
 
     assertElement(node);
-    const children = React.Children.toArray(node.props.children);
+    const children = onlineChildren(node);
     assert.equal(children.length, 2);
     children.forEach((child, index) => {
       assertElement(child);
@@ -174,11 +195,11 @@ describe("tryRenderNl2AgentCard", () => {
     const items = [{ agent_id: 202, name: "Browser MCP", source: "community" }];
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
-      JSON.stringify({ items })
+      JSON.stringify({ recommendation_batch_id: "online_mcp", items })
     );
 
     assertElement(node);
-    const [child] = React.Children.toArray(node.props.children);
+    const [child] = onlineChildren(node);
     assertElement(child);
     assert.equal(child.type, WebMcpCard);
     assert.equal(child.props.agentId, 202);
@@ -187,13 +208,16 @@ describe("tryRenderNl2AgentCard", () => {
   it("uses the trusted conversation ID when an MCP list omits agent_id", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
-      JSON.stringify({ items: [{ name: "Browser MCP", source: "community" }] }),
+      JSON.stringify({
+        recommendation_batch_id: "online_mcp",
+        items: [{ name: "Browser MCP", source: "community" }],
+      }),
       undefined,
       202
     );
 
     assertElement(node);
-    const [child] = React.Children.toArray(node.props.children);
+    const [child] = onlineChildren(node);
     assertElement(child);
     assert.equal(child.type, WebMcpCard);
     assert.equal(child.props.agentId, 202);
@@ -202,19 +226,37 @@ describe("tryRenderNl2AgentCard", () => {
   it("renders an empty MCP list with the trusted conversation ID", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
-      JSON.stringify({ items: [] }),
+      JSON.stringify({ recommendation_batch_id: "online_empty", items: [] }),
       undefined,
       202
     );
 
     assertElement(node);
-    assert.equal(React.Children.count(node.props.children), 0);
+    assert.equal(onlineChildren(node).length, 0);
+  });
+
+  it("rejects online cards that cannot be registered as a stable batch", () => {
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-web-skills",
+      JSON.stringify({ agent_id: 202, items: [] })
+    );
+
+    assertElement(node);
+    assert.equal(node.type, "div");
+    assert.match(
+      String(node.props.children),
+      /missing recommendation_batch_id/
+    );
   });
 
   it("rejects a payload ID that conflicts with the active conversation", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
-      JSON.stringify({ agent_id: 303, items: [] }),
+      JSON.stringify({
+        agent_id: 303,
+        recommendation_batch_id: "online_mcp",
+        items: [],
+      }),
       undefined,
       202
     );
@@ -238,7 +280,10 @@ describe("tryRenderNl2AgentCard", () => {
       ],
       [
         "nl2agent-web-skills",
-        { items: [{ skill_id: 1, name: "skill" }] },
+        {
+          recommendation_batch_id: "online_skill",
+          items: [{ skill_id: 1, name: "skill" }],
+        },
         WebSkillCard,
       ],
       [
@@ -261,7 +306,7 @@ describe("tryRenderNl2AgentCard", () => {
       );
       assertElement(node);
       if (language === "nl2agent-web-skills") {
-        const [child] = React.Children.toArray(node.props.children);
+        const [child] = onlineChildren(node);
         assertElement(child);
         assert.equal(child.type, component);
         assert.equal(child.props.agentId, 202);
@@ -285,11 +330,15 @@ describe("tryRenderNl2AgentCard", () => {
 
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-skills",
-      JSON.stringify({ agent_id: 202, items })
+      JSON.stringify({
+        agent_id: 202,
+        recommendation_batch_id: "online_skill",
+        items,
+      })
     );
 
     assertElement(node);
-    const children = React.Children.toArray(node.props.children);
+    const children = onlineChildren(node);
     assert.equal(children.length, 2);
     children.forEach((child, index) => {
       assertElement(child);
@@ -297,6 +346,56 @@ describe("tryRenderNl2AgentCard", () => {
       assert.equal(child.props.agentId, 202);
       assert.deepEqual(child.props.item, items[index]);
     });
+  });
+});
+
+describe("online configuration blockers", () => {
+  it("requires both online catalogs before completion", () => {
+    const blockers = getOnlineConfigurationBlockers({
+      identity_confirmed: false,
+      recommendation_batches: {},
+      online_recommendation_batches: {
+        online_mcp: {
+          resource_type: "mcp",
+          item_keys: [],
+          status: "recommendations_ready",
+        },
+      },
+      online_configuration_confirmed: false,
+      mcp_workflows: {},
+    });
+
+    assert.deepEqual(blockers.missingCatalogs, ["Skill"]);
+    assert.equal(blockers.unresolvedMcpCount, 0);
+  });
+
+  it("blocks connected MCP workflows after both catalogs render", () => {
+    const blockers = getOnlineConfigurationBlockers({
+      identity_confirmed: false,
+      recommendation_batches: {},
+      online_recommendation_batches: {
+        online_mcp: {
+          resource_type: "mcp",
+          item_keys: [],
+          status: "recommendations_ready",
+        },
+        online_skill: {
+          resource_type: "skill",
+          item_keys: [],
+          status: "recommendations_ready",
+        },
+      },
+      online_configuration_confirmed: false,
+      mcp_workflows: {
+        "registry:test": {
+          recommendation_id: "registry:test",
+          status: "connected",
+        },
+      },
+    });
+
+    assert.deepEqual(blockers.missingCatalogs, []);
+    assert.equal(blockers.unresolvedMcpCount, 1);
   });
 });
 
@@ -322,5 +421,24 @@ describe("resolveNl2AgentCardAgentId", () => {
   it("rejects conflicting wrapper, item, or trusted IDs", () => {
     assert.equal(resolveNl2AgentCardAgentId(202, [303], 202).mismatch, true);
     assert.equal(resolveNl2AgentCardAgentId(303, [], 202).mismatch, true);
+  });
+});
+
+describe("NL2AGENT automatic continuation messages", () => {
+  it("recognizes only the reserved hidden-message prefix", () => {
+    assert.equal(
+      isNl2AgentAutoContinueText(
+        "[[NL2AGENT_AUTO_CONTINUE]]\nThe previous card action completed."
+      ),
+      true
+    );
+    assert.equal(isNl2AgentAutoContinueText("Please continue"), false);
+  });
+
+  it("isolates pending continuations by conversation and draft", () => {
+    assert.notEqual(
+      nl2AgentContinuationScopeKey(10, 202),
+      nl2AgentContinuationScopeKey(11, 303)
+    );
   });
 });

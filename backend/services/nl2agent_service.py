@@ -27,12 +27,15 @@ from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candid
 from agents.nl2agent_session_catalog import (
     assert_identity_confirmed,
     assert_mcp_workflows_resolved,
+    assert_online_configuration_complete,
     assert_resource_review_complete,
+    complete_online_configuration as complete_online_configuration_state,
     confirm_agent_identity,
     find_mcp_workflow_by_id,
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
     register_recommendation_batch,
+    register_online_recommendation_batch,
     resolve_recommendation_batch,
     set_nl2agent_session_catalogs,
     update_mcp_workflow,
@@ -97,6 +100,13 @@ NL2AGENT_AGENT_NAME = "nl2agent"
 
 # Prefix for draft agent names created during NL2AGENT sessions.
 DRAFT_AGENT_NAME_PREFIX = "draft_"
+
+NL2AGENT_CHAT_INJECTION_TEXT = (
+    "[[NL2AGENT_AUTO_CONTINUE]]\n"
+    "The previous card action completed successfully. Re-read the authoritative "
+    "Current Session state and continue naturally from the next incomplete stage. "
+    "Do not ask the user to type continue."
+)
 
 _NL2AGENT_SEED_PROMPT_FALLBACK = (
     "You are NL2AGENT, the Agent Builder. Help the user design and build "
@@ -541,6 +551,7 @@ async def select_models(
             {"model_id": model_id, "display_name": display_names[model_id]}
             for model_id in ordered_ids
         ],
+        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
 
@@ -1098,6 +1109,7 @@ async def apply_local_resources_batch(
         "bound_skill_count": bound_skills,
         "tool_ids": bound_tool_ids,
         "skill_ids": bound_skill_ids,
+        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
 
@@ -1126,7 +1138,44 @@ async def skip_local_resource_recommendations(
     batch = resolve_recommendation_batch(
         tenant_id, agent_id, recommendation_batch_id, "skipped"
     )
+    return {
+        "recommendation_batch_id": recommendation_batch_id,
+        **batch,
+        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
+    }
+
+
+async def register_online_resource_recommendations(
+    agent_id: int,
+    recommendation_batch_id: str,
+    resource_type: str,
+    item_keys: List[str],
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Record one MCP or web-Skill result batch rendered by the frontend."""
+    _get_owned_draft(agent_id, tenant_id)
+    batch = register_online_recommendation_batch(
+        tenant_id,
+        agent_id,
+        recommendation_batch_id,
+        resource_type,
+        item_keys,
+    )
     return {"recommendation_batch_id": recommendation_batch_id, **batch}
+
+
+async def confirm_online_resource_configuration(
+    agent_id: int, tenant_id: str
+) -> Dict[str, Any]:
+    """Persist the user's global decision to finish online configuration."""
+    _get_owned_draft(agent_id, tenant_id)
+    completed_batch_ids = complete_online_configuration_state(tenant_id, agent_id)
+    return {
+        "agent_id": agent_id,
+        "online_configuration_confirmed": True,
+        "completed_batch_ids": completed_batch_ids,
+        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
+    }
 
 
 async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
@@ -1198,6 +1247,7 @@ async def save_agent_identity(
             normalized_display_name, agent_id, tenant_id
         ),
         "identity_confirmed": True,
+        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
 
@@ -1438,6 +1488,10 @@ async def finalize_agent(
         raise AgentRunException(str(exc)) from exc
     try:
         assert_mcp_workflows_resolved(tenant_id, agent_id)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
+    try:
+        assert_online_configuration_complete(tenant_id, agent_id)
     except Exception as exc:
         raise AgentRunException(str(exc)) from exc
     try:

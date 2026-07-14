@@ -22,17 +22,20 @@ from consts.model import (
     Nl2AgentMcpBindToolsRequest,
     Nl2AgentMcpInstallRequest,
     Nl2AgentModelSelectionRequest,
+    Nl2AgentOnlineRecommendationBatchRequest,
     Nl2AgentRecommendationBatchRequest,
     Nl2AgentRecommendationSkipRequest,
 )
 from services.nl2agent_service import (
     apply_local_resources_batch,
+    confirm_online_resource_configuration,
     finalize_agent,
     install_web_skill,
     bind_mcp_tools,
     install_recommended_mcp,
     get_session_state,
     register_local_resource_recommendations,
+    register_online_resource_recommendations,
     save_agent_identity,
     select_models,
     skip_mcp_tool_binding,
@@ -63,6 +66,10 @@ def _session_http_error(exc: Exception) -> HTTPException:
             "Reopen the model-selection card",
             "Apply or skip",
             "Show the local resource",
+            "Show online resource",
+            "Online recommendation batch contents",
+            "before completing online configuration",
+            "Complete the online resource",
             "display name is missing",
         )
     ):
@@ -253,6 +260,39 @@ async def skip_local_resources_api(
     return await skip_local_resource_recommendations(
         agent_id, payload.recommendation_batch_id, tenant_id
     )
+
+
+@router.post("/session/{agent_id}/online-recommendations/register")
+async def register_online_recommendations_api(
+    agent_id: int,
+    payload: Nl2AgentOnlineRecommendationBatchRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await register_online_resource_recommendations(
+            agent_id,
+            payload.recommendation_batch_id,
+            payload.resource_type,
+            payload.item_keys,
+            tenant_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post("/session/{agent_id}/online-configuration/complete")
+async def complete_online_configuration_api(
+    agent_id: int,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await confirm_online_resource_configuration(agent_id, tenant_id)
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.get("/session/{agent_id}/state")

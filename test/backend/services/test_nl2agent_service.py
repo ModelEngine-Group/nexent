@@ -86,6 +86,18 @@ _EXPECTED_SESSION_CATALOGS = {
 }
 
 
+def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
+    nl2agent_session_catalog.register_online_recommendation_batch(
+        tenant_id, draft_agent_id, "online_mcp", "mcp", []
+    )
+    nl2agent_session_catalog.register_online_recommendation_batch(
+        tenant_id, draft_agent_id, "online_skill", "skill", []
+    )
+    nl2agent_session_catalog.complete_online_configuration(
+        tenant_id, draft_agent_id
+    )
+
+
 class _FakeRedis:
     def __init__(self):
         self.data = {}
@@ -402,6 +414,10 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
     assert request.business_logic_model_id == 7
     assert request.model_ids == [7, 8]
     assert result["fallback_model_ids"] == [8]
+    assert (
+        result["chat_injection_text"]
+        == nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT
+    )
 
 
 @pytest.mark.asyncio
@@ -958,6 +974,7 @@ async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_d
         "bound_skill_count": 1,
         "tool_ids": [42],
         "skill_ids": [107],
+        "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
     tool_request = bind_tool.call_args.kwargs["tool_info"]
@@ -1098,6 +1115,7 @@ async def test_finalize_uses_persisted_resources_and_ignores_generated_ids(monke
     nl2agent_session_catalog.resolve_recommendation_batch(
         "tenant_1", 202, "batch_1", "applied", [42], [7]
     )
+    _complete_required_online_review()
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
 
     result = await nl2agent_service.finalize_agent(
@@ -1146,6 +1164,7 @@ async def test_finalize_rejects_incomplete_generated_proposal(monkeypatch):
     nl2agent_session_catalog.resolve_recommendation_batch(
         "tenant_1", 202, "batch_1", "skipped"
     )
+    _complete_required_online_review()
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
 
     with pytest.raises(
@@ -1192,6 +1211,66 @@ async def test_finalize_rejects_connected_mcp_until_tools_are_bound_or_skipped(m
     )
 
     with pytest.raises(nl2agent_service.AgentRunException, match="Bind discovered MCP tools"):
+        await nl2agent_service.finalize_agent(
+            agent_id=202,
+            user_id="user_1",
+            tenant_id="tenant_1",
+            business_description="Build document presentations",
+            duty_prompt="Create presentations from documents.",
+            greeting_message="Upload a document to begin.",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registered_resource_type", ["mcp", "skill"])
+async def test_finalize_requires_both_online_catalogs(
+    monkeypatch, registered_resource_type
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            return_value={
+                "agent_id": 202,
+                "name": "draft_test",
+                "display_name": "Document Helper",
+                "business_logic_model_id": 7,
+                "model_ids": [7],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(
+            return_value=[
+                {
+                    "model_id": 7,
+                    "model_type": "llm",
+                    "connect_status": "available",
+                }
+            ]
+        ),
+    )
+    nl2agent_session_catalog.register_recommendation_batch(
+        "tenant_1", 202, "batch_1", [], []
+    )
+    nl2agent_session_catalog.resolve_recommendation_batch(
+        "tenant_1", 202, "batch_1", "skipped"
+    )
+    nl2agent_session_catalog.register_online_recommendation_batch(
+        "tenant_1",
+        202,
+        f"online_{registered_resource_type}",
+        registered_resource_type,
+        [],
+    )
+    nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="both MCP and Skill",
+    ):
         await nl2agent_service.finalize_agent(
             agent_id=202,
             user_id="user_1",
@@ -1279,6 +1358,7 @@ async def test_save_agent_identity_persists_display_name_and_confirmation(monkey
         "display_name": "Document Helper",
         "internal_name": "document_helper",
         "identity_confirmed": True,
+        "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
     assert update.call_args.kwargs["agent_info"].display_name == "Document Helper"
     assert nl2agent_session_catalog.get_nl2agent_session_state(
@@ -1297,6 +1377,56 @@ async def test_save_agent_identity_rejects_whitespace(monkeypatch):
         await nl2agent_service.save_agent_identity(
             202, "   ", "tenant_1", "user_1"
         )
+
+
+@pytest.mark.asyncio
+async def test_online_recommendation_registration_and_completion(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+
+    registered = await nl2agent_service.register_online_resource_recommendations(
+        202, "online_1", "skill", ["skill:7"], "tenant_1"
+    )
+    assert registered["status"] == "recommendations_ready"
+    mcp_registered = await nl2agent_service.register_online_resource_recommendations(
+        202, "online_mcp", "mcp", [], "tenant_1"
+    )
+    assert mcp_registered["status"] == "recommendations_ready"
+
+    completed = await nl2agent_service.confirm_online_resource_configuration(
+        202, "tenant_1"
+    )
+    assert completed == {
+        "agent_id": 202,
+        "online_configuration_confirmed": True,
+        "completed_batch_ids": ["online_1", "online_mcp"],
+        "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
+    }
+
+
+@pytest.mark.asyncio
+async def test_local_skip_returns_automatic_continuation_text(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    nl2agent_session_catalog.register_recommendation_batch(
+        "tenant_1", 202, "local_empty", [], []
+    )
+
+    result = await nl2agent_service.skip_local_resource_recommendations(
+        202, "local_empty", "tenant_1"
+    )
+
+    assert result["status"] == "skipped"
+    assert (
+        result["chat_injection_text"]
+        == nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT
+    )
 
 
 @pytest.mark.asyncio

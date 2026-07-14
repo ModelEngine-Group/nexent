@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
+import { message } from "antd";
 import { resolveNl2AgentCardAgentId } from "@/lib/chat/nl2agentDraftContext";
 import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
 import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
@@ -8,6 +9,48 @@ import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
 import { FinalizeCard } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
+import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+
+export const OnlineRecommendationGroup: React.FC<{
+  agentId: number;
+  recommendationBatchId: string;
+  resourceType: "mcp" | "skill";
+  itemKeys: string[];
+  children: React.ReactNode;
+}> = ({ agentId, recommendationBatchId, resourceType, itemKeys, children }) => {
+  const workflow = useNl2AgentWorkflow();
+  const serializedKeys = JSON.stringify(itemKeys);
+
+  useEffect(() => {
+    if (!recommendationBatchId || !workflow.active) return;
+    workflow.beginAction();
+    void registerOnlineResourceRecommendations(agentId, {
+      recommendation_batch_id: recommendationBatchId,
+      resource_type: resourceType,
+      item_keys: itemKeys,
+    })
+      .then(() => workflow.notifyStateChanged())
+      .catch((error) =>
+        message.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to register online recommendations."
+        )
+      )
+      .finally(() => workflow.endAction());
+    // Stable serialized keys prevent repeated registration from array identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    agentId,
+    recommendationBatchId,
+    resourceType,
+    serializedKeys,
+    workflow.active,
+  ]);
+
+  return <>{children}</>;
+};
 
 /**
  * Registry that maps fenced-code-block language tags to NL2AGENT card
@@ -48,6 +91,12 @@ const renderInvalidSearchCard = () => (
   <div className="my-2 p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
     Invalid NL2AGENT search card: search must be executed by the agent before a
     result card can be rendered.
+  </div>
+);
+
+const renderMissingOnlineBatch = () => (
+  <div className="my-2 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+    Invalid NL2AGENT online resource card: missing recommendation_batch_id.
   </div>
 );
 
@@ -130,15 +179,31 @@ export const tryRenderNl2AgentCard = (
       );
     }
     case "nl2agent-web-mcp": {
+      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
       const item: WebMcpCardItem = parsed;
       return (
-        <WebMcpCard agentId={agentId} item={item} onInstall={onInstallMcp} />
+        <OnlineRecommendationGroup
+          agentId={agentId}
+          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          resourceType="mcp"
+          itemKeys={[String(item.recommendation_id || "")].filter(Boolean)}
+        >
+          <WebMcpCard agentId={agentId} item={item} onInstall={onInstallMcp} />
+        </OnlineRecommendationGroup>
       );
     }
     case "nl2agent-web-mcps": {
+      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
       const items: WebMcpCardItem[] = parsed.items || [];
       return (
-        <>
+        <OnlineRecommendationGroup
+          agentId={agentId}
+          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          resourceType="mcp"
+          itemKeys={items
+            .map((item) => String(item.recommendation_id || ""))
+            .filter(Boolean)}
+        >
           {items.map((item, i) => (
             <WebMcpCard
               key={i}
@@ -147,21 +212,48 @@ export const tryRenderNl2AgentCard = (
               onInstall={onInstallMcp}
             />
           ))}
-        </>
+        </OnlineRecommendationGroup>
       );
     }
     case "nl2agent-web-skill": {
+      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
       const item: WebSkillCardItem = parsed;
-      return <WebSkillCard agentId={agentId} item={item} />;
+      const itemKey = item.skill_id
+        ? `skill:${item.skill_id}`
+        : `skill-name:${String(item.skill_name || item.name || "")
+            .trim()
+            .toLowerCase()}`;
+      return (
+        <OnlineRecommendationGroup
+          agentId={agentId}
+          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          resourceType="skill"
+          itemKeys={[itemKey]}
+        >
+          <WebSkillCard agentId={agentId} item={item} />
+        </OnlineRecommendationGroup>
+      );
     }
     case "nl2agent-web-skills": {
+      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
       const items: WebSkillCardItem[] = parsed.items || [];
       return (
-        <>
+        <OnlineRecommendationGroup
+          agentId={agentId}
+          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          resourceType="skill"
+          itemKeys={items.map((item) =>
+            item.skill_id
+              ? `skill:${item.skill_id}`
+              : `skill-name:${String(item.skill_name || item.name || "")
+                  .trim()
+                  .toLowerCase()}`
+          )}
+        >
           {items.map((item, i) => (
             <WebSkillCard key={i} agentId={agentId} item={item} />
           ))}
-        </>
+        </OnlineRecommendationGroup>
       );
     }
     case "nl2agent-finalize": {

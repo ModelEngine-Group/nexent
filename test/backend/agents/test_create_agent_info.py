@@ -427,6 +427,7 @@ from backend.agents.create_agent_info import (
     _merge_tool_params,
     _resolve_agent_run_model_id,
     _is_nl2agent_model_selection_confirmed,
+    _build_nl2agent_current_session,
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
@@ -462,6 +463,91 @@ def test_resolve_agent_run_model_id_prefers_current_model_fields():
 )
 def test_is_nl2agent_model_selection_confirmed(draft, expected):
     assert _is_nl2agent_model_selection_confirmed(draft) is expected
+
+
+@pytest.mark.parametrize(
+    ("workflow_state", "expected"),
+    [
+        (
+            {},
+            {
+                "local_review_status": "missing",
+                "mcp_batch_registered": False,
+                "skill_batch_registered": False,
+                "configuration_confirmed": False,
+                "unresolved_mcp_count": 0,
+                "identity_confirmed": False,
+            },
+        ),
+        (
+            {
+                "recommendation_batches": {
+                    "local_1": {"status": "recommendations_ready"}
+                }
+            },
+            {
+                "local_review_status": "pending",
+                "mcp_batch_registered": False,
+                "skill_batch_registered": False,
+                "configuration_confirmed": False,
+                "unresolved_mcp_count": 0,
+                "identity_confirmed": False,
+            },
+        ),
+        (
+            {
+                "recommendation_batches": {"local_1": {"status": "applied"}},
+                "online_recommendation_batches": {
+                    "mcp_1": {"resource_type": "mcp"}
+                },
+                "mcp_workflows": {"registry:test": {"status": "connected"}},
+            },
+            {
+                "local_review_status": "complete",
+                "mcp_batch_registered": True,
+                "skill_batch_registered": False,
+                "configuration_confirmed": False,
+                "unresolved_mcp_count": 1,
+                "identity_confirmed": False,
+            },
+        ),
+        (
+            {
+                "recommendation_batches": {"local_1": {"status": "skipped"}},
+                "online_recommendation_batches": {
+                    "mcp_1": {"resource_type": "mcp"},
+                    "skill_1": {"resource_type": "skill"},
+                },
+                "online_configuration_confirmed": True,
+                "identity_confirmed": True,
+                "mcp_workflows": {"registry:test": {"status": "tools_bound"}},
+            },
+            {
+                "local_review_status": "complete",
+                "mcp_batch_registered": True,
+                "skill_batch_registered": True,
+                "configuration_confirmed": True,
+                "unresolved_mcp_count": 0,
+                "identity_confirmed": True,
+            },
+        ),
+    ],
+)
+def test_build_nl2agent_current_session_projects_workflow_state(
+    workflow_state, expected
+):
+    summary = _build_nl2agent_current_session(202, True, workflow_state)
+
+    assert summary["draft_agent_id"] == 202
+    assert summary["model_selection_confirmed"] is True
+    assert summary["local_review_status"] == expected["local_review_status"]
+    assert summary["online_review"] == {
+        "mcp_batch_registered": expected["mcp_batch_registered"],
+        "skill_batch_registered": expected["skill_batch_registered"],
+        "configuration_confirmed": expected["configuration_confirmed"],
+    }
+    assert summary["unresolved_mcp_count"] == expected["unresolved_mcp_count"]
+    assert summary["identity_confirmed"] is expected["identity_confirmed"]
 ValidationError = sys.modules["consts.exceptions"].ValidationError
 
 # Import ToolParamsRequest for testing
@@ -2089,7 +2175,10 @@ class TestCreateAgentConfig:
             }
             assert mock_agent_config.call_args.kwargs["model_name"] == "business_model"
             runtime_prompt = mock_prepare_templates.call_args.kwargs["system_prompt"]
-            assert "Authoritative model_selection_confirmed is `false`" in runtime_prompt
+            assert "This authoritative JSON is a snapshot" in runtime_prompt
+            assert '"draft_agent_id": 202' in runtime_prompt
+            assert '"model_selection_confirmed": false' in runtime_prompt
+            assert '"local_review_status": "missing"' in runtime_prompt
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):

@@ -136,6 +136,51 @@ def _is_nl2agent_model_selection_confirmed(
     }
     return primary_model_id is not None and primary_model_id in model_ids
 
+
+def _build_nl2agent_current_session(
+    draft_agent_id: int,
+    model_selection_confirmed: bool,
+    workflow_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Project persisted NL2AGENT state into an ID-free workflow summary."""
+    local_batches = workflow_state.get("recommendation_batches") or {}
+    if not local_batches:
+        local_review_status = "missing"
+    elif any(
+        batch.get("status") == "recommendations_ready"
+        for batch in local_batches.values()
+    ):
+        local_review_status = "pending"
+    else:
+        local_review_status = "complete"
+
+    online_batches = workflow_state.get("online_recommendation_batches") or {}
+    online_resource_types = {
+        batch.get("resource_type") for batch in online_batches.values()
+    }
+    mcp_workflows = workflow_state.get("mcp_workflows") or {}
+    unresolved_mcp_count = sum(
+        1
+        for workflow in mcp_workflows.values()
+        if workflow.get("status") in {"installing", "connected"}
+    )
+    return {
+        "draft_agent_id": int(draft_agent_id),
+        "model_selection_confirmed": bool(model_selection_confirmed),
+        "local_review_status": local_review_status,
+        "online_review": {
+            "mcp_batch_registered": "mcp" in online_resource_types,
+            "skill_batch_registered": "skill" in online_resource_types,
+            "configuration_confirmed": bool(
+                workflow_state.get("online_configuration_confirmed", False)
+            ),
+        },
+        "unresolved_mcp_count": unresolved_mcp_count,
+        "identity_confirmed": bool(
+            workflow_state.get("identity_confirmed", False)
+        ),
+    }
+
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
 # Keyed by model_id; cleared only on process restart.
@@ -799,18 +844,18 @@ async def create_agent_config(
         model_selection_confirmed = _is_nl2agent_model_selection_confirmed(
             draft_agent_info
         )
+        current_session = _build_nl2agent_current_session(
+            draft_agent_id,
+            model_selection_confirmed,
+            resource_state,
+        )
         nl2agent_system_prompt += (
             "\n\n### Current Session\n"
-            f"The exact draft agent_id is `{int(draft_agent_id)}`. "
-            "Use it in every NL2AGENT card. "
-            "Authoritative model_selection_confirmed is "
-            f"`{str(model_selection_confirmed).lower()}`. "
-            "When false, emit only the required one-sentence instruction followed "
-            "by the model-selection card, then wait. When true, "
-            "do not show or discuss model choices again; continue to resource review.\n"
-            "Authoritative local resource review state: "
-            f"{json.dumps(resource_state, ensure_ascii=False)}. "
-            "Finalization is forbidden until at least one batch exists and every batch is applied or skipped."
+            "This authoritative JSON is a snapshot taken at the start of this Agent Run. "
+            "Select exactly one next action from the ordered state machine. Fresh tool "
+            "Observations produced during this run take precedence over this snapshot "
+            "only for rendering their result cards.\n"
+            f"{json.dumps(current_session, ensure_ascii=False, sort_keys=True)}"
         )
 
     # Get template content (use manager template if has any sub-agents)

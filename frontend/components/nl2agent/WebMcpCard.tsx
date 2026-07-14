@@ -18,6 +18,7 @@ import {
   installNl2AgentMcp,
   skipNl2AgentMcpTools,
 } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export interface WebMcpCardItem {
   recommendation_id?: string;
@@ -114,6 +115,7 @@ const fieldValueIsValid = (
 
 /** Renders the in-chat MCP configuration, installation, and tool-binding flow. */
 export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
+  const workflow = useNl2AgentWorkflow();
   const { t } = useTranslation("common");
   const options = item.install_options ?? [];
   const [optionId, setOptionId] = React.useState(
@@ -233,6 +235,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
         return;
       }
     }
+    workflow.beginAction();
     setInstalling(true);
     setInstallError(undefined);
     try {
@@ -248,6 +251,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
         result.tools.map((tool: { tool_id: number }) => tool.tool_id)
       );
       message.success("MCP installed and connected.");
+      workflow.notifyStateChanged();
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "MCP installation failed.";
@@ -255,31 +259,38 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
       message.error(errorMessage);
     } finally {
       setInstalling(false);
+      workflow.endAction();
     }
   };
 
   const bind = async () => {
     if (!installed) return;
+    workflow.beginAction();
     try {
       await bindNl2AgentMcpTools(agentId, installed.mcp_id, selectedTools);
       setBound(true);
       setInstallError(undefined);
       message.success("Selected MCP tools are bound to the draft.");
+      workflow.notifyStateChanged();
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "MCP tool binding failed.";
       setInstallError(errorMessage);
       message.error(errorMessage);
+    } finally {
+      workflow.endAction();
     }
   };
 
   const skip = async () => {
     if (!installed) return;
+    workflow.beginAction();
     try {
       await skipNl2AgentMcpTools(agentId, installed.mcp_id);
       setSkipped(true);
       setInstallError(undefined);
       message.success("MCP tool binding skipped.");
+      workflow.notifyStateChanged();
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -287,6 +298,8 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
           : "Unable to skip MCP tool binding.";
       setInstallError(errorMessage);
       message.error(errorMessage);
+    } finally {
+      workflow.endAction();
     }
   };
 
@@ -331,7 +344,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
             size="small"
             icon={<Download className="h-3.5 w-3.5" />}
             loading={installing}
-            disabled={!canInstall}
+            disabled={!canInstall || workflow.busy}
             onClick={install}
           >
             {t("nl2agent.webMcp.install", "Install")}
@@ -472,12 +485,18 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
             <Button
               size="small"
               type="primary"
-              disabled={bound || skipped || selectedTools.length === 0}
+              disabled={
+                bound || skipped || selectedTools.length === 0 || workflow.busy
+              }
               onClick={bind}
             >
               {bound ? "Tools bound" : "Bind selected tools"}
             </Button>
-            <Button size="small" disabled={bound || skipped} onClick={skip}>
+            <Button
+              size="small"
+              disabled={bound || skipped || workflow.busy}
+              onClick={skip}
+            >
               {skipped ? "Binding skipped" : "Skip tool binding"}
             </Button>
           </div>

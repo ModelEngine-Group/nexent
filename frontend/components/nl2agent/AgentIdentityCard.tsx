@@ -8,6 +8,7 @@ import {
   getNl2AgentSessionState,
   saveNl2AgentIdentity,
 } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export interface AgentIdentityCardProps {
   agentId: number;
@@ -18,6 +19,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
   agentId,
   suggestedDisplayName,
 }) => {
+  const workflow = useNl2AgentWorkflow();
   const normalizedSuggestion = (suggestedDisplayName || "").trim().slice(0, 50);
   const [displayName, setDisplayName] = useState(normalizedSuggestion);
   const [internalName, setInternalName] = useState("");
@@ -54,6 +56,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
       setInternalName(result.internal_name);
       setSaved(true);
       message.success("Agent identity saved.");
+      await workflow.continueWithText(result.chat_injection_text);
     } catch (error: any) {
       message.error(error?.message || "Failed to save agent identity.");
     } finally {

@@ -6,10 +6,12 @@ import {
   getAvailablePlatformLlms,
   selectNl2AgentModels,
 } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
   agentId,
 }) => {
+  const workflow = useNl2AgentWorkflow();
   const [models, setModels] = useState<
     Array<{ id: number; displayName: string }>
   >([]);
@@ -51,13 +53,14 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
     if (!primary) return message.warning("Select a primary LLM.");
     setSaving(true);
     try {
-      await selectNl2AgentModels(
+      const result = await selectNl2AgentModels(
         agentId,
         primary,
         fallbacks.filter((id) => id !== primary)
       );
       setSaved(true);
       message.success("LLM selection saved.");
+      await workflow.continueWithText(result.chat_injection_text);
     } catch (error) {
       message.error(
         error instanceof Error ? error.message : "Failed to save models."

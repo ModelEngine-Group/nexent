@@ -14,6 +14,7 @@ from ._context import (
     create_nl2agent_context,
     error_response,
     get_cached_search,
+    online_recommendation_batch_id,
     set_cached_search,
 )
 
@@ -140,9 +141,18 @@ class NL2AgentSearchWebSkillsTool(Tool):
         # Guard: if already searched, return cached + applied state
         if ctx.was_searched(cache_tool_name, query):
             scored = _rank_web_skills(ctx.official_skills, query)
+            item_keys = [
+                f"skill:{item.get('skill_id')}"
+                if item.get("skill_id")
+                else f"skill-name:{canonical_search_query(str(item.get('skill_name') or item.get('name') or ''))}"
+                for item in scored
+            ]
             result = json.dumps(
                 {
                     "agent_id": ctx.target_agent_id,
+                    "recommendation_batch_id": online_recommendation_batch_id(
+                        ctx.target_agent_id, "skill", query, item_keys
+                    ),
                     "items": scored,
                     "already_searched": True,
                     "applied_skill_ids": list(ctx.applied_skill_ids),
@@ -153,7 +163,22 @@ class NL2AgentSearchWebSkillsTool(Tool):
             return result
 
         scored = _rank_web_skills(ctx.official_skills, query)
-        result = json.dumps({"agent_id": ctx.target_agent_id, "items": scored}, ensure_ascii=False)
+        item_keys = [
+            f"skill:{item.get('skill_id')}"
+            if item.get("skill_id")
+            else f"skill-name:{canonical_search_query(str(item.get('skill_name') or item.get('name') or ''))}"
+            for item in scored
+        ]
+        result = json.dumps(
+            {
+                "agent_id": ctx.target_agent_id,
+                "recommendation_batch_id": online_recommendation_batch_id(
+                    ctx.target_agent_id, "skill", query, item_keys
+                ),
+                "items": scored,
+            },
+            ensure_ascii=False,
+        )
         set_cached_search(ctx, *cache_key, result)
         ctx.mark_searched(cache_tool_name, query)
         return result

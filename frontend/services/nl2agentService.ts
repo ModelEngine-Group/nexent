@@ -72,6 +72,38 @@ export const skipLocalResourceRecommendations = async (
   return response.json();
 };
 
+export const registerOnlineResourceRecommendations = async (
+  agentId: number,
+  payload: {
+    recommendation_batch_id: string;
+    resource_type: "mcp" | "skill";
+    item_keys: string[];
+  }
+) => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.registerOnlineRecommendations(agentId),
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const completeOnlineResourceConfiguration = async (
+  agentId: number
+): Promise<{
+  agent_id: number;
+  online_configuration_confirmed: boolean;
+  completed_batch_ids: string[];
+  chat_injection_text: string;
+}> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.completeOnlineConfiguration(agentId),
+    { method: "POST" }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
 export interface Nl2AgentSessionState {
   agent_id: number;
   display_name?: string;
@@ -84,6 +116,15 @@ export interface Nl2AgentSessionState {
   resource_review: {
     identity_confirmed: boolean;
     recommendation_batches: Record<string, unknown>;
+    online_recommendation_batches: Record<
+      string,
+      {
+        resource_type: "mcp" | "skill";
+        item_keys: string[];
+        status: "recommendations_ready" | "completed";
+      }
+    >;
+    online_configuration_confirmed: boolean;
     mcp_workflows: Record<
       string,
       {
@@ -128,6 +169,7 @@ export const saveNl2AgentIdentity = async (
   display_name: string;
   internal_name: string;
   identity_confirmed: boolean;
+  chat_injection_text?: string;
 }> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.saveIdentity(agentId),
@@ -145,6 +187,7 @@ export interface Nl2AgentApplyLocalResourcesResponse {
   bound_skill_count: number;
   tool_ids: number[];
   skill_ids: number[];
+  chat_injection_text?: string;
 }
 
 export const selectNl2AgentModels = async (

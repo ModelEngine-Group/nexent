@@ -43,6 +43,8 @@ def _empty_session_state() -> Dict[str, Any]:
         "recommendation_batches": {},
         "identity_confirmed": False,
         "mcp_workflows": {},
+        "online_recommendation_batches": {},
+        "online_configuration_confirmed": False,
     }
 
 
@@ -67,6 +69,25 @@ def get_nl2agent_session_state(
         if not isinstance(workflows, dict):
             raise ValueError("mcp_workflows must be an object")
         state["mcp_workflows"] = workflows
+        online_batches = state.get("online_recommendation_batches", {})
+        if not isinstance(online_batches, dict):
+            raise ValueError("online_recommendation_batches must be an object")
+        for batch_id, batch in online_batches.items():
+            if not isinstance(batch_id, str) or not isinstance(batch, dict):
+                raise ValueError("online recommendation batches must be typed objects")
+            if batch.get("resource_type") not in {"mcp", "skill"}:
+                raise ValueError("online recommendation resource_type is invalid")
+            if not isinstance(batch.get("item_keys"), list) or not all(
+                isinstance(item_key, str) for item_key in batch["item_keys"]
+            ):
+                raise ValueError("online recommendation item_keys must be strings")
+            if batch.get("status") not in {"recommendations_ready", "completed"}:
+                raise ValueError("online recommendation status is invalid")
+        state["online_recommendation_batches"] = online_batches
+        online_confirmed = state.get("online_configuration_confirmed", False)
+        if not isinstance(online_confirmed, bool):
+            raise ValueError("online_configuration_confirmed must be a boolean")
+        state["online_configuration_confirmed"] = online_confirmed
         return deepcopy(state)
     except Exception as exc:
         logger.error(
@@ -155,6 +176,90 @@ def assert_mcp_workflows_resolved(tenant_id: str, draft_agent_id: int) -> None:
     if unresolved:
         raise Nl2AgentSessionCatalogError(
             "Bind discovered MCP tools or explicitly skip tool binding before finalizing."
+        )
+
+
+def register_online_recommendation_batch(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_batch_id: str,
+    resource_type: str,
+    item_keys: List[str],
+) -> Dict[str, Any]:
+    """Idempotently record one rendered online recommendation batch."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    if resource_type not in {"mcp", "skill"}:
+        raise Nl2AgentSessionCatalogError("Invalid online resource type.")
+    if not recommendation_batch_id:
+        raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
+    normalized_keys = sorted({str(key).strip() for key in item_keys if str(key).strip()})
+    state = get_nl2agent_session_state(tenant, draft_id)
+    batches = state["online_recommendation_batches"]
+    expected = {
+        "resource_type": resource_type,
+        "item_keys": normalized_keys,
+        "status": "recommendations_ready",
+    }
+    existing = batches.get(recommendation_batch_id)
+    if existing is None:
+        batches[recommendation_batch_id] = expected
+        state["online_configuration_confirmed"] = False
+    elif (
+        existing.get("resource_type") != resource_type
+        or existing.get("item_keys") != normalized_keys
+    ):
+        raise Nl2AgentSessionCatalogError(
+            "Online recommendation batch contents do not match the registered card."
+        )
+    _set_nl2agent_session_state(tenant, draft_id, state)
+    return deepcopy(batches[recommendation_batch_id])
+
+
+def complete_online_configuration(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> List[str]:
+    """Complete all rendered online recommendation batches for one draft."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    state = get_nl2agent_session_state(tenant, draft_id)
+    batches = state["online_recommendation_batches"]
+    resource_types = {batch.get("resource_type") for batch in batches.values()}
+    if not {"mcp", "skill"}.issubset(resource_types):
+        raise Nl2AgentSessionCatalogError(
+            "Show online resource recommendations for both MCP and Skill before completing configuration."
+        )
+    unresolved = [
+        workflow
+        for workflow in state["mcp_workflows"].values()
+        if workflow.get("status") in {"installing", "connected"}
+    ]
+    if unresolved:
+        raise Nl2AgentSessionCatalogError(
+            "Bind discovered MCP tools or explicitly skip tool binding before completing online configuration."
+        )
+    for batch in batches.values():
+        batch["status"] = "completed"
+    state["online_configuration_confirmed"] = True
+    _set_nl2agent_session_state(tenant, draft_id, state)
+    return sorted(batches)
+
+
+def assert_online_configuration_complete(
+    tenant_id: str, draft_agent_id: int
+) -> None:
+    """Reject finalization when rendered online batches remain unfinished."""
+    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+    batches = state["online_recommendation_batches"]
+    resource_types = {batch.get("resource_type") for batch in batches.values()}
+    if not {"mcp", "skill"}.issubset(resource_types):
+        raise Nl2AgentSessionCatalogError(
+            "Show online resource recommendations for both MCP and Skill before finalizing."
+        )
+    if (
+        not state.get("online_configuration_confirmed")
+        or any(batch.get("status") != "completed" for batch in batches.values())
+    ):
+        raise Nl2AgentSessionCatalogError(
+            "Complete the online resource configuration before finalizing."
         )
 
 

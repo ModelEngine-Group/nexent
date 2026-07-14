@@ -14,6 +14,7 @@ from ._context import (
     create_nl2agent_context,
     error_response,
     get_cached_search,
+    online_recommendation_batch_id,
     set_cached_search,
 )
 
@@ -364,9 +365,16 @@ class NL2AgentSearchWebMcpsTool(Tool):
             scored = [
                 {**item, "agent_id": ctx.target_agent_id} for item in scored
             ]
+            batch_id = online_recommendation_batch_id(
+                ctx.target_agent_id,
+                "mcp",
+                query,
+                [str(item.get("recommendation_id") or "") for item in scored],
+            )
             result = json.dumps(
                 {
                     "agent_id": ctx.target_agent_id,
+                    "recommendation_batch_id": batch_id,
                     "items": scored,
                     "already_searched": True,
                     "applied_mcp_names": list(ctx.applied_mcp_names),
@@ -380,7 +388,20 @@ class NL2AgentSearchWebMcpsTool(Tool):
         # Keep the draft identity on every recommendation as well as the
         # wrapper. This makes both plural and per-item MCP card rendering safe.
         scored = [{**item, "agent_id": ctx.target_agent_id} for item in scored]
-        result = json.dumps({"agent_id": ctx.target_agent_id, "items": scored}, ensure_ascii=False)
+        batch_id = online_recommendation_batch_id(
+            ctx.target_agent_id,
+            "mcp",
+            query,
+            [str(item.get("recommendation_id") or "") for item in scored],
+        )
+        result = json.dumps(
+            {
+                "agent_id": ctx.target_agent_id,
+                "recommendation_batch_id": batch_id,
+                "items": scored,
+            },
+            ensure_ascii=False,
+        )
         set_cached_search(ctx, *cache_key, result)
         ctx.mark_searched("nl2agent_search_web_mcps", query)
         return result

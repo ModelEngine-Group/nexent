@@ -9,6 +9,7 @@ import {
   registerLocalResourceRecommendations,
   skipLocalResourceRecommendations,
 } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export interface LocalResourceItem {
   tool_id?: number;
@@ -43,6 +44,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   tools,
   skills,
 }) => {
+  const workflow = useNl2AgentWorkflow();
   const { t } = useTranslation("common");
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
@@ -58,10 +60,16 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     if (!recommendationBatchId) return;
     void registerLocalResourceRecommendations(agentId, {
       recommendation_batch_id: recommendationBatchId,
-      tool_ids: tools.flatMap((item) => item.tool_id == null ? [] : [item.tool_id]),
-      skill_ids: skills.flatMap((item) => item.skill_id == null ? [] : [item.skill_id]),
+      tool_ids: tools.flatMap((item) =>
+        item.tool_id == null ? [] : [item.tool_id]
+      ),
+      skill_ids: skills.flatMap((item) =>
+        item.skill_id == null ? [] : [item.skill_id]
+      ),
     }).catch((error) => {
-      AntMessage.error(error?.message || "Failed to register resource recommendations.");
+      AntMessage.error(
+        error?.message || "Failed to register resource recommendations."
+      );
     });
   }, [agentId, recommendationBatchId, skills, tools]);
 
@@ -75,17 +83,28 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   };
 
   const selectedToolIds = useMemo(
-    () => tools.filter((x) => x.tool_id != null && selected.has(`t:${x.tool_id}`)).map((x) => x.tool_id!) as number[],
+    () =>
+      tools
+        .filter((x) => x.tool_id != null && selected.has(`t:${x.tool_id}`))
+        .map((x) => x.tool_id!) as number[],
     [selected, tools]
   );
   const selectedSkillIds = useMemo(
-    () => skills.filter((x) => x.skill_id != null && selected.has(`s:${x.skill_id}`)).map((x) => x.skill_id!) as number[],
+    () =>
+      skills
+        .filter((x) => x.skill_id != null && selected.has(`s:${x.skill_id}`))
+        .map((x) => x.skill_id!) as number[],
     [selected, skills]
   );
 
   const handleApplyAll = async () => {
     if (selectedToolIds.length === 0 && selectedSkillIds.length === 0) {
-      AntMessage.warning(t("nl2agent.localResources.selectAtLeastOne", "Please select at least one resource."));
+      AntMessage.warning(
+        t(
+          "nl2agent.localResources.selectAtLeastOne",
+          "Please select at least one resource."
+        )
+      );
       return;
     }
     setLoading(true);
@@ -97,12 +116,14 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
       });
       AntMessage.success(
         t("nl2agent.localResources.applied", {
-          defaultValue: "Applied {{toolCount}} tool(s) and {{skillCount}} skill(s).",
+          defaultValue:
+            "Applied {{toolCount}} tool(s) and {{skillCount}} skill(s).",
           toolCount: res.bound_tool_count,
           skillCount: res.bound_skill_count,
         })
       );
       setApplied(true);
+      await workflow.continueWithText(res.chat_injection_text);
     } catch (e: any) {
       AntMessage.error(e?.message || "Failed to apply resources.");
     } finally {
@@ -113,11 +134,18 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const handleSkip = async () => {
     setLoading(true);
     try {
-      await skipLocalResourceRecommendations(agentId, recommendationBatchId);
+      const result = await skipLocalResourceRecommendations(
+        agentId,
+        recommendationBatchId
+      );
       setSkipped(true);
       AntMessage.success(
-        t("nl2agent.localResources.skipped", "Continuing without these local resources.")
+        t(
+          "nl2agent.localResources.skipped",
+          "Continuing without these local resources."
+        )
       );
+      await workflow.continueWithText(result.chat_injection_text);
     } catch (e: any) {
       AntMessage.error(e?.message || "Failed to skip resources.");
     } finally {
@@ -126,7 +154,8 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   };
 
   const renderRow = (item: LocalResourceItem) => {
-    const key = item.kind === "tool" ? `t:${item.tool_id}` : `s:${item.skill_id}`;
+    const key =
+      item.kind === "tool" ? `t:${item.tool_id}` : `s:${item.skill_id}`;
     return (
       <label
         key={key}
@@ -147,14 +176,20 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
               </span>
             )}
             {typeof item.score === "number" && (
-              <span className="text-[10px] text-gray-500">score: {item.score}</span>
+              <span className="text-[10px] text-gray-500">
+                score: {item.score}
+              </span>
             )}
           </div>
           {item.description && (
-            <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">{item.description}</div>
+            <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">
+              {item.description}
+            </div>
           )}
           {item.reason && (
-            <div className="text-xs text-gray-400 mt-0.5 italic">{item.reason}</div>
+            <div className="text-xs text-gray-400 mt-0.5 italic">
+              {item.reason}
+            </div>
           )}
         </div>
       </label>
@@ -200,7 +235,12 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           size="small"
           onClick={handleApplyAll}
           loading={loading}
-          disabled={!recommendationBatchId || applied || skipped || (selectedToolIds.length === 0 && selectedSkillIds.length === 0)}
+          disabled={
+            !recommendationBatchId ||
+            applied ||
+            skipped ||
+            (selectedToolIds.length === 0 && selectedSkillIds.length === 0)
+          }
         >
           {applied ? (
             <>
@@ -224,7 +264,10 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         >
           {skipped
             ? t("nl2agent.localResources.skippedShort", "Skipped")
-            : t("nl2agent.localResources.continueWithout", "Continue Without Resources")}
+            : t(
+                "nl2agent.localResources.continueWithout",
+                "Continue Without Resources"
+              )}
         </Button>
       </div>
     </div>

@@ -18,6 +18,15 @@ import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
 import { TaskWindow } from "./taskWindow";
 import { transformMessagesToTaskMessages } from "./messageTransformer";
 import { TokenMetrics } from "@/types/chat";
+import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
+import {
+  Nl2AgentContinuationError,
+  OnlineConfigurationBar,
+} from "@/components/nl2agent/OnlineConfigurationBar";
+
+export const isHiddenNl2AgentContinuation = (message: ChatMessageType) =>
+  message.role === MESSAGE_ROLES.USER &&
+  isNl2AgentAutoContinueText(message.content);
 
 export function ChatStreamMain({
   messages,
@@ -401,6 +410,7 @@ export function ChatStreamMain({
                 >
                   {shareMode &&
                     message.role === MESSAGE_ROLES.USER &&
+                    !isHiddenNl2AgentContinuation(message) &&
                     typeof message.message_id === "number" && (
                       <div className="absolute left-0 top-2 z-10">
                         <Checkbox
@@ -414,21 +424,23 @@ export function ChatStreamMain({
                         />
                       </div>
                     )}
-                  <ChatStreamFinalMessage
-                    message={message}
-                    onSelectMessage={onSelectMessage}
-                    isSelected={message.id === selectedMessageId}
-                    searchResultsCount={message?.searchResults?.length || 0}
-                    imagesCount={message?.images?.length || 0}
-                    onImageClick={onImageClick}
-                    onOpinionChange={onOpinionChange}
-                    readOnly={readOnly}
-                    index={index}
-                    currentConversationId={currentConversationId}
-                    onCitationHover={onCitationHover}
-                    onInstallNl2AgentMcp={onInstallNl2AgentMcp}
-                    nl2AgentDraftAgentId={nl2AgentDraftAgentId}
-                  />
+                  {!isHiddenNl2AgentContinuation(message) && (
+                    <ChatStreamFinalMessage
+                      message={message}
+                      onSelectMessage={onSelectMessage}
+                      isSelected={message.id === selectedMessageId}
+                      searchResultsCount={message?.searchResults?.length || 0}
+                      imagesCount={message?.images?.length || 0}
+                      onImageClick={onImageClick}
+                      onOpinionChange={onOpinionChange}
+                      readOnly={readOnly}
+                      index={index}
+                      currentConversationId={currentConversationId}
+                      onCitationHover={onCitationHover}
+                      onInstallNl2AgentMcp={onInstallNl2AgentMcp}
+                      nl2AgentDraftAgentId={nl2AgentDraftAgentId}
+                    />
+                  )}
                   {message.role === MESSAGE_ROLES.USER &&
                     processedMessages.conversationGroups.has(message.id!) && (
                       <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
@@ -491,6 +503,8 @@ export function ChatStreamMain({
             transition={chatInputTransition}
             ref={chatInputRef}
           >
+            <Nl2AgentContinuationError />
+            <OnlineConfigurationBar agentId={nl2AgentDraftAgentId} />
             <ChatInput
               input={input}
               isLoading={isLoading}

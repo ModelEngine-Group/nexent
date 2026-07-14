@@ -1,5 +1,6 @@
 """Shared session context for NL2AGENT builtin tools."""
 
+import hashlib
 import json
 import re
 import time
@@ -62,6 +63,25 @@ def normalize_search_keywords(query: str) -> List[str]:
 def canonical_search_query(query: str) -> str:
     """Return an order-independent signature for an equivalent keyword set."""
     return "\x1f".join(sorted(normalize_search_keywords(query)))
+
+
+def online_recommendation_batch_id(
+    draft_agent_id: Optional[int],
+    resource_type: str,
+    query: str,
+    item_keys: List[str],
+) -> str:
+    """Build a stable identifier for one online recommendation result batch."""
+    payload = {
+        "draft_agent_id": int(draft_agent_id or 0),
+        "resource_type": resource_type,
+        "query": canonical_search_query(query),
+        "item_keys": sorted({str(key) for key in item_keys if str(key)}),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:20]
+    return f"online_{digest}"
 
 
 def _searchable_text(value: Any) -> str:
