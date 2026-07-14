@@ -73,6 +73,23 @@ class TestRegistryList:
         resp = client.get("/mcp-tools/registry/list?search=test&limit=10", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
 
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_registry_mcp_services')
+    def test_list_unauthorized(self, mock_list, mock_auth):
+        """Test registry list returns 401 on UnauthorizedError."""
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp-tools/registry/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_registry_mcp_services')
+    def test_list_server_error(self, mock_list, mock_auth):
+        """Test registry list returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.side_effect = RuntimeError("unexpected")
+        resp = client.get("/mcp-tools/registry/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # ============================================================================
 # GET /mcp-tools/community/list
@@ -107,6 +124,23 @@ class TestCommunityList:
         )
         assert resp.status_code == HTTPStatus.OK
 
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_services')
+    def test_list_unauthorized(self, mock_list, mock_auth):
+        """Test community list returns 401 on UnauthorizedError."""
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp-tools/community/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_services')
+    def test_list_server_error(self, mock_list, mock_auth):
+        """Test community list returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.side_effect = RuntimeError("unexpected")
+        resp = client.get("/mcp-tools/community/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # ============================================================================
 # GET /mcp-tools/community/tags/stats
@@ -125,6 +159,23 @@ class TestCommunityTagStats:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["data"][0]["tag"] == "python"
         mock_stats.assert_called_once_with(tenant_id="tid")
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_tag_stats')
+    def test_tag_stats_unauthorized(self, mock_stats, mock_auth):
+        """Test tag stats returns 401 on UnauthorizedError."""
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp-tools/community/tags/stats", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_tag_stats')
+    def test_tag_stats_server_error(self, mock_stats, mock_auth):
+        """Test tag stats returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_stats.side_effect = RuntimeError("unexpected")
+        resp = client.get("/mcp-tools/community/tags/stats", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 # ============================================================================
@@ -530,6 +581,23 @@ class TestCommunityMine:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
         mock_list.assert_called_once_with(tenant_id="tid", user_id="uid")
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_my_community_mcp_services')
+    def test_list_mine_unauthorized(self, mock_list, mock_auth):
+        """Test my community list returns 401 on UnauthorizedError."""
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp-tools/community/mine", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_my_community_mcp_services')
+    def test_list_mine_server_error(self, mock_list, mock_auth):
+        """Test my community list returns 500 on unexpected error."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.side_effect = RuntimeError("unexpected")
+        resp = client.get("/mcp-tools/community/mine", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 # ============================================================================
