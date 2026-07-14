@@ -87,7 +87,6 @@ export function MineSkillsView({
   isUpdatingStatus: boolean;
   onSetNotShared: (repositoryInfo: MySkillRepositoryInfoItem) => Promise<void>;
 }) {
-  const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalSkill, setReviewModalSkill] =
