@@ -9,6 +9,17 @@ export interface OAuthProvider {
   enabled: boolean;
 }
 
+export interface OAuthConfig {
+  enabled: boolean;
+  login_mode: "button" | "force" | "disabled";
+  auto_login_provider: string | null;
+  providers: OAuthProvider[];
+}
+
+interface GetOAuthConfigOptions {
+  forceRefresh?: boolean;
+}
+
 export interface OAuthAccount {
   provider: string;
   provider_username: string | null;
@@ -46,7 +57,10 @@ export type OAuthErrorKey =
   | "auth.inviteCodeInvalid"
   | "auth.oauthCompleteFailed";
 
-function getOAuthErrorKey(errorMessage: string, status?: number): OAuthErrorKey {
+function getOAuthErrorKey(
+  errorMessage: string,
+  status?: number
+): OAuthErrorKey {
   const normalized = errorMessage.toLowerCase();
 
   if (
@@ -78,20 +92,73 @@ function getOAuthErrorKey(errorMessage: string, status?: number): OAuthErrorKey 
   return "auth.oauthCompleteFailed";
 }
 
+const disabledConfig: OAuthConfig = {
+  enabled: false,
+  login_mode: "disabled",
+  auto_login_provider: null,
+  providers: [],
+};
+
+const SUCCESS_CACHE_TTL_MS = 5 * 60 * 1000;
+const FAILURE_CACHE_TTL_MS = 30 * 1000;
+
+let cachedConfig: OAuthConfig | null = null;
+let cacheExpiresAt = 0;
+let inFlightConfigPromise: Promise<OAuthConfig> | null = null;
+
+const cacheConfig = (config: OAuthConfig, ttlMs: number) => {
+  cachedConfig = config;
+  cacheExpiresAt = Date.now() + ttlMs;
+};
+
 export const oauthService = {
-  getEnabledProviders: async (): Promise<OAuthProvider[]> => {
-    try {
-      const response = await fetch(API_ENDPOINTS.oauth.providers);
-      if (!response.ok) {
-        log.warn("Failed to fetch OAuth providers");
-        return [];
-      }
-      const data = await response.json();
-      return data.data || [];
-    } catch (error) {
-      log.error("Failed to fetch OAuth providers:", error);
-      return [];
+  getConfig: async (
+    options: GetOAuthConfigOptions = {}
+  ): Promise<OAuthConfig> => {
+    const now = Date.now();
+    if (!options.forceRefresh && cachedConfig && cacheExpiresAt > now) {
+      return cachedConfig;
     }
+
+    if (inFlightConfigPromise) {
+      return inFlightConfigPromise;
+    }
+
+    inFlightConfigPromise = (async () => {
+      try {
+        const response = await fetch(API_ENDPOINTS.oauth.config);
+        if (!response.ok) {
+          log.warn("Failed to fetch OAuth config");
+          cacheConfig(disabledConfig, FAILURE_CACHE_TTL_MS);
+          return disabledConfig;
+        }
+
+        const data = await response.json();
+        const responseConfig = data.data || {};
+        const config: OAuthConfig = {
+          ...disabledConfig,
+          ...responseConfig,
+          providers: Array.isArray(responseConfig.providers)
+            ? responseConfig.providers
+            : [],
+        };
+        cacheConfig(config, SUCCESS_CACHE_TTL_MS);
+        return config;
+      } catch (error) {
+        log.warn("Failed to fetch OAuth config:", error);
+        cacheConfig(disabledConfig, FAILURE_CACHE_TTL_MS);
+        return disabledConfig;
+      } finally {
+        inFlightConfigPromise = null;
+      }
+    })();
+
+    return inFlightConfigPromise;
+  },
+
+  getEnabledProviders: async (): Promise<OAuthProvider[]> => {
+    const config = await oauthService.getConfig();
+    return config.providers;
   },
 
   startOAuthLogin: (provider: string): void => {
@@ -175,9 +242,12 @@ export const oauthService = {
 
   unlinkAccount: async (provider: string): Promise<boolean> => {
     try {
-      const response = await fetchWithAuth(API_ENDPOINTS.oauth.unlink(provider), {
-        method: "DELETE",
-      });
+      const response = await fetchWithAuth(
+        API_ENDPOINTS.oauth.unlink(provider),
+        {
+          method: "DELETE",
+        }
+      );
       return response.ok;
     } catch (error) {
       log.error(`Failed to unlink ${provider} account:`, error);

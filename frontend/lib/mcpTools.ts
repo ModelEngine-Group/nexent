@@ -1,5 +1,6 @@
 import type { McpServer } from "@/types/agentConfig";
 import type {
+  CommunityMcpCard,
   McpServiceItem,
   RegistryMcpCard,
   RegistryPackageArgumentInput,
@@ -7,8 +8,10 @@ import type {
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
 import {
+  FILTER_ALL,
   MCP_PORT_RANGE,
   McpContainerStatus,
+  McpDeploymentType,
   McpHealthStatus,
   McpSource,
   McpTransportType,
@@ -36,6 +39,31 @@ export const getTransportLabelKey = (
   if (transportType === McpTransportType.CONTAINER)
     return "mcpTools.serverType.container";
   return "mcpTools.serverType.url";
+};
+
+export const getDeploymentTypeLabelKey = (
+  deploymentType: McpDeploymentType | string
+): string => {
+  if (deploymentType === McpDeploymentType.CONTAINER)
+    return "mcpTools.deploymentType.container";
+  if (deploymentType === McpDeploymentType.API)
+    return "mcpTools.deploymentType.api";
+  if (deploymentType === McpDeploymentType.LOCAL_IMAGE)
+    return "mcpTools.deploymentType.localImage";
+  return "mcpTools.deploymentType.remoteLink";
+};
+
+export const resolveDeploymentType = (item: {
+  transportType: McpTransportType;
+  deploymentType?: McpDeploymentType;
+  configJson?: Record<string, unknown>;
+  serverUrl?: string;
+}): McpDeploymentType => {
+  if (item.deploymentType) return item.deploymentType;
+  if (item.transportType === McpTransportType.CONTAINER || item.configJson) {
+    return McpDeploymentType.CONTAINER;
+  }
+  return McpDeploymentType.REMOTE_LINK;
 };
 
 /** i18n key for a service's `healthStatus`. */
@@ -73,6 +101,33 @@ export const filterServiceCards = (
       item.tags.some((tag) => tag.toLowerCase().includes(keyword))
     );
   });
+};
+
+export const matchesNameOrTag = (
+  item: { name?: string; tags?: string[] },
+  searchValue: string
+): boolean => {
+  const keyword = searchValue.trim().toLowerCase();
+  if (!keyword) return true;
+  return (
+    (item.name || "").toLowerCase().includes(keyword) ||
+    (item.tags || []).some((tag) => tag.toLowerCase().includes(keyword))
+  );
+};
+
+export const filterByDeploymentType = <T extends {
+  transportType: McpTransportType;
+  deploymentType?: McpDeploymentType;
+  configJson?: Record<string, unknown>;
+  serverUrl?: string;
+}>(items: T[], deploymentType: McpDeploymentType | typeof FILTER_ALL): T[] => {
+  if (deploymentType === FILTER_ALL) return items;
+  return items.filter((item) => resolveDeploymentType(item) === deploymentType);
+};
+
+export const paginateItems = <T>(items: T[], page: number, pageSize: number): T[] => {
+  const safePage = Math.max(1, page);
+  return items.slice((safePage - 1) * pageSize, safePage * pageSize);
 };
 
 // ---------------------------------------------------------------------------

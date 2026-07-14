@@ -176,6 +176,7 @@ data:
   OAUTH_SSL_VERIFY: {{ .Values.config.oauth.sslVerify | quote }}
   OAUTH_CA_BUNDLE: {{ .Values.config.oauth.caBundle | quote }}
   OAUTH_CALLBACK_BASE_URL: {{ .Values.config.oauth.callbackBaseUrl | quote }}
+  OAUTH_LOGIN_MODE: {{ .Values.config.oauth.loginMode | quote }}
 
   # ===== CAS SSO Configuration =====
   CAS_ENABLED: {{ .Values.config.cas.enabled | quote }}

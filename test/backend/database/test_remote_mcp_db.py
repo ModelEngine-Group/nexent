@@ -86,6 +86,9 @@ from backend.database.remote_mcp_db import (
     get_mcp_custom_headers_by_name_and_url,
     check_mcp_name_exists,
     check_enabled_mcp_name_exists,
+    update_mcp_record_market_id_by_id,
+    clear_mcp_record_market_id,
+    update_mcp_record_registry_json_by_id,
 )
 
 
@@ -363,6 +366,7 @@ def test_update_mcp_record_manage_fields_by_id_success(monkeypatch, mock_session
         name="new-name", server_url="http://new.url",
         description="desc", tags=["a"], source="local",
         authorization_token="tok", custom_headers=None, config_json={"key": "val"},
+        market_id=None,
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
@@ -389,6 +393,7 @@ def test_update_mcp_record_manage_fields_by_id_none_tags(monkeypatch, mock_sessi
         name="n", server_url="u", description=None,
         tags=None, source="local", authorization_token=None,
         custom_headers=None, config_json=None,
+        market_id=None,
     )
     call_args = mock_update.call_args[0][0]
     assert call_args["tags"] == []
@@ -415,6 +420,7 @@ def test_update_mcp_record_manage_fields_by_id_with_custom_headers(monkeypatch, 
         source="community", authorization_token="new_token",
         custom_headers=custom_headers,
         config_json={"timeout": 30},
+        market_id=None,
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
@@ -1007,6 +1013,73 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
 
     # 5. Delete by ID
     delete_mcp_record_by_id(mcp_id=1, tenant_id="tenant1", user_id="user1")
+
+
+# ============================================================================
+# update_mcp_record_market_id_by_id (NEW)
+# ============================================================================
+
+def test_update_mcp_record_market_id_by_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_mcp_record_market_id_by_id(mcp_id=1, tenant_id="tid", user_id="uid", market_id=100)
+    mock_update.assert_called_once_with({"market_id": 100, "updated_by": "uid"})
+
+    update_mcp_record_market_id_by_id(mcp_id=2, tenant_id="tid", user_id="uid", market_id=None)
+    assert mock_update.call_count == 2
+
+
+# ============================================================================
+# clear_mcp_record_market_id (NEW)
+# ============================================================================
+
+def test_clear_mcp_record_market_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    clear_mcp_record_market_id(tenant_id="tid", user_id="uid", market_id=100)
+    mock_update.assert_called_once_with({"market_id": None, "updated_by": "uid"})
+
+
+# ============================================================================
+# update_mcp_record_registry_json_by_id (NEW)
+# ============================================================================
+
+def test_update_mcp_record_registry_json_by_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    registry_json = {"tools": [{"name": "tool1", "description": "desc1"}]}
+    update_mcp_record_registry_json_by_id(mcp_id=1, tenant_id="tid", user_id="uid", registry_json=registry_json)
+    mock_update.assert_called_once_with({
+        "registry_json": registry_json,
+        "updated_by": "uid",
+    })
 
 
 if __name__ == "__main__":
