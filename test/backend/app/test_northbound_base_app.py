@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -85,14 +86,34 @@ sys.modules["services.redis_service"] = redis_service_module
 # services.vectordatabase_service - stub to avoid heavy SDK imports
 vectordb_service_module = types.ModuleType("services.vectordatabase_service")
 
+class KnowledgeBaseNeedsModelConfigError(Exception):
+    def __init__(self, index_name: str, message: str = None):
+        self.index_name = index_name
+        self.message = message or (
+            f"Knowledge base '{index_name}' needs an embedding model to be configured"
+        )
+        super().__init__(self.message)
+
 class _ElasticSearchServiceStub:
     @staticmethod
     def list_indices(*args, **kwargs):
         return {"indices": []}
 
 vectordb_service_module.ElasticSearchService = _ElasticSearchServiceStub
+vectordb_service_module.KnowledgeBaseNeedsModelConfigError = KnowledgeBaseNeedsModelConfigError
 vectordb_service_module.get_vector_db_core = MagicMock()
 sys.modules["services.vectordatabase_service"] = vectordb_service_module
+
+# database.knowledge_db - stub used by northbound_knowledge_app
+database_pkg = types.ModuleType("database")
+database_pkg.__path__ = [os.path.join(backend_dir, "database")]
+sys.modules["database"] = database_pkg
+
+knowledge_db_module = types.ModuleType("database.knowledge_db")
+knowledge_db_module.get_index_name_by_knowledge_name = MagicMock(
+    side_effect=lambda name, tenant_id: f"resolved_{name}"
+)
+sys.modules["database.knowledge_db"] = knowledge_db_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 2: Mock minimal consts modules needed by apps layer
@@ -102,12 +123,19 @@ consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules['consts'] = consts_module
 
 # consts.model - only exceptions and AgentRequest needed by apps
+class HybridSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    index_names: list = Field(..., min_length=1)
+    top_k: int = Field(10, ge=1, le=100)
+    weight_accurate: float = Field(0.5, ge=0.0, le=1.0)
+
 consts_model_module = types.ModuleType("consts.model")
 consts_model_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_model_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 consts_model_module.SignatureValidationError = type("SignatureValidationError", (Exception,), {})
 consts_model_module.AgentRequest = type("AgentRequest", (), {})
 consts_model_module.ProcessParams = type("ProcessParams", (), {})
+consts_model_module.HybridSearchRequest = HybridSearchRequest
 consts_module.model = consts_model_module
 sys.modules['consts.model'] = consts_model_module
 
@@ -124,6 +152,16 @@ consts_exceptions_module.UnsupportedFileTypeException = type("UnsupportedFileTyp
 consts_exceptions_module.FileTooLargeException = type("FileTooLargeException", (Exception,), {})
 consts_module.exceptions = consts_exceptions_module
 sys.modules['consts.exceptions'] = consts_exceptions_module
+
+# consts.const - stub used by northbound_knowledge_app
+consts_const_module = types.ModuleType("consts.const")
+consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+class VectorDatabaseType:
+    ELASTICSEARCH = "elasticsearch"
+
+consts_const_module.VectorDatabaseType = VectorDatabaseType
+sys.modules["consts.const"] = consts_const_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
@@ -151,6 +189,13 @@ async def _get_northbound_context_fake(request):
 
 northbound_app_module._get_northbound_context = _get_northbound_context_fake
 sys.modules['apps.northbound_app'] = northbound_app_module
+
+# Mock apps.file_management_app - used by northbound_knowledge_app
+file_management_app_module = types.ModuleType("apps.file_management_app")
+file_management_app_module.build_content_disposition_header = MagicMock(
+    return_value='attachment; filename="file.txt"'
+)
+sys.modules["apps.file_management_app"] = file_management_app_module
 
 # Mock apps.app_factory (imported by northbound_base_app)
 app_factory_module = types.ModuleType("apps.app_factory")
