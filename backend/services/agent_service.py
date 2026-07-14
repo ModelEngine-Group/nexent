@@ -1456,7 +1456,11 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             tenant_id=tenant_id,
             version_no=version_no
         )
-        agent_info["skills"] = instances
+        # Keep disabled instances for their saved configuration, but do not
+        # return them as selected skills in the agent configuration.
+        agent_info["skills"] = [
+            instance for instance in instances if instance.get("enabled", True)
+        ]
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []

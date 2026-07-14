@@ -535,9 +535,12 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     mock_sub_agent_ids = [456, 789]
     mock_query_sub_agents_id.return_value = mock_sub_agent_ids
 
-    # Mock SkillService to return empty list for skills
+    # Disabled skill instances must not be returned as selected skills.
     mock_skill_service_instance = MagicMock()
-    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service_instance.list_skill_instances.return_value = [
+        {"skill_id": 1, "enabled": True},
+        {"skill_id": 2, "enabled": False},
+    ]
     mock_skill_service.return_value = mock_skill_service_instance
 
     # Mock query_external_sub_agents
@@ -560,7 +563,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
-        "skills": [],
+        "skills": [{"skill_id": 1, "enabled": True}],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
         "model_names": [],
