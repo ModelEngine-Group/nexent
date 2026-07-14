@@ -252,26 +252,15 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
 
 
 def _build_supabase_options() -> SyncClientOptions:
-    """Build ClientOptions for the server-side Supabase client.
+    """Build ClientOptions that bypass the system HTTP proxy.
 
-    Two things matter here:
+    httpx 0.28 reads the Windows system proxy (e.g. Clash on 127.0.0.1:7897)
+    by default and routes every request through it. When the proxy cannot
+    reach a local service (such as GoTrue on http://localhost:8000) the
+    request hangs until the timeout, breaking login.
 
-    1. ``httpx.Client`` is built with ``trust_env=False`` and ``proxy=None``
-       so Supabase always talks to ``SUPABASE_URL`` directly and does not
-       pick up the Windows system proxy (e.g. Clash on 127.0.0.1:7897),
-       which would otherwise hang local GoTrue calls until timeout.
-
-    2. ``auto_refresh_token=False`` and ``persist_session=False`` disable
-       the supabase-py background refresh tick. The refresh tick calls
-       ``/auth/v1/token?grant_type=refresh_token`` whenever the in-memory
-       session is close to expiry, which is *not* what we want on the
-       backend: the new ``refresh_token`` is rotated server-side but the
-       caller (frontend / BFF) never learns about it. The next frontend
-       refresh attempt then sends the now-consumed ``refresh_token`` and
-       Supabase rejects it with ``refresh_token_already_used``. Keeping
-       the client passive means every refresh must flow through the
-       explicit ``/api/user/refresh_token`` endpoint, which has full
-       ownership of the rotated tokens and updates the cookies atomically.
+    Pass an explicit ``httpx.Client`` with ``trust_env=False`` and
+    ``proxy=None`` so Supabase always talks to ``SUPABASE_URL`` directly.
     """
     http_client = httpx.Client(
         trust_env=False,
@@ -279,11 +268,7 @@ def _build_supabase_options() -> SyncClientOptions:
         timeout=httpx.Timeout(30.0, connect=10.0),
         follow_redirects=True,
     )
-    return SyncClientOptions(
-        httpx_client=http_client,
-        auto_refresh_token=False,
-        persist_session=False,
-    )
+    return SyncClientOptions(httpx_client=http_client)
 
 
 def get_supabase_client():

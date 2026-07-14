@@ -139,13 +139,6 @@ async def user_refresh_token(request: Request):
         logging.error(f"Refresh token failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                             detail="No refresh token provided")
-    except UnauthorizedError as e:
-        # refresh_token has been consumed by the auth server (auto-refresh
-        # race or already rotated). The session cannot be recovered; the
-        # caller must re-authenticate.
-        logging.warning(f"Refresh token rejected: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
-                            detail="REFRESH_TOKEN_INVALID")
     except Exception as e:
         logging.error(f"Refresh token failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

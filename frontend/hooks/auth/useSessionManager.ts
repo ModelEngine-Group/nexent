@@ -34,27 +34,19 @@ export const isSessionExpiringSoon = (): boolean => {
  * Refresh session via server.js BFF layer.
  * refresh_token is sent automatically via HttpOnly cookie.
  * server.js updates the cookies on success.
- *
- * @returns true only when the backend returned a valid new session.
- *          Returns false for transient failures (network, 5xx, etc.).
- *          If the backend returns 401 with detail=REFRESH_TOKEN_INVALID
- *          (indicating the cookie's refresh_token is stale), returns false
- *          AND the caller should treat this as a permanent session loss
- *          and prompt re-authentication.
  */
 export const refreshSession = async (): Promise<boolean> => {
   if (!hasAuthCookies()) {
     return false;
   }
 
-  const result = await sessionService.refreshToken();
-
-  if (result.success) {
+  const newSession = await sessionService.refreshToken();
+  if (newSession) {
     log.info("Session refreshed successfully");
     return true;
   }
 
-  log.error(`Session refresh failed: ${result.error}`);
+  log.warn("Session refresh failed");
   return false;
 };
 
