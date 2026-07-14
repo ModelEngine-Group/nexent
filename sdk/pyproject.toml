@@ -79,7 +79,7 @@ quality = [
 ]
 data_process = [
     "unstructured[all-docs]",
-    "unstructured-inference==1.2.0",
+    "unstructured-inference==1.6.13",
 ]
 performance = [
     "opentelemetry-api>=1.20.0",
