@@ -108,7 +108,7 @@ class RuntimeProcessPayload(BaseModel):
         """Return the existing SSE-compatible payload shape."""
         return {
             "type": self.process_type,
-            "content": self.content,
+            "content": _content_to_legacy_text(self.content),
         }
 
 
@@ -489,3 +489,12 @@ def _legacy_unit_merge_key(compat_process_type: str) -> str | None:
     if compat_process_type in MERGEABLE_LEGACY_PROCESS_TYPES:
         return f"legacy:{compat_process_type}"
     return None
+
+
+def _content_to_legacy_text(content: Any) -> str:
+    """Serialize structured runtime content for the existing string-only SSE contract."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False, default=str)

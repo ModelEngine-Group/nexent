@@ -27,8 +27,14 @@ from services.agent_runtime.models import (  # noqa: E402
     PromptBundle,
     RunControl,
 )
-from services.agent_runtime.openjiuwen_runtime import OpenJiuwenRuntime  # noqa: E402
+from services.agent_runtime.openjiuwen_runtime import (  # noqa: E402
+    OpenJiuwenRuntime,
+    _to_openjiuwen_tool_schema,
+)
 from services.agent_runtime.events import RuntimeEventSink, RuntimeEventType  # noqa: E402
+from skill_tool_schema import (  # noqa: E402
+    get_builtin_skill_tool_input_schema,
+)
 
 
 def _real_plan() -> AgentRunPlan:
@@ -141,6 +147,82 @@ def test_runtime_and_prompt_adapter_do_not_install_import_hooks_or_skillutil_pat
     source = inspect.getsource(sys.modules[OpenJiuwenRuntime.__module__])
     assert "openjiuwen.core.skills" not in source
     assert "openjiuwen.core.single_agent.skills" not in source
+
+
+@pytest.mark.asyncio
+async def test_real_local_function_accepts_omitted_builtin_skill_optional_inputs():
+    api = load_openjiuwen_public_api()
+    calls: list[tuple[str, object]] = []
+
+    async def read_skill_md(
+        skill_name: str,
+        additional_files: list[str] | None = None,
+    ) -> str:
+        calls.append((skill_name, additional_files))
+        return "skill guide"
+
+    async def run_skill_script(
+        skill_name: str,
+        script_path: str,
+        params: str | None = None,
+    ) -> str:
+        calls.append((f"{skill_name}:{script_path}", params))
+        return "script result"
+
+    read_tool = api.LocalFunction(
+        card=api.ToolCard(
+            name="read_skill_md",
+            input_params=_to_openjiuwen_tool_schema(
+                get_builtin_skill_tool_input_schema("read_skill_md")
+            ),
+        ),
+        func=read_skill_md,
+    )
+    run_tool = api.LocalFunction(
+        card=api.ToolCard(
+            name="run_skill_script",
+            input_params=_to_openjiuwen_tool_schema(
+                get_builtin_skill_tool_input_schema("run_skill_script")
+            ),
+        ),
+        func=run_skill_script,
+    )
+
+    assert await read_tool.invoke({"skill_name": "csv-data-analyzer"}) == (
+        "skill guide"
+    )
+    assert await read_tool.invoke(
+        {
+            "skill_name": "csv-data-analyzer",
+            "additional_files": [],
+        }
+    ) == "skill guide"
+    assert await read_tool.invoke(
+        {
+            "skill_name": "csv-data-analyzer",
+            "additional_files": ["reference.md"],
+        }
+    ) == "skill guide"
+    assert await run_tool.invoke(
+        {
+            "skill_name": "csv-data-analyzer",
+            "script_path": "scripts/analyze.py",
+        }
+    ) == "script result"
+    assert await run_tool.invoke(
+        {
+            "skill_name": "csv-data-analyzer",
+            "script_path": "scripts/analyze.py",
+            "params": "--input sales.csv",
+        }
+    ) == "script result"
+    assert calls == [
+        ("csv-data-analyzer", []),
+        ("csv-data-analyzer", []),
+        ("csv-data-analyzer", ["reference.md"]),
+        ("csv-data-analyzer:scripts/analyze.py", None),
+        ("csv-data-analyzer:scripts/analyze.py", "--input sales.csv"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -305,6 +306,27 @@ async def test_assemble_agent_run_plan_returns_frozen_plan_not_assembly_state():
     assert plan.model_config_list == [{"cite_name": "main_model"}]
     with pytest.raises(Exception, match="frozen"):
         plan.request_id = "other"
+
+
+@pytest.mark.asyncio
+async def test_assemble_agent_run_plan_preserves_non_deepcopyable_context_components():
+    runtime_lock = threading.Lock()
+    context_component = {"runtime_lock": runtime_lock}
+    provider = Provider(
+        name="model",
+        contribution=CapabilityContribution(
+            root_agent=_root_agent(
+                prompt=PromptBundle(
+                    fragments={"base": "answer clearly"},
+                    context_components=[context_component],
+                )
+            ),
+        ),
+    )
+
+    plan = await assemble_agent_run_plan(_request(version_no=1), [provider])
+
+    assert plan.root_agent.prompt.context_components[0]["runtime_lock"] is runtime_lock
 
 
 @pytest.mark.asyncio

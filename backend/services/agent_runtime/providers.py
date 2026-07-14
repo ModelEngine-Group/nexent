@@ -10,6 +10,8 @@ from typing import Any
 
 from jinja2 import StrictUndefined, Template
 
+from skill_tool_schema import get_builtin_skill_tool_inputs
+
 from .assembly import DuplicateToolIdentifierError
 from .models import (
     AgentRunRequestContext,
@@ -1369,7 +1371,7 @@ def _skill_builtin_tools(
                 "Execute a skill script with given parameters. Use this to run "
                 "Python or shell scripts that are part of a skill."
             ),
-            "inputs": '{"skill_name": "str", "script_path": "str", "params": "dict"}',
+            "inputs": get_builtin_skill_tool_inputs("run_skill_script"),
         },
         {
             "class_name": "ReadSkillMdTool",
@@ -1378,7 +1380,7 @@ def _skill_builtin_tools(
                 "Read skill execution guide and optional additional files. Always "
                 "reads SKILL.md first, then optionally reads additional files."
             ),
-            "inputs": '{"skill_name": "str", "additional_files": "list[str]"}',
+            "inputs": get_builtin_skill_tool_inputs("read_skill_md"),
         },
         {
             "class_name": "ReadSkillConfigTool",
@@ -1387,7 +1389,7 @@ def _skill_builtin_tools(
                 "Read the config.yaml file from a skill directory. Returns JSON "
                 "containing configuration variables needed for skill workflows."
             ),
-            "inputs": '{"skill_name": "str"}',
+            "inputs": get_builtin_skill_tool_inputs("read_skill_config"),
         },
         {
             "class_name": "WriteSkillFileTool",
@@ -1396,7 +1398,7 @@ def _skill_builtin_tools(
                 "Write content to a file within a skill directory. Creates parent "
                 "directories if they do not exist."
             ),
-            "inputs": '{"skill_name": "str", "file_path": "str", "content": "str"}',
+            "inputs": get_builtin_skill_tool_inputs("write_skill_file"),
         },
     ]
     return [
@@ -1425,8 +1427,12 @@ def _with_injected_params(
         key: value for key, value in injected_params.items() if value is not None
     }
     return tool.model_copy(
-        update={"injected_params": clean_injected_params},
-        deep=True,
+        update={
+            "input_schema": dict(tool.input_schema),
+            "params": dict(tool.params),
+            "metadata": dict(tool.metadata),
+            "injected_params": clean_injected_params,
+        },
     )
 
 

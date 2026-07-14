@@ -1,9 +1,11 @@
-import pytest
+import importlib.util
+import json
 import sys
 import types
-import importlib.util
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
+
+import pytest
 
 from test.common.test_mocks import bootstrap_test_env
 
@@ -729,21 +731,44 @@ class TestGetSkillScriptTools:
             calls = mock_tool_config.call_args_list
 
             # RunSkillScriptTool
-            assert '"skill_name": "str"' in calls[0][1]['inputs']
-            assert '"script_path": "str"' in calls[0][1]['inputs']
-            assert '"params": "dict"' in calls[0][1]['inputs']
+            run_skill_schema = json.loads(calls[0][1]['inputs'])
+            assert run_skill_schema == {
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string"},
+                    "script_path": {"type": "string"},
+                    "params": {
+                        "type": ["string", "null"],
+                        "default": None,
+                    },
+                },
+                "required": ["skill_name", "script_path"],
+            }
 
             # ReadSkillMdTool
-            assert '"skill_name": "str"' in calls[1][1]['inputs']
-            assert '"additional_files": "list[str]"' in calls[1][1]['inputs']
+            read_skill_schema = json.loads(calls[1][1]['inputs'])
+            assert read_skill_schema == {
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string"},
+                    "additional_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": [],
+                    },
+                },
+                "required": ["skill_name"],
+            }
 
             # ReadSkillConfigTool
-            assert '"skill_name": "str"' in calls[2][1]['inputs']
+            assert json.loads(calls[2][1]['inputs'])["required"] == ["skill_name"]
 
             # WriteSkillFileTool
-            assert '"skill_name": "str"' in calls[3][1]['inputs']
-            assert '"file_path": "str"' in calls[3][1]['inputs']
-            assert '"content": "str"' in calls[3][1]['inputs']
+            assert json.loads(calls[3][1]['inputs'])["required"] == [
+                "skill_name",
+                "file_path",
+                "content",
+            ]
 
     def test_get_skill_script_tools_output_types(self):
         """Test that output types are correctly set for all tools"""

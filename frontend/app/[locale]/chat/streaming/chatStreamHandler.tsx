@@ -85,6 +85,20 @@ interface JsonData {
   conversation_id?: number;
 }
 
+const normalizeMessageContent = (content: unknown): string => {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (content === null || content === undefined) {
+    return "";
+  }
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content);
+  }
+};
+
 // Reconstruct streaming state from persisted units (for tab-switch recovery)
 // maxUnitIndex: only process units up to this index (for resume mode)
 
@@ -435,7 +449,7 @@ export const handleStreamResponse = async (
                 continue;
               }
 
-              const messageContent = jsonData.content;
+              const messageContent = normalizeMessageContent(jsonData.content);
 
               // In resume mode, skip metadata messages to prevent creating duplicate steps or indicators.
               // Steps are already reconstructed from the persisted streaming message.
@@ -1208,7 +1222,7 @@ export const handleStreamResponse = async (
 
         if (jsonData.type && jsonData.content) {
           const messageType = jsonData.type;
-          const messageContent = jsonData.content;
+          const messageContent = normalizeMessageContent(jsonData.content);
 
           // Process the last message, focusing on final_answer and card
           if (messageType === chatConfig.messageTypes.FINAL_ANSWER) {

@@ -180,6 +180,27 @@ def test_runtime_event_to_process_payload_maps_standard_final_error_and_token_ev
     }
 
 
+def test_runtime_process_payload_serializes_structured_tool_content_for_sse():
+    payload = runtime_event_to_process_payload(
+        RuntimeEvent(
+            type=RuntimeEventType.TOOL_CALL,
+            tool_name="search",
+            tool_input={"query": "nexent"},
+            tool_output=None,
+        )
+    )
+
+    sse_payload = payload.to_sse_payload()
+
+    assert sse_payload["type"] == "tool"
+    assert isinstance(sse_payload["content"], str)
+    assert json.loads(sse_payload["content"]) == {
+        "tool_name": "search",
+        "tool_input": {"query": "nexent"},
+        "tool_output": None,
+    }
+
+
 def test_runtime_event_to_process_payload_maps_artifact_to_skill_files_payload():
     payload = runtime_event_to_process_payload(
         RuntimeEvent(

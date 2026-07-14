@@ -202,17 +202,15 @@ class LangChainToolFactory:
 
 
 class BuiltinSkillToolFactory:
-    """Factory creating builtin skill tools from SkillProvider metadata."""
+    """Factory creating request-scoped builtin skill tools."""
 
     name = "builtin_skill"
 
     def __init__(
         self,
-        initializers: Mapping[str, Callable[..., Any]] | None = None,
-        tool_resolvers: Mapping[str, Callable[[], Any]] | None = None,
+        tool_classes: Mapping[str, Callable[..., Any]] | None = None,
     ):
-        self._initializers = dict(initializers or {})
-        self._tool_resolvers = dict(tool_resolvers or {})
+        self._tool_classes = dict(tool_classes or {})
 
     def supports(self, tool: ToolSpec, context: ToolRuntimeContext) -> bool:
         """Return whether this is a supported builtin skill tool."""
@@ -223,17 +221,23 @@ class BuiltinSkillToolFactory:
         )
 
     def create(self, tool: ToolSpec, context: ToolRuntimeContext) -> Any:
-        """Initialize and return the builtin skill runtime tool."""
+        """Create an isolated builtin skill callable for the current request."""
         class_name = tool.class_name or tool.name
-        initializer = self._initializers.get(class_name) or _default_skill_initializer(
-            class_name
-        )
-        resolver = self._tool_resolvers.get(class_name) or _default_skill_tool_resolver(
+        tool_class = self._tool_classes.get(class_name) or _default_skill_tool_class(
             class_name
         )
         skill_metadata = _skill_tool_metadata(tool, context)
-        initializer(**skill_metadata)
-        return resolver()
+        if not skill_metadata["local_skills_dir"]:
+            raise ToolCreationError(
+                f"Builtin skill tool {class_name} requires local_skills_dir."
+            )
+        try:
+            tool_obj = tool_class(**skill_metadata)
+        except Exception as exc:
+            raise ToolCreationError(
+                f"Failed to create builtin skill tool {class_name}: {exc}"
+            ) from exc
+        return _bind_request_scoped_skill_tool(class_name, tool_obj)
 
 
 class MemoryToolFactory:
@@ -765,7 +769,12 @@ def _tool_value(
     key: str,
     default: Any = None,
 ) -> Any:
-    for source in (tool.injected_params, tool.metadata, context.resources):
+    for source in (
+        tool.injected_params,
+        tool.metadata,
+        tool.params,
+        context.resources,
+    ):
         if key in source:
             return source[key]
     return default
@@ -961,44 +970,42 @@ def _skill_tool_metadata(
     }
 
 
-def _default_skill_initializer(class_name: str) -> Callable[..., Any]:
+def _default_skill_tool_class(class_name: str) -> Callable[..., Any]:
     if class_name == "RunSkillScriptTool":
-        from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
+        from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
 
-        return get_run_skill_script_tool
+        return RunSkillScriptTool
     if class_name == "ReadSkillMdTool":
-        from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
+        from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
 
-        return get_read_skill_md_tool
+        return ReadSkillMdTool
     if class_name == "ReadSkillConfigTool":
-        from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+        from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 
-        return get_read_skill_config_tool
+        return ReadSkillConfigTool
     if class_name == "WriteSkillFileTool":
-        from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+        from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
 
-        return get_write_skill_file_tool
+        return WriteSkillFileTool
     raise ToolCreationError(f"Unknown builtin skill tool: {class_name}.")
 
 
-def _default_skill_tool_resolver(class_name: str) -> Callable[[], Any]:
-    if class_name == "RunSkillScriptTool":
-        from nexent.core.tools.run_skill_script_tool import run_skill_script
+def _bind_request_scoped_skill_tool(class_name: str, tool_obj: Any) -> Callable[..., Any]:
+    execute = getattr(tool_obj, "execute", None)
+    if not callable(execute):
+        raise ToolCreationError(f"Builtin skill tool {class_name} has no execute method.")
 
-        return lambda: run_skill_script
     if class_name == "ReadSkillMdTool":
-        from nexent.core.tools.read_skill_md_tool import read_skill_md
 
-        return lambda: read_skill_md
-    if class_name == "ReadSkillConfigTool":
-        from nexent.core.tools.read_skill_config_tool import read_skill_config
+        def read_skill_md(
+            skill_name: str,
+            additional_files: list[str] | None = None,
+        ) -> Any:
+            return execute(skill_name, *(additional_files or []))
 
-        return lambda: read_skill_config
-    if class_name == "WriteSkillFileTool":
-        from nexent.core.tools.write_skill_file_tool import write_skill_file
+        return read_skill_md
 
-        return lambda: write_skill_file
-    raise ToolCreationError(f"Unknown builtin skill tool: {class_name}.")
+    return execute
 
 
 def _plugin_creator(

@@ -369,14 +369,16 @@ def _attach_state_to_root_agent(
     external_a2a_agents = list(root_agent.external_a2a_agents) + list(
         state.external_a2a_agents
     )
+    # Context components can retain request-scoped clients or locks. Copy only
+    # the neutral containers replaced by this assembly step.
     return root_agent.model_copy(
         update={
             "tools": combined_tools,
             "prompt": prompt,
             "managed_agents": managed_agents,
             "external_a2a_agents": external_a2a_agents,
+            "runtime_hints": dict(root_agent.runtime_hints),
         },
-        deep=True,
     )
 
 
@@ -392,8 +394,8 @@ def _merge_prompt_bundle(prompt: PromptBundle, state: AssemblyState) -> PromptBu
             "fragments": fragments,
             "context_components": list(prompt.context_components)
             + list(state.context_components),
+            "templates": dict(prompt.templates),
         },
-        deep=True,
     )
 
 

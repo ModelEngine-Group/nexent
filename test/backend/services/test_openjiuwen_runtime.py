@@ -34,6 +34,7 @@ from services.agent_runtime.openjiuwen_runtime import (
     _to_openjiuwen_tool_schema,
 )
 from services.agent_runtime.tool_factory import ToolFactoryRegistry
+from skill_tool_schema import get_builtin_skill_tool_input_schema
 
 
 @dataclass
@@ -558,6 +559,27 @@ def test_openjiuwen_tool_schema_converts_builtin_skill_shorthand():
             "params",
             "additional_files",
         ],
+    }
+
+
+def test_openjiuwen_tool_schema_preserves_builtin_skill_optional_defaults():
+    read_skill_schema = _to_openjiuwen_tool_schema(
+        get_builtin_skill_tool_input_schema("read_skill_md")
+    )
+    run_skill_schema = _to_openjiuwen_tool_schema(
+        get_builtin_skill_tool_input_schema("run_skill_script")
+    )
+
+    assert read_skill_schema["required"] == ["skill_name"]
+    assert read_skill_schema["properties"]["additional_files"] == {
+        "type": "array",
+        "items": {"type": "string"},
+        "default": [],
+    }
+    assert run_skill_schema["required"] == ["skill_name", "script_path"]
+    assert run_skill_schema["properties"]["params"] == {
+        "type": ["string", "null"],
+        "default": None,
     }
 
 

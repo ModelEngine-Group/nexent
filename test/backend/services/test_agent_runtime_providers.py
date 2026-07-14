@@ -772,6 +772,31 @@ def test_skill_provider_outputs_enabled_skill_prompt_tools_and_hidden_params():
     )
     assert all("local_skills_dir" not in tool.input_schema for tool in tools)
     assert all("tenant_id" not in tool.input_schema for tool in tools)
+    tools_by_name = {tool.name: tool for tool in tools}
+    assert tools_by_name["read_skill_md"].input_schema == {
+        "type": "object",
+        "properties": {
+            "skill_name": {"type": "string"},
+            "additional_files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+            },
+        },
+        "required": ["skill_name"],
+    }
+    assert tools_by_name["run_skill_script"].input_schema == {
+        "type": "object",
+        "properties": {
+            "skill_name": {"type": "string"},
+            "script_path": {"type": "string"},
+            "params": {
+                "type": ["string", "null"],
+                "default": None,
+            },
+        },
+        "required": ["skill_name", "script_path"],
+    }
     assert contribution.runtime_resources["skill.enabled_skills"] == [
         {
             "skill_id": 10,

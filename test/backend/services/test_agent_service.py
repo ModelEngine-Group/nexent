@@ -15225,6 +15225,8 @@ async def test_selected_runtime_chunks_delivers_tool_started_before_tool_finishe
 
     first = json.loads(await asyncio.wait_for(anext(chunks), timeout=1))
     assert first["type"] == "tool"
+    assert isinstance(first["content"], str)
+    assert json.loads(first["content"])["tool_name"] == "slow_tool"
     assert release_tool.is_set() is False
 
     release_tool.set()

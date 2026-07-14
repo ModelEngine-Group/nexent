@@ -46,6 +46,7 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
+from skill_tool_schema import get_builtin_skill_tool_inputs
 from consts.const import (
     AGENT_RUNTIME_PROVIDER_SMOLAGENTS,
     LOCAL_MCP_SERVER,
@@ -554,7 +555,7 @@ def _get_skill_script_tools(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
                 description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
-                inputs='{"skill_name": "str", "script_path": "str", "params": "dict"}',
+                inputs=get_builtin_skill_tool_inputs("run_skill_script"),
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
                 source="builtin",
@@ -565,7 +566,7 @@ def _get_skill_script_tools(
                 class_name="ReadSkillMdTool",
                 name="read_skill_md",
                 description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
-                inputs='{"skill_name": "str", "additional_files": "list[str]"}',
+                inputs=get_builtin_skill_tool_inputs("read_skill_md"),
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
                 source="builtin",
@@ -576,7 +577,7 @@ def _get_skill_script_tools(
                 class_name="ReadSkillConfigTool",
                 name="read_skill_config",
                 description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
-                inputs='{"skill_name": "str"}',
+                inputs=get_builtin_skill_tool_inputs("read_skill_config"),
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
                 source="builtin",
@@ -587,7 +588,7 @@ def _get_skill_script_tools(
                 class_name="WriteSkillFileTool",
                 name="write_skill_file",
                 description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
-                inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
+                inputs=get_builtin_skill_tool_inputs("write_skill_file"),
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
                 source="builtin",

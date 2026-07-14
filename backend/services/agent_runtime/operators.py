@@ -268,9 +268,21 @@ class OperatorRunner:
             if result.status == "blocking_failure":
                 aggregate.status = "blocking_failure"
                 if not _handling_error and stage != "on_error":
+                    # Preserve request-scoped handles by identity while isolating
+                    # the mutable containers used by on_error operators.
                     on_error_context = context.model_copy(
-                        update={"stage": "on_error", "error": result.message},
-                        deep=True,
+                        update={
+                            "stage": "on_error",
+                            "error": result.message,
+                            "tools": list(context.tools),
+                            "prompt_fragments": dict(context.prompt_fragments),
+                            "context_components": list(context.context_components),
+                            "runtime_resources": dict(context.runtime_resources),
+                            "monitoring_metadata": dict(context.monitoring_metadata),
+                            "runtime_events": list(context.runtime_events),
+                            "added_tools": list(context.added_tools),
+                            "metadata": dict(context.metadata),
+                        },
                     )
                     on_error_result = await self.run_stage(
                         "on_error",
@@ -305,19 +317,23 @@ def apply_operator_context_to_plan(
     context: OperatorContext,
 ) -> AgentRunPlan:
     """Build a new plan snapshot from mutable operator context output."""
+    # AgentRunPlan may contain events, clients, and locks. Rebuild the mutable
+    # neutral containers without deep-copying those request-scoped handles.
     prompt = plan.root_agent.prompt.model_copy(
         update={
             "fragments": dict(context.prompt_fragments),
             "context_components": list(context.context_components),
+            "templates": dict(plan.root_agent.prompt.templates),
         },
-        deep=True,
     )
     root_agent = plan.root_agent.model_copy(
         update={
             "tools": list(context.tools),
             "prompt": prompt,
+            "managed_agents": list(plan.root_agent.managed_agents),
+            "external_a2a_agents": list(plan.root_agent.external_a2a_agents),
+            "runtime_hints": dict(plan.root_agent.runtime_hints),
         },
-        deep=True,
     )
     monitoring_metadata = dict(context.monitoring_metadata)
     if context.runtime_events:
@@ -325,10 +341,13 @@ def apply_operator_context_to_plan(
     return plan.model_copy(
         update={
             "root_agent": root_agent,
+            "history": list(plan.history) if plan.history is not None else None,
+            "model_config_list": list(plan.model_config_list),
+            "mcp_connections": list(plan.mcp_connections),
             "runtime_resources": dict(context.runtime_resources),
+            "operators": list(plan.operators),
             "monitoring_metadata": monitoring_metadata,
         },
-        deep=True,
     )
 
 

@@ -334,30 +334,144 @@ def test_langchain_tool_factory_wraps_explicit_resource_reference():
         factory.create(tool, _context())
 
 
-def test_builtin_skill_tool_factory_uses_skill_provider_metadata_only():
-    initialized: dict[str, Any] = {}
-    native_tool = object()
+def test_builtin_skill_tool_factory_uses_legacy_params_and_request_scope():
+    instances: list[Any] = []
+
+    class SkillTool:
+        def __init__(self, **kwargs: Any):
+            self.metadata = kwargs
+            instances.append(self)
+
+        def execute(self, skill_name: str, script_path: str, params: str | None = None):
+            return skill_name, script_path, params, self.metadata
+
     factory = BuiltinSkillToolFactory(
-        initializers={
-            "RunSkillScriptTool": lambda **kwargs: initialized.update(kwargs),
-        },
-        tool_resolvers={"RunSkillScriptTool": lambda: native_tool},
+        tool_classes={"RunSkillScriptTool": SkillTool},
     )
     tool = ToolSpec(
         name="run_skill_script",
         class_name="RunSkillScriptTool",
         source=ToolSource.BUILTIN,
         metadata={"agent_id": 1, "tenant_id": "tenant-1", "version_no": 3},
-        injected_params={"local_skills_dir": "/opt/nexent/skills"},
+        params={"local_skills_dir": "/opt/nexent/skills"},
     )
 
-    assert factory.create(tool, _context()) is native_tool
-    assert initialized == {
+    first_tool = factory.create(tool, _context(request_id="req-1"))
+    second_tool = factory.create(
+        tool.model_copy(
+            update={
+                "metadata": {
+                    "agent_id": 2,
+                    "tenant_id": "tenant-2",
+                    "version_no": 4,
+                }
+            }
+        ),
+        _context(request_id="req-2", tenant_id="tenant-2"),
+    )
+
+    assert first_tool("csv-data-analyzer", "analyze.py")[-1] == {
         "local_skills_dir": "/opt/nexent/skills",
         "agent_id": 1,
         "tenant_id": "tenant-1",
         "version_no": 3,
     }
+    assert second_tool("csv-data-analyzer", "analyze.py")[-1] == {
+        "local_skills_dir": "/opt/nexent/skills",
+        "agent_id": 2,
+        "tenant_id": "tenant-2",
+        "version_no": 4,
+    }
+    assert instances[0] is not instances[1]
+
+    with pytest.raises(ToolCreationError, match="requires local_skills_dir"):
+        factory.create(
+            tool.model_copy(update={"params": {}}),
+            _context(resources={}),
+        )
+
+
+def test_builtin_read_skill_md_factory_expands_additional_files():
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    class ReadSkillTool:
+        def __init__(self, **kwargs: Any):
+            self.metadata = kwargs
+
+        def execute(self, skill_name: str, *additional_files: str):
+            calls.append((skill_name, additional_files))
+            return "skill guide"
+
+    factory = BuiltinSkillToolFactory(
+        tool_classes={"ReadSkillMdTool": ReadSkillTool},
+    )
+    tool = ToolSpec(
+        name="read_skill_md",
+        class_name="ReadSkillMdTool",
+        source=ToolSource.BUILTIN,
+        params={"local_skills_dir": "/opt/nexent/skills"},
+        metadata={"agent_id": 1, "tenant_id": "tenant-1", "version_no": 3},
+    )
+
+    native_tool = factory.create(tool, _context())
+
+    assert native_tool("csv-data-analyzer") == "skill guide"
+    assert native_tool(
+        "csv-data-analyzer",
+        additional_files=["SKILL.md", "reference.md"],
+    ) == "skill guide"
+    assert calls == [
+        ("csv-data-analyzer", ()),
+        ("csv-data-analyzer", ("SKILL.md", "reference.md")),
+    ]
+
+
+def test_production_builtin_skill_factory_reads_tenant_skill_from_legacy_params(
+    tmp_path,
+):
+    class ReadSkillTool:
+        def __init__(
+            self,
+            local_skills_dir: str,
+            tenant_id: str,
+            **kwargs: Any,
+        ):
+            _ = kwargs
+            self.local_skills_dir = os.path.join(local_skills_dir, tenant_id)
+
+        def execute(self, skill_name: str, *additional_files: str):
+            _ = additional_files
+            skill_path = os.path.join(
+                self.local_skills_dir,
+                skill_name,
+                "SKILL.md",
+            )
+            with open(skill_path, encoding="utf-8") as skill_file:
+                return skill_file.read()
+
+    skill_dir = tmp_path / "tenant-1" / "csv-data-analyzer"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: csv-data-analyzer\n"
+        "description: Analyze CSV data\n"
+        "---\n"
+        "# CSV guide\n",
+        encoding="utf-8",
+    )
+    tool = ToolSpec(
+        name="read_skill_md",
+        class_name="ReadSkillMdTool",
+        source=ToolSource.BUILTIN,
+        params={"local_skills_dir": str(tmp_path)},
+        metadata={"agent_id": 1, "tenant_id": "tenant-1", "version_no": 3},
+    )
+
+    native_tool = BuiltinSkillToolFactory(
+        tool_classes={"ReadSkillMdTool": ReadSkillTool}
+    ).create(tool, _context())
+
+    assert "CSV guide" in native_tool("csv-data-analyzer")
 
 
 def test_memory_tool_factory_injects_hidden_memory_runtime_config():

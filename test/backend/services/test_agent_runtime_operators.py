@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import threading
 from typing import Any
 
 import pytest
@@ -35,6 +36,7 @@ from services.agent_runtime.operators import (
     OperatorRunner,
     SkillFileUploadOperator,
     UnknownOperatorError,
+    apply_operator_context_to_plan,
 )
 
 
@@ -85,6 +87,51 @@ def _plan() -> AgentRunPlan:
         runtime_resources={"existing": "resource"},
         monitoring_metadata={"agent_id": 1},
     )
+
+
+def test_apply_operator_context_to_plan_preserves_non_deepcopyable_runtime_handles():
+    runtime_lock = threading.Lock()
+    stop_event = threading.Event()
+    plan = _plan().model_copy(
+        update={
+            "run_control": RunControl(
+                request_id="req-1",
+                user_id="user-1",
+                legacy_stop_event=stop_event,
+            )
+        }
+    )
+    context = OperatorContext.from_plan(stage="prepare_context", plan=plan)
+    context.context_components.append({"runtime_lock": runtime_lock})
+
+    patched_plan = apply_operator_context_to_plan(plan, context)
+
+    assert patched_plan.run_control.legacy_stop_event is stop_event
+    assert patched_plan.root_agent.prompt.context_components[-1]["runtime_lock"] is runtime_lock
+
+
+@pytest.mark.asyncio
+async def test_operator_runner_on_error_preserves_non_deepcopyable_context_handles():
+    runtime_lock = threading.Lock()
+    context = OperatorContext.from_plan(stage="before_run", plan=_plan())
+    context.metadata["runtime_lock"] = runtime_lock
+    specs = [
+        OperatorSpec(
+            name="block",
+            stages={"before_run"},
+            config={"result": OperatorResult.blocking_failure("failed")},
+        ),
+        OperatorSpec(name="on_error", stages={"on_error"}),
+    ]
+
+    result = await OperatorRunner(_operator_registry([])).run_stage(
+        "before_run",
+        context,
+        specs,
+    )
+
+    assert result.status == "blocking_failure"
+    assert result.context.metadata["runtime_lock"] is runtime_lock
 
 
 def test_operator_stages_are_fixed_lifecycle_contract():
