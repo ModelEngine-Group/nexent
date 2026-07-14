@@ -289,7 +289,9 @@ export default function SkillDraftPanel({
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
             <div className="flex h-11 items-center justify-between border-b border-slate-200 px-3">
-              <span className="text-sm font-medium text-slate-700">文件</span>
+              <span className="text-sm font-medium text-slate-700">
+                {t("skillManagement.detail.file")}
+              </span>
               {canEditFiles ? (
                 <Button
                   type="text"
@@ -379,7 +381,7 @@ export default function SkillDraftPanel({
                 <span className="min-w-0 flex-1 truncate">
                   {activeFile.path}
                 </span>
-                <Tooltip title="放大查看">
+                <Tooltip title={t("skillManagement.detail.expand")}>
                   <Button
                     type="text"
                     size="small"
@@ -447,7 +449,7 @@ export default function SkillDraftPanel({
                     setExpandedEditorContent("");
                   }}
                 >
-                  取消
+                  {t("common.cancel")}
                 </Button>,
                 <Button
                   key="save-expanded-editor"
@@ -465,7 +467,7 @@ export default function SkillDraftPanel({
                     setExpandedEditorContent("");
                   }}
                 >
-                  保存
+                  {t("common.save")}
                 </Button>,
               ]
         }

@@ -395,7 +395,7 @@ export default function SkillBuildModal({
         form.setFields([
           {
             name: "name",
-            errors: ["技能名称已存在，请修改名称"],
+            errors: [t("skillManagement.message.nameExists")],
           },
         ]);
         return;
@@ -510,10 +510,24 @@ export default function SkillBuildModal({
     // Assemble skill content from all tabs
     const assembledContent = assembleSkillContent(skillTabs);
     const formContext = [
-      formValues.name ? `当前技能名称：${formValues.name}` : "",
-      formValues.description ? `当前技能描述：${formValues.description}` : "",
-      formValues.tags?.length ? `当前标签：${formValues.tags.join(", ")}` : "",
-      assembledContent ? `当前技能文件内容：\n${assembledContent}` : "",
+      formValues.name
+        ? t("skillManagement.chat.context.name", { name: formValues.name })
+        : "",
+      formValues.description
+        ? t("skillManagement.chat.context.description", {
+            description: formValues.description,
+          })
+        : "",
+      formValues.tags?.length
+        ? t("skillManagement.chat.context.tags", {
+            tags: formValues.tags.join(", "),
+          })
+        : "",
+      assembledContent
+        ? t("skillManagement.chat.context.content", {
+            content: assembledContent,
+          })
+        : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -528,9 +542,7 @@ export default function SkillBuildModal({
     setChatMessages((prev) => [...prev, userMessage]);
     setIsChatLoading(true);
     setIsThinkingVisible(true);
-    setThinkingDescription(
-      t("skillManagement.generatingSkill") || "生成技能内容中 ..."
-    );
+    setThinkingDescription(t("skillManagement.generatingSkill"));
 
     // Clear content input before streaming — start fresh so the streamed content
     // reflects the (possibly refined) result of this turn.
@@ -564,8 +576,11 @@ export default function SkillBuildModal({
       // On subsequent turns (accumulatedDraft exists), existing_skill is passed
       // → backend follows the modify-workflow template and refines the draft.
       const userPrompt = formContext
-        ? `用户需求：${currentInput}\n\n${formContext}`
-        : `用户需求：${currentInput}`;
+        ? t("skillManagement.chat.userRequestWithContext", {
+            request: currentInput,
+            context: formContext,
+          })
+        : t("skillManagement.chat.userRequest", { request: currentInput });
 
       await createSkillStream(
         {
@@ -586,7 +601,7 @@ export default function SkillBuildModal({
             taskIdRef.current = taskId;
           },
           onThinkingUpdate: (step, desc) => {
-            setThinkingDescription(desc || "生成技能内容中 ...");
+            setThinkingDescription(desc || t("skillManagement.generatingSkill"));
           },
           onThinkingVisible: (visible) => {
             setIsThinkingVisible(visible);
@@ -594,7 +609,7 @@ export default function SkillBuildModal({
           onStepCount: (step) => {
             setThinkingDescription(
               THINKING_STEPS_ZH.find((s) => s.step === step)?.description ||
-                "生成技能内容中 ..."
+                t("skillManagement.generatingSkill")
             );
           },
           onFrontmatter: (content) => {
@@ -798,7 +813,9 @@ export default function SkillBuildModal({
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
-          <p className="text-sm font-semibold text-gray-800">安装</p>
+          <p className="text-sm font-semibold text-gray-800">
+            {t("skillManagement.tabs.install")}
+          </p>
           <p className="text-xs text-gray-500">
             {t("skillManagement.form.uploadHint")}
           </p>
@@ -928,22 +945,19 @@ export default function SkillBuildModal({
               {isEditMode ? (
                 <>
                   <p>
-                    你好！我是 Skill 构建助手，当前正在编辑「{editingSkillName}
-                    」。
+                    {t("skillManagement.chat.editGreetingTitle", {
+                      name: editingSkillName,
+                    })}
                   </p>
                   <p className="mt-3">
-                    你可以告诉我需要优化或调整的地方，我会帮你更新对应的文件内容。
+                    {t("skillManagement.chat.editGreetingBody")}
                   </p>
                 </>
               ) : (
                 <>
-                  <p>
-                    你好！我是 Skill
-                    构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill
-                    的结构和代码。
-                  </p>
+                  <p>{t("skillManagement.chat.createGreetingTitle")}</p>
                   <p className="mt-3">
-                    例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」
+                    {t("skillManagement.chat.createGreetingExample")}
                   </p>
                 </>
               )}
@@ -1001,8 +1015,8 @@ export default function SkillBuildModal({
               }}
               placeholder={
                 isEditMode
-                  ? "告诉我需要如何优化这个技能..."
-                  : "描述你想要的技能..."
+                  ? t("skillManagement.chat.editPlaceholder")
+                  : t("skillManagement.chat.createPlaceholder")
               }
               disabled={isChatLoading || isStreaming}
               autoSize={{ minRows: 1, maxRows: 3 }}
@@ -1037,7 +1051,7 @@ export default function SkillBuildModal({
             )}
           </Flex>
           <div className="mt-3 text-xs text-slate-500">
-            按 Enter 发送，Shift+Enter 换行
+            {t("skillManagement.chat.sendHint")}
           </div>
         </div>
       </div>
@@ -1074,7 +1088,7 @@ export default function SkillBuildModal({
       label: (
         <Flex gap={6} align="center">
           <Box size={16} />
-          <span>安装</span>
+          <span>{t("skillManagement.tabs.install")}</span>
         </Flex>
       ),
     },
@@ -1083,7 +1097,7 @@ export default function SkillBuildModal({
 
   const getConfirmButtonText = () => {
     if (isEditMode) {
-      return "保存更改";
+      return t("skillManagement.mode.saveChanges");
     }
     if (activeTab === "interactive") {
       return t("skillManagement.mode.create");
@@ -1096,12 +1110,12 @@ export default function SkillBuildModal({
       title={
         <div>
           <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {isEditMode ? "编辑技能" : t("skillManagement.title")}
+            {isEditMode ? t("skillManagement.edit.title") : t("skillManagement.title")}
           </div>
           <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
             {isEditMode
-              ? `正在编辑：${editingSkillName}`
-              : "创建、编辑并发布你的 Skill。"}
+              ? t("skillManagement.edit.subtitle", { name: editingSkillName })
+              : t("skillManagement.create.subtitle")}
           </div>
         </div>
       }

@@ -27,6 +27,7 @@ import {
 } from "./SkillRepositoryControls";
 import {
   formatRepositoryDate,
+  getSkillRepositoryStatusLabel,
   getSkillSourceLabel,
   pickReviewDisplayRepositoryInfo,
 } from "./skillRepositoryShared";
@@ -87,6 +88,7 @@ export function MineSkillsView({
   isUpdatingStatus: boolean;
   onSetNotShared: (repositoryInfo: MySkillRepositoryInfoItem) => Promise<void>;
 }) {
+  const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalSkill, setReviewModalSkill] =
@@ -117,19 +119,23 @@ export function MineSkillsView({
       await onSetNotShared(reviewModalInfo);
       closeReviewModal();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "状态更新失败");
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("skillRepository.common.statusUpdateFailed")
+      );
       throw error;
     }
   };
 
   const handleEnableSkill = (skill: MyEditableSkillItem) => {
-    const title = skill.name?.trim() || "未命名 Skill";
+    const title = skill.name?.trim() || t("skillRepository.common.untitled");
     modal.confirm({
       title: t("skillRepository.mine.confirmApplyTitle", { name: title }),
       content: t("skillRepository.mine.confirmApplyContent"),
       centered: true,
-      okText: "提交审批",
-      cancelText: "取消",
+      okText: t("skillRepository.mine.submitReview"),
+      cancelText: t("common.cancel"),
       onOk: async () => {
         await onApplyListing(skill, {
           icon: "skill",
@@ -140,12 +146,12 @@ export function MineSkillsView({
   };
 
   const handleDeleteSkill = (skill: MyEditableSkillItem) => {
-    const title = skill.name?.trim() || "未命名 Skill";
+    const title = skill.name?.trim() || t("skillRepository.common.untitled");
     modal.confirm({
-      title: "删除 Skill",
-      content: `确认删除 ${title}？`,
-      okText: "删除",
-      cancelText: "取消",
+      title: t("skillRepository.mine.deleteTitle"),
+      content: t("skillRepository.mine.deleteContent", { name: title }),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
         await onDeleteSkill(skill);
@@ -160,7 +166,7 @@ export function MineSkillsView({
           <Input
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="搜索Skill名称、描述或标签"
+            placeholder={t("skillRepository.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
             className="h-11 rounded-xl"
             allowClear
@@ -172,19 +178,19 @@ export function MineSkillsView({
           icon={<Plus className="size-4" />}
           onClick={onCreateSkill}
         >
-          创建 Skill
+          {t("skillRepository.mine.createSkill")}
         </Button>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
         <FilterButton active onClick={() => {}}>
-          全部
+          {t("skillRepository.filter.all")}
           <span className="ml-1 text-xs opacity-80">{counts.all}</span>
         </FilterButton>
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">
-        共 {counts.all} 个服务 · 标题旁带 Hub 标签的已上架到仓库
+        {t("skillRepository.mine.summary", { count: counts.all })}
       </p>
 
       <AsyncContent
@@ -193,7 +199,7 @@ export function MineSkillsView({
         isFetching={isFetching}
         onRetry={onRetry}
         isEmpty={false}
-        emptyDescription="暂无可管理 Skill"
+        emptyDescription={t("skillRepository.mine.empty")}
       >
         <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {skills.map((skill) =>
@@ -234,13 +240,6 @@ export function MineSkillsView({
   );
 }
 
-const MINE_SKILL_STATUS_LABELS: Record<SkillRepositoryListingStatus, string> = {
-  not_shared: "未上架",
-  pending_review: "审批中",
-  rejected: "已驳回",
-  shared: "已上架",
-};
-
 const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
   not_shared:
     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -275,7 +274,7 @@ function MineSkillCard({
   const isEnabled = latestRepository?.status === "shared";
   const canEdit = skill.permission !== "READ_ONLY";
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
-  const sourceLabel = getSkillSourceLabel(skill.source);
+  const sourceLabel = getSkillSourceLabel(skill.source, t);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const isPendingReview = repositoryStatus === "pending_review";
   const menuItems: MenuProps["items"] = [
@@ -283,7 +282,7 @@ function MineSkillCard({
       ? [
           {
             key: "review",
-            label: "查看审批进度",
+            label: t("skillRepository.mine.viewReviewProgress"),
             icon: <ClipboardCheck className="size-3.5" aria-hidden />,
             onClick: onViewReview,
           },
@@ -291,7 +290,7 @@ function MineSkillCard({
       : []),
     {
       key: "delete",
-      label: "删除",
+      label: t("common.delete"),
       icon: <Trash2 className="size-3.5" aria-hidden />,
       danger: true,
       onClick: onDelete,
@@ -308,7 +307,7 @@ function MineSkillCard({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-                {skill.name || "未命名 Skill"}
+                {skill.name || t("skillRepository.common.untitled")}
               </h3>
               {hasRepositoryInfo ? (
                 <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
@@ -321,7 +320,7 @@ function MineSkillCard({
               <span
                 className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
               >
-                {MINE_SKILL_STATUS_LABELS[repositoryStatus]}
+                {getSkillRepositoryStatusLabel(t, repositoryStatus)}
               </span>
             </div>
           </div>
@@ -333,14 +332,14 @@ function MineSkillCard({
               size="small"
               className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
               icon={<MoreHorizontal className="size-4" aria-hidden />}
-              aria-label="更多操作"
+              aria-label={t("skillRepository.common.moreActions")}
             />
           </Dropdown>
         ) : null}
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {skill.description || "暂无描述"}
+        {skill.description || t("skillRepository.common.noDescription")}
       </p>
 
       {tags.length > 0 ? (
@@ -383,7 +382,7 @@ function MineSkillCard({
               icon={<Pencil className="size-3.5" aria-hidden />}
               onClick={onEdit}
             >
-              编辑
+              {t("common.edit")}
             </Button>
           ) : (
             <Button
@@ -392,7 +391,7 @@ function MineSkillCard({
               icon={<Eye className="size-3.5" aria-hidden />}
               disabled
             >
-              查看
+              {t("skillRepository.common.view")}
             </Button>
           )}
           <Button
