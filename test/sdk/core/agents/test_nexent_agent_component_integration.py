@@ -85,7 +85,7 @@ class TestNexentAgentComponentRegistration:
         assert ctx_config is None
         assert agent.context_manager is None
 
-    def test_no_context_manager_when_config_disabled(self):
+    def test_disabled_context_manager_config_is_deprecated_not_absent(self):
         ctx_config = ContextManagerConfig(enabled=False, token_threshold=1000)
         agent_config = AgentConfig(
             name="test_agent",
@@ -95,15 +95,10 @@ class TestNexentAgentComponentRegistration:
             context_manager_config=ctx_config,
         )
 
-        agent = MagicMock()
-        agent.context_manager = None
-
         config = getattr(agent_config, 'context_manager_config', None)
-        if config and config.enabled:
-            from sdk.nexent.core.agents.agent_context import ContextManager
-            agent.context_manager = ContextManager(config=config, max_steps=10)
-
-        assert agent.context_manager is None
+        assert config is not None
+        assert config.enabled is False
+        assert config.token_threshold == 1000
 
     def test_components_registered_in_order(self, mock_context_manager, agent_config_with_components):
         components = getattr(agent_config_with_components, 'context_components', [])

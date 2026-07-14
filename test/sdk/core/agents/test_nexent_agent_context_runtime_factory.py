@@ -52,7 +52,7 @@ def test_create_single_agent_injects_managed_runtime_and_registers_components():
     assert runtime.context_manager.get_registered_components() == []
 
 
-def test_create_single_agent_injects_legacy_runtime_when_context_manager_disabled():
+def test_create_single_agent_normalizes_disabled_config_to_managed_runtime():
     factory = _factory()
     config = AgentConfig(
         name="agent",
@@ -72,5 +72,7 @@ def test_create_single_agent_injects_legacy_runtime_when_context_manager_disable
         factory.create_single_agent(config)
 
     runtime = captured["context_runtime"]
-    assert type(runtime).__name__ == "LegacyContextRuntime"
-    assert runtime.context_manager is None
+    assert type(runtime).__name__ == "ManagedContextRuntime"
+    assert runtime.context_manager is not None
+    assert runtime.context_manager.config.enabled is True
+    assert runtime.context_manager.config.token_threshold == 1000

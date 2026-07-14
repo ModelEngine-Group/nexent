@@ -160,10 +160,20 @@ class _MockLegacyContextRuntime:
 
 
 class _MockManagedContextRuntime:
-    def __init__(self, context_manager):
+    def __init__(self, context_manager, components=None, conversation_id=None):
         self.context_manager = context_manager
+        self.components = list(components or [])
+        self.conversation_id = conversation_id
 
 
+class _MockContextManager:
+    def __init__(self, config=None, max_steps=None):
+        self.config = config
+        self.max_steps = max_steps
+
+
+mock_sdk_agent_context_module = types.ModuleType("sdk.nexent.core.agents.agent_context")
+mock_sdk_agent_context_module.ContextManager = _MockContextManager
 mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
 mock_sdk_context_runtime_module.__path__ = []
 mock_sdk_context_runtime_legacy_module = types.ModuleType("sdk.nexent.core.context_runtime.legacy")
@@ -295,6 +305,7 @@ module_mocks = {
     "sdk.nexent.core": mock_sdk_nexent_core_module,
     "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
     "sdk.nexent.core.tools": mock_sdk_nexent_core_tools_module,
+    "sdk.nexent.core.agents.agent_context": mock_sdk_agent_context_module,
     "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
     "sdk.nexent.core.context_runtime.legacy": mock_sdk_context_runtime_legacy_module,
     "sdk.nexent.core.context_runtime.legacy.runtime": mock_sdk_context_runtime_legacy_runtime_module,
@@ -357,6 +368,7 @@ sys.modules.setdefault("sdk.nexent", mock_sdk_nexent_module)
 sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
 sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
 sys.modules.setdefault("sdk.nexent.core.tools", mock_sdk_nexent_core_tools_module)
+sys.modules.setdefault("sdk.nexent.core.agents.agent_context", mock_sdk_agent_context_module)
 sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
 sys.modules.setdefault("sdk.nexent.core.context_runtime.legacy", mock_sdk_context_runtime_legacy_module)
 sys.modules.setdefault(
