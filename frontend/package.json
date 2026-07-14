@@ -57,7 +57,7 @@
     "recharts": "^2.15.0",
     "rehype-katex": "^6.0.3",
     "rehype-raw": "^7.0.0",
-    "remark-gfm": "^3.0.1",
+    "remark-gfm": "^4.0.1",
     "remark-math": "^5.1.1",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.0",
