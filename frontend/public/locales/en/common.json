@@ -2758,8 +2758,7 @@
   "aidpKnowledge.kbListTitle": "Knowledge Bases",
   "aidpKnowledge.createKb": "Create Knowledge Base",
   "aidpKnowledge.refresh": "Refresh",
-  "aidpKnowledge.searchPlaceholder": "Search by name or description...",
-  "aidpKnowledge.noResults": "No knowledge bases match your search",
+  
   "aidpKnowledge.listEmpty": "No knowledge bases found",
   "aidpKnowledge.tagDocs": "docs: {{count}}",
   "aidpKnowledge.tagChunks": "chunks: {{count}}",
@@ -2815,5 +2814,6 @@
   "aidpKnowledge.createChunkTokenNumMin": "Chunk token count must be greater than 0",
   "aidpKnowledge.createChunkOverlapNum": "Chunk Overlap Token Count",
   "aidpKnowledge.createChunkOverlapNumRequired": "Please enter the chunk overlap token count",
-  "aidpKnowledge.createChunkOverlapNumMin": "Chunk overlap token count must be ≥ 0"
+  "aidpKnowledge.createChunkOverlapNumMin": "Chunk overlap token count must be ≥ 0",
+  "aidpKnowledge.showTotal": "Total {{count}} items"
 }

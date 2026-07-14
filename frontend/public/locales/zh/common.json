@@ -2749,8 +2749,7 @@
   "aidpKnowledge.kbListTitle": "知识库列表",
   "aidpKnowledge.createKb": "创建知识库",
   "aidpKnowledge.refresh": "刷新",
-  "aidpKnowledge.searchPlaceholder": "按名称或描述搜索...",
-  "aidpKnowledge.noResults": "没有匹配的知识库",
+  
   "aidpKnowledge.listEmpty": "暂无知识库",
   "aidpKnowledge.tagDocs": "文档: {{count}}",
   "aidpKnowledge.tagChunks": "分块: {{count}}",
@@ -2806,5 +2805,6 @@
   "aidpKnowledge.createChunkTokenNumMin": "分块 Token 数必须大于 0",
   "aidpKnowledge.createChunkOverlapNum": "分块重叠 Token 数",
   "aidpKnowledge.createChunkOverlapNumRequired": "请输入分块重叠 Token 数",
-  "aidpKnowledge.createChunkOverlapNumMin": "分块重叠 Token 数必须 ≥ 0"
+  "aidpKnowledge.createChunkOverlapNumMin": "分块重叠 Token 数必须 ≥ 0",
+  "aidpKnowledge.showTotal": "共 {{count}} 条"
 }

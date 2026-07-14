@@ -90,7 +90,7 @@ class AidpKnowledgeService {
     serverUrl: string,
     apiKey: string,
     page: number = 1,
-    pageSize: number = 100
+    pageSize: number = 10
   ): Promise<AidpKnowledgeBaseListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {
       server_url: serverUrl,
@@ -296,7 +296,7 @@ class AidpKnowledgeService {
     apiKey: string,
     id: string,
     page: number = 1,
-    pageSize: number = 100
+    pageSize: number = 10
   ): Promise<AidpDocumentListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
       server_url: serverUrl,

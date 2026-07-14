@@ -187,6 +187,18 @@ def list_knowledge_bases(
     })
 
 
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Count")
+def count_knowledge_bases(
+    kds_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Count knowledge bases. AIDP uses POST .../KnowledgeBases/{kds_id}/Count."""
+    _check_auth(authorization)
+    count = len(_KNOWLEDGE_BASES)
+    logger.info("COUNT  kds_id=%s count=%d", kds_id, count)
+    return JSONResponse(content={"count": count})
+
+
 @app.put(_KB_PREFIX)
 def create_knowledge_base(
     body: CreateKbBody,

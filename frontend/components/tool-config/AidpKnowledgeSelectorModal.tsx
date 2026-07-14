@@ -220,19 +220,6 @@ export default function AidpKnowledgeSelectorModal({
               <Text type="secondary" className="break-words">{item.description}</Text>
             )}
           </div>
-          <Space size={8} className="shrink-0">
-            <Tag>
-              {t(
-                "toolConfig.aidp.selector.documentCount",
-                { count: item.document_count || 0 }
-              )}
-            </Tag>
-            <Tag>
-              {t("toolConfig.aidp.selector.chunkCount", {
-                count: item.chunk_count || 0,
-              })}
-            </Tag>
-          </Space>
         </div>
       </div>
     );

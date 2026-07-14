@@ -3,6 +3,7 @@ AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 from urllib.parse import urljoin
 
@@ -15,6 +16,41 @@ from nexent.utils.http_client_manager import http_client_manager
 logger = logging.getLogger("aidp_service")
 
 _LIST_PATH = "/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+
+
+def _timestamp_to_iso(value: Any) -> str | None:
+    """Convert a numeric Unix timestamp (seconds or milliseconds) to ISO-8601 UTC.
+
+    Returns None if the input is not a number, so optional fields stay optional
+    in the output (frontend checks ``doc.created_at`` for undefined).
+    """
+    if value in (None, "", False):
+        return None
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return None
+    # Millisecond timestamps (13+ digits) common in some AIDP responses
+    if ts > 10_000_000_000:
+        ts = ts / 1000
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Map an AIDP document item to the shape the frontend expects.
+
+    AIDP returns ``first_upload_time`` / ``create_time`` as the creation timestamp
+    and ``update_time`` as the last-modified timestamp. The frontend schema
+    expects ``created_at`` (ISO string). This mapper performs that conversion
+    and carries through all other fields unchanged.
+    """
+    out = dict(raw)
+    created_raw = raw.get("first_upload_time") or raw.get("create_time")
+    out["created_at"] = _timestamp_to_iso(created_raw)
+
+    updated_raw = raw.get("update_time")
+    out["updated_at"] = _timestamp_to_iso(updated_raw)
+    return out
 
 
 def _validate_params(server_url: str, api_key: str) -> str:
@@ -253,7 +289,11 @@ def fetch_all_aidp_knowledge_bases_impl(
 
 
 def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
-    """Get total count of knowledge bases by fetching list with page_size=1."""
+    """Get total count of knowledge bases via AIDP POST .../Count endpoint.
+
+    AIDP's list endpoint does NOT return a total count, so we must call the
+    dedicated Count API: POST /KnowledgeBases/0/Count with {"is_personal": 0}.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
@@ -261,9 +301,9 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         "Content-Type": "application/json",
     }
 
-    list_path = f"{_LIST_PATH}?page=1&page_size=1"
-    list_url = urljoin(f"{normalized_url}/", list_path)
-    logger.info("Counting AIDP knowledge bases from %s", list_url)
+    count_path = f"{_LIST_PATH}/0/Count"
+    count_url = urljoin(f"{normalized_url}/", count_path)
+    logger.info("Counting AIDP knowledge bases from %s", count_url)
 
     try:
         client = http_client_manager.get_sync_client(
@@ -271,16 +311,15 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
             timeout=60.0,
             verify_ssl=False,
         )
-        response = client.get(list_url, headers=headers)
+        response = client.post(count_url, headers=headers, json={"is_personal": 0})
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
             raise AppException(
                 ErrorCode.AIDP_RESPONSE_ERROR,
-                "Unexpected AIDP knowledge base response format",
+                "Unexpected AIDP count response format",
             )
-        total_count = result.get("total_count", 0)
-        return int(total_count) if total_count is not None else 0
+        return int(result.get("count") or 0)
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -712,6 +751,14 @@ def list_aidp_docs_impl(
                 ErrorCode.AIDP_RESPONSE_ERROR,
                 "Unexpected AIDP document list response format",
             )
+        # Normalize each document item so the frontend receives `created_at`
+        # (ISO string) instead of AIDP's raw `first_upload_time` timestamp.
+        value = result.get("value")
+        if isinstance(value, list):
+            result["value"] = [
+                _normalize_aidp_doc(item) if isinstance(item, dict) else item
+                for item in value
+            ]
         return result
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)

@@ -36,6 +36,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   // ---- KB list state ----
   const [kbs, setKbs] = useState<AidpKnowledgeBaseItem[]>([]);
   const [loadingKbs, setLoadingKbs] = useState(false);
+  const [kbTotal, setKbTotal] = useState(0);
 
   // ---- Active KB / document state ----
   const [activeKbId, setActiveKbId] = useState<string | null>(null);
@@ -43,6 +44,12 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [documents, setDocuments] = useState<AidpDocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState(0);
   const [loadingDocs, setLoadingDocs] = useState(false);
+
+  // ---- Pagination state ----
+  const KB_PAGE_SIZE = 10;
+  const DOC_PAGE_SIZE = 10;
+  const [kbPage, setKbPage] = useState(1);
+  const [docPage, setDocPage] = useState(1);
 
   // ---- Modal state ----
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -60,17 +67,25 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     }
   }, []);
 
-  // ---- Fetch KB list ----
-  const fetchKbs = useCallback(async () => {
+  // ---- Fetch KB list (server-side pagination: each page fetches page_size items + Count total) ----
+  const fetchKbs = useCallback(async (page: number = 1) => {
     if (!serverUrl || !apiKey) return;
     setLoadingKbs(true);
     try {
-      const result = await aidpKnowledgeService.listKbs(serverUrl, apiKey);
+      const result = await aidpKnowledgeService.listKbs(
+        serverUrl,
+        apiKey,
+        page,
+        KB_PAGE_SIZE,
+      );
       setKbs(result.value);
+      setKbTotal(result.total_count ?? result.value.length);
+      setKbPage(page);
     } catch (error) {
       log.error("Failed to fetch AIDP knowledge bases:", error);
       appMessage.error(t("aidpKnowledge.fetchKbsFailed"));
       setKbs([]);
+      setKbTotal(0);
     } finally {
       setLoadingKbs(false);
     }
@@ -83,20 +98,23 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     }
   }, [isConnected, serverUrl, apiKey, fetchKbs]);
 
-  // ---- Fetch documents for active KB ----
+  // ---- Fetch documents for active KB (server-side pagination) ----
   const fetchDocs = useCallback(
-    async (kbId: string) => {
+    async (kbId: string, page: number = 1) => {
       if (!serverUrl || !apiKey) return;
       setLoadingDocs(true);
       try {
         const result = await aidpKnowledgeService.listDocs(
           serverUrl,
           apiKey,
-          kbId
+          kbId,
+          page,
+          DOC_PAGE_SIZE,
         );
         const count = result.total_count ?? result.value.length;
         setDocuments(result.value);
         setTotalDocs(count);
+        setDocPage(page);
       } catch (error) {
         log.error("Failed to fetch AIDP documents:", error);
         appMessage.error(t("aidpKnowledge.fetchDocsFailed"));
@@ -128,6 +146,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       setActiveKbDetail(null);
       setDocuments([]);
       setTotalDocs(0);
+      setKbTotal(0);
+      setKbPage(1);
+      setDocPage(1);
     },
     []
   );
@@ -142,6 +163,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     setActiveKbDetail(null);
     setDocuments([]);
     setTotalDocs(0);
+    setKbTotal(0);
+    setKbPage(1);
+    setDocPage(1);
   }, []);
 
   // ---- Handle KB deletion ----
@@ -171,6 +195,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
               setActiveKbDetail(null);
               setDocuments([]);
               setTotalDocs(0);
+              setDocPage(1);
             }
 
             // Refresh list
@@ -239,12 +264,16 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
             xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
           >
-            <AidpKnowledgeList
+             <AidpKnowledgeList
               kbs={kbs}
               activeKbId={activeKbId}
               isLoading={loadingKbs}
+              total={kbTotal}
+              currentPage={kbPage}
+              pageSize={KB_PAGE_SIZE}
+              onPageChange={(page) => fetchKbs(page)}
               onSelect={handleSelectKb}
-              onRefresh={fetchKbs}
+              onRefresh={() => fetchKbs(kbPage)}
               onCreateNew={() => setCreateModalOpen(true)}
               onEdit={handleEditKb}
               onDelete={handleDeleteKb}
@@ -268,6 +297,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
                 isLoading={loadingDocs}
                 serverUrl={serverUrl}
                 apiKey={apiKey}
+                currentPage={docPage}
+                pageSize={DOC_PAGE_SIZE}
+                onPageChange={(page) => fetchDocs(activeKbId!, page)}
                 onDocsUploaded={handleDocsUploaded}
                 onRefresh={handleDocsUploaded}
               />

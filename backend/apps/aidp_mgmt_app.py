@@ -57,7 +57,7 @@ async def list_knowledge_bases(
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
 ) -> JSONResponse:
-    """List knowledge bases from AIDP (paginated)."""
+    """List knowledge bases from AIDP (paginated) with total count."""
     try:
         result = fetch_aidp_knowledge_bases_impl(
             server_url=server_url,
@@ -65,6 +65,12 @@ async def list_knowledge_bases(
             page=page,
             page_size=page_size,
         )
+        # AIDP list API does not return total; call Count endpoint separately.
+        total_count = count_aidp_kbs_impl(
+            server_url=server_url,
+            api_key=api_key,
+        )
+        result["total_count"] = total_count
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AppException:
         raise
