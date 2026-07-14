@@ -22,6 +22,7 @@ from consts.exceptions import ValidationError
 from backend.services import asset_owner_visibility as aov
 
 ASSET_OWNER_RESOURCES_ROUTE = aov.ASSET_OWNER_RESOURCES_ROUTE
+OWNER_MANAGE_ROUTE = aov.OWNER_MANAGE_ROUTE
 
 
 class TestRequireAssetOwnerEnabled:
@@ -38,14 +39,15 @@ class TestRequireAssetOwnerEnabled:
 class TestFilterAccessibleRoutes:
     @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", True)
     def test_returns_routes_unchanged_when_enabled(self):
-        routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, "/settings"]
+        routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, OWNER_MANAGE_ROUTE, "/settings"]
         assert aov.filter_accessible_routes_for_asset_owner_feature(routes) == routes
 
     @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", False)
-    def test_removes_asset_owner_route_when_disabled(self):
-        routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, "/settings"]
+    def test_removes_asset_owner_routes_when_disabled(self):
+        routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, OWNER_MANAGE_ROUTE, "/settings"]
         result = aov.filter_accessible_routes_for_asset_owner_feature(routes)
         assert ASSET_OWNER_RESOURCES_ROUTE not in result
+        assert OWNER_MANAGE_ROUTE not in result
         assert result == ["/home", "/settings"]
 
 

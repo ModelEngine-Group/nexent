@@ -1672,7 +1672,7 @@
   "sidebar.modelConfig": "模型配置",
   "sidebar.memoryConfig": "记忆配置",
   "sidebar.resourceManage": "资源管理",
-  "sidebar.ownerManage": "资产管理",
+  "sidebar.ownerManage": "资产管理员资源管理",
   "sidebar.userManagement": "个人信息",
   "sidebar.tenantResources": "租户资源",
   "sidebar.assetOwnerResources": "资产管理员资源",
