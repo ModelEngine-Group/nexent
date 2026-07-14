@@ -235,6 +235,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
+            "file_preprocess": new_agent.file_preprocess,
             "requested_output_tokens": new_agent.requested_output_tokens,
             "verification_config": new_agent.verification_config,
             "greeting_message": new_agent.greeting_message,

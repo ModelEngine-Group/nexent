@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
-from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
+from nexent.core.agents.agent_model import AgentVerificationConfig, AgentFilePreprocessConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
@@ -565,6 +565,7 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    file_preprocess: Optional[Dict[str, Any]] = None
     verification_config: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -576,6 +577,13 @@ class AgentInfoRequest(BaseModel):
         if value is None:
             return None
         return AgentVerificationConfig.model_validate(value).model_dump()
+
+    @field_validator("file_preprocess", mode="before")
+    @classmethod
+    def normalize_file_preprocess(cls, value):
+        if value is None:
+            return None
+        return AgentFilePreprocessConfig.model_validate(value).model_dump()
 
 
 class AgentIDRequest(BaseModel):
@@ -652,6 +660,7 @@ class ExportAndImportAgentInfo(BaseModel):
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: bool
     verification_config: Optional[Dict[str, Any]] = None
+    file_preprocess: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
     few_shots_prompt: Optional[str] = None

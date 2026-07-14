@@ -26,6 +26,7 @@ export type AgentConfigUpdate = Partial<Pick<
   | "prompt_template_id"
   | "prompt_template_name"
   | "verification_config"
+  | "file_preprocess"
   | "group_ids"
   | "ingroup_permission"
   | "greeting_message"
@@ -70,6 +71,35 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
   ],
 };
 
+// ========== File Preprocess Config ==========
+
+// Fixed to "auto" for now; may expand later.
+export type FilePreprocessStrategy = "auto";
+
+export interface FilePreprocessConfig {
+  rerank_top_n: number;
+  max_parse_length: number;
+  prompt_max_token_length: number;
+  prompt_strategy_name: FilePreprocessStrategy;
+  file_mode: "full_text_reference" | "chunk_search";
+}
+
+export interface AgentFilePreprocessConfig {
+  enable: boolean;
+  config: FilePreprocessConfig;
+}
+
+export const DEFAULT_AGENT_FILE_PREPROCESS_CONFIG: AgentFilePreprocessConfig = {
+  enable: false,
+  config: {
+    rerank_top_n: 5,
+    max_parse_length: 2000,
+    prompt_max_token_length: 5000,
+    prompt_strategy_name: "auto",
+    file_mode: "full_text_reference",
+  },
+};
+
 // ========== Core Interfaces ==========
 
 export interface Agent {
@@ -87,6 +117,7 @@ export interface Agent {
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;
+  file_preprocess?: AgentFilePreprocessConfig;
   tools: Tool[];
   skills?: Skill[];  // Skills configured for this agent
   duty_prompt?: string;

@@ -42,6 +42,7 @@ import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
 import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
+import FilePreprocessSection from "./FilePreprocessSection";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
@@ -1159,6 +1160,8 @@ export default function AgentGenerateDetail({}) {
                           </Form.Item>
                         </Col>
                       </Row>
+
+                      <FilePreprocessSection />
 
                       <Form.Item
                         name="agentDescription"

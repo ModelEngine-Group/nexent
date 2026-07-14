@@ -195,6 +195,48 @@ class AgentVerificationConfig(BaseModel):
         ],
     )
 
+
+class FilePreprocessConfig(BaseModel):
+    """Per-mode tuning for conversation-level file preprocess (Q&A)."""
+
+    rerank_top_n: int = Field(
+        default=5,
+        ge=1,
+        description="Number of chunks to recall/rerank, effective in chunk_search mode.",
+    )
+    max_parse_length: int = Field(
+        default=2000,
+        ge=1,
+        description="Maximum parse length per single file, in tokens.",
+    )
+    prompt_max_token_length: int = Field(
+        default=5000,
+        ge=1,
+        description="Maximum assembled prompt length, in tokens.",
+    )
+    prompt_strategy_name: Literal["auto"] = Field(
+        default="auto",
+        description="Prompt strategy name. Fixed to 'auto' for now; may expand later. Coexists with file_mode.",
+    )
+    file_mode: Literal["full_text_reference", "chunk_search"] = Field(
+        default="full_text_reference",
+        description="User-selected processing mode. Defaults to full_text_reference, switchable to chunk_search.",
+    )
+
+
+class AgentFilePreprocessConfig(BaseModel):
+    """Configuration for conversation-level file preprocess (Q&A)."""
+
+    enable: bool = Field(
+        default=False,
+        description="Whether to enable conversation-level file preprocess for this agent.",
+    )
+    config: FilePreprocessConfig = Field(
+        default_factory=FilePreprocessConfig,
+        description="Per-mode tuning parameters.",
+    )
+
+
 class AgentConfig(BaseModel):
     name: str = Field(description="Agent name")
     description: str = Field(description="Agent description")

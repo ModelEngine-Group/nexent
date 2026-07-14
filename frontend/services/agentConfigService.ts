@@ -415,6 +415,7 @@ export interface UpdateAgentInfoPayload {
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
+  file_preprocess?: Record<string, any>;
   enabled?: boolean;
   business_description?: string;
   business_logic_model_name?: string;
@@ -782,6 +783,7 @@ export const searchAgentInfo = async (
       prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
       verification_config: data.verification_config,
+      file_preprocess: data.file_preprocess,
       enabled: data.enabled,
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],

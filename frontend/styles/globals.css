@@ -398,3 +398,27 @@ tr.selected-row > td:first-child::before {
 .ant-dropdown-menu-title-content {
   @apply w-full;
 }
+
+/* File preprocess slider: keep the max-value mark inside the track edge.
+   antd injects an inline `left` and a class `transform: translateX(-50%)`
+   that center the last mark on the right edge, causing the label to overflow
+   and clip. Cancel them and anchor from the right edge instead. */
+.file-preprocess-slider .ant-slider-mark-text:last-of-type {
+  left: auto !important;
+  right: 0 !important;
+  transform: none !important;
+}
+
+/* ===== File preprocess section (FilePreprocessSection.tsx) ===== */
+.fp-enable-row { margin-bottom: 16px; }
+.fp-info-icon { color: rgba(0, 0, 0, 0.45); }
+.fp-mode-title { font-weight: 500; line-height: 1; }
+.fp-mode-desc { font-size: 12px; color: #6b7280; margin-top: 4px; }
+.fp-mode-card { flex: 1; cursor: pointer; border-width: 1px; }
+.fp-card-left { min-width: 0; }
+.fp-settings-trigger { display: inline-flex; align-items: center; }
+.fp-radio { line-height: 1; }
+.fp-setting-row { margin-bottom: 16px; }
+.fp-setting-label { font-size: 13px; margin-bottom: 6px; }
+.fp-setting-slider { flex: 1; min-width: 140px; }
+.fp-setting-input { width: 80px; }

@@ -478,6 +478,7 @@ class AgentInfo(TableBase):
         ),
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
+    file_preprocess = Column(JSONB, doc="Per-agent file preprocess config: {enable, config{rerank_top_n, max_parse_length, prompt_max_token_length, prompt_strategy_name, file_mode}}")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
