@@ -53,6 +53,9 @@ const proxy = createProxyServer({
   timeout: PROXY_TIMEOUT_MS,
 });
 
+// Prevent concurrent refresh requests (supabase refresh_token is single-use)
+let refreshInProgress = false;
+
 // ============================================================================
 // Cookie configuration
 // ============================================================================
@@ -200,14 +203,21 @@ function collectRequestBody(req) {
  * For the refresh_token endpoint, inject the refresh_token from cookie
  * into the request body so the backend can process it normally.
  * If no refresh_token cookie exists, return 401 immediately.
+ * Also prevents concurrent refresh attempts (supabase refresh_token is single-use).
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
-  if (
-    pathname === "/api/user/refresh_token" ) {
-    const refreshToken =
-    cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ;
+  if (pathname === "/api/user/refresh_token") {
+    // Prevent concurrent refresh requests
+    if (refreshInProgress) {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "Refresh already in progress" }));
+      return null;
+    }
+    refreshInProgress = true;
+
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
+      refreshInProgress = false;
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
       return null;
@@ -217,6 +227,7 @@ function prepareAuthRequestBody(pathname, body, cookies, res) {
       parsed.refresh_token = refreshToken;
       return Buffer.from(JSON.stringify(parsed));
     } catch {
+      refreshInProgress = false;
       return body;
     }
   }
@@ -227,6 +238,23 @@ function forwardAuthRequest(req, res, targetUrl) {
   const parsedTarget = new URL(targetUrl);
   const transport = parsedTarget.protocol === "https:" ? https : http;
   const cookies = parseCookies(req);
+
+  if (req.parsedPathname === "/api/user/refresh_token") {
+    // [diag] BFF-side diagnostic for refresh_token. Never log token values,
+    // only presence/len flags so we can localise where the request lost its
+    // refresh_token. Safe to remove once the 422 root cause is confirmed.
+    const refreshLen = (cookies[COOKIE_NAMES.REFRESH_TOKEN] || "").length;
+    const accessLen = (cookies[COOKIE_NAMES.ACCESS_TOKEN] || "").length;
+    const expiresAt = cookies[COOKIE_NAMES.EXPIRES_AT] || "missing";
+    console.log(
+      "[diag][refresh_token] access=%s refresh_len=%d expires_at=%s ct=%s cl=%s",
+      accessLen > 0 ? "present" : "missing",
+      refreshLen,
+      expiresAt,
+      req.headers["content-type"] || "missing",
+      req.headers["content-length"] || "missing"
+    );
+  }
 
   if (
     req.parsedPathname === "/api/user/refresh_token" &&
@@ -286,6 +314,9 @@ function forwardAuthRequest(req, res, targetUrl) {
           const responseBody = Buffer.concat(responseChunks);
           let finalBody = responseBody;
 
+          // Reset refresh lock when response completes (for refresh_token endpoint)
+          const isRefreshEndpoint = req.parsedPathname === "/api/user/refresh_token";
+
           try {
             const contentType = proxyRes.headers["content-type"] || "";
             if (
@@ -309,6 +340,7 @@ function forwardAuthRequest(req, res, targetUrl) {
                 const locale = getPreferredLocale(cookies);
                 res.writeHead(302, { Location: `/${locale}/oauth/complete` });
                 res.end();
+                if (isRefreshEndpoint) refreshInProgress = false;
                 return;
               } else if (data.data && data.data.session) {
                 const session = data.data.session;
@@ -323,6 +355,7 @@ function forwardAuthRequest(req, res, targetUrl) {
                 if (isOAuthCallback) {
                   res.writeHead(302, { Location: "/" });
                   res.end();
+                  if (isRefreshEndpoint) refreshInProgress = false;
                   return;
                 }
                 if (isCasCallback) {
@@ -330,6 +363,7 @@ function forwardAuthRequest(req, res, targetUrl) {
                     Location: data.data.redirect_url || "/",
                   });
                   res.end();
+                  if (isRefreshEndpoint) refreshInProgress = false;
                   return;
                 }
                 if (isCasRenewCallback) {
@@ -350,6 +384,7 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   }
                   res.writeHead(200, responseHeaders);
                   res.end(html);
+                  if (isRefreshEndpoint) refreshInProgress = false;
                   return;
                 }
 
@@ -376,11 +411,15 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                 });
                 res.writeHead(302, { Location: `/?${errorParams.toString()}` });
                 res.end();
+                if (isRefreshEndpoint) refreshInProgress = false;
                 return;
               }
             }
           } catch {
             // If JSON parsing fails, pass through unchanged
+          } finally {
+            // Always reset refresh lock when response is complete
+            if (isRefreshEndpoint) refreshInProgress = false;
           }
 
           // Copy response headers, but override content-length and set cookies
@@ -410,6 +449,9 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 
       proxyReq.on("error", (err) => {
         console.error("[Auth Proxy] Forward error:", err.message);
+        if (req.parsedPathname === "/api/user/refresh_token") {
+          refreshInProgress = false;
+        }
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ detail: "Backend unavailable" }));
@@ -421,6 +463,9 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
     })
     .catch((err) => {
       console.error("[Auth Proxy] Body read error:", err.message);
+      if (req.parsedPathname === "/api/user/refresh_token") {
+        refreshInProgress = false;
+      }
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ detail: "Internal proxy error" }));
