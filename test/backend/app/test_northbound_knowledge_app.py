@@ -167,7 +167,7 @@ sys.modules["apps.file_management_app"] = file_management_app_module
 
 from apps.northbound_knowledge_app import router  # noqa: E402
 from consts.const import ASSET_OWNER_TENANT_ID  # noqa: E402
-from consts.exceptions import LimitExceededError  # noqa: E402
+from consts.exceptions import LimitExceededError, UnauthorizedError  # noqa: E402
 
 ASSET_CTX = NorthboundContext(
     request_id="req-1",
@@ -340,6 +340,36 @@ class TestGetIndexChunks:
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
         assert response.status_code == 429
 
+    def test_value_error_returns_404(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.get_index_chunks",
+            side_effect=ValueError("index not found"),
+        ):
+            response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
+        assert response.status_code == 404
+        assert "index not found" in response.json()["detail"]
+
+    def test_unauthorized_returns_401(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.get_index_chunks",
+            side_effect=UnauthorizedError("bad token"),
+        ):
+            response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
+        assert response.status_code == 401
+        assert "bad token" in response.json()["detail"]
+
+    def test_generic_error_returns_500(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.get_index_chunks",
+            side_effect=RuntimeError("es down"),
+        ):
+            response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
+        assert response.status_code == 500
+        assert "Error getting chunks" in response.json()["detail"]
+
 
 class TestHybridSearch:
     def test_non_asset_owner_returns_403(self, client, mock_northbound_context):
@@ -414,3 +444,70 @@ class TestHybridSearch:
                 },
             )
         assert response.status_code == 429
+
+    def test_unresolved_index_name_falls_back_to_requested(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.get_index_name_by_knowledge_name",
+            side_effect=RuntimeError("not mapped"),
+        ), patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.search_hybrid",
+        ) as mock_search:
+            mock_search.return_value = {"results": [], "total": 0}
+            response = client.post(
+                "/nb/v1/knowledge/indices/search/hybrid",
+                json={
+                    "query": "test",
+                    "index_names": ["raw_kb"],
+                },
+            )
+        assert response.status_code == 200
+        assert mock_search.call_args.kwargs["index_names"] == ["raw_kb"]
+
+    def test_value_error_returns_400(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.search_hybrid",
+            side_effect=ValueError("invalid query"),
+        ):
+            response = client.post(
+                "/nb/v1/knowledge/indices/search/hybrid",
+                json={
+                    "query": "test",
+                    "index_names": ["kb1"],
+                },
+            )
+        assert response.status_code == 400
+        assert "invalid query" in response.json()["detail"]
+
+    def test_unauthorized_returns_401(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.search_hybrid",
+            side_effect=UnauthorizedError("bad token"),
+        ):
+            response = client.post(
+                "/nb/v1/knowledge/indices/search/hybrid",
+                json={
+                    "query": "test",
+                    "index_names": ["kb1"],
+                },
+            )
+        assert response.status_code == 401
+        assert "bad token" in response.json()["detail"]
+
+    def test_generic_error_returns_500(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.search_hybrid",
+            side_effect=RuntimeError("search failed"),
+        ):
+            response = client.post(
+                "/nb/v1/knowledge/indices/search/hybrid",
+                json={
+                    "query": "test",
+                    "index_names": ["kb1"],
+                },
+            )
+        assert response.status_code == 500
+        assert "Error executing hybrid search" in response.json()["detail"]
