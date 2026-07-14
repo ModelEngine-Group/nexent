@@ -5,8 +5,8 @@ import { Button, Upload, message, Tooltip } from "antd";
 import { UploadOutlined, InboxOutlined, ReloadOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
-import type { AidpDocumentItem } from "@/services/aidpKnowledgeService";
-import aidpKnowledgeService from "@/services/aidpKnowledgeService";
+import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
+import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 
 const { Dragger } = Upload;
 

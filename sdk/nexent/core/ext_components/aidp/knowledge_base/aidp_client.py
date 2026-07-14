@@ -10,7 +10,7 @@ import httpx
 
 from nexent.utils.http_client_manager import http_client_manager
 
-from .config import AIDP_API_KEY, AIDP_BASE_URL, AIDP_TENANT_ID, COUNT_PATH_KDS_ID
+from ....knowledge_base.config import AIDP_API_KEY, AIDP_BASE_URL, AIDP_TENANT_ID, COUNT_PATH_KDS_ID
 
 
 logger = logging.getLogger("aidp_knowledge_base_adapter")

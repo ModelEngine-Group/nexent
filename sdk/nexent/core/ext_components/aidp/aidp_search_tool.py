@@ -14,9 +14,9 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
-from ...utils.http_client_manager import http_client_manager
+from ...utils.observer import MessageObserver, ProcessType
+from ...utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ....utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_search_tool")
 

@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .aidp_client import AidpAdapterError, AidpClient
+from ..ext_components.aidp.knowledge_base.aidp_client import AidpAdapterError, AidpClient
 from .config import ADAPTER_PLATFORM, ADAPTER_VERSION
 from .mapper import (
     build_create_payload,

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, message } from "antd";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
-import aidpKnowledgeService from "@/services/aidpKnowledgeService";
+import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 
 interface AidpUpdateKbModalProps {
   open: boolean;

@@ -37,10 +37,8 @@ from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
 from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
-from apps.aidp_app import router as aidp_router
-from apps.aidp_mgmt_app import aidp_mgmt_router
 from apps.cas_app import router as cas_router
-from consts.const import IS_SPEED_MODE
+from consts.const import IS_SPEED_MODE, ENABLE_AIDP_KNOWLEDGE
 from services.prompt_template_service import sync_system_default_prompt_template
 
 # Create logger instance
@@ -102,5 +100,8 @@ app.include_router(a2a_server_router)
 app.include_router(haotian_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
-app.include_router(aidp_router)
-app.include_router(aidp_mgmt_router)
+if ENABLE_AIDP_KNOWLEDGE:
+    from ext_components.aidp.apps.aidp_app import router as aidp_router
+    from ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
+    app.include_router(aidp_router)
+    app.include_router(aidp_mgmt_router)

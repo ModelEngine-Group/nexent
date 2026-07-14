@@ -15,14 +15,14 @@ import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService, {
   type AidpKbDetail,
   type AidpDocumentItem,
-} from "@/services/aidpKnowledgeService";
+} from "@/ext_components/aidp/services/aidpKnowledgeService";
 import log from "@/lib/logger";
 
-import AidpConnectionConfig from "./components/AidpConnectionConfig";
-import AidpKnowledgeList from "./components/AidpKnowledgeList";
-import AidpDocumentList from "./components/AidpDocumentList";
-import AidpCreateKbModal from "./components/AidpCreateKbModal";
-import AidpUpdateKbModal from "./components/AidpUpdateKbModal";
+import AidpConnectionConfig from "./AidpConnectionConfig";
+import AidpKnowledgeList from "./AidpKnowledgeList";
+import AidpDocumentList from "./AidpDocumentList";
+import AidpCreateKbModal from "./AidpCreateKbModal";
+import AidpUpdateKbModal from "./AidpUpdateKbModal";
 
 const AidpKnowledgeConfiguration: React.FC = () => {
   const { t } = useTranslation();

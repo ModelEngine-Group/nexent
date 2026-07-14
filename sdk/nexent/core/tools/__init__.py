@@ -7,7 +7,7 @@ from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
 from .ragflow_search_tool import RAGFlowSearchTool
-from .aidp_search_tool import AidpSearchTool
+from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool

@@ -19,7 +19,7 @@ import {
 import { InboxOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
-import aidpKnowledgeService from "@/services/aidpKnowledgeService";
+import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 
 const { Dragger } = Upload;
 

@@ -8,7 +8,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 
-import aidpKnowledgeService from "@/services/aidpKnowledgeService";
+import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 
 interface AidpConnectionConfigProps {
   serverUrl: string;

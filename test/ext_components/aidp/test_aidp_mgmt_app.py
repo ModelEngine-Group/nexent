@@ -41,11 +41,11 @@ for _mod in [backend_pkg, backend_db_pkg, backend_db_client_pkg]:
     sys.modules.setdefault(_mod.__name__, _mod)
 
 # Now safe to import backend modules under test
-from backend.apps.aidp_mgmt_app import aidp_mgmt_router
+from backend.ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
 from backend.apps.app_factory import register_exception_handlers
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from backend.services.aidp_service import (
+from backend.ext_components.aidp.services.aidp_service import (
     count_aidp_kbs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
@@ -89,7 +89,7 @@ class TestListKnowledgeBases:
             "next_link": None,
         }
 
-        with patch("backend.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
             mock.return_value = expected
             response = client.get(
                 "/aidp-mgmt/knowledge-bases",
@@ -110,7 +110,7 @@ class TestListKnowledgeBases:
         client = TestClient(app)
         expected = {"value": [], "total_count": 0, "next_link": None}
 
-        with patch("backend.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
             mock.return_value = expected
             response = client.get(
                 "/aidp-mgmt/knowledge-bases",
@@ -129,7 +129,7 @@ class TestListKnowledgeBases:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_AUTH_ERROR, "auth failed")
             response = client.get(
                 "/aidp-mgmt/knowledge-bases",
@@ -142,7 +142,7 @@ class TestListKnowledgeBases:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
             mock.side_effect = RuntimeError("unexpected")
             response = client.get(
                 "/aidp-mgmt/knowledge-bases",
@@ -162,7 +162,7 @@ class TestCountKnowledgeBases:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
             mock.return_value = 42
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/count",
@@ -177,7 +177,7 @@ class TestCountKnowledgeBases:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
             mock.return_value = 0
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/count",
@@ -191,7 +191,7 @@ class TestCountKnowledgeBases:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_CONNECTION_ERROR, "timeout")
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/count",
@@ -204,7 +204,7 @@ class TestCountKnowledgeBases:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
             mock.side_effect = ValueError("bad value")
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/count",
@@ -225,7 +225,7 @@ class TestCreateKnowledgeBase:
         client = TestClient(app)
         created = {"kds_id": "kb-new", "kds_name": "New KB"}
 
-        with patch("backend.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
             mock.return_value = created
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
@@ -246,7 +246,7 @@ class TestCreateKnowledgeBase:
         client = TestClient(app)
         created = {"kds_id": "kb-new", "kds_name": "Full KB"}
 
-        with patch("backend.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
             mock.return_value = created
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
@@ -273,7 +273,7 @@ class TestCreateKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
             mock.return_value = {"kds_id": "kb-1"}
             client.post(
                 "/aidp-mgmt/knowledge-bases",
@@ -289,7 +289,7 @@ class TestCreateKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_CONFIG_INVALID, "bad config")
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
@@ -317,7 +317,7 @@ class TestGetKnowledgeBase:
             "state": 4,
         }
 
-        with patch("backend.apps.aidp_mgmt_app.get_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.get_aidp_kb_impl") as mock:
             mock.return_value = detail
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -336,7 +336,7 @@ class TestGetKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.get_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.get_aidp_kb_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_SERVICE_ERROR, "error")
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -357,7 +357,7 @@ class TestUpdateKnowledgeBase:
         client = TestClient(app)
         updated = {"kds_id": KDS_ID, "kds_name": "Renamed KB"}
 
-        with patch("backend.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
             mock.return_value = updated
             response = client.put(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -378,7 +378,7 @@ class TestUpdateKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
             mock.return_value = {"kds_id": KDS_ID}
             response = client.put(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -394,7 +394,7 @@ class TestUpdateKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
             mock.return_value = {"kds_id": KDS_ID}
             response = client.put(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -409,7 +409,7 @@ class TestUpdateKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.update_aidp_kb_impl"):
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl"):
             response = client.put(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
                 params={"server_url": SERVER_URL, "api_key": API_KEY},
@@ -422,7 +422,7 @@ class TestUpdateKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_SERVICE_ERROR, "fail")
             response = client.put(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -443,7 +443,7 @@ class TestDeleteKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
             mock.return_value = True
             response = client.delete(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -462,7 +462,7 @@ class TestDeleteKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_AUTH_ERROR, "unauthorized")
             response = client.delete(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -475,7 +475,7 @@ class TestDeleteKnowledgeBase:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
             mock.side_effect = Exception("boom")
             response = client.delete(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
@@ -496,7 +496,7 @@ class TestUploadDocuments:
         client = TestClient(app)
         upload_result = {"success_count": 2, "failed_count": 0, "errors": []}
 
-        with patch("backend.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
             mock.return_value = upload_result
             response = client.post(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
@@ -520,7 +520,7 @@ class TestUploadDocuments:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
             mock.return_value = {"success_count": 1}
             response = client.post(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
@@ -534,7 +534,7 @@ class TestUploadDocuments:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_RATE_LIMIT, "slow down")
             response = client.post(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
@@ -574,7 +574,7 @@ class TestListDocuments:
             "total_count": 2,
         }
 
-        with patch("backend.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
             mock.return_value = expected
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
@@ -595,7 +595,7 @@ class TestListDocuments:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
             mock.return_value = {"value": [], "total_count": 0}
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
@@ -615,7 +615,7 @@ class TestListDocuments:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
             mock.side_effect = AppException(ErrorCode.AIDP_SERVICE_ERROR, "error")
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
@@ -628,7 +628,7 @@ class TestListDocuments:
         app = _build_app()
         client = TestClient(app)
 
-        with patch("backend.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
+        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
             mock.side_effect = TypeError("type err")
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",

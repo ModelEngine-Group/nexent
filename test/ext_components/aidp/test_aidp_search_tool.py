@@ -10,7 +10,7 @@ import pytest
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-MODULE_PATH = os.path.join(PROJECT_ROOT, "sdk", "nexent", "core", "tools", "aidp_search_tool.py")
+MODULE_PATH = os.path.join(PROJECT_ROOT, "sdk", "nexent", "core", "ext_components", "aidp", "aidp_search_tool.py")
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def aidp_module():
     http_client_mod.http_client_manager = MagicMock()
     register_module("sdk.nexent.utils.http_client_manager", http_client_mod)
 
-    module_name = "sdk.nexent.core.tools.aidp_search_tool"
+    module_name = "sdk.nexent.core.ext_components.aidp.aidp_search_tool"
     spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     module.__package__ = "sdk.nexent.core.tools"

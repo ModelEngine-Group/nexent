@@ -169,7 +169,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, enableAidpKnowledge } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -233,9 +233,13 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       return [];
     }
 
-    const filtered = ROUTE_CONFIG.filter((route) =>
-      accessibleRoutes.includes(route.path)
-    );
+    const filtered = ROUTE_CONFIG.filter((route) => {
+      // Gate AIDP knowledge page behind feature flag
+      if (route.path === "/aidp-knowledges" && !enableAidpKnowledge) {
+        return false;
+      }
+      return accessibleRoutes.includes(route.path);
+    });
 
     // Separate root items and children
     const rootItems = filtered
@@ -259,7 +263,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       ...root,
       children: childrenByParent.get(root.path) || [],
     }));
-  }, [accessibleRoutes]);
+  }, [accessibleRoutes, enableAidpKnowledge]);
 
   /**
    * Create a menu item from route configuration

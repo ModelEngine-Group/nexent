@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from services.aidp_service import (
+from ext_components.aidp.services.aidp_service import (
     count_aidp_kbs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,

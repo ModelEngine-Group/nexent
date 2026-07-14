@@ -10,7 +10,7 @@ import pytest
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
 BACKEND_ROOT = os.path.join(PROJECT_ROOT, "backend")
-SERVICE_PATH = os.path.join(BACKEND_ROOT, "services", "aidp_service.py")
+SERVICE_PATH = os.path.join(BACKEND_ROOT, "ext_components", "aidp", "services", "aidp_service.py")
 
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
@@ -48,7 +48,7 @@ def aidp_service_module():
     backend_services_pkg.__path__ = [os.path.join(PROJECT_ROOT, "backend", "services")]
     register_module("backend.services", backend_services_pkg)
 
-    module_name = "backend.services.aidp_service"
+    module_name = "backend.ext_components.aidp.services.aidp_service"
     spec = importlib.util.spec_from_file_location(module_name, SERVICE_PATH)
     module = importlib.util.module_from_spec(spec)
     module.__package__ = "backend.services"
