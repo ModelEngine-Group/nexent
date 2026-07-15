@@ -420,7 +420,7 @@ export default function McpServiceDetailModal({
               </div>
             ) : null}
 
-            <div className="grid grid-cols-[1fr_160px] gap-4">
+            <div className="flex flex-col gap-4">
               <TagEditor
                 title={t("mcpTools.detail.tags")}
                 titleClassName="mb-1 block text-sm font-medium text-slate-700"
@@ -430,15 +430,6 @@ export default function McpServiceDetailModal({
                 removeAriaKey="mcpTools.detail.removeTagAria"
                 placeholderKey="mcpTools.detail.tagInputPlaceholder"
               />
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  {t("mcpTools.detail.versionNumber")}
-                </label>
-                <Form.Item name="version" className="mb-0" rules={rules.version}>
-                  <Input className="w-full rounded-md" placeholder="1.0.0" />
-                </Form.Item>
-              </div>
             </div>
           </Form>
 
