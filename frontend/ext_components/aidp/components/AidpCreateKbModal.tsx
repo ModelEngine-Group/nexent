@@ -50,7 +50,7 @@ interface AidpCreateKbModalProps {
   apiKey: string;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
-  onSuccess: () => void;
+  onSuccess: (newKdsId: string) => void;
 }
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
@@ -186,8 +186,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         message.success(t("aidpKnowledge.createKbSuccess"));
       }
 
+      const newKdsId = created.kds_id;
       handleReset();
-      onSuccess();
+      onSuccess(newKdsId);
     } catch (error) {
       message.error(t("aidpKnowledge.createKbFailed"));
     } finally {

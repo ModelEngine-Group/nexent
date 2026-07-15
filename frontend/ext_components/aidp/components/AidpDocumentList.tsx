@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Upload, message, Tooltip } from "antd";
+import { Button, Pagination, Upload, message, Tooltip } from "antd";
 import { UploadOutlined, InboxOutlined, ReloadOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
@@ -14,9 +14,13 @@ interface AidpDocumentListProps {
   activeKb: AidpKnowledgeBaseItem | null;
   documents: AidpDocumentItem[];
   totalDocs: number;
+  hasMore: boolean;
   isLoading: boolean;
   serverUrl: string;
   apiKey: string;
+  currentPage: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
   onDocsUploaded: () => void;
   onRefresh: () => void;
 }
@@ -25,14 +29,22 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   activeKb,
   documents,
   totalDocs,
+  hasMore,
   isLoading,
   serverUrl,
   apiKey,
+  currentPage,
+  pageSize,
+  onPageChange,
   onDocsUploaded,
   onRefresh,
 }) => {
   const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
+  // Antd Dragger fires beforeUpload once per file in a multi-select batch,
+  // each time passing the SAME fileList ref. Use it as a dedup key so we
+  // only kick off one upload per user action.
+  const batchRef = useRef<unknown>(null);
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
@@ -84,9 +96,9 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   };
 
   return (
-    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
+    <div className="w-full bg-white border border-gray-200 rounded-md overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 shrink-0">
+      <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-base font-semibold text-blue-500 truncate">
@@ -107,8 +119,8 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         </div>
       </div>
 
-      {/* Document table — compact; scrolls internally when content overflows. */}
-      <div className="shrink-0 overflow-auto max-h-[50%] p-2 border-b border-gray-200">
+      {/* Document table */}
+      <div className="p-2 border-b border-gray-200">
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
@@ -169,20 +181,55 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         )}
       </div>
 
-      {/* Upload area — placed directly beneath the table, not stretched to the bottom. */}
-      <div className="shrink-0 p-3">
+      {/* Server-side pagination.
+          When Count API is unavailable total may be unreliable, so we use
+          has_more (derived from page fullness on the backend) as a fallback
+          signal. To make Pagination show at least "one more page" we inflate
+          total to be just beyond the current page when has_more is true but
+          total ≤ currentPage*pageSize. */}
+      {documents.length > 0 && (() => {
+        const effectiveTotal = hasMore && totalDocs <= currentPage * pageSize
+          ? currentPage * pageSize + pageSize + 1
+          : totalDocs;
+        return (
+          <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
+            <Pagination
+              current={currentPage}
+              pageSize={pageSize}
+              total={effectiveTotal}
+              onChange={onPageChange}
+              showSizeChanger={false}
+              showTotal={(total) =>
+                t("aidpKnowledge.showTotal", { count: total })
+              }
+              size="small"
+            />
+          </div>
+        );
+      })()}
+
+      {/* Upload area */}
+      <div className="p-3">
         <Dragger
           multiple
           showUploadList={false}
-          beforeUpload={(file, fileList) => {
-            // Collect all files from this upload batch
+          beforeUpload={(_file, fileList) => {
+            // Dedupe: antd calls beforeUpload N times for N selected files,
+            // passing the same `fileList` reference each time. Only process
+            // the FIRST invocation per batch to prevent duplicate uploads.
+            if (batchRef.current === fileList) return false;
+            batchRef.current = fileList;
+
             const allFiles = fileList
               .map((f) => f as unknown as File)
               .filter(Boolean);
 
             // Defer to avoid blocking antd
-            setTimeout(() => handleUpload(allFiles), 0);
-            return false; // Prevent default upload
+            setTimeout(() => {
+              handleUpload(allFiles);
+              batchRef.current = null;
+            }, 0);
+            return false;
           }}
           disabled={uploading || !activeKb}
         >
@@ -199,9 +246,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           </p>
         </Dragger>
       </div>
-
-      {/* Spacer absorbs any remaining column space so the Dragger sits just below content. */}
-      <div className="flex-1 min-h-0" />
     </div>
   );
 };

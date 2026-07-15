@@ -1,10 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Input, Tooltip } from "antd";
+import { Button, Pagination, Tooltip } from "antd";
 import {
   PlusOutlined,
-  SearchOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { SquarePen, Trash2 } from "lucide-react";
@@ -15,6 +14,11 @@ interface AidpKnowledgeListProps {
   kbs: AidpKnowledgeBaseItem[];
   activeKbId: string | null;
   isLoading: boolean;
+  total: number;
+  hasMore: boolean;
+  currentPage: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
   onSelect: (kb: AidpKnowledgeBaseItem) => void;
   onRefresh: () => void;
   onCreateNew: () => void;
@@ -26,6 +30,11 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   kbs,
   activeKbId,
   isLoading,
+  total,
+  hasMore,
+  currentPage,
+  pageSize,
+  onPageChange,
   onSelect,
   onRefresh,
   onCreateNew,
@@ -33,28 +42,18 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   onDelete,
 }) => {
   const { t } = useTranslation();
-  const [searchKeyword, setSearchKeyword] = useState("");
 
-  // Sort by name alphabetically, then filter
-  const filteredKbs = useMemo(() => {
-    const sorted = [...kbs].sort((a, b) =>
+  // Sort alphabetically by name
+  const displayedKbs = useMemo(() => {
+    return [...kbs].sort((a, b) =>
       (a.kds_name || "").localeCompare(b.kds_name || "")
     );
-
-    if (!searchKeyword.trim()) return sorted;
-
-    const keyword = searchKeyword.toLowerCase();
-    return sorted.filter(
-      (kb) =>
-        (kb.kds_name || "").toLowerCase().includes(keyword) ||
-        (kb.description || "").toLowerCase().includes(keyword)
-    );
-  }, [kbs, searchKeyword]);
+  }, [kbs]);
 
   return (
-    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
+    <div className="w-full bg-white border border-gray-200 rounded-md overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 shrink-0">
+      <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-gray-800">
             {t("aidpKnowledge.kbListTitle")}
@@ -77,22 +76,13 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             </Tooltip>
           </div>
         </div>
-        <div className="mt-3">
-          <Input
-            placeholder={t("aidpKnowledge.searchPlaceholder")}
-            prefix={<SearchOutlined />}
-            value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
-            allowClear
-          />
-        </div>
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        {filteredKbs.length > 0 ? (
+      <div>
+        {displayedKbs.length > 0 ? (
           <div>
-            {filteredKbs.map((kb) => {
+            {displayedKbs.map((kb) => {
               const isActive = activeKbId === kb.kds_id;
 
               return (
@@ -164,12 +154,34 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
           </div>
         ) : (
           <div className="p-6 text-center text-gray-500 text-sm">
-            {searchKeyword
-              ? t("aidpKnowledge.noResults")
-              : t("aidpKnowledge.listEmpty")}
+            {t("aidpKnowledge.listEmpty")}
           </div>
         )}
       </div>
+
+      {/* Server-side pagination.
+          When Count API is unavailable total may be unreliable, so we use
+          has_more (derived from page fullness on the backend) as a fallback
+          signal. To make Pagination show at least "one more page" we inflate
+          total to be just beyond the current page when has_more is true but
+          total ≤ currentPage*pageSize. */}
+      {((total > pageSize) || hasMore || kbs.length >= pageSize) && (() => {
+        const effectiveTotal = hasMore && total <= currentPage * pageSize
+          ? currentPage * pageSize + pageSize + 1
+          : total;
+        return (
+          <div className="px-4 py-3 border-t border-gray-200 flex justify-center">
+            <Pagination
+              current={currentPage}
+              pageSize={pageSize}
+              total={effectiveTotal}
+              onChange={onPageChange}
+              showSizeChanger={false}
+              size="small"
+            />
+          </div>
+        );
+      })()}
     </div>
   );
 };

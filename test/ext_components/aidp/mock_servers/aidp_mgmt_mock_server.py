@@ -56,32 +56,35 @@ _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def _seed_initial_data() -> None:
-    """Populate a few seed knowledge bases and documents for list/get testing."""
+    """Populate seed knowledge bases and documents for list/get testing.
+    25 KBs total to exercise pagination (3 pages of 10).
+    """
     seeds = [
-        {
-            "kds_id": "aidp-kb-product",
-            "kds_name": "AIDP Product Handbook",
-            "description": "Product documents for AIDP search capability.",
-            "state": 4,
-            "create_time": 1718000100,
-            "update_time": 1718000100,
-        },
-        {
-            "kds_id": "aidp-kb-api",
-            "kds_name": "AIDP API Guide",
-            "description": "API and integration guide for the AIDP platform.",
-            "state": 4,
-            "create_time": 1718000200,
-            "update_time": 1718000200,
-        },
-        {
-            "kds_id": "aidp-kb-faq",
-            "kds_name": "AIDP FAQ",
-            "description": "Frequently asked questions and troubleshooting notes.",
-            "state": 4,
-            "create_time": 1718000300,
-            "update_time": 1718000300,
-        },
+        {"kds_id": "aidp-kb-product", "kds_name": "AIDP Product Handbook", "description": "Product documents for AIDP search capability.", "state": 4, "create_time": 1718000100, "update_time": 1718000100},
+        {"kds_id": "aidp-kb-api", "kds_name": "AIDP API Guide", "description": "API and integration guide for the AIDP platform.", "state": 4, "create_time": 1718000200, "update_time": 1718000200},
+        {"kds_id": "aidp-kb-faq", "kds_name": "AIDP FAQ", "description": "Frequently asked questions and troubleshooting notes.", "state": 4, "create_time": 1718000300, "update_time": 1718000300},
+        {"kds_id": "aidp-kb-04", "kds_name": "Customer Support Playbook", "description": "Standard operating procedures for support teams.", "state": 4, "create_time": 1718001004, "update_time": 1718001004},
+        {"kds_id": "aidp-kb-05", "kds_name": "Data Privacy Guidelines", "description": "GDPR/CCPA compliance and data handling policies.", "state": 4, "create_time": 1718001005, "update_time": 1718001005},
+        {"kds_id": "aidp-kb-06", "kds_name": "Engineering Onboarding", "description": "New engineer ramp-up materials and tooling setup.", "state": 4, "create_time": 1718001006, "update_time": 1718001006},
+        {"kds_id": "aidp-kb-07", "kds_name": "Frontend Style Guide", "description": "React component library and design token references.", "state": 4, "create_time": 1718001007, "update_time": 1718001007},
+        {"kds_id": "aidp-kb-08", "kds_name": "HR Policy Handbook", "description": "Leave, benefits, and company culture guidelines.", "state": 4, "create_time": 1718001008, "update_time": 1718001008},
+        {"kds_id": "aidp-kb-09", "kds_name": "Incident Response Runbook", "description": "On-call procedures and escalation matrices.", "state": 4, "create_time": 1718001009, "update_time": 1718001009},
+        {"kds_id": "aidp-kb-10", "kds_name": "Java Migration Notes", "description": "Legacy Java service migration to microservices.", "state": 4, "create_time": 1718001010, "update_time": 1718001010},
+        {"kds_id": "aidp-kb-11", "kds_name": "Kubernetes Operations", "description": "Cluster management, scaling, and maintenance.", "state": 4, "create_time": 1718001011, "update_time": 1718001011},
+        {"kds_id": "aidp-kb-12", "kds_name": "Localization Guide", "description": "i18n/l10n standards for multi-region releases.", "state": 4, "create_time": 1718001012, "update_time": 1718001012},
+        {"kds_id": "aidp-kb-13", "kds_name": "Marketing Collateral", "description": "Brand assets, press kits, and campaign materials.", "state": 4, "create_time": 1718001013, "update_time": 1718001013},
+        {"kds_id": "aidp-kb-14", "kds_name": "Network Architecture", "description": "VPC topology, load balancing, and DNS configuration.", "state": 4, "create_time": 1718001014, "update_time": 1718001014},
+        {"kds_id": "aidp-kb-15", "kds_name": "Observability Stack", "description": "Metrics, logging, and distributed tracing setup.", "state": 4, "create_time": 1718001015, "update_time": 1718001015},
+        {"kds_id": "aidp-kb-16", "kds_name": "Performance Benchmarks", "description": "Load test results and SLO reports across services.", "state": 4, "create_time": 1718001016, "update_time": 1718001016},
+        {"kds_id": "aidp-kb-17", "kds_name": "QA Test Plans", "description": "Regression suites and release gating checklists.", "state": 4, "create_time": 1718001017, "update_time": 1718001017},
+        {"kds_id": "aidp-kb-18", "kds_name": "Release Notes Archive", "description": "Changelog and release communication templates.", "state": 4, "create_time": 1718001018, "update_time": 1718001018},
+        {"kds_id": "aidp-kb-19", "kds_name": "Security Audit Reports", "description": "Penetration test findings and remediation trackers.", "state": 4, "create_time": 1718001019, "update_time": 1718001019},
+        {"kds_id": "aidp-kb-20", "kds_name": "Terraform Modules", "description": "Reusable IaC modules for infrastructure provisioning.", "state": 4, "create_time": 1718001020, "update_time": 1718001020},
+        {"kds_id": "aidp-kb-21", "kds_name": "User Research Insights", "description": "Persona studies, usability tests, and journey maps.", "state": 4, "create_time": 1718001021, "update_time": 1718001021},
+        {"kds_id": "aidp-kb-22", "kds_name": "Vendor Contracts", "description": "SaaS licensing agreements and SLA commitments.", "state": 4, "create_time": 1718001022, "update_time": 1718001022},
+        {"kds_id": "aidp-kb-23", "kds_name": "Workflow Automation", "description": "Zapier/n8n integrations and scheduling playbooks.", "state": 4, "create_time": 1718001023, "update_time": 1718001023},
+        {"kds_id": "aidp-kb-24", "kds_name": "Cross-Platform Builds", "description": "macOS/Windows/Linux build matrix and signing keys.", "state": 4, "create_time": 1718001024, "update_time": 1718001024},
+        {"kds_id": "aidp-kb-25", "kds_name": "Year in Review 2024", "description": "Annual retrospective and OKR outcomes.", "state": 4, "create_time": 1718001025, "update_time": 1718001025},
     ]
     for kb in seeds:
         _KNOWLEDGE_BASES[kb["kds_id"]] = kb
@@ -185,6 +188,18 @@ def list_knowledge_bases(
         "total_count": len(all_items),
         "next_link": next_link,
     })
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Count")
+def count_knowledge_bases(
+    kds_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Count knowledge bases. AIDP uses POST .../KnowledgeBases/{kds_id}/Count."""
+    _check_auth(authorization)
+    count = len(_KNOWLEDGE_BASES)
+    logger.info("COUNT  kds_id=%s count=%d", kds_id, count)
+    return JSONResponse(content={"count": count})
 
 
 @app.put(_KB_PREFIX)
@@ -504,7 +519,7 @@ def reset_state() -> Dict[str, str]:
 # =============================================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AIDP Management Mock Server")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=30081, help="Bind port (default: 30081)")
     parser.add_argument("--api-key", default=EXPECTED_API_KEY, help="Expected Bearer API key")
     args = parser.parse_args()

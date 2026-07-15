@@ -5,7 +5,7 @@
  * Credentials (server_url, api_key) are passed per-call from localStorage.
  */
 
-import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
+import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type {
   AidpKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse,
@@ -38,6 +38,7 @@ export interface AidpDocumentItem {
 export interface AidpDocumentListResponse {
   value: AidpDocumentItem[];
   total_count?: number;
+  has_more?: boolean;
 }
 
 export interface AidpCreateKbPayload {
@@ -90,7 +91,7 @@ class AidpKnowledgeService {
     serverUrl: string,
     apiKey: string,
     page: number = 1,
-    pageSize: number = 100
+    pageSize: number = 10
   ): Promise<AidpKnowledgeBaseListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {
       server_url: serverUrl,
@@ -111,6 +112,8 @@ class AidpKnowledgeService {
         typeof result.total_count === "number" ? result.total_count : undefined,
       next_link:
         typeof result.next_link === "string" ? result.next_link : null,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
     };
   }
 
@@ -296,7 +299,7 @@ class AidpKnowledgeService {
     apiKey: string,
     id: string,
     page: number = 1,
-    pageSize: number = 100
+    pageSize: number = 10
   ): Promise<AidpDocumentListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
       server_url: serverUrl,
@@ -315,6 +318,8 @@ class AidpKnowledgeService {
       value: Array.isArray(result.value) ? result.value : [],
       total_count:
         typeof result.total_count === "number" ? result.total_count : undefined,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
     };
   }
 }

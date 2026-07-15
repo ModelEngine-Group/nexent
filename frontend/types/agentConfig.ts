@@ -168,6 +168,7 @@ export interface AidpKnowledgeBaseListResponse {
   value: AidpKnowledgeBaseItem[];
   total_count?: number;
   next_link?: string | null;
+  has_more?: boolean;
 }
 
 export interface SkillParam {
