@@ -32,6 +32,7 @@ from services.agent_runtime.models import (
     CapabilityContribution,
     PromptBundle,
     RuntimeWarningInfo,
+    SandboxExecutionSpec,
     ToolSource,
     ToolSpec,
     OperatorSpec,
@@ -306,6 +307,48 @@ async def test_assemble_agent_run_plan_returns_frozen_plan_not_assembly_state():
     assert plan.model_config_list == [{"cite_name": "main_model"}]
     with pytest.raises(Exception, match="frozen"):
         plan.request_id = "other"
+
+
+@pytest.mark.asyncio
+async def test_assemble_agent_run_plan_carries_sandbox_spec_and_requirement():
+    sandbox_spec = SandboxExecutionSpec(
+        enabled=True,
+        required=True,
+        execution_timeout_seconds=120,
+        workspace_policy={"root": "/workspace/nexent", "concurrent": True},
+    )
+    provider = Provider(
+        name="model",
+        contribution=CapabilityContribution(
+            root_agent=_root_agent(),
+            sandbox_execution=sandbox_spec,
+        ),
+    )
+
+    plan = await assemble_agent_run_plan(_request(version_no=1), [provider])
+
+    assert plan.sandbox_execution == sandbox_spec
+    assert "sandboxed_execution" in plan.capability_requirements.required
+
+
+def test_merge_capability_contribution_rejects_sandbox_spec_conflicts():
+    state = AssemblyState(
+        sandbox_execution=SandboxExecutionSpec(enabled=True, required=True)
+    )
+
+    with pytest.raises(
+        CapabilityContributionConflictError,
+        match="sandbox execution",
+    ):
+        merge_capability_contribution(
+            state,
+            CapabilityContribution(
+                sandbox_execution=SandboxExecutionSpec(
+                    enabled=True,
+                    required=False,
+                )
+            ),
+        )
 
 
 @pytest.mark.asyncio

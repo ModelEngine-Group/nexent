@@ -276,6 +276,15 @@ def merge_capability_contribution(
         state.agent_record.update(contribution.agent_record)
     if contribution.version_no is not None:
         state.version_no = contribution.version_no
+    if contribution.sandbox_execution is not None:
+        if (
+            state.sandbox_execution is not None
+            and state.sandbox_execution != contribution.sandbox_execution
+        ):
+            raise CapabilityContributionConflictError(
+                "Multiple sandbox execution specifications were contributed."
+            )
+        state.sandbox_execution = contribution.sandbox_execution
     state.model_configs.extend(contribution.model_configs)
 
     if contribution.root_agent is not None:
@@ -334,6 +343,7 @@ def freeze_agent_run_plan(
         root_agent,
         list(state.mcp_connections),
         dict(state.runtime_resources),
+        state.sandbox_execution,
     )
     plan = AgentRunPlan(
         request_id=request.request_id,
@@ -346,6 +356,7 @@ def freeze_agent_run_plan(
         runtime_resources=dict(state.runtime_resources),
         operators=list(state.operators),
         monitoring_metadata=monitoring_metadata,
+        sandbox_execution=state.sandbox_execution,
         capability_requirements=capability_requirements,
         run_control=run_control
         or RunControl(

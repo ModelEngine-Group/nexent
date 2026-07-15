@@ -277,6 +277,24 @@ AGENT_RUNTIME_PROVIDER = normalize_agent_runtime_provider(
 )
 
 
+# OpenJiuwen fixed AIO sandbox configuration. The SDK never reads these values
+# directly; backend runtime services pass validated settings explicitly.
+OPENJIUWEN_SANDBOX_ENABLED = os.getenv(
+    "OPENJIUWEN_SANDBOX_ENABLED", "false"
+).lower() in ("true", "1", "yes", "on")
+OPENJIUWEN_SANDBOX_BASE_URL = os.getenv("OPENJIUWEN_SANDBOX_BASE_URL", "").rstrip("/")
+OPENJIUWEN_SANDBOX_PROVIDER = os.getenv("OPENJIUWEN_SANDBOX_PROVIDER", "aio").strip().lower()
+OPENJIUWEN_SANDBOX_EXECUTION_TIMEOUT_SECONDS = int(
+    os.getenv("OPENJIUWEN_SANDBOX_EXECUTION_TIMEOUT_SECONDS", "300")
+)
+OPENJIUWEN_SANDBOX_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("OPENJIUWEN_SANDBOX_REQUEST_TIMEOUT_SECONDS", "30")
+)
+OPENJIUWEN_SANDBOX_WORKSPACE_ROOT = os.getenv(
+    "OPENJIUWEN_SANDBOX_WORKSPACE_ROOT", "/workspace/nexent"
+).rstrip("/")
+
+
 # Celery Configuration
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(
     os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))

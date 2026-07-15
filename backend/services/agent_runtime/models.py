@@ -17,6 +17,7 @@ CapabilityName = Literal[
     "managed_agents",
     "external_a2a_agents",
     "code_execution",
+    "sandboxed_execution",
     "tool_artifacts",
     "context_compression",
     "tool_call_events",
@@ -38,6 +39,7 @@ class RuntimeCapabilities(BaseModel):
     managed_agents: bool = False
     external_a2a_agents: bool = False
     code_execution: bool = False
+    sandboxed_execution: bool = False
     tool_artifacts: bool = False
     context_compression: bool = False
     tool_call_events: bool = False
@@ -252,6 +254,17 @@ class RuntimeWarningInfo(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SandboxExecutionSpec(BaseModel):
+    """Deployment-derived sandbox requirements carried by a run plan."""
+
+    enabled: bool = False
+    required: bool = False
+    purpose: Literal["skill_script"] = "skill_script"
+    profile: str = "fixed_aio"
+    execution_timeout_seconds: int = Field(default=300, gt=0)
+    workspace_policy: dict[str, Any] = Field(default_factory=dict)
+
+
 class CapabilityContribution(BaseModel):
     """Declarative capability output produced by an assembly provider."""
 
@@ -269,6 +282,7 @@ class CapabilityContribution(BaseModel):
     operators: list[OperatorSpec] = Field(default_factory=list)
     monitoring_metadata: dict[str, Any] = Field(default_factory=dict)
     warnings: list[RuntimeWarningInfo] = Field(default_factory=list)
+    sandbox_execution: SandboxExecutionSpec | None = None
 
 
 class AgentRunRequestContext(BaseModel):
@@ -348,6 +362,7 @@ class AssemblyState(BaseModel):
     operators: list[OperatorSpec] = Field(default_factory=list)
     monitoring_metadata: dict[str, Any] = Field(default_factory=dict)
     warnings: list[RuntimeWarningInfo] = Field(default_factory=list)
+    sandbox_execution: SandboxExecutionSpec | None = None
 
 
 class AgentRunPlan(BaseModel):
@@ -365,6 +380,7 @@ class AgentRunPlan(BaseModel):
     runtime_resources: dict[str, Any] = Field(default_factory=dict)
     operators: list[OperatorSpec] = Field(default_factory=list)
     monitoring_metadata: dict[str, Any] = Field(default_factory=dict)
+    sandbox_execution: SandboxExecutionSpec | None = None
     capability_requirements: RuntimeCapabilityRequirements = Field(
         default_factory=RuntimeCapabilityRequirements
     )
@@ -375,6 +391,7 @@ def derive_runtime_capability_requirements(
     root_agent: AgentSpec,
     mcp_connections: list[MCPConnectionConfig] | None = None,
     runtime_resources: dict[str, Any] | None = None,
+    sandbox_execution: SandboxExecutionSpec | None = None,
 ) -> RuntimeCapabilityRequirements:
     """Derive runtime requirements from the concrete assembled run plan."""
     resources = runtime_resources or {}
@@ -404,6 +421,11 @@ def derive_runtime_capability_requirements(
         required.add("verification")
     if bool(resources.get("runtime.resumable_stream_required")):
         required.add("resumable_stream")
+    if sandbox_execution is not None and sandbox_execution.enabled:
+        if sandbox_execution.required:
+            required.add("sandboxed_execution")
+        else:
+            optional.add("sandboxed_execution")
     if bool(resources.get("runtime.tool_artifacts_enabled")) or any(
         tool.source == ToolSource.SKILL
         or (

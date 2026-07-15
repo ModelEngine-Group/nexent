@@ -231,6 +231,20 @@ class BuiltinSkillToolFactory:
             raise ToolCreationError(
                 f"Builtin skill tool {class_name} requires local_skills_dir."
             )
+        if class_name == "RunSkillScriptTool":
+            script_executor = context.resources.get("skill.script_executor")
+            sandbox_spec = context.resources.get("sandbox.execution_spec")
+            sandbox_required = bool(
+                sandbox_spec is not None
+                and getattr(sandbox_spec, "enabled", False)
+                and getattr(sandbox_spec, "required", False)
+            )
+            if sandbox_required and script_executor is None:
+                raise ToolCreationError(
+                    "OpenJiuwen sandbox-required RunSkillScriptTool has no executor."
+                )
+            if script_executor is not None:
+                skill_metadata["script_executor"] = script_executor
         try:
             tool_obj = tool_class(**skill_metadata)
         except Exception as exc:
@@ -394,7 +408,7 @@ class ToolRuntimeEventWrapper:
                     agent_name=self._context.agent_name,
                     tool_name=self._tool.name,
                     error=str(exc),
-                    metadata={"tool_status": "error"},
+                    metadata=_tool_error_metadata(exc),
                 ),
             )
             raise
@@ -419,7 +433,7 @@ class ToolRuntimeEventWrapper:
                 agent_name=self._context.agent_name,
                 tool_name=self._tool.name,
                 error=str(exc),
-                metadata={"tool_status": "error"},
+                metadata=_tool_error_metadata(exc),
             ),
         )
 
@@ -540,6 +554,15 @@ def _tool_call_target(tool_obj: Any, method_name: str | None) -> Callable[..., A
     raise ToolCreationError(
         f"Tool '{getattr(tool_obj, 'name', 'unknown')}' is not callable."
     )
+
+
+def _tool_error_metadata(exc: Exception) -> dict[str, str]:
+    """Return standard tool failure metadata with an optional safe sandbox stage."""
+    metadata = {"tool_status": "error"}
+    sandbox_stage = getattr(exc, "stage", None)
+    if isinstance(sandbox_stage, str) and sandbox_stage:
+        metadata["sandbox_stage"] = sandbox_stage
+    return metadata
 
 
 def _emit_tool_runtime_event(

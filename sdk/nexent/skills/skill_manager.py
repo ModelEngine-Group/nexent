@@ -1,19 +1,21 @@
 """Skill manager for loading and managing skills from local storage."""
 
 import io
-import json
 import logging
 import os
-import shlex
 import shutil
-import subprocess
-import sys
 import tempfile
 import zipfile
 from typing import Any, Dict, List, Optional, Union
 
 from .constants import SKILL_FILE_NAME
+from .script_executor import (
+    LocalSkillScriptExecutor,
+    SkillScriptExecutionRequest,
+    SkillScriptExecutor,
+)
 from .skill_loader import SkillLoader
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class SkillManager:
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
+        script_executor: SkillScriptExecutor | None = None,
     ):
         """Initialize SkillManager with local directory.
 
@@ -53,6 +56,7 @@ class SkillManager:
             tenant_id: Tenant ID for directory isolation. When provided, skills
                 are stored under base_skills_dir / tenant_id /
             version_no: Version number for filtering skills (default 0 = draft)
+            script_executor: Execution backend used after script validation.
         """
         self.base_skills_dir = base_skills_dir
         if tenant_id and base_skills_dir:
@@ -62,6 +66,7 @@ class SkillManager:
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        self.script_executor = script_executor or LocalSkillScriptExecutor()
 
     def list_skills(self) -> List[Dict[str, str]]:
         """List all available skills from local storage.
@@ -296,7 +301,6 @@ class SkillManager:
 
         skill_md_path: Optional[str] = None
         detected_skill_name: Optional[str] = None
-        skill_files: List[tuple] = []
 
         for file_path in file_list:
             if file_path.endswith("/"):
@@ -641,10 +645,10 @@ class SkillManager:
             name = escape_xml(skill.get("name", ""))
             description = escape_xml(skill.get("description", ""))
 
-            lines.append(f'  <skill>')
+            lines.append('  <skill>')
             lines.append(f'    <name>{name}</name>')
             lines.append(f'    <description>{description}</description>')
-            lines.append(f'  </skill>')
+            lines.append('  </skill>')
 
         lines.append("</skills>")
 
@@ -846,12 +850,18 @@ class SkillManager:
             else:
                 raise _fail("script file does not exist")
 
-        if normalised_script_path.endswith(".py"):
-            return self._run_python_script(full_path, params)
-        elif normalised_script_path.endswith(".sh"):
-            return self._run_shell_script(full_path, params)
-        else:
+        if not normalised_script_path.endswith((".py", ".sh")):
             raise ValueError(f"Unsupported script type: {normalised_script_path}")
+
+        return self.script_executor.execute(
+            SkillScriptExecutionRequest(
+                skill_name=skill_name,
+                skill_root=skill_root_abs,
+                script_path=os.path.abspath(full_path),
+                params=params,
+                timeout_seconds=300,
+            )
+        )
 
     def _list_available_scripts(self, local_skill_dir: str) -> List[str]:
         """Return script paths (relative to the skill root) that exist on disk.
@@ -882,67 +892,3 @@ class SkillManager:
             seen.add(rel)
             unique.append(rel)
         return sorted(unique)
-
-    def _run_python_script(self, script_path: str, params: Optional[str]) -> str:
-        """Run a Python script with parameters.
-
-        Args:
-            script_path: Full path to the Python script
-            params: Raw command-line argument string to pass to the script
-
-        Returns:
-            Script output as string
-        """
-        cmd_parts = shlex.split(params) if params else []
-
-        # Use sys.executable to ensure the script runs in the same Python environment
-        # as the current process, so all installed packages (e.g., python-docx) are available
-        python_executable = sys.executable
-
-        try:
-            result = subprocess.run(
-                [python_executable, script_path] + cmd_parts,
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env=os.environ.copy()
-            )
-            if result.returncode != 0:
-                logger.error(f"Script error: {result.stderr}")
-                return json.dumps({"error": result.stderr, "output": result.stdout})
-            return result.stdout
-        except subprocess.TimeoutExpired:
-            raise TimeoutError(f"Script execution timed out: {script_path}")
-        except Exception as e:
-            logger.error(f"Failed to run script: {e}")
-            raise
-
-    def _run_shell_script(self, script_path: str, params: Optional[str]) -> str:
-        """Run a shell script with parameters.
-
-        Args:
-            script_path: Full path to the shell script
-            params: Raw command-line argument string to pass to the script
-
-        Returns:
-            Script output as string
-        """
-        cmd_parts = shlex.split(params) if params else []
-
-        try:
-            result = subprocess.run(
-                ["bash", script_path] + cmd_parts,
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env=os.environ.copy()
-            )
-            if result.returncode != 0:
-                logger.error(f"Script error: {result.stderr}")
-                return json.dumps({"error": result.stderr, "output": result.stdout})
-            return result.stdout
-        except subprocess.TimeoutExpired:
-            raise TimeoutError(f"Script execution timed out: {script_path}")
-        except Exception as e:
-            logger.error(f"Failed to run script: {e}")
-            raise

@@ -12,7 +12,12 @@ if backend_path not in sys.path:
 
 from consts import const
 from services.agent_runtime.events import RuntimeEventSink, RuntimeEventType
-from services.agent_runtime.models import ToolRuntimeContext, ToolSource, ToolSpec
+from services.agent_runtime.models import (
+    SandboxExecutionSpec,
+    ToolRuntimeContext,
+    ToolSource,
+    ToolSpec,
+)
 from services.agent_runtime.tool_factory import (
     BuiltinSkillToolFactory,
     DuplicateToolFactoryError,
@@ -391,6 +396,50 @@ def test_builtin_skill_tool_factory_uses_legacy_params_and_request_scope():
         )
 
 
+def test_builtin_run_skill_factory_injects_required_sandbox_executor():
+    class SkillTool:
+        def __init__(self, **kwargs: Any):
+            self.metadata = kwargs
+
+        def execute(self, skill_name: str, script_path: str, params: str | None = None):
+            return self.metadata, skill_name, script_path, params
+
+    executor = object()
+    factory = BuiltinSkillToolFactory(
+        tool_classes={"RunSkillScriptTool": SkillTool},
+    )
+    tool = ToolSpec(
+        name="run_skill_script",
+        class_name="RunSkillScriptTool",
+        source=ToolSource.BUILTIN,
+        params={"local_skills_dir": "/opt/nexent/skills"},
+    )
+    sandbox_spec = SandboxExecutionSpec(enabled=True, required=True)
+
+    native_tool = factory.create(
+        tool,
+        _context(
+            runtime_provider=const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
+            resources={
+                "sandbox.execution_spec": sandbox_spec,
+                "skill.script_executor": executor,
+            },
+        ),
+    )
+
+    metadata, *_ = native_tool("demo", "scripts/run.py")
+    assert metadata["script_executor"] is executor
+
+    with pytest.raises(ToolCreationError, match="has no executor"):
+        factory.create(
+            tool,
+            _context(
+                runtime_provider=const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
+                resources={"sandbox.execution_spec": sandbox_spec},
+            ),
+        )
+
+
 def test_builtin_read_skill_md_factory_expands_additional_files():
     calls: list[tuple[str, tuple[str, ...]]] = []
 
@@ -589,8 +638,11 @@ async def test_tool_runtime_wrapper_awaits_async_result_before_finished_events()
 
 @pytest.mark.asyncio
 async def test_tool_runtime_wrapper_emits_failed_without_finished_for_async_error():
+    class SandboxFailure(ValueError):
+        stage = "resource"
+
     async def failing_tool() -> None:
-        raise ValueError("tool failed")
+        raise SandboxFailure("tool failed")
 
     sink = RuntimeEventSink("req-failing-tool")
     registry = ToolFactoryRegistry()
@@ -605,3 +657,4 @@ async def test_tool_runtime_wrapper_emits_failed_without_finished_for_async_erro
 
     statuses = [event.metadata.get("tool_status") for event in sink.events]
     assert statuses == ["parsed", "started", "error"]
+    assert sink.events[-1].metadata["sandbox_stage"] == "resource"

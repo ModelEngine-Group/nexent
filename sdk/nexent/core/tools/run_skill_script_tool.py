@@ -1,7 +1,13 @@
 """Skill script execution tool."""
+import inspect
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
+
 from smolagents import tool
+
+
+if TYPE_CHECKING:
+    from nexent.skills.script_executor import SkillScriptExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +21,7 @@ class RunSkillScriptTool:
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
+        script_executor: "SkillScriptExecutor | None" = None,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -23,12 +30,14 @@ class RunSkillScriptTool:
             agent_id: Agent ID for filtering available skills in error messages.
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
+            script_executor: Request-scoped script execution backend.
         """
         self.skill_manager = None
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        self.script_executor = script_executor
 
     def _get_skill_manager(self):
         """Lazy load skill manager."""
@@ -39,6 +48,7 @@ class RunSkillScriptTool:
                 agent_id=self.agent_id,
                 tenant_id=self.tenant_id,
                 version_no=self.version_no,
+                script_executor=self.script_executor,
             )
         return self.skill_manager
 
@@ -47,7 +57,7 @@ class RunSkillScriptTool:
         skill_name: str,
         script_path: str,
         params: Optional[str] = None,
-    ) -> str:
+    ) -> Any:
         """Execute a skill script with given parameters.
 
         ``script_path`` is always resolved relative to the skill's root
@@ -82,6 +92,12 @@ class RunSkillScriptTool:
                 tenant_id=self.tenant_id,
                 version_no=self.version_no,
             )
+            if inspect.isawaitable(result):
+
+                async def stringify_result() -> str:
+                    return str(await result)
+
+                return stringify_result()
             return str(result)
         except SkillNotFoundError as e:
             logger.error(f"Skill not found: {skill_name} - {e.message}")

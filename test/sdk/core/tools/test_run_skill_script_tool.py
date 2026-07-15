@@ -41,11 +41,19 @@ mock_skill_manager_module.SkillNotFoundError = MockSkillNotFoundError
 mock_skill_manager_module.SkillScriptNotFoundError = MockSkillScriptNotFoundError
 
 class MockSkillManager:
-    def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
+    def __init__(
+        self,
+        local_skills_dir=None,
+        agent_id=None,
+        tenant_id=None,
+        version_no=0,
+        script_executor=None,
+    ):
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        self.script_executor = script_executor
 
     def load_skill(self, name):
         return None
@@ -161,6 +169,13 @@ class TestRunSkillScriptToolInit:
         assert tool.tenant_id is None
         assert tool.version_no == 0
         assert tool.skill_manager is None
+
+    def test_init_accepts_request_scoped_executor(self):
+        executor = object()
+
+        tool = RunSkillScriptTool(script_executor=executor)
+
+        assert tool.script_executor is executor
 
 
 class TestGetSkillManager:
@@ -300,6 +315,20 @@ class TestExecute:
         # Should pass None for params (not converted to {})
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] is None
+
+    @pytest.mark.asyncio
+    async def test_execute_preserves_async_executor_result(self, run_skill_script_tool):
+        mock_manager = MagicMock()
+
+        async def async_result(*args, **kwargs):
+            return "sandbox output"
+
+        mock_manager.run_skill_script.side_effect = async_result
+        run_skill_script_tool.skill_manager = mock_manager
+
+        result = run_skill_script_tool.execute("test-skill", "script.py")
+
+        assert await result == "sandbox output"
 
 
 class TestGetRunSkillScriptTool:

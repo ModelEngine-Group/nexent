@@ -34,6 +34,7 @@ from services.agent_runtime.operators import (
     OperatorRegistry,
     OperatorResult,
     OperatorRunner,
+    SandboxStagingCleanupOperator,
     SkillFileUploadOperator,
     UnknownOperatorError,
     apply_operator_context_to_plan,
@@ -668,6 +669,7 @@ async def test_skill_file_upload_operator_rejects_payload_outside_allowed_roots(
             "absolute_path": str(generated_file),
         }
     ]
+    assert context.runtime_events[0].type == RuntimeEventType.ERROR
 
 
 @pytest.mark.asyncio
@@ -754,7 +756,99 @@ async def test_skill_file_upload_operator_soft_fails_upload_errors(tmp_path):
             "error": "object storage unavailable",
         }
     ]
-    assert context.runtime_events[0].type == RuntimeEventType.ERROR
+
+
+@pytest.mark.asyncio
+async def test_sandbox_staging_cleanup_removes_only_registered_request_dirs(tmp_path):
+    first = tmp_path / "request-1"
+    second = tmp_path / "request-2"
+    untouched = tmp_path / "request-other"
+    for path in (first, second, untouched):
+        path.mkdir()
+        (path / "artifact.txt").write_text("data", encoding="utf-8")
+    paths = [str(first), str(second)]
+    context = OperatorContext(
+        stage="after_run",
+        runtime_resources={"sandbox.host_staging_dirs": paths},
+    )
+    registry = OperatorRegistry(
+        {
+            "sandbox_staging_cleanup": lambda spec: SandboxStagingCleanupOperator(
+                spec
+            )
+        }
+    )
+
+    result = await OperatorRunner(registry).run_stage(
+        "after_run",
+        context,
+        [
+            OperatorSpec(
+                name="sandbox_staging_cleanup",
+                stages={"after_run"},
+                priority=450,
+                required=False,
+            )
+        ],
+    )
+
+    assert result.status == "ok"
+    assert not first.exists()
+    assert not second.exists()
+    assert untouched.exists()
+    assert paths == []
+
+
+@pytest.mark.asyncio
+async def test_sandbox_staging_cleanup_reports_safe_diagnostics_and_failures(
+    tmp_path,
+    mocker,
+):
+    staging = tmp_path / "request-1"
+    staging.mkdir()
+    paths = [str(staging)]
+    diagnostics = [
+        {"sandbox_stage": "cleanup", "status": "warning", "path": str(staging)}
+    ]
+    context = OperatorContext(
+        stage="on_error",
+        runtime_resources={
+            "sandbox.host_staging_dirs": paths,
+            "sandbox.diagnostics": diagnostics,
+        },
+    )
+    registry = OperatorRegistry(
+        {
+            "sandbox_staging_cleanup": lambda spec: SandboxStagingCleanupOperator(
+                spec
+            )
+        }
+    )
+    mocker.patch(
+        "services.agent_runtime.operators.shutil.rmtree",
+        side_effect=OSError("busy"),
+    )
+
+    result = await OperatorRunner(registry).run_stage(
+        "on_error",
+        context,
+        [
+            OperatorSpec(
+                name="sandbox_staging_cleanup",
+                stages={"on_error"},
+                priority=450,
+                required=False,
+            )
+        ],
+    )
+
+    assert result.status == "soft_failure"
+    assert context.monitoring_metadata["sandbox.staging_cleanup_failures"] == 1
+    assert context.monitoring_metadata["sandbox.diagnostics"] == [
+        {"sandbox_stage": "cleanup", "status": "warning"}
+    ]
+    assert paths == []
+    assert diagnostics == []
 
 
 @pytest.mark.asyncio

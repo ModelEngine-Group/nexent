@@ -9,17 +9,65 @@ for path in (project_root, backend_path):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from backend.services.agent_runtime.models import (
+from services.agent_runtime.models import (
     AgentRunRequestContext,
     ContextMode,
     ToolSource,
 )
-from backend.services.agent_runtime.providers import KnowledgeProvider
-from backend.services.agent_runtime.run_preparation import (
+from services.agent_runtime.providers import KnowledgeProvider
+from services.agent_runtime.run_preparation import (
     agent_run_plan_from_legacy_info,
     build_production_capability_providers,
     enhance_legacy_knowledge_tools,
 )
+
+
+def _skill_run_info():
+    tool = SimpleNamespace(
+        class_name="RunSkillScriptTool",
+        name="run_skill_script",
+        description="Run skill",
+        inputs=(
+            '{"type":"object","properties":{'
+            '"skill_name":{"type":"string"},'
+            '"script_path":{"type":"string"},'
+            '"params":{"type":["string","null"],"default":null}},'
+            '"required":["skill_name","script_path"]}'
+        ),
+        output_type="string",
+        params={"local_skills_dir": "/skills"},
+        source="builtin",
+        usage="builtin",
+        metadata={"agent_id": 1, "tenant_id": "tenant-1", "version_no": 2},
+    )
+    agent_config = SimpleNamespace(
+        name="root",
+        description="Root agent",
+        model_name="main_model",
+        max_steps=5,
+        prompt_templates={"system_prompt": "legacy"},
+        prompt_fragments={"duty": "Answer", "runtime_instructions": "Use tools"},
+        tools=[tool],
+        managed_agents=[],
+        external_a2a_agents=[],
+        context_manager_config=SimpleNamespace(enabled=False),
+        context_components=[],
+        verification_config={"enabled": False},
+        requested_output_tokens=256,
+        provide_run_summary=False,
+        instructions=None,
+        capacity_snapshot=None,
+        safe_input_budget_snapshot=None,
+    )
+    return SimpleNamespace(
+        query="hello",
+        history=[],
+        model_config_list=[],
+        agent_config=agent_config,
+        mcp_host=[],
+        observer=object(),
+        stop_event=__import__("threading").Event(),
+    )
 
 
 def _request() -> AgentRunRequestContext:
@@ -192,3 +240,79 @@ def test_production_legacy_bridge_builds_non_empty_openjiuwen_plan():
     smolagents_plan = agent_run_plan_from_legacy_info(run_info, _request())
     assert smolagents_plan.root_agent.context_policy.mode == ContextMode.MANAGED
     assert "context_compression" in smolagents_plan.capability_requirements.required
+
+
+def test_openjiuwen_skill_plan_derives_required_sandbox_from_deployment(monkeypatch):
+    from consts import const
+
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_ENABLED", True)
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_BASE_URL",
+        "http://sandbox.internal:8080",
+    )
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_PROVIDER", "aio")
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_EXECUTION_TIMEOUT_SECONDS",
+        90,
+    )
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_REQUEST_TIMEOUT_SECONDS", 10)
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_WORKSPACE_ROOT",
+        "/workspace/nexent",
+    )
+    request = _request().model_copy(update={"runtime_provider": "openjiuwen"})
+
+    plan = agent_run_plan_from_legacy_info(_skill_run_info(), request)
+
+    assert plan.sandbox_execution is not None
+    assert plan.sandbox_execution.required is True
+    assert plan.sandbox_execution.execution_timeout_seconds == 90
+    assert plan.sandbox_execution.workspace_policy["concurrent"] is True
+    assert "sandboxed_execution" in plan.capability_requirements.required
+    assert plan.monitoring_metadata["sandbox.enabled"] is True
+    assert plan.monitoring_metadata["sandbox.endpoint_host_hash"]
+    assert "sandbox.internal" not in str(plan.monitoring_metadata)
+    assert [operator.name for operator in plan.operators] == [
+        "skill_file_upload",
+        "sandbox_staging_cleanup",
+    ]
+
+
+def test_smolagents_never_derives_openjiuwen_sandbox(monkeypatch):
+    from consts import const
+
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_ENABLED", True)
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_BASE_URL",
+        "http://sandbox.internal:8080",
+    )
+
+    plan = agent_run_plan_from_legacy_info(_skill_run_info(), _request())
+
+    assert plan.sandbox_execution is None
+    assert "sandboxed_execution" not in plan.capability_requirements.required
+
+
+def test_openjiuwen_read_only_skill_tools_do_not_require_sandbox(monkeypatch):
+    from consts import const
+
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_ENABLED", True)
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_BASE_URL",
+        "http://sandbox.internal:8080",
+    )
+    run_info = _skill_run_info()
+    run_info.agent_config.tools[0].class_name = "ReadSkillMdTool"
+    run_info.agent_config.tools[0].name = "read_skill_md"
+    request = _request().model_copy(update={"runtime_provider": "openjiuwen"})
+
+    plan = agent_run_plan_from_legacy_info(run_info, request)
+
+    assert plan.sandbox_execution is None
+    assert "sandboxed_execution" not in plan.capability_requirements.required
+    assert [operator.name for operator in plan.operators] == ["skill_file_upload"]

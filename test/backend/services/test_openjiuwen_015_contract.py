@@ -1,9 +1,11 @@
 """Contract tests against the installed OpenJiuwen 0.1.15 package."""
 
 import asyncio
+import importlib
 import inspect
 import os
 import sys
+import uuid
 
 import pytest
 
@@ -19,6 +21,7 @@ from adapters.openjiuwen_compat import (  # noqa: E402
     NEXENT_OPENAI_CLIENT_PROVIDER,
     flatten_message_content,
     load_openjiuwen_public_api,
+    load_openjiuwen_sandbox_api,
     validate_openjiuwen_version,
 )
 from services.agent_runtime.models import (  # noqa: E402
@@ -35,6 +38,16 @@ from services.agent_runtime.events import RuntimeEventSink, RuntimeEventType  # 
 from skill_tool_schema import (  # noqa: E402
     get_builtin_skill_tool_input_schema,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_real_sqlalchemy_after_backend_test_module_stubs():
+    sqlalchemy_module = sys.modules.get("sqlalchemy")
+    if sqlalchemy_module is not None and not hasattr(sqlalchemy_module, "__path__"):
+        for module_name in list(sys.modules):
+            if module_name == "sqlalchemy" or module_name.startswith("sqlalchemy."):
+                sys.modules.pop(module_name, None)
+    importlib.import_module("sqlalchemy.ext.asyncio")
 
 
 def _real_plan() -> AgentRunPlan:
@@ -99,6 +112,57 @@ def test_openjiuwen_version_and_real_react_config_contract():
     prompt = bundle.prompt_template[0]["content"]
     assert "Answer the user." in prompt
     assert "final_answer()" not in prompt
+
+
+def test_openjiuwen_real_sandbox_import_and_provider_contract():
+    api = load_openjiuwen_sandbox_api()
+
+    assert api.OperationMode.SANDBOX.value == "sandbox"
+    assert api.ContainerScope.SYSTEM.value == "system"
+    assert api.SandboxRegistry.get_provider_cls("aio", "fs") is not None
+    assert api.SandboxRegistry.get_provider_cls("aio", "shell") is not None
+    assert api.SandboxRegistry.get_provider_cls("aio", "code") is not None
+    assert callable(api.Runner.resource_mgr.add_sys_operation)
+    assert callable(api.Runner.resource_mgr.remove_sys_operation)
+
+
+def test_openjiuwen_real_sys_operation_add_remove_contract_without_endpoint_io():
+    api = load_openjiuwen_sandbox_api()
+    sys_operation_id = f"nexent_contract_{uuid.uuid4().hex}"
+    card = api.SysOperationCard(
+        id=sys_operation_id,
+        mode=api.OperationMode.SANDBOX,
+        gateway_config=api.SandboxGatewayConfig(
+            isolation=api.SandboxIsolationConfig(
+                container_scope=api.ContainerScope.SYSTEM,
+                prefix="nexent-contract",
+            ),
+            launcher_config=api.PreDeployLauncherConfig(
+                base_url="http://127.0.0.1:9",
+                sandbox_type="aio",
+                on_stop="keep",
+            ),
+            timeout_seconds=1,
+        ),
+    )
+
+    try:
+        add_result = api.Runner.resource_mgr.add_sys_operation(card)
+
+        assert add_result.is_ok()
+        assert api.Runner.resource_mgr.get_sys_operation(sys_operation_id) is not None
+        generated_cards = api.Runner.resource_mgr.get_sys_op_tool_cards(
+            sys_operation_id
+        )
+        assert generated_cards
+        assert any(card.name == "execute_cmd" for card in generated_cards)
+    finally:
+        remove_result = api.Runner.resource_mgr.remove_sys_operation(
+            sys_operation_id=sys_operation_id
+        )
+
+    assert remove_result.is_ok()
+    assert api.Runner.resource_mgr.get_sys_operation(sys_operation_id) is None
 
 
 def test_nexent_openai_client_accepts_system_ca_and_flattens_modelengine_content():

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from consts.const import (
     AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
@@ -19,6 +24,7 @@ from .assembly import (
     merge_capability_contribution,
     sort_capability_providers,
 )
+from .config import get_openjiuwen_sandbox_settings
 from .models import (
     AgentRunPlan,
     AgentRunRequestContext,
@@ -32,6 +38,7 @@ from .models import (
     PromptBundle,
     RunControl,
     RuntimeWarningInfo,
+    SandboxExecutionSpec,
     ToolSource,
 )
 from .providers import KnowledgeProvider
@@ -292,8 +299,58 @@ def build_production_capability_providers(
         )
         for tool in root_agent.tools
     )
+    run_skill_script_enabled = any(
+        tool.source in {ToolSource.SKILL, ToolSource.BUILTIN}
+        and (tool.class_name or tool.name) == "RunSkillScriptTool"
+        for tool in root_agent.tools
+    )
     if skill_tools_enabled:
         runtime_resources["runtime.tool_artifacts_enabled"] = True
+
+    sandbox_execution = None
+    sandbox_monitoring = {"sandbox.enabled": False}
+    if (
+        request_context.runtime_provider == AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+        and run_skill_script_enabled
+    ):
+        sandbox_settings = get_openjiuwen_sandbox_settings()
+        sandbox_monitoring = {
+            "sandbox.enabled": sandbox_settings.enabled,
+            "sandbox.provider": sandbox_settings.provider,
+        }
+        if sandbox_settings.base_url:
+            sandbox_monitoring["sandbox.endpoint_host_hash"] = (
+                _endpoint_host_hash(sandbox_settings.base_url)
+            )
+        if sandbox_settings.enabled:
+            host_staging_root = os.path.join(
+                tempfile.gettempdir(), "nexent-sandbox"
+            )
+            runtime_resources.update(
+                {
+                    "sandbox.attachments": _local_attachment_mapping(
+                        request_context.minio_files
+                    ),
+                    "sandbox.host_staging_dirs": [],
+                    "sandbox.host_staging_root": host_staging_root,
+                    "skill.upload_allowed_roots": [host_staging_root],
+                }
+            )
+            sandbox_execution = SandboxExecutionSpec(
+                enabled=True,
+                required=True,
+                purpose="skill_script",
+                profile="fixed_aio",
+                execution_timeout_seconds=(
+                    sandbox_settings.execution_timeout_seconds
+                ),
+                workspace_policy={
+                    "root": sandbox_settings.workspace_root,
+                    "request_scoped": True,
+                    "shared_container": True,
+                    "concurrent": True,
+                },
+            )
 
     context_compatibility = dict(
         root_agent.runtime_hints.get("context_compatibility") or {}
@@ -318,16 +375,31 @@ def build_production_capability_providers(
             for config in (getattr(agent_run_info, "model_config_list", None) or [])
         ],
         root_agent=root_agent,
+        sandbox_execution=sandbox_execution,
         mcp_connections=mcp_connections,
         runtime_resources=runtime_resources,
-        operators=[
-            OperatorSpec(
-                name="skill_file_upload",
-                stages={"after_tool_call", "after_run"},
-                priority=400,
-                required=False,
+        operators=(
+            [
+                OperatorSpec(
+                    name="skill_file_upload",
+                    stages={"after_tool_call", "after_run"},
+                    priority=400,
+                    required=False,
+                )
+            ]
+            + (
+                [
+                    OperatorSpec(
+                        name="sandbox_staging_cleanup",
+                        stages={"after_tool_call", "after_run", "on_error"},
+                        priority=450,
+                        required=False,
+                    )
+                ]
+                if sandbox_execution is not None
+                else []
             )
-        ]
+        )
         if skill_tools_enabled
         else [],
         warnings=warnings,
@@ -335,6 +407,7 @@ def build_production_capability_providers(
             "language": request_context.language,
             "tenant_id": request_context.tenant_id,
             "assembly_path": "production_prepared_provider",
+            **sandbox_monitoring,
         },
     )
     return [PreparedAgentRunCapabilityProvider(contribution=contribution)]
@@ -350,6 +423,38 @@ def _visible_tool_count(plan: AgentRunPlan) -> int:
         for tool in plan.root_agent.tools
         if str(getattr(tool.visibility, "value", tool.visibility)) != "internal"
     )
+
+
+def _endpoint_host_hash(base_url: str) -> str:
+    """Return a stable non-sensitive endpoint identifier for monitoring."""
+    parsed = urlparse(base_url)
+    host = parsed.netloc or parsed.path
+    return hashlib.sha256(host.encode("utf-8")).hexdigest()[:12]
+
+
+def _local_attachment_mapping(
+    minio_files: list[dict[str, Any]] | None,
+) -> dict[str, str]:
+    """Return only explicitly supplied, existing local attachment paths."""
+    attachments: dict[str, str] = {}
+    for item in minio_files or []:
+        if not isinstance(item, dict):
+            continue
+        raw_path = next(
+            (
+                item.get(key)
+                for key in ("absolute_path", "local_path", "path")
+                if item.get(key)
+            ),
+            None,
+        )
+        if not raw_path:
+            continue
+        path = Path(str(raw_path)).expanduser()
+        if not path.is_absolute() or not path.is_file():
+            continue
+        attachments[str(path.resolve())] = str(item.get("name") or path.name)
+    return attachments
 
 
 def _agent_spec_from_legacy_config(

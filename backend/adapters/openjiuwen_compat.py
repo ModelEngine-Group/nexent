@@ -14,6 +14,7 @@ from packaging.version import Version
 
 OPENJIUWEN_MIN_VERSION = Version("0.1.15")
 OPENJIUWEN_MAX_VERSION = Version("0.1.16")
+AGENT_SANDBOX_MIN_VERSION = Version("0.0.26")
 NEXENT_OPENAI_CLIENT_PROVIDER = "NexentOpenAI"
 
 
@@ -45,6 +46,20 @@ class OpenJiuwenPublicAPI:
     SystemMessage: Any
     ToolMessage: Any
     NexentOpenAIModelClient: Any
+
+
+@dataclass(frozen=True)
+class OpenJiuwenSandboxAPI:
+    """Public OpenJiuwen sandbox objects loaded only when sandbox is enabled."""
+
+    SysOperationCard: Any
+    OperationMode: Any
+    SandboxGatewayConfig: Any
+    SandboxIsolationConfig: Any
+    PreDeployLauncherConfig: Any
+    ContainerScope: Any
+    SandboxRegistry: Any
+    Runner: Any
 
 
 @lru_cache(maxsize=1)
@@ -166,6 +181,76 @@ def validate_openjiuwen_version() -> Version:
             f"OpenJiuwen version must satisfy >=0.1.15,<0.1.16; found {installed}."
         )
     return installed
+
+
+@lru_cache(maxsize=1)
+def load_openjiuwen_sandbox_api() -> OpenJiuwenSandboxAPI:
+    """Validate and load the fixed AIO sandbox contract."""
+    validate_openjiuwen_version()
+    try:
+        agent_sandbox_version = Version(metadata.version("agent-sandbox"))
+    except metadata.PackageNotFoundError as exc:
+        raise OpenJiuwenCompatibilityError(
+            "OpenJiuwen sandbox requires agent-sandbox>=0.0.26."
+        ) from exc
+    if agent_sandbox_version < AGENT_SANDBOX_MIN_VERSION:
+        raise OpenJiuwenCompatibilityError(
+            "OpenJiuwen sandbox requires agent-sandbox>=0.0.26; "
+            f"found {agent_sandbox_version}."
+        )
+
+    try:
+        import openjiuwen.extensions.sys_operation.sandbox  # noqa: F401
+        from openjiuwen.core.runner import Runner
+        from openjiuwen.core.sys_operation import SysOperationCard
+        from openjiuwen.core.sys_operation.base import OperationMode
+        from openjiuwen.core.sys_operation.config import (
+            ContainerScope,
+            PreDeployLauncherConfig,
+            SandboxGatewayConfig,
+            SandboxIsolationConfig,
+        )
+        from openjiuwen.core.sys_operation.sandbox.sandbox_registry import (
+            SandboxRegistry,
+        )
+    except ImportError as exc:
+        raise OpenJiuwenCompatibilityError(
+            "OpenJiuwen 0.1.15 public sandbox APIs are unavailable."
+        ) from exc
+
+    missing: list[str] = []
+    resource_mgr = getattr(Runner, "resource_mgr", None)
+    for method_name in {
+        "add_sys_operation",
+        "get_sys_operation",
+        "get_sys_op_tool_cards",
+        "remove_sys_operation",
+    }:
+        if not callable(getattr(resource_mgr, method_name, None)):
+            missing.append(f"Runner.resource_mgr.{method_name}")
+    for operation_type in ("fs", "shell", "code"):
+        if SandboxRegistry.get_provider_cls("aio", operation_type) is None:
+            missing.append(f"SandboxRegistry.aio.{operation_type}")
+    if missing:
+        raise OpenJiuwenCompatibilityError(
+            "OpenJiuwen 0.1.15 sandbox contract is incomplete: "
+            + ", ".join(sorted(missing))
+        )
+
+    logger.info(
+        "OpenJiuwen sandbox API validated, agent_sandbox_version=%s, provider=aio",
+        agent_sandbox_version,
+    )
+    return OpenJiuwenSandboxAPI(
+        SysOperationCard=SysOperationCard,
+        OperationMode=OperationMode,
+        SandboxGatewayConfig=SandboxGatewayConfig,
+        SandboxIsolationConfig=SandboxIsolationConfig,
+        PreDeployLauncherConfig=PreDeployLauncherConfig,
+        ContainerScope=ContainerScope,
+        SandboxRegistry=SandboxRegistry,
+        Runner=Runner,
+    )
 
 
 def _validate_public_runtime_contract(

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ from services.agent_runtime.models import (
     MCPConnectionConfig,
     PromptBundle,
     RunControl,
+    SandboxExecutionSpec,
     ToolSource,
     ToolSpec,
 )
@@ -32,6 +34,10 @@ from services.agent_runtime.openjiuwen_runtime import (
     OpenJiuwenRuntimeDependencies,
     OpenJiuwenUnsupportedFeatureError,
     _to_openjiuwen_tool_schema,
+)
+from services.agent_runtime.openjiuwen_sandbox import (
+    OpenJiuwenSandboxUnavailableError,
+    SandboxSkillScriptExecutor,
 )
 from services.agent_runtime.tool_factory import ToolFactoryRegistry
 from skill_tool_schema import get_builtin_skill_tool_input_schema
@@ -413,6 +419,38 @@ class FakeFactory:
         return call_tool
 
 
+class FakeSandboxService:
+    def __init__(self):
+        self.enabled = True
+        self.healthy = False
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.settings = SimpleNamespace(
+            workspace_root="/workspace/nexent",
+            request_timeout_seconds=10,
+        )
+
+    def validate_installation(self) -> None:
+        return None
+
+    async def start(self) -> None:
+        self.start_calls += 1
+        self.healthy = True
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        self.healthy = False
+
+
+class CapturingFactory(FakeFactory):
+    def __init__(self):
+        self.context = None
+
+    def create(self, tool: ToolSpec, context):
+        self.context = context
+        return super().create(tool, context)
+
+
 def _tool_registry() -> ToolFactoryRegistry:
     registry = ToolFactoryRegistry()
     for source in (
@@ -501,9 +539,101 @@ def test_openjiuwen_capabilities_match_initial_spike_contract():
     assert runtime.capabilities.managed_agents is False
     assert runtime.capabilities.external_a2a_agents is False
     assert runtime.capabilities.code_execution is False
+    assert runtime.capabilities.sandboxed_execution is False
     assert runtime.capabilities.context_compression is False
     assert runtime.capabilities.resumable_stream is False
     assert runtime.capabilities.process_type_compatibility == "partial"
+    assert not hasattr(runtime, "_lock")
+
+
+@pytest.mark.asyncio
+async def test_openjiuwen_runtime_prepares_request_scoped_sandbox_executor(
+    openjiuwen_dependencies,
+):
+    factory = CapturingFactory()
+    registry = ToolFactoryRegistry()
+    registry.register(ToolSource.BUILTIN, factory)
+    sandbox_service = FakeSandboxService()
+    runtime = OpenJiuwenRuntime(
+        dependencies=openjiuwen_dependencies,
+        tool_factory_registry=registry,
+        sandbox_service=sandbox_service,
+    )
+    root_agent = _plan().root_agent.model_copy(
+        update={
+            "tools": [
+                ToolSpec(
+                    name="run_skill_script",
+                    class_name="RunSkillScriptTool",
+                    source=ToolSource.BUILTIN,
+                    input_schema={
+                        "skill_name": {"type": "string"},
+                        "script_path": {"type": "string"},
+                    },
+                )
+            ]
+        }
+    )
+    plan = _plan(
+        root_agent=root_agent,
+        sandbox_execution=SandboxExecutionSpec(enabled=True, required=True),
+        runtime_resources={
+            "sandbox.host_staging_dirs": [],
+            "sandbox.attachments": {},
+        },
+    )
+
+    _ = [chunk async for chunk in runtime.run(plan, RuntimeEventSink(plan.request_id))]
+
+    assert sandbox_service.start_calls == 1
+    assert runtime.capabilities.sandboxed_execution is True
+    assert isinstance(
+        factory.context.resources["skill.script_executor"],
+        SandboxSkillScriptExecutor,
+    )
+    assert (
+        factory.context.resources["skill.script_executor"].execution_timeout_seconds
+        == plan.sandbox_execution.execution_timeout_seconds
+    )
+    assert factory.context.resources["sandbox.execution_spec"] == (
+        plan.sandbox_execution
+    )
+    assert [ability.name for ability in FakeReActAgent.instances[-1].ability_manager.abilities] == [
+        "run_skill_script"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openjiuwen_runtime_emits_safe_sandbox_stage_metadata(
+    openjiuwen_dependencies,
+):
+    class FailingSandboxService(FakeSandboxService):
+        async def start(self) -> None:
+            self.start_calls += 1
+            raise OpenJiuwenSandboxUnavailableError(
+                "OpenJiuwen sandbox health check failed.",
+                stage="health",
+            )
+
+    runtime = OpenJiuwenRuntime(
+        dependencies=openjiuwen_dependencies,
+        sandbox_service=FailingSandboxService(),
+    )
+    plan = _plan(
+        sandbox_execution=SandboxExecutionSpec(enabled=True, required=True),
+    )
+    sink = RuntimeEventSink(plan.request_id)
+
+    with pytest.raises(OpenJiuwenSandboxUnavailableError):
+        _ = [chunk async for chunk in runtime.run(plan, sink)]
+
+    error_event = next(
+        event for event in sink.events if event.type == RuntimeEventType.ERROR
+    )
+    assert error_event.metadata == {
+        "runtime_provider": "openjiuwen",
+        "sandbox_stage": "health",
+    }
 
 
 def test_openjiuwen_process_type_coverage_matrix_lists_all_legacy_process_types():

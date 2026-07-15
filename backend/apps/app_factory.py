@@ -61,6 +61,9 @@ def create_app(
     from services.agent_runtime.registry import get_configured_agent_runtime
     runtime = get_configured_agent_runtime()
     logger.info("Initialized agent runtime provider: %s", runtime.name)
+    register_lifecycle = getattr(runtime, "register_app_lifecycle", None)
+    if callable(register_lifecycle):
+        register_lifecycle(app)
 
     # Initialize monitoring if enabled
     if enable_monitoring:

@@ -6,6 +6,8 @@ for FastAPI application factory with common configurations and exception handler
 """
 import sys
 import os
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -101,6 +103,22 @@ class TestCreateApp:
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+
+    def test_create_app_registers_runtime_lifecycle_without_frontend_fields(self):
+        captured = {}
+        runtime = SimpleNamespace(
+            name="openjiuwen",
+            register_app_lifecycle=lambda app: captured.setdefault("app", app),
+        )
+
+        with patch(
+            "services.agent_runtime.registry.get_configured_agent_runtime",
+            return_value=runtime,
+        ):
+            app = create_app(enable_monitoring=False)
+
+        assert captured["app"] is app
+        assert "sandbox" not in app.openapi()["info"]
 
 
 class TestRegisterExceptionHandlers:

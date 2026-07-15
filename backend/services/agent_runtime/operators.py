@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import shutil
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -134,7 +135,11 @@ class OperatorContext(BaseModel):
             "runtime_events": [],
         }
         payload.update(overrides)
-        return cls(**payload)
+        # This is a trusted internal snapshot. Construct without re-validating
+        # nested Pydantic instances so request-scoped handles keep identity and
+        # mixed import aliases cannot turn equivalent runtime models into
+        # incompatible classes during large test/application imports.
+        return cls.model_construct(**payload)
 
 
 class OperatorResult(BaseModel):
@@ -305,6 +310,9 @@ def default_operator_registry() -> OperatorRegistry:
         {
             "mcp_connection": lambda spec: MCPConnectionOperator(spec),
             "skill_file_upload": lambda spec: SkillFileUploadOperator(spec),
+            "sandbox_staging_cleanup": lambda spec: SandboxStagingCleanupOperator(
+                spec
+            ),
             "memory_retrieval": lambda spec: MemoryRetrievalOperator(spec),
             "memory_persistence": lambda spec: MemoryPersistenceOperator(spec),
             "knowledge_summary": lambda spec: KnowledgeSummaryOperator(spec),
@@ -566,6 +574,59 @@ class SkillFileUploadOperator:
             runtime_events=runtime_events,
             added_metadata=metadata,
         )
+
+
+class SandboxStagingCleanupOperator:
+    """Delete request-scoped host files after sandbox artifact upload."""
+
+    def __init__(self, spec: OperatorSpec):
+        self.spec = spec
+
+    def supports(self, context: OperatorContext) -> bool:
+        """Run when the sandbox executor registered host staging directories."""
+        paths = context.runtime_resources.get("sandbox.host_staging_dirs")
+        diagnostics = context.runtime_resources.get("sandbox.diagnostics")
+        return (isinstance(paths, list) and bool(paths)) or (
+            isinstance(diagnostics, list) and bool(diagnostics)
+        )
+
+    def execute(self, context: OperatorContext) -> OperatorResult:
+        """Remove only the request-scoped staging directories."""
+        paths = context.runtime_resources.get("sandbox.host_staging_dirs")
+        if not isinstance(paths, list):
+            paths = []
+        unique_paths = list(dict.fromkeys(str(item) for item in paths if item))
+        failures = 0
+        for path in unique_paths:
+            try:
+                shutil.rmtree(path)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                failures += 1
+        paths.clear()
+        diagnostics = context.runtime_resources.get("sandbox.diagnostics")
+        safe_diagnostics = [
+            {
+                "sandbox_stage": str(item.get("sandbox_stage") or "sandbox"),
+                "status": str(item.get("status") or "unknown"),
+            }
+            for item in diagnostics or []
+            if isinstance(item, Mapping)
+        ]
+        if isinstance(diagnostics, list):
+            diagnostics.clear()
+        metadata = {
+            "sandbox.staging_cleanup_count": len(unique_paths) - failures,
+            "sandbox.staging_cleanup_failures": failures,
+            "sandbox.diagnostics": safe_diagnostics,
+        }
+        if failures:
+            return OperatorResult.soft_failure(
+                f"Sandbox host staging cleanup failed for {failures} path(s).",
+                added_metadata=metadata,
+            )
+        return OperatorResult.ok(added_metadata=metadata)
 
 
 class MemoryRetrievalOperator:

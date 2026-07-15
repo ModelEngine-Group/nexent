@@ -14,7 +14,9 @@ if backend_path not in sys.path:
 
 from consts import const
 from services.agent_runtime.config import (
+    OpenJiuwenSandboxConfigError,
     get_deployment_agent_runtime_provider,
+    get_openjiuwen_sandbox_settings,
     resolve_agent_runtime_provider_for_request,
 )
 from services.agent_runtime.models import (
@@ -31,6 +33,7 @@ from services.agent_runtime.models import (
     RuntimeCapabilities,
     RuntimeCapabilityRequirements,
     RunControl,
+    SandboxExecutionSpec,
     ToolSource,
     ToolRuntimeContext,
     ToolSpec,
@@ -138,8 +141,13 @@ def test_registry_unknown_provider_fails_fast():
         registry.get("openjiuwen")
 
 
-def test_default_registry_contains_runtime_spike_extension_points():
+def test_default_registry_contains_runtime_spike_extension_points(monkeypatch):
     registry = build_default_agent_runtime_registry()
+    monkeypatch.setattr(
+        registry._runtimes[const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN],
+        "validate_installation",
+        lambda: None,
+    )
 
     assert registry.list_providers() == [
         const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN,
@@ -158,6 +166,12 @@ def test_default_registry_contains_runtime_spike_extension_points():
 def test_configured_runtime_uses_deployment_provider(monkeypatch):
     monkeypatch.setattr(
         const, "AGENT_RUNTIME_PROVIDER", const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN
+    )
+    registry = get_configured_agent_runtime.__globals__["agent_runtime_registry"]
+    monkeypatch.setattr(
+        registry._runtimes[const.AGENT_RUNTIME_PROVIDER_OPENJIUWEN],
+        "validate_installation",
+        lambda: None,
     )
 
     runtime = get_configured_agent_runtime()
@@ -282,6 +296,33 @@ def test_capability_requirements_are_derived_from_actual_agent_configuration():
     }.issubset(requirements.required)
 
 
+def test_sandbox_capability_is_required_only_for_required_enabled_spec():
+    root = AgentSpec(
+        agent_id=1,
+        name="root",
+        model_name="main_model",
+        max_steps=3,
+        prompt=PromptBundle(fragments={"duty": "answer"}),
+    )
+
+    required = derive_runtime_capability_requirements(
+        root,
+        sandbox_execution=SandboxExecutionSpec(enabled=True, required=True),
+    )
+    optional = derive_runtime_capability_requirements(
+        root,
+        sandbox_execution=SandboxExecutionSpec(enabled=True, required=False),
+    )
+    disabled = derive_runtime_capability_requirements(
+        root,
+        sandbox_execution=SandboxExecutionSpec(enabled=False, required=True),
+    )
+
+    assert "sandboxed_execution" in required.required
+    assert "sandboxed_execution" in optional.optional
+    assert "sandboxed_execution" not in disabled.required | disabled.optional
+
+
 def test_agent_run_request_context_preserves_deployment_runtime_provider():
     context = AgentRunRequestContext(
         request_id="req-1",
@@ -300,6 +341,41 @@ def test_agent_run_request_context_preserves_deployment_runtime_provider():
     assert context.runtime_provider == const.AGENT_RUNTIME_PROVIDER_SMOLAGENTS
     assert context.conversation_id is None
     assert context.tool_params == {"tool": {"k": "v"}}
+
+
+def test_openjiuwen_sandbox_settings_are_deployment_only_and_validated(monkeypatch):
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_ENABLED", True)
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_BASE_URL",
+        "https://sandbox.internal:8443",
+    )
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_PROVIDER", "aio")
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_EXECUTION_TIMEOUT_SECONDS",
+        120,
+    )
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_REQUEST_TIMEOUT_SECONDS", 15)
+    monkeypatch.setattr(
+        const,
+        "OPENJIUWEN_SANDBOX_WORKSPACE_ROOT",
+        "/workspace/nexent",
+    )
+
+    settings = get_openjiuwen_sandbox_settings()
+
+    assert settings.enabled is True
+    assert settings.base_url == "https://sandbox.internal:8443"
+    assert settings.execution_timeout_seconds == 120
+
+
+def test_openjiuwen_sandbox_settings_reject_invalid_enabled_endpoint(monkeypatch):
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_ENABLED", True)
+    monkeypatch.setattr(const, "OPENJIUWEN_SANDBOX_BASE_URL", "localhost:8080")
+
+    with pytest.raises(OpenJiuwenSandboxConfigError, match="absolute HTTP"):
+        get_openjiuwen_sandbox_settings()
 
 
 def test_run_control_cancel_sets_legacy_stop_event():

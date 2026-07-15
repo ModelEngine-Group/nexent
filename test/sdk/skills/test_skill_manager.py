@@ -94,6 +94,15 @@ module_loader = importlib.util.module_from_spec(spec_loader)
 spec_loader.loader.exec_module(module_loader)
 sys.modules['nexent.skills.skill_loader'] = module_loader
 
+# Load script_executor before skill_manager so the package mock remains isolated.
+spec_executor = importlib.util.spec_from_file_location(
+    "nexent.skills.script_executor",
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent/skills/script_executor.py")
+)
+module_executor = importlib.util.module_from_spec(spec_executor)
+spec_executor.loader.exec_module(module_executor)
+sys.modules['nexent.skills.script_executor'] = module_executor
+
 # Load skill_manager module
 spec_manager = importlib.util.spec_from_file_location(
     "nexent.skills.skill_manager",
@@ -106,6 +115,7 @@ SkillManager = module_manager.SkillManager
 SkillNotFoundError = module_manager.SkillNotFoundError
 SkillScriptNotFoundError = module_manager.SkillScriptNotFoundError
 SkillLoader = module_loader.SkillLoader
+SkillScriptExecutionRequest = module_executor.SkillScriptExecutionRequest
 
 
 class TestSkillManagerInit:
@@ -133,6 +143,13 @@ class TestSkillManagerInit:
         assert manager.agent_id is None
         assert manager.tenant_id is None
         assert manager.version_no == 0
+
+    def test_init_uses_injected_script_executor(self):
+        executor = MagicMock()
+
+        manager = SkillManager(script_executor=executor)
+
+        assert manager.script_executor is executor
 
 
 class TestSkillManagerListSkills:
@@ -937,6 +954,40 @@ class TestSkillManagerCleanupSkillDirectory:
 
 class TestSkillManagerRunSkillScript:
     """Test SkillManager.run_skill_script method."""
+
+    def test_delegates_validated_script_to_injected_executor(self):
+        with TempSkillDir() as temp:
+            temp.create_skill(
+                "delegated-skill",
+                """---
+name: delegated-skill
+description: Delegated
+---
+# Content
+""",
+                subdirs={
+                    "scripts": [{"name": "run.py", "content": "print('ok')"}],
+                },
+            )
+            executor = MagicMock()
+            executor.execute.return_value = "sandbox-result"
+            manager = SkillManager(
+                base_skills_dir=temp.skills_dir,
+                script_executor=executor,
+            )
+
+            result = manager.run_skill_script(
+                "delegated-skill",
+                "scripts/run.py",
+                "--value 1",
+            )
+
+            assert result == "sandbox-result"
+            request = executor.execute.call_args.args[0]
+            assert isinstance(request, SkillScriptExecutionRequest)
+            assert request.skill_name == "delegated-skill"
+            assert request.script_path.endswith("scripts/run.py")
+            assert request.params == "--value 1"
 
     def test_run_skill_script_not_found_raises(self):
         """Test running script in non-existent skill raises SkillNotFoundError."""

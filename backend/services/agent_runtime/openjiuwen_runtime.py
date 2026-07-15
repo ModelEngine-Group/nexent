@@ -7,7 +7,6 @@ import inspect
 import json
 import logging
 import re
-import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
@@ -16,6 +15,7 @@ from typing import Any
 from consts.const import AGENT_RUNTIME_PROVIDER_OPENJIUWEN
 
 from .events import RuntimeEvent, RuntimeEventType, emit_runtime_event
+from .config import get_openjiuwen_sandbox_settings
 from .models import (
     AgentRunPlan,
     AgentSpec,
@@ -26,6 +26,11 @@ from .models import (
     ToolSource,
     ToolSpec,
     ToolVisibility,
+)
+from .openjiuwen_sandbox import (
+    OpenJiuwenDevSandboxService,
+    OpenJiuwenSandboxError,
+    SandboxSkillScriptExecutor,
 )
 from .tool_factory import (
     ToolFactoryRegistry,
@@ -133,6 +138,7 @@ class _OpenJiuwenRunState:
     session: Any | None = None
     context_engine: Any | None = None
     context_id: str | None = None
+    sandbox_executor: SandboxSkillScriptExecutor | None = None
     cleaned: bool = False
 
 
@@ -180,6 +186,7 @@ class OpenJiuwenRuntime:
         managed_agents=False,
         external_a2a_agents=False,
         code_execution=False,
+        sandboxed_execution=False,
         tool_artifacts=True,
         context_compression=False,
         tool_call_events=True,
@@ -198,13 +205,19 @@ class OpenJiuwenRuntime:
         tool_factory_registry: ToolFactoryRegistry | None = None,
         prefer_streaming: bool = True,
         mcp_expiry_time: float | None = None,
+        sandbox_service: OpenJiuwenDevSandboxService | None = None,
     ):
         self._dependencies = dependencies
         self._tool_factory_registry = tool_factory_registry
         self._prefer_streaming = prefer_streaming
         self._mcp_expiry_time = mcp_expiry_time
+        self._sandbox_service = sandbox_service or OpenJiuwenDevSandboxService(
+            get_openjiuwen_sandbox_settings(validate=False)
+        )
+        self.capabilities = type(self).capabilities.model_copy(
+            update={"sandboxed_execution": self._sandbox_service.healthy}
+        )
         self._active_runs: dict[str, _OpenJiuwenRunState] = {}
-        self._lock = threading.Lock()
 
     async def run(
         self,
@@ -235,10 +248,10 @@ class OpenJiuwenRuntime:
             run_control=plan.run_control,
             runner=dependencies.Runner,
         )
-        with self._lock:
-            self._active_runs[plan.request_id] = state
+        self._active_runs[plan.request_id] = state
 
         try:
+            await self._prepare_sandbox_execution(plan, state)
             self._validate_supported_plan(plan)
             logger.debug(
                 "OpenJiuwen runtime plan validation passed, request_id=%s, "
@@ -358,6 +371,10 @@ class OpenJiuwenRuntime:
             )
             raise
         except Exception as exc:
+            error_metadata = {
+                "runtime_provider": self.name,
+                **_sandbox_error_metadata(exc),
+            }
             await emit_runtime_event(
                 event_sink,
                 RuntimeEvent(
@@ -365,7 +382,7 @@ class OpenJiuwenRuntime:
                     request_id=plan.request_id,
                     agent_name=plan.root_agent.name,
                     error=str(exc),
-                    metadata={"runtime_provider": self.name},
+                    metadata=error_metadata,
                 ),
             )
             logger.error(
@@ -377,8 +394,7 @@ class OpenJiuwenRuntime:
             raise
         finally:
             await self._cleanup_state(state)
-            with self._lock:
-                self._active_runs.pop(plan.request_id, None)
+            self._active_runs.pop(plan.request_id, None)
             logger.debug(
                 "OpenJiuwen runtime run state removed, request_id=%s, active_run_count=%d",
                 plan.request_id,
@@ -387,8 +403,7 @@ class OpenJiuwenRuntime:
 
     async def stop(self, request_id: str) -> None:
         """Cancel an OpenJiuwen run and clean request-scoped resources."""
-        with self._lock:
-            state = self._active_runs.get(request_id)
+        state = self._active_runs.get(request_id)
         if state is None:
             logger.debug(
                 "OpenJiuwen runtime stop ignored, request_id=%s, reason=no_active_run",
@@ -404,6 +419,8 @@ class OpenJiuwenRuntime:
             len(state.sys_operation_ids),
         )
         state.run_control.cancel()
+        if state.sandbox_executor is not None:
+            await state.sandbox_executor.cancel()
         if state.task is not None and not state.task.done():
             state.task.cancel()
         await self._cleanup_state(state)
@@ -411,6 +428,22 @@ class OpenJiuwenRuntime:
     def validate_installation(self) -> None:
         """Validate the selected OpenJiuwen SDK before starting a run."""
         self._resolve_dependencies()
+        self._sandbox_service.validate_installation()
+
+    def register_app_lifecycle(self, app: Any) -> None:
+        """Register fixed sandbox startup and shutdown on a FastAPI app."""
+        if not self._sandbox_service.enabled:
+            return
+
+        @app.on_event("startup")
+        async def start_openjiuwen_sandbox() -> None:
+            await self._sandbox_service.start()
+            self._refresh_sandbox_capability()
+
+        @app.on_event("shutdown")
+        async def stop_openjiuwen_sandbox() -> None:
+            await self._sandbox_service.stop()
+            self._refresh_sandbox_capability()
 
     def to_agent_bundle(
         self,
@@ -611,6 +644,48 @@ class OpenJiuwenRuntime:
             return self._dependencies()
         return _load_openjiuwen_dependencies()
 
+    async def _prepare_sandbox_execution(
+        self,
+        plan: AgentRunPlan,
+        state: _OpenJiuwenRunState,
+    ) -> None:
+        spec = plan.sandbox_execution
+        if spec is None or not spec.enabled:
+            return
+        await self._sandbox_service.start()
+        self._refresh_sandbox_capability()
+        if spec.required and not self._sandbox_service.healthy:
+            raise OpenJiuwenDependencyError(
+                "OpenJiuwen sandbox execution is required but unavailable."
+            )
+        attachments = plan.runtime_resources.get("sandbox.attachments") or {}
+        host_staging_dirs = plan.runtime_resources.get("sandbox.host_staging_dirs")
+        if not isinstance(host_staging_dirs, list):
+            host_staging_dirs = []
+            plan.runtime_resources["sandbox.host_staging_dirs"] = host_staging_dirs
+        diagnostics = plan.runtime_resources.get("sandbox.diagnostics")
+        if not isinstance(diagnostics, list):
+            diagnostics = []
+            plan.runtime_resources["sandbox.diagnostics"] = diagnostics
+        state.sandbox_executor = SandboxSkillScriptExecutor(
+            service=self._sandbox_service,
+            request_id=plan.request_id,
+            tenant_id=str(plan.run_control.metadata.get("tenant_id") or ""),
+            run_control=plan.run_control,
+            attachments=attachments if isinstance(attachments, Mapping) else {},
+            host_staging_dirs=host_staging_dirs,
+            diagnostics=diagnostics,
+            host_staging_root=plan.runtime_resources.get(
+                "sandbox.host_staging_root"
+            ),
+            execution_timeout_seconds=spec.execution_timeout_seconds,
+        )
+
+    def _refresh_sandbox_capability(self) -> None:
+        self.capabilities = type(self).capabilities.model_copy(
+            update={"sandboxed_execution": self._sandbox_service.healthy}
+        )
+
     def _validate_supported_plan(self, plan: AgentRunPlan) -> None:
         root_agent = plan.root_agent
         if root_agent.managed_agents:
@@ -794,7 +869,9 @@ class OpenJiuwenRuntime:
                 )
                 continue
 
-            tool_context = self._tool_runtime_context(plan, dependencies, event_sink)
+            tool_context = self._tool_runtime_context(
+                plan, dependencies, event_sink, state
+            )
             wrapped_native_tool = wrap_tool_with_runtime_events(
                 native_tool,
                 tool,
@@ -850,7 +927,9 @@ class OpenJiuwenRuntime:
             _tool_source_counts(plan),
         )
         for tool in visible_tools:
-            tool_context = self._tool_runtime_context(plan, dependencies, event_sink)
+            tool_context = self._tool_runtime_context(
+                plan, dependencies, event_sink, state
+            )
             native_tool = registry.create(tool, tool_context)
             openjiuwen_tool = self._to_openjiuwen_local_tool(
                 tool,
@@ -875,7 +954,15 @@ class OpenJiuwenRuntime:
         plan: AgentRunPlan,
         dependencies: OpenJiuwenRuntimeDependencies,
         event_sink: Any,
+        state: _OpenJiuwenRunState,
     ) -> ToolRuntimeContext:
+        resources = {
+            **dict(plan.runtime_resources),
+            "openjiuwen.runner": dependencies.Runner,
+            "sandbox.execution_spec": plan.sandbox_execution,
+        }
+        if state.sandbox_executor is not None:
+            resources["skill.script_executor"] = state.sandbox_executor
         return ToolRuntimeContext(
             request_id=plan.request_id,
             agent_name=plan.root_agent.name,
@@ -884,10 +971,7 @@ class OpenJiuwenRuntime:
             runtime_provider=plan.runtime_provider,
             event_sink=event_sink,
             run_control=plan.run_control,
-            resources={
-                **dict(plan.runtime_resources),
-                "openjiuwen.runner": dependencies.Runner,
-            },
+            resources=resources,
         )
 
     async def _setup_native_skill_util(
@@ -1369,6 +1453,13 @@ def _tool_source_counts(plan: AgentRunPlan) -> dict[str, int]:
         source = _normalize_tool_source(tool.source)
         counts[source] = counts.get(source, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _sandbox_error_metadata(exc: Exception) -> dict[str, str]:
+    """Return a safe sandbox stage without exposing endpoint or path details."""
+    if not isinstance(exc, OpenJiuwenSandboxError):
+        return {}
+    return {"sandbox_stage": exc.stage}
 
 
 def _render_prompt_fragments(fragments: Mapping[str, Any]) -> str:
