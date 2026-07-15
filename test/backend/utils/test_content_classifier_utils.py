@@ -68,6 +68,16 @@ class TestContentClassifier:
         assert others_text == "ignored"
         assert classifier.state == "others"
 
+    def test_process_non_tag_content_waits_on_leading_tag_start(self):
+        """Test non-tag processing keeps a leading tag start in the buffer."""
+        classifier = ContentClassifier()
+        classifier.buffer = "<"
+
+        results = classifier._process_non_tag_content()
+
+        assert results == []
+        assert classifier.buffer == "<"
+
     def test_full_skill_flow(self):
         """Test full SKILL -> body -> </SKILL> -> summary flow."""
         classifier = ContentClassifier()
@@ -166,6 +176,12 @@ class TestContentClassifier:
         assert not any(r.get("type") == "file_content" for r in results)
         assert classifier.state == "others"
 
+    def test_file_path_rejects_blank_after_strip(self):
+        """Test blank file paths are rejected after trimming whitespace."""
+        classifier = ContentClassifier()
+
+        assert classifier._is_valid_file_path(" ") is False
+
     def test_end_file_tag_outside_file_state_does_not_change_state(self):
         """Test </FILE> outside file state does not leave the current state."""
         classifier = ContentClassifier()
@@ -175,6 +191,12 @@ class TestContentClassifier:
 
         assert classifier.state == "skill_body"
         assert classifier.current_file_path is None
+
+    def test_create_event_ignores_empty_content(self):
+        """Test empty content does not create a stream event."""
+        classifier = ContentClassifier()
+
+        assert classifier._create_event("") == {}
 
     def test_others_content(self):
         """Test content outside tags is classified as 'others'."""
