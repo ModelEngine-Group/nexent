@@ -5,6 +5,7 @@ import sys
 import os
 import io
 import json
+import base64
 import types
 
 # Add backend path for imports
@@ -4106,6 +4107,31 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
 class TestUploadZipFilesWithZipError:
     """Test _upload_zip_files error handling."""
 
+    def test_upload_zip_renamed_root_does_not_nest_target_dir(self, tmp_path):
+        """Test ZIP root rename writes files directly under the target skill directory."""
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("old-skill/SKILL.md", "---\nname: old-skill\n---\nbody")
+            zf.writestr("old-skill/references/info.md", "info")
+
+        mock_manager = MagicMock()
+        mock_manager.local_skills_dir = str(tmp_path)
+
+        service = SkillService()
+        service.skill_manager = mock_manager
+
+        service._upload_zip_files(
+            zip_buffer.getvalue(),
+            "new-skill copy",
+            "old-skill",
+        )
+
+        assert (tmp_path / "new-skill copy" / "SKILL.md").is_file()
+        assert (tmp_path / "new-skill copy" / "references" / "info.md").is_file()
+        assert not (tmp_path / "new-skill copy" / "new-skill copy" / "SKILL.md").exists()
+
     def test_upload_zip_extract_error(self, mocker):
         """Test ZIP extraction error handling."""
         import zipfile
@@ -4126,6 +4152,43 @@ class TestUploadZipFilesWithZipError:
                 assert False, "Should have raised"
             except Exception as e:
                 assert "makedirs error" in str(e)
+
+
+class TestSkillServiceExportSkillsByNames:
+    """Test SkillService.export_skills_by_names."""
+
+    def test_export_rebuilds_missing_local_dir_from_db_snapshot(self, tmp_path, mocker):
+        """Test export can recover when the DB skill exists but local files are missing."""
+        import zipfile
+
+        class FakeSkillManager:
+            local_skills_dir = str(tmp_path)
+
+            def save_skill(self, skill_data):
+                skill_dir = tmp_path / skill_data["name"]
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(skill_data["content"], encoding="utf-8")
+                return skill_data
+
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={
+                "name": "missing-skill",
+                "description": "desc",
+                "content": "# Missing Skill\nbody",
+                "tags": ["tag"],
+            },
+        )
+
+        service = SkillService()
+        service.skill_manager = FakeSkillManager()
+
+        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+
+        assert len(result) == 1
+        zip_bytes = base64.b64decode(result[0]["skill_zip_base64"])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            assert "missing-skill/SKILL.md" in zf.namelist()
 
 
 class TestParamsDictToStorableWithInvalidData:
