@@ -4157,6 +4157,20 @@ class TestUploadZipFilesWithZipError:
 class TestSkillServiceExportSkillsByNames:
     """Test SkillService.export_skills_by_names."""
 
+    def test_export_skips_missing_local_dir_without_db_record(self, tmp_path, mocker):
+        """Test export skips a missing local skill when no DB snapshot exists."""
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+
+        service = SkillService()
+        service.skill_manager = MagicMock(local_skills_dir=str(tmp_path))
+
+        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+
+        assert result == []
+
     def test_export_rebuilds_missing_local_dir_from_db_snapshot(self, tmp_path, mocker):
         """Test export can recover when the DB skill exists but local files are missing."""
         import zipfile
@@ -4189,6 +4203,28 @@ class TestSkillServiceExportSkillsByNames:
         zip_bytes = base64.b64decode(result[0]["skill_zip_base64"])
         with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
             assert "missing-skill/SKILL.md" in zf.namelist()
+
+    def test_export_skips_when_db_rebuild_does_not_create_local_dir(self, tmp_path, mocker):
+        """Test export skips when rebuilding from DB does not create local files."""
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={
+                "name": "missing-skill",
+                "description": "desc",
+                "content": "# Missing Skill\nbody",
+                "tags": ["tag"],
+            },
+        )
+
+        skill_manager = MagicMock(local_skills_dir=str(tmp_path))
+        skill_manager.save_skill.return_value = None
+        service = SkillService()
+        service.skill_manager = skill_manager
+
+        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+
+        assert result == []
+        skill_manager.save_skill.assert_called_once()
 
 
 class TestParamsDictToStorableWithInvalidData:

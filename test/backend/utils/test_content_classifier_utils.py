@@ -146,6 +146,36 @@ class TestContentClassifier:
             }
         ]
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "",
+            "/absolute/path.md",
+            r"references\windows.md",
+            "references//empty.md",
+            "./relative.md",
+        ],
+    )
+    def test_file_path_rejects_unsafe_paths(self, path):
+        """Test unsafe file paths are not treated as generated files."""
+        classifier = ContentClassifier()
+
+        results = classifier.classify(f'<FILE path="{path}">')
+        results.extend(classifier.classify("content"))
+
+        assert not any(r.get("type") == "file_content" for r in results)
+        assert classifier.state == "others"
+
+    def test_end_file_tag_outside_file_state_does_not_change_state(self):
+        """Test </FILE> outside file state does not leave the current state."""
+        classifier = ContentClassifier()
+        classifier.classify("<SKILL>")
+
+        classifier.classify("</FILE>")
+
+        assert classifier.state == "skill_body"
+        assert classifier.current_file_path is None
+
     def test_others_content(self):
         """Test content outside tags is classified as 'others'."""
         classifier = ContentClassifier()
