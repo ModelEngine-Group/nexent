@@ -503,9 +503,12 @@ FinalizeCard 会先读取权威 session state：
 - 加载失败显示后端错误和 Retry。
 - 身份未确认或 proposal 不完整时禁用操作。
 - 显示名称、内部名称、模型和资源只使用持久化状态。
+- 模型按主模型、备用模型顺序显示平台名称，不显示模型 ID。
+- 资源按来源分成“本地资源”和“联网资源”，每个 Tool/Skill 名称独占一行。`source=mcp` 的 Tool 和 `source=official` 的 Skill 归入联网资源，其余归入本地资源。
+- Session State 无法解析任何持久化模型或资源引用时返回 `invalid_references`；卡片显示引用类型和 ID 用于排查，并禁用发布。
 - 描述和 Prompt 字段使用 proposal。
 
-后端最终生成正式内部名称、保存 proposal 字段，并保留数据库中现有的启用资源实例。返回状态为 `draft_ready`，随后进入既有 Agent 配置和版本发布流程。
+后端最终生成正式内部名称、保存 proposal 字段，并保留数据库中现有的启用资源实例。发布前再次按 tenant 解析模型、Tool 和 Skill；失效引用返回 409，且校验必须发生在草稿更新之前，避免产生部分更新。成功时返回状态 `draft_ready`，随后进入既有 Agent 配置和版本发布流程。
 
 ---
 
@@ -529,7 +532,7 @@ FinalizeCard 会先读取权威 session state：
 | POST | `/session/{id}/mcp/{mcp_id}/skip-tools` | 显式跳过 MCP tool binding |
 | POST | `/session/{id}/install-web-skill` | 安装在线 Skill |
 | PUT | `/session/{id}/identity` | 保存显示名称并确认身份 |
-| GET | `/session/{id}/state` | 读取权威草稿和工作流状态 |
+| GET | `/session/{id}/state` | 读取权威草稿、模型/资源展示名称、失效引用和工作流状态 |
 | POST | `/session/{id}/finalize` | 校验状态并完成草稿配置 |
 
 ### 5.1 关键请求结构

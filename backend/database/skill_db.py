@@ -268,6 +268,20 @@ def get_skill_by_id(skill_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def query_skills_by_ids(skill_id_list: List[int], tenant_id: str) -> List[Dict[str, Any]]:
+    """Return active SkillInfo rows for the requested tenant-scoped IDs."""
+    if not skill_id_list:
+        return []
+
+    with get_db_session() as session:
+        skills = session.query(SkillInfo).filter(
+            SkillInfo.skill_id.in_(skill_id_list),
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+        ).all()
+        return [_to_dict(skill) for skill in skills]
+
+
 def get_skill_by_id_global(skill_id: int) -> Optional[Dict[str, Any]]:
     """Get skill by ID without tenant filter (global lookup for template skills).
 

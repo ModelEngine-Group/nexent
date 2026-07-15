@@ -154,8 +154,36 @@ export interface Nl2AgentSessionState {
   identity_confirmed: boolean;
   business_logic_model_id?: number;
   model_ids: number[];
-  tools: Array<{ tool_id: number; [key: string]: unknown }>;
-  skills: Array<{ skill_id: number; [key: string]: unknown }>;
+  models: Array<{
+    model_id: number;
+    display_name?: string;
+    role: "primary" | "fallback";
+    valid: boolean;
+  }>;
+  tools: Array<{
+    tool_id: number;
+    name: string;
+    source: string;
+    origin: "local" | "online";
+    [key: string]: unknown;
+  }>;
+  skills: Array<{
+    skill_id: number;
+    name: string;
+    source: string;
+    origin: "local" | "online";
+    [key: string]: unknown;
+  }>;
+  invalid_references: Array<{
+    reference_type: "model" | "tool" | "skill";
+    reference_id: number;
+    reason:
+      | "not_found"
+      | "not_llm"
+      | "unavailable"
+      | "name_missing"
+      | "primary_not_in_runtime_models";
+  }>;
   resource_review: {
     requirements_review: {
       status: "collecting" | "awaiting_confirmation" | "confirmed";

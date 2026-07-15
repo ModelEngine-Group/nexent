@@ -18,10 +18,15 @@ import {
   RequirementsSummaryCard,
   resolveRequirementsCardState,
 } from "../RequirementsSummaryCard";
-import { FinalizeCard } from "../FinalizeCard";
+import {
+  FinalizeCard,
+  canPublishFinalReview,
+  groupFinalReviewResources,
+} from "../FinalizeCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
 import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
 import { getOnlineConfigurationBlockers } from "../OnlineConfigurationBar";
+import type { Nl2AgentSessionState } from "@/services/nl2agentService";
 
 function assertElement(
   node: React.ReactNode
@@ -482,6 +487,72 @@ describe("requirements summary card state", () => {
       }),
       "confirmed"
     );
+  });
+});
+
+describe("final review persisted names", () => {
+  it("groups local and online resources without using IDs as labels", () => {
+    const state = {
+      tools: [
+        {
+          tool_id: 11,
+          name: "Document Parser",
+          source: "local",
+          origin: "local",
+        },
+        {
+          tool_id: 12,
+          name: "Web Fetch",
+          source: "mcp",
+          origin: "online",
+        },
+      ],
+      skills: [
+        {
+          skill_id: 21,
+          name: "Presentation Builder",
+          source: "custom",
+          origin: "local",
+        },
+        {
+          skill_id: 22,
+          name: "Official Research",
+          source: "official",
+          origin: "online",
+        },
+      ],
+    } as Nl2AgentSessionState;
+
+    const groups = groupFinalReviewResources(state);
+
+    assert.deepEqual(
+      groups.local.map((resource) => resource.name),
+      ["Document Parser", "Presentation Builder"]
+    );
+    assert.deepEqual(
+      groups.online.map((resource) => resource.name),
+      ["Web Fetch", "Official Research"]
+    );
+  });
+
+  it("blocks publication while any persisted reference is invalid", () => {
+    const validState = {
+      identity_confirmed: true,
+      invalid_references: [],
+    } as unknown as Nl2AgentSessionState;
+    const invalidState = {
+      ...validState,
+      invalid_references: [
+        {
+          reference_type: "tool" as const,
+          reference_id: 404,
+          reason: "not_found" as const,
+        },
+      ],
+    };
+
+    assert.equal(canPublishFinalReview(validState, true, false, null), true);
+    assert.equal(canPublishFinalReview(invalidState, true, false, null), false);
   });
 });
 

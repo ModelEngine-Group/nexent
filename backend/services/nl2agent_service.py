@@ -68,6 +68,7 @@ from database.skill_db import (
     get_skill_by_id as get_tenant_skill_by_id,
     list_skills as list_tenant_skills,
     query_enabled_skill_instances,
+    query_skills_by_ids,
 )
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
@@ -584,14 +585,167 @@ def _validate_available_llm_ids(
         ) != ModelConnectStatusEnum.AVAILABLE.value:
             reason = f"Model {model_id} is currently unavailable."
         else:
-            display_names[int(model_id)] = (
-                record.get("display_name") or record.get("model_name") or str(model_id)
-            )
-            continue
+            display_name = str(
+                record.get("display_name") or record.get("model_name") or ""
+            ).strip()
+            if display_name:
+                display_names[int(model_id)] = display_name
+                continue
+            reason = f"Model {model_id} has no display name."
         if finalizing:
             reason += " Reopen the model-selection card and choose an available LLM."
         raise AgentRunException(reason)
     return display_names
+
+
+def _resolve_model_summaries(
+    draft: Dict[str, Any], tenant_id: str
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Resolve persisted model IDs into display-ready summaries without raising."""
+    primary_model_id = draft.get("business_logic_model_id")
+    model_ids = _normalize_model_ids(draft.get("model_ids"))
+    ordered_ids = list(model_ids)
+    if primary_model_id:
+        primary_model_id = int(primary_model_id)
+        if primary_model_id not in ordered_ids:
+            ordered_ids.insert(0, primary_model_id)
+
+    records = get_model_records(None, tenant_id) or []
+    records_by_id = {int(record["model_id"]): record for record in records}
+    summaries: List[Dict[str, Any]] = []
+    invalid_references: List[Dict[str, Any]] = []
+    for model_id in ordered_ids:
+        record = records_by_id.get(model_id)
+        reason: Optional[str] = None
+        display_name: Optional[str] = None
+        if record is None:
+            reason = "not_found"
+        else:
+            display_name = str(
+                record.get("display_name") or record.get("model_name") or ""
+            ).strip() or None
+            if str(record.get("model_type") or "").lower() != "llm":
+                reason = "not_llm"
+            elif ModelConnectStatusEnum.get_value(
+                record.get("connect_status")
+            ) != ModelConnectStatusEnum.AVAILABLE.value:
+                reason = "unavailable"
+            elif not display_name:
+                reason = "name_missing"
+
+        is_primary = model_id == primary_model_id
+        summaries.append(
+            {
+                "model_id": model_id,
+                "display_name": display_name,
+                "role": "primary" if is_primary else "fallback",
+                "valid": reason is None,
+            }
+        )
+        if reason:
+            invalid_references.append(
+                {
+                    "reference_type": "model",
+                    "reference_id": model_id,
+                    "reason": reason,
+                }
+            )
+
+    if primary_model_id and primary_model_id not in model_ids:
+        invalid_references.append(
+            {
+                "reference_type": "model",
+                "reference_id": primary_model_id,
+                "reason": "primary_not_in_runtime_models",
+            }
+        )
+    return summaries, invalid_references
+
+
+def _resolve_resource_summaries(
+    tool_instances: List[Dict[str, Any]],
+    skill_instances: List[Dict[str, Any]],
+    tenant_id: str,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Enrich persisted resource instances and report dangling references."""
+    tool_ids = [int(row["tool_id"]) for row in tool_instances]
+    skill_ids = [int(row["skill_id"]) for row in skill_instances]
+    tool_info_by_id = {
+        int(row["tool_id"]): row for row in (query_tools_by_ids(tool_ids) if tool_ids else [])
+    }
+    skill_info_by_id = {
+        int(row["skill_id"]): row
+        for row in (query_skills_by_ids(skill_ids, tenant_id) if skill_ids else [])
+    }
+
+    tools: List[Dict[str, Any]] = []
+    skills: List[Dict[str, Any]] = []
+    invalid_references: List[Dict[str, Any]] = []
+    for instance in tool_instances:
+        tool_id = int(instance["tool_id"])
+        info = tool_info_by_id.get(tool_id)
+        name = str(
+            (info or {}).get("origin_name") or (info or {}).get("name") or ""
+        ).strip()
+        if not info or not name:
+            invalid_references.append(
+                {
+                    "reference_type": "tool",
+                    "reference_id": tool_id,
+                    "reason": "not_found" if not info else "name_missing",
+                }
+            )
+            continue
+        source = str(info.get("source") or "").lower()
+        tools.append(
+            {
+                **instance,
+                "name": name,
+                "source": source,
+                "origin": "online" if source == "mcp" else "local",
+            }
+        )
+
+    for instance in skill_instances:
+        skill_id = int(instance["skill_id"])
+        info = skill_info_by_id.get(skill_id)
+        name = str((info or {}).get("name") or "").strip()
+        if not info or not name:
+            invalid_references.append(
+                {
+                    "reference_type": "skill",
+                    "reference_id": skill_id,
+                    "reason": "not_found" if not info else "name_missing",
+                }
+            )
+            continue
+        source = str(info.get("source") or "").lower()
+        skills.append(
+            {
+                **instance,
+                "name": name,
+                "source": source,
+                "origin": "online" if source == "official" else "local",
+            }
+        )
+
+    return tools, skills, invalid_references
+
+
+def _raise_for_invalid_resource_references(
+    invalid_references: List[Dict[str, Any]],
+) -> None:
+    """Block publication when a persisted resource no longer resolves."""
+    if not invalid_references:
+        return
+    references = ", ".join(
+        f"{item['reference_type']} {item['reference_id']} ({item['reason']})"
+        for item in invalid_references
+    )
+    raise AgentRunException(
+        "One or more selected resources are no longer valid: "
+        f"{references}. Reconfigure the draft before finalizing."
+    )
 
 
 def _recommendation_id(source: str, item: Dict[str, Any]) -> str:
@@ -1236,8 +1390,12 @@ async def confirm_requirements_review(
 async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
     """Return authoritative draft models, resource bindings, and review state."""
     draft = _get_owned_draft(agent_id, tenant_id)
-    tools = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
-    skills = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
+    tool_instances = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
+    skill_instances = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
+    models, invalid_model_references = _resolve_model_summaries(draft, tenant_id)
+    tools, skills, invalid_resource_references = _resolve_resource_summaries(
+        tool_instances, skill_instances, tenant_id
+    )
     workflow_state = get_nl2agent_session_state(tenant_id, agent_id)
     for workflow in workflow_state.get("mcp_workflows", {}).values():
         discovered_ids = [int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])]
@@ -1259,8 +1417,10 @@ async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
         ),
         "business_logic_model_id": draft.get("business_logic_model_id"),
         "model_ids": _normalize_model_ids(draft.get("model_ids")),
+        "models": models,
         "tools": tools,
         "skills": skills,
+        "invalid_references": invalid_model_references + invalid_resource_references,
         "identity_confirmed": workflow_state.get("identity_confirmed", False),
         "resource_review": workflow_state,
     }
@@ -1576,6 +1736,19 @@ async def finalize_agent(
             "The final proposal is incomplete: " + ", ".join(missing_proposal_fields)
         )
 
+    # Resolve persisted resources before mutating the draft so dangling catalog
+    # references cannot leave a partially finalized agent.
+    persisted_tools = query_all_enabled_tool_instances(
+        agent_id, tenant_id, version_no=0
+    ) or []
+    persisted_skills = query_enabled_skill_instances(
+        agent_id, tenant_id, version_no=0
+    ) or []
+    _, _, invalid_resource_references = _resolve_resource_summaries(
+        persisted_tools, persisted_skills, tenant_id
+    )
+    _raise_for_invalid_resource_references(invalid_resource_references)
+
     final_display_name = str(current_draft.get("display_name") or "").strip()[:50]
     if not final_display_name:
         raise AgentRunException("The persisted agent display name is missing.")
@@ -1627,11 +1800,6 @@ async def finalize_agent(
         except Exception as exc:
             logger.error(f"Failed to update draft agent {agent_id}: {exc}")
             raise AgentRunException("Failed to finalize agent.") from exc
-
-    # Existing enabled instance rows are authoritative. Do not bind or rewrite
-    # resources from IDs/configuration emitted by the LLM proposal.
-    persisted_tools = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
-    persisted_skills = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
 
     return {
         "agent_id": agent_id,

@@ -54,6 +54,51 @@ export interface FinalizeCardProps {
   data: FinalizeCardData;
 }
 
+export interface FinalReviewResource {
+  id: number;
+  kind: "tool" | "skill";
+  name: string;
+  origin: "local" | "online";
+  source: string;
+}
+
+export const groupFinalReviewResources = (state: Nl2AgentSessionState) => {
+  const resources: FinalReviewResource[] = [
+    ...state.tools.map((tool) => ({
+      id: tool.tool_id,
+      kind: "tool" as const,
+      name: tool.name,
+      origin: tool.origin,
+      source: tool.source,
+    })),
+    ...state.skills.map((skill) => ({
+      id: skill.skill_id,
+      kind: "skill" as const,
+      name: skill.name,
+      origin: skill.origin,
+      source: skill.source,
+    })),
+  ];
+  return {
+    local: resources.filter((resource) => resource.origin === "local"),
+    online: resources.filter((resource) => resource.origin === "online"),
+  };
+};
+
+export const canPublishFinalReview = (
+  state: Nl2AgentSessionState | null,
+  proposalComplete: boolean,
+  stateLoading: boolean,
+  stateError: string | null
+) =>
+  Boolean(
+    state?.identity_confirmed &&
+    proposalComplete &&
+    !state.invalid_references.length &&
+    !stateLoading &&
+    !stateError
+  );
+
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   title,
   children,
@@ -66,10 +111,10 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   </div>
 );
 
-const FieldLine: React.FC<{ label: string; value?: string | number | boolean }> = ({
-  label,
-  value,
-}) => {
+const FieldLine: React.FC<{
+  label: string;
+  value?: string | number | boolean;
+}> = ({ label, value }) => {
   if (value === undefined || value === null || value === "") return null;
   return (
     <div className="flex gap-2 text-xs">
@@ -80,6 +125,33 @@ const FieldLine: React.FC<{ label: string; value?: string | number | boolean }> 
     </div>
   );
 };
+
+const NameList: React.FC<{
+  label: string;
+  items: Array<{ key: string; name: string; typeLabel?: string }>;
+  emptyText: string;
+}> = ({ label, items, emptyText }) => (
+  <div className="mb-2 text-xs">
+    <div className="mb-1 text-gray-500">{label}</div>
+    {items.length ? (
+      <div className="space-y-1">
+        {items.map((item) => (
+          <div
+            key={item.key}
+            className="rounded border border-gray-200 bg-white px-2 py-1 text-gray-800 break-words"
+          >
+            {item.typeLabel ? (
+              <span className="mr-1 text-gray-500">{item.typeLabel} ·</span>
+            ) : null}
+            {item.name}
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div className="text-gray-400">{emptyText}</div>
+    )}
+  </div>
+);
 
 /**
  * Renders the full agent spec produced by the nl2agent_finalize_proposal skill.
@@ -93,7 +165,9 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const params = useParams<{ locale: string }>();
   const locale = params?.locale || "en";
   const [loading, setLoading] = useState(false);
-  const [sessionState, setSessionState] = useState<Nl2AgentSessionState | null>(null);
+  const [sessionState, setSessionState] = useState<Nl2AgentSessionState | null>(
+    null
+  );
   const [stateLoading, setStateLoading] = useState(true);
   const [stateError, setStateError] = useState<string | null>(null);
 
@@ -118,11 +192,14 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
 
   const proposalComplete = Boolean(
     data.business_description?.trim() &&
-      data.duty_prompt?.trim() &&
-      data.greeting_message?.trim()
+    data.duty_prompt?.trim() &&
+    data.greeting_message?.trim()
   );
-  const canPublish = Boolean(
-    sessionState?.identity_confirmed && proposalComplete && !stateLoading && !stateError
+  const canPublish = canPublishFinalReview(
+    sessionState,
+    proposalComplete,
+    stateLoading,
+    stateError
   );
 
   const handlePublish = async () => {
@@ -150,7 +227,11 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
       router.push(`/${locale}/agents?agent_id=${agentId}`);
     } catch (error: any) {
       message.error(
-        error?.message || t("nl2agent.finalize.error", "Failed to publish agent. Please try again.")
+        error?.message ||
+          t(
+            "nl2agent.finalize.error",
+            "Failed to publish agent. Please try again."
+          )
       );
     } finally {
       setLoading(false);
@@ -174,11 +255,29 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           showIcon
           message="Persisted agent state could not be loaded"
           description={stateError || "No persisted state was returned."}
-          action={<Button size="small" onClick={() => void loadState()}>Retry</Button>}
+          action={
+            <Button size="small" onClick={() => void loadState()}>
+              Retry
+            </Button>
+          }
         />
       </div>
     );
   }
+
+  const resourceGroups = groupFinalReviewResources(sessionState);
+  const primaryModels = sessionState.models.filter(
+    (model) => model.role === "primary" && model.display_name
+  );
+  const fallbackModels = sessionState.models.filter(
+    (model) => model.role === "fallback" && model.display_name
+  );
+  const invalidReferenceText = sessionState.invalid_references
+    .map(
+      (reference) =>
+        `${reference.reference_type} #${reference.reference_id} (${reference.reason})`
+    )
+    .join(", ");
 
   return (
     <div className="my-3 border border-emerald-200 rounded-lg p-4 bg-emerald-50/50 max-h-[480px] overflow-y-auto">
@@ -195,6 +294,21 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
               showIcon
               message="Agent identity has not been saved"
               description="Return to the identity card and save the display name before publishing."
+              className="mb-3"
+            />
+          ) : sessionState.invalid_references.length ? (
+            <Alert
+              type="error"
+              showIcon
+              message={t(
+                "nl2agent.finalize.invalidReferences",
+                "Selected models or resources are no longer valid"
+              )}
+              description={t("nl2agent.finalize.invalidReferencesDescription", {
+                defaultValue:
+                  "Reconfigure the draft before publishing. Invalid references: {{references}}",
+                references: invalidReferenceText,
+              })}
               className="mb-3"
             />
           ) : !proposalComplete ? (
@@ -215,7 +329,10 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
 
           {/* Identity */}
           <Section title={t("nl2agent.finalize.identity", "Identity")}>
-            <FieldLine label="Agent Display Name" value={sessionState.display_name} />
+            <FieldLine
+              label="Agent Display Name"
+              value={sessionState.display_name}
+            />
             <FieldLine
               label="Internal Variable Name"
               value={sessionState?.internal_name}
@@ -226,20 +343,27 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           <Divider className="my-2" />
 
           {/* Models */}
-          {sessionState?.business_logic_model_id || (sessionState?.model_ids?.length ?? 0) > 0 ? (
+          {sessionState.models.length > 0 ? (
             <>
               <Section title={t("nl2agent.finalize.models", "LLM Models")}>
-                <FieldLine
-                  label="Logic Model ID"
-                  value={sessionState?.business_logic_model_id}
+                <NameList
+                  label={t("nl2agent.finalize.primaryModel", "Primary Model")}
+                  items={primaryModels.map((model) => ({
+                    key: `model-${model.model_id}`,
+                    name: model.display_name || "",
+                  }))}
+                  emptyText={t("nl2agent.finalize.none", "None")}
                 />
-                <FieldLine
-                  label="Runtime Model IDs"
-                  value={
-                    sessionState?.model_ids?.length
-                      ? sessionState.model_ids.join(", ")
-                      : undefined
-                  }
+                <NameList
+                  label={t(
+                    "nl2agent.finalize.fallbackModels",
+                    "Fallback Models"
+                  )}
+                  items={fallbackModels.map((model) => ({
+                    key: `model-${model.model_id}`,
+                    name: model.display_name || "",
+                  }))}
+                  emptyText={t("nl2agent.finalize.none", "None")}
                 />
               </Section>
               <Divider className="my-2" />
@@ -259,7 +383,9 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           ) : null}
 
           {/* Prompts */}
-          {(data.duty_prompt || data.constraint_prompt || data.few_shots_prompt) ? (
+          {data.duty_prompt ||
+          data.constraint_prompt ||
+          data.few_shots_prompt ? (
             <>
               <Section title={t("nl2agent.finalize.prompts", "Prompts")}>
                 {data.duty_prompt ? (
@@ -298,7 +424,8 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           ) : null}
 
           {/* UI */}
-          {data.greeting_message || (data.example_questions?.length ?? 0) > 0 ? (
+          {data.greeting_message ||
+          (data.example_questions?.length ?? 0) > 0 ? (
             <>
               <Section title={t("nl2agent.finalize.ui", "Greeting & Starters")}>
                 <FieldLine label="Greeting" value={data.greeting_message} />
@@ -317,33 +444,44 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           ) : null}
 
           {/* Resources */}
-          {(sessionState?.tools?.length ?? 0) > 0 ||
-          (sessionState?.skills?.length ?? 0) > 0 ? (
+          {sessionState.tools.length > 0 || sessionState.skills.length > 0 ? (
             <>
-              <Section title={t("nl2agent.finalize.resources", "Selected Resources")}>
-                <FieldLine
-                  label="Tools"
-                  value={
-                    sessionState?.tools?.length
-                      ? sessionState.tools.map((item: any) => item.tool_id).join(", ")
-                      : "None"
-                  }
+              <Section
+                title={t("nl2agent.finalize.resources", "Selected Resources")}
+              >
+                <NameList
+                  label={t(
+                    "nl2agent.finalize.localResources",
+                    "Local Resources"
+                  )}
+                  items={resourceGroups.local.map((resource) => ({
+                    key: `${resource.kind}-${resource.id}`,
+                    name: resource.name,
+                    typeLabel: t(
+                      resource.kind === "tool"
+                        ? "nl2agent.finalize.tool"
+                        : "nl2agent.finalize.skill",
+                      resource.kind === "tool" ? "Tool" : "Skill"
+                    ),
+                  }))}
+                  emptyText={t("nl2agent.finalize.none", "None")}
                 />
-                <FieldLine
-                  label="Skills"
-                  value={
-                    sessionState?.skills?.length
-                      ? sessionState.skills.map((item: any) => item.skill_id).join(", ")
-                      : "None"
-                  }
-                />
-                <FieldLine
-                  label="Sub-Agents"
-                  value={
-                    data.sub_agent_ids?.length
-                      ? data.sub_agent_ids.join(", ")
-                      : "None"
-                  }
+                <NameList
+                  label={t(
+                    "nl2agent.finalize.onlineResources",
+                    "Online Resources"
+                  )}
+                  items={resourceGroups.online.map((resource) => ({
+                    key: `${resource.kind}-${resource.id}`,
+                    name: resource.name,
+                    typeLabel: t(
+                      resource.kind === "tool"
+                        ? "nl2agent.finalize.mcpTool"
+                        : "nl2agent.finalize.officialSkill",
+                      resource.kind === "tool" ? "MCP Tool" : "Official Skill"
+                    ),
+                  }))}
+                  emptyText={t("nl2agent.finalize.none", "None")}
                 />
               </Section>
               <Divider className="my-2" />
@@ -356,7 +494,9 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           data.provide_run_summary !== undefined ||
           data.enable_context_manager !== undefined ? (
             <>
-              <Section title={t("nl2agent.finalize.runtime", "Runtime Options")}>
+              <Section
+                title={t("nl2agent.finalize.runtime", "Runtime Options")}
+              >
                 <FieldLine label="Max Steps" value={data.max_steps} />
                 <FieldLine
                   label="Output Tokens"

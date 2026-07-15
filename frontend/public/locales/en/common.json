@@ -3111,5 +3111,16 @@
   "nl2agent.requirements.confirmInstruction": "Confirm this summary, or describe required changes in chat.",
   "nl2agent.requirements.confirmationFailed": "Failed to confirm the requirements summary.",
   "nl2agent.requirements.confirming": "Confirming…",
-  "nl2agent.requirements.confirm": "Confirm Requirements"
+  "nl2agent.requirements.confirm": "Confirm Requirements",
+  "nl2agent.finalize.primaryModel": "Primary Model",
+  "nl2agent.finalize.fallbackModels": "Fallback Models",
+  "nl2agent.finalize.localResources": "Local Resources",
+  "nl2agent.finalize.onlineResources": "Online Resources",
+  "nl2agent.finalize.tool": "Tool",
+  "nl2agent.finalize.skill": "Skill",
+  "nl2agent.finalize.mcpTool": "MCP Tool",
+  "nl2agent.finalize.officialSkill": "Official Skill",
+  "nl2agent.finalize.none": "None",
+  "nl2agent.finalize.invalidReferences": "Selected models or resources are no longer valid",
+  "nl2agent.finalize.invalidReferencesDescription": "Reconfigure the draft before publishing. Invalid references: {{references}}"
 }

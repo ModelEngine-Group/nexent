@@ -1229,7 +1229,12 @@ async def test_finalize_uses_persisted_resources_and_ignores_generated_ids(monke
     monkeypatch.setattr(
         nl2agent_service,
         "get_model_records",
-        MagicMock(return_value=[{"model_id": 7, "model_type": "llm", "connect_status": "available"}]),
+        MagicMock(return_value=[{
+            "model_id": 7,
+            "model_type": "llm",
+            "connect_status": "available",
+            "display_name": "Primary LLM",
+        }]),
     )
     monkeypatch.setattr(
         nl2agent_service, "search_agent_id_by_agent_name", MagicMock(return_value=None)
@@ -1249,6 +1254,24 @@ async def test_finalize_uses_persisted_resources_and_ignores_generated_ids(monke
         nl2agent_service,
         "query_enabled_skill_instances",
         MagicMock(return_value=[{"skill_id": 7, "config_values": {"saved": True}}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids",
+        MagicMock(return_value=[{
+            "tool_id": 42,
+            "origin_name": "Document Parser",
+            "source": "local",
+        }]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_skills_by_ids",
+        MagicMock(return_value=[{
+            "skill_id": 7,
+            "name": "Presentation Builder",
+            "source": "custom",
+        }]),
     )
     nl2agent_session_catalog.register_recommendation_batch(
         "tenant_1", 202, "batch_1", [42], [7]
@@ -1283,6 +1306,66 @@ async def test_finalize_uses_persisted_resources_and_ignores_generated_ids(monke
 
 
 @pytest.mark.asyncio
+async def test_finalize_rejects_dangling_resources_before_updating_draft(monkeypatch):
+    draft = {
+        "agent_id": 202,
+        "name": "draft_test",
+        "display_name": "Document Helper",
+        "business_logic_model_id": 7,
+        "model_ids": [7],
+    }
+    monkeypatch.setattr(
+        nl2agent_service, "search_agent_info_by_agent_id", MagicMock(return_value=draft)
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(return_value=[{
+            "model_id": 7,
+            "model_type": "llm",
+            "connect_status": "available",
+            "display_name": "Primary LLM",
+        }]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_all_enabled_tool_instances",
+        MagicMock(return_value=[{"tool_id": 404}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_enabled_skill_instances",
+        MagicMock(return_value=[]),
+    )
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", MagicMock(return_value=[]))
+    update = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_agent", update)
+    nl2agent_session_catalog.register_recommendation_batch(
+        "tenant_1", 202, "batch_1", [404], []
+    )
+    nl2agent_session_catalog.resolve_recommendation_batch(
+        "tenant_1", 202, "batch_1", "applied", [404], []
+    )
+    _complete_required_online_review()
+    nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="tool 404.*Reconfigure the draft",
+    ):
+        await nl2agent_service.finalize_agent(
+            agent_id=202,
+            user_id="user_1",
+            tenant_id="tenant_1",
+            business_description="Build document presentations",
+            duty_prompt="Create presentations from documents.",
+            greeting_message="Upload a document to begin.",
+        )
+
+    update.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_finalize_rejects_incomplete_generated_proposal(monkeypatch):
     draft = {
         "agent_id": 202,
@@ -1297,7 +1380,12 @@ async def test_finalize_rejects_incomplete_generated_proposal(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "get_model_records",
-        MagicMock(return_value=[{"model_id": 7, "model_type": "llm", "connect_status": "available"}]),
+        MagicMock(return_value=[{
+            "model_id": 7,
+            "model_type": "llm",
+            "connect_status": "available",
+            "display_name": "Primary LLM",
+        }]),
     )
     nl2agent_session_catalog.register_recommendation_batch(
         "tenant_1", 202, "batch_1", [], []
@@ -1332,7 +1420,12 @@ async def test_finalize_rejects_connected_mcp_until_tools_are_bound_or_skipped(m
         }
     ))
     monkeypatch.setattr(nl2agent_service, "get_model_records", MagicMock(return_value=[
-        {"model_id": 7, "model_type": "llm", "connect_status": "available"},
+        {
+            "model_id": 7,
+            "model_type": "llm",
+            "connect_status": "available",
+            "display_name": "Primary LLM",
+        },
     ]))
     nl2agent_session_catalog.register_recommendation_batch(
         "tenant_1", 202, "batch_1", [], []
@@ -1391,6 +1484,7 @@ async def test_finalize_requires_both_online_catalogs(
                     "model_id": 7,
                     "model_type": "llm",
                     "connect_status": "available",
+                    "display_name": "Primary LLM",
                 }
             ]
         ),
@@ -1603,6 +1697,16 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
         "query_enabled_skill_instances",
         MagicMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(return_value=[{
+            "model_id": 7,
+            "model_type": "llm",
+            "connect_status": "available",
+            "display_name": "Primary LLM",
+        }]),
+    )
 
     result = await nl2agent_service.get_session_state(202, "tenant_1")
 
@@ -1610,6 +1714,135 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     assert result["internal_name"] == "customer_support"
     assert result["business_logic_model_id"] == 7
     assert result["model_ids"] == [7]
+    assert result["models"] == [{
+        "model_id": 7,
+        "display_name": "Primary LLM",
+        "role": "primary",
+        "valid": True,
+    }]
+    assert result["invalid_references"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={
+            "agent_id": 202,
+            "display_name": "Document Assistant",
+            "business_logic_model_id": 7,
+            "model_ids": [7, 8],
+        }),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_id_by_agent_name",
+        MagicMock(side_effect=ValueError("agent not found")),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(return_value=[
+            {
+                "model_id": 7,
+                "model_type": "llm",
+                "connect_status": "available",
+                "display_name": "Primary LLM",
+            },
+            {
+                "model_id": 8,
+                "model_type": "llm",
+                "connect_status": "available",
+                "model_name": "Fallback LLM",
+            },
+        ]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_all_enabled_tool_instances",
+        MagicMock(return_value=[{"tool_id": 11}, {"tool_id": 12}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids",
+        MagicMock(return_value=[
+            {"tool_id": 11, "origin_name": "Local Reader", "source": "local"},
+            {"tool_id": 12, "name": "Web Fetch", "source": "mcp"},
+        ]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_enabled_skill_instances",
+        MagicMock(return_value=[{"skill_id": 21}, {"skill_id": 22}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_skills_by_ids",
+        MagicMock(return_value=[
+            {"skill_id": 21, "name": "Local Skill", "source": "custom"},
+            {"skill_id": 22, "name": "Official Skill", "source": "official"},
+        ]),
+    )
+
+    result = await nl2agent_service.get_session_state(202, "tenant_1")
+
+    assert [model["display_name"] for model in result["models"]] == [
+        "Primary LLM",
+        "Fallback LLM",
+    ]
+    assert [model["role"] for model in result["models"]] == ["primary", "fallback"]
+    assert [(tool["name"], tool["origin"]) for tool in result["tools"]] == [
+        ("Local Reader", "local"),
+        ("Web Fetch", "online"),
+    ]
+    assert [(skill["name"], skill["origin"]) for skill in result["skills"]] == [
+        ("Local Skill", "local"),
+        ("Official Skill", "online"),
+    ]
+    assert result["invalid_references"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_session_state_reports_invalid_persisted_references(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={
+            "agent_id": 202,
+            "display_name": "Document Assistant",
+            "business_logic_model_id": 7,
+            "model_ids": [7],
+        }),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_id_by_agent_name",
+        MagicMock(side_effect=ValueError("agent not found")),
+    )
+    monkeypatch.setattr(nl2agent_service, "get_model_records", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_all_enabled_tool_instances",
+        MagicMock(return_value=[{"tool_id": 11}]),
+    )
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_enabled_skill_instances",
+        MagicMock(return_value=[{"skill_id": 21}]),
+    )
+    monkeypatch.setattr(nl2agent_service, "query_skills_by_ids", MagicMock(return_value=[]))
+
+    result = await nl2agent_service.get_session_state(202, "tenant_1")
+
+    assert result["tools"] == []
+    assert result["skills"] == []
+    assert result["invalid_references"] == [
+        {"reference_type": "model", "reference_id": 7, "reason": "not_found"},
+        {"reference_type": "tool", "reference_id": 11, "reason": "not_found"},
+        {"reference_type": "skill", "reference_id": 21, "reason": "not_found"},
+    ]
 
 
 def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatch):

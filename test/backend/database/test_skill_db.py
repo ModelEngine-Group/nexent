@@ -64,6 +64,7 @@ from backend.database.skill_db import (
     list_skills,
     get_skill_by_name,
     get_skill_by_id,
+    query_skills_by_ids,
     get_skill_by_id_global,
     create_skill,
     update_skill,
@@ -1198,6 +1199,34 @@ class TestGetSkillById:
         result = get_skill_by_id(999, 'tenant1')
 
         assert result is None
+
+
+class TestQuerySkillsByIds:
+    """Tests for tenant-scoped bulk SkillInfo lookup."""
+
+    def test_query_skills_by_ids_returns_tenant_rows(self, monkeypatch, mock_session):
+        session, query = mock_session
+        query.filter.return_value.all.return_value = [
+            MockSkillInfo(skill_id=10, skill_name='first_skill', tenant_id='tenant1'),
+            MockSkillInfo(skill_id=11, skill_name='second_skill', tenant_id='tenant1'),
+        ]
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx
+        )
+
+        result = query_skills_by_ids([10, 11], 'tenant1')
+
+        assert [row['skill_id'] for row in result] == [10, 11]
+        query.filter.assert_called_once()
+
+    def test_query_skills_by_ids_skips_database_for_empty_ids(self, mock_session):
+        _, query = mock_session
+
+        assert query_skills_by_ids([], 'tenant1') == []
+        query.filter.assert_not_called()
 
 
 # ===== create_skill Tests =====
