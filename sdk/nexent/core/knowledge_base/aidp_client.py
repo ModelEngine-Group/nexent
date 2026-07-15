@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from urllib.parse import urljoin
 
@@ -14,6 +15,8 @@ from .config import AIDP_API_KEY, AIDP_BASE_URL, AIDP_TENANT_ID, COUNT_PATH_KDS_
 
 
 logger = logging.getLogger("aidp_knowledge_base_adapter")
+
+_RETRY_DELAYS_SECONDS = (1, 2, 4)
 
 
 class AidpAdapterError(RuntimeError):
@@ -61,21 +64,40 @@ class AidpClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         url = self._url(path)
-        try:
-            response = self._client.request(method, url, **kwargs)
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            body = self._safe_json(exc.response)
-            message = self._extract_error_message(body) or str(exc)
-            logger.warning("AIDP HTTP error %s for %s %s: %s", exc.response.status_code, method, path, message)
-            raise AidpAdapterError(message, exc.response.status_code, body) from exc
-        except httpx.RequestError as exc:
-            logger.warning("AIDP request error for %s %s: %s", method, path, exc)
-            raise AidpAdapterError(f"AIDP request failed: {exc}", 503) from exc
+        for attempt, retry_delay in enumerate((*_RETRY_DELAYS_SECONDS, None), start=1):
+            try:
+                response = self._client.request(method, url, **kwargs)
+            except httpx.RequestError as exc:
+                if retry_delay is None:
+                    raise AidpAdapterError(f"AIDP request failed: {exc}", 503) from exc
+                logger.warning(
+                    "AIDP request attempt %d/4 failed for %s %s: %s; retrying in %ds",
+                    attempt,
+                    method,
+                    path,
+                    exc,
+                    retry_delay,
+                )
+                time.sleep(retry_delay)
+                continue
 
-        if response.status_code == 204 or not response.content:
-            return {}
-        return self._safe_json(response)
+            if response.status_code == 200:
+                return {} if not response.content else self._safe_json(response)
+
+            if retry_delay is None:
+                body = self._safe_json(response)
+                message = self._extract_error_message(body) or f"AIDP HTTP error {response.status_code}"
+                raise AidpAdapterError(message, response.status_code, body)
+
+            logger.warning(
+                "AIDP HTTP attempt %d/4 failed for %s %s with status %d; retrying in %ds",
+                attempt,
+                method,
+                path,
+                response.status_code,
+                retry_delay,
+            )
+            time.sleep(retry_delay)
 
     @staticmethod
     def _safe_json(response: httpx.Response) -> Any:
