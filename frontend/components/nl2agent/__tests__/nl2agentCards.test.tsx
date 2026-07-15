@@ -14,7 +14,10 @@ import { OnlineRecommendationGroup, tryRenderNl2AgentCard } from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
 import { ModelSelectionCard } from "../ModelSelectionCard";
 import { AgentIdentityCard } from "../AgentIdentityCard";
-import { RequirementsSummaryCard } from "../RequirementsSummaryCard";
+import {
+  RequirementsSummaryCard,
+  resolveRequirementsCardState,
+} from "../RequirementsSummaryCard";
 import { FinalizeCard } from "../FinalizeCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
 import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
@@ -439,6 +442,46 @@ describe("online configuration blockers", () => {
 
     assert.deepEqual(blockers.missingCatalogs, []);
     assert.equal(blockers.unresolvedMcpCount, 1);
+  });
+});
+
+describe("requirements summary card state", () => {
+  const awaiting = {
+    status: "awaiting_confirmation" as const,
+    fingerprint: "a".repeat(64),
+    isCurrent: true,
+  };
+
+  it("shows a confirmable state only for the current pending summary", () => {
+    assert.equal(
+      resolveRequirementsCardState(false, undefined, awaiting),
+      "awaiting"
+    );
+    assert.equal(
+      resolveRequirementsCardState(false, undefined, {
+        ...awaiting,
+        isCurrent: false,
+      }),
+      "superseded"
+    );
+  });
+
+  it("keeps loading, failure, and confirmed states distinct", () => {
+    assert.equal(
+      resolveRequirementsCardState(true, undefined, undefined),
+      "loading"
+    );
+    assert.equal(
+      resolveRequirementsCardState(false, "failed", undefined),
+      "error"
+    );
+    assert.equal(
+      resolveRequirementsCardState(false, undefined, {
+        ...awaiting,
+        status: "confirmed",
+      }),
+      "confirmed"
+    );
   });
 });
 

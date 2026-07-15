@@ -58,13 +58,31 @@ export const registerRequirementsSummary = async (
   summary: Nl2AgentRequirementsSummary
 ): Promise<{
   agent_id: number;
-  status: "awaiting_confirmation" | "confirmed";
+  status: "collecting" | "awaiting_confirmation" | "confirmed";
   summary: Nl2AgentRequirementsSummary;
   fingerprint: string;
+  is_current: boolean;
 }> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.registerRequirements(agentId),
     { method: "POST", body: JSON.stringify(summary) }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export const confirmRequirementsSummary = async (
+  agentId: number,
+  fingerprint: string
+): Promise<{
+  agent_id: number;
+  status: "confirmed";
+  fingerprint: string;
+  chat_injection_text?: string;
+}> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.confirmRequirements(agentId),
+    { method: "POST", body: JSON.stringify({ fingerprint }) }
   );
   if (!response.ok) throw new Error(await response.text());
   return response.json();

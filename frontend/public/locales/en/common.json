@@ -3095,5 +3095,21 @@
   "skillSpace.comingSoon.feature1": "Browse and install community-built skills",
   "skillSpace.comingSoon.feature2": "Create and publish your own skill packs",
   "skillSpace.comingSoon.feature3": "Version control and skill dependency management",
-  "skillSpace.comingSoon.badge": "Coming Soon"
+  "skillSpace.comingSoon.badge": "Coming Soon",
+  "nl2agent.requirements.title": "Requirements Summary",
+  "nl2agent.requirements.goal": "Agent Goal",
+  "nl2agent.requirements.audienceOrScenario": "Audience / Scenario",
+  "nl2agent.requirements.primaryInput": "Primary Input",
+  "nl2agent.requirements.expectedOutput": "Expected Output",
+  "nl2agent.requirements.keyConstraints": "Key Constraints",
+  "nl2agent.requirements.registering": "Registering summary…",
+  "nl2agent.requirements.notRegistered": "Requirements summary was not registered.",
+  "nl2agent.requirements.registrationFailed": "Failed to register the requirements summary.",
+  "nl2agent.requirements.retry": "Retry",
+  "nl2agent.requirements.superseded": "This summary has been replaced by a newer version.",
+  "nl2agent.requirements.confirmed": "Requirements confirmed",
+  "nl2agent.requirements.confirmInstruction": "Confirm this summary, or describe required changes in chat.",
+  "nl2agent.requirements.confirmationFailed": "Failed to confirm the requirements summary.",
+  "nl2agent.requirements.confirming": "Confirming…",
+  "nl2agent.requirements.confirm": "Confirm Requirements"
 }

@@ -25,11 +25,13 @@ from consts.model import (
     Nl2AgentOnlineRecommendationBatchRequest,
     Nl2AgentRecommendationBatchRequest,
     Nl2AgentRecommendationSkipRequest,
+    Nl2AgentRequirementsConfirmRequest,
     Nl2AgentRequirementsSummaryRequest,
 )
 from services.nl2agent_service import (
     apply_local_resources_batch,
     confirm_online_resource_configuration,
+    confirm_requirements_review,
     finalize_agent,
     install_web_skill,
     bind_mcp_tools,
@@ -75,6 +77,8 @@ def _session_http_error(exc: Exception) -> HTTPException:
             "display name is missing",
             "Requirements summary",
             "Confirm the requirements summary",
+            "requirements summary is stale",
+            "requirements summary is not awaiting confirmation",
         )
     ):
         return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
@@ -302,6 +306,22 @@ async def register_requirements_api(
             agent_id,
             payload.model_dump(),
             tenant_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post("/session/{agent_id}/requirements/confirm")
+async def confirm_requirements_api(
+    agent_id: int,
+    payload: Nl2AgentRequirementsConfirmRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await confirm_requirements_review(
+            agent_id, payload.fingerprint, tenant_id
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc

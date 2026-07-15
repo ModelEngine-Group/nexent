@@ -25,13 +25,14 @@ from urllib.parse import urlparse
 from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
 
 from agents.nl2agent_session_catalog import (
-    apply_requirements_confirmation_text,
+    apply_requirements_revision_text,
     assert_requirements_confirmed,
     assert_identity_confirmed,
     assert_mcp_workflows_resolved,
     assert_online_configuration_complete,
     assert_resource_review_complete,
     complete_online_configuration as complete_online_configuration_state,
+    confirm_requirements_summary,
     confirm_agent_identity,
     find_mcp_workflow_by_id,
     get_nl2agent_session_catalogs,
@@ -1196,23 +1197,40 @@ async def register_requirements_review(
         "status": review["status"],
         "summary": review["summary"],
         "fingerprint": review["fingerprint"],
+        "is_current": review["is_current"],
     }
 
 
-def process_requirements_confirmation_text(
+def process_requirements_revision_text(
     runner_agent_id: Optional[int],
     draft_agent_id: int,
     tenant_id: str,
     text: str,
 ) -> Dict[str, Any]:
-    """Process textual confirmation only for the seeded NL2AGENT runner."""
+    """Process textual requirement revisions only for the seeded NL2AGENT runner."""
     runner = search_agent_info_by_agent_id(
         agent_id=runner_agent_id, tenant_id=tenant_id
     )
     if not runner or runner.get("name") != NL2AGENT_AGENT_NAME:
         return {"intent": "not_applicable"}
     _get_owned_draft(draft_agent_id, tenant_id)
-    return apply_requirements_confirmation_text(tenant_id, draft_agent_id, text)
+    return apply_requirements_revision_text(tenant_id, draft_agent_id, text)
+
+
+async def confirm_requirements_review(
+    agent_id: int, fingerprint: str, tenant_id: str
+) -> Dict[str, Any]:
+    """Confirm the current registered requirements revision."""
+    _get_owned_draft(agent_id, tenant_id)
+    review = confirm_requirements_summary(
+        tenant_id, agent_id, fingerprint
+    )
+    return {
+        "agent_id": agent_id,
+        "status": review["status"],
+        "fingerprint": review["fingerprint"],
+        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
+    }
 
 
 async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:

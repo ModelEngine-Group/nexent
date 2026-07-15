@@ -270,7 +270,7 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
     }
 
 
-def test_requirements_summary_registration_and_confirmation(fake_redis):
+def test_requirements_summary_registration_and_button_confirmation(fake_redis):
     summary = {
         "goal": "  Create presentations  ",
         "audience_or_scenario": "Office   users",
@@ -288,13 +288,16 @@ def test_requirements_summary_registration_and_confirmation(fake_redis):
 
     assert first == second
     assert first["status"] == "awaiting_confirmation"
+    assert first["is_current"] is True
     assert first["summary"]["goal"] == "Create presentations"
     assert first["summary"]["audience_or_scenario"] == "Office users"
-    confirmed = catalog_module.apply_requirements_confirmation_text(
-        "tenant_1", 202, "我确认需求，可以继续"
+    confirmed = catalog_module.confirm_requirements_summary(
+        "tenant_1", 202, first["fingerprint"]
     )
-    assert confirmed["intent"] == "confirm"
     assert confirmed["status"] == "confirmed"
+    assert catalog_module.confirm_requirements_summary(
+        "tenant_1", 202, first["fingerprint"]
+    )["status"] == "confirmed"
     catalog_module.assert_requirements_confirmed("tenant_1", 202)
 
 
@@ -307,15 +310,29 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
         "key_constraints": "No invented facts",
     }
     catalog_module.register_requirements_summary("tenant_1", 202, summary)
-    catalog_module.apply_requirements_confirmation_text(
-        "tenant_1", 202, "confirm requirements"
+    catalog_module.apply_requirements_revision_text(
+        "tenant_1", 202, "change the expected output"
     )
+    unchanged = catalog_module.register_requirements_summary(
+        "tenant_1", 202, summary
+    )
+
+    assert unchanged["status"] == "collecting"
+    assert unchanged["is_current"] is False
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="not awaiting confirmation",
+    ):
+        catalog_module.confirm_requirements_summary(
+            "tenant_1", 202, unchanged["fingerprint"]
+        )
 
     changed = catalog_module.register_requirements_summary(
         "tenant_1", 202, {**summary, "expected_output": "Presentation and notes"}
     )
 
     assert changed["status"] == "awaiting_confirmation"
+    assert changed["is_current"] is True
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
         match="Confirm the requirements summary",
@@ -326,9 +343,9 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("确认需求", "confirm"),
-        ("looks good", "confirm"),
-        ("yes", "confirm"),
+        ("确认需求", "confirmation_requires_button"),
+        ("looks good", "confirmation_requires_button"),
+        ("yes", "confirmation_requires_button"),
         ("yes I may have more details later", "ambiguous"),
         ("是 但我还要考虑", "ambiguous"),
         ("确认，但需要修改输出", "modify"),
@@ -336,8 +353,8 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
         ("我再考虑一下", "ambiguous"),
     ],
 )
-def test_requirements_confirmation_classifier(text, expected):
-    assert catalog_module.classify_requirements_confirmation(text) == expected
+def test_requirements_message_classifier(text, expected):
+    assert catalog_module.classify_requirements_message_intent(text) == expected
 
 
 def test_requirements_modification_returns_to_collecting(fake_redis):
@@ -353,9 +370,64 @@ def test_requirements_modification_returns_to_collecting(fake_redis):
         },
     )
 
-    result = catalog_module.apply_requirements_confirmation_text(
+    result = catalog_module.apply_requirements_revision_text(
         "tenant_1", 202, "不正确，改成输出 PDF"
     )
 
     assert result["intent"] == "modify"
     assert result["status"] == "collecting"
+
+
+@pytest.mark.parametrize("text", ["确认需求", "yes", "可以继续"])
+def test_text_confirmation_requires_button(fake_redis, text):
+    catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+
+    result = catalog_module.apply_requirements_revision_text(
+        "tenant_1", 202, text
+    )
+
+    assert result["intent"] == "confirmation_requires_button"
+    assert result["status"] == "awaiting_confirmation"
+
+
+def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake_redis):
+    original = {
+        "goal": "Create presentations",
+        "audience_or_scenario": "Office users",
+        "primary_input": "DOCX files",
+        "expected_output": "Presentation",
+        "key_constraints": "No invented facts",
+    }
+    first = catalog_module.register_requirements_summary(
+        "tenant_1", 202, original
+    )
+    catalog_module.apply_requirements_revision_text(
+        "tenant_1", 202, "change the expected output"
+    )
+    revised = catalog_module.register_requirements_summary(
+        "tenant_1", 202, {**original, "expected_output": "Presentation and notes"}
+    )
+
+    stale = catalog_module.register_requirements_summary(
+        "tenant_1", 202, original
+    )
+
+    assert stale["is_current"] is False
+    assert stale["fingerprint"] == revised["fingerprint"]
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="requirements summary is stale",
+    ):
+        catalog_module.confirm_requirements_summary(
+            "tenant_1", 202, first["fingerprint"]
+        )

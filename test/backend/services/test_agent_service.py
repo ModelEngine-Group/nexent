@@ -4025,7 +4025,7 @@ async def test_run_agent_stream(
 @patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.save_messages")
 @patch("backend.services.agent_service.generate_stream_with_memory")
-async def test_run_agent_stream_processes_requirements_before_agent_generation(
+async def test_run_agent_stream_processes_requirement_revisions_before_generation(
     mock_generate_stream,
     mock_save_messages,
     mock_build_memory,
@@ -4039,7 +4039,7 @@ async def test_run_agent_stream_processes_requirements_before_agent_generation(
         side_effect=lambda **kwargs: events.append("requirements")
     )
     nl2agent_service_module = types.ModuleType("services.nl2agent_service")
-    nl2agent_service_module.process_requirements_confirmation_text = (
+    nl2agent_service_module.process_requirements_revision_text = (
         mock_process_requirements
     )
     monkeypatch.setitem(
@@ -4057,7 +4057,7 @@ async def test_run_agent_stream_processes_requirements_before_agent_generation(
     )
     mock_agent_request.draft_agent_id = 202
     mock_agent_request.agent_id = 1
-    mock_agent_request.query = "confirm requirements"
+    mock_agent_request.query = "change the expected output"
 
     await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
 
@@ -4065,7 +4065,7 @@ async def test_run_agent_stream_processes_requirements_before_agent_generation(
         runner_agent_id=1,
         draft_agent_id=202,
         tenant_id="tenant_1",
-        text="confirm requirements",
+        text="change the expected output",
     )
     assert events[:2] == ["requirements", "generation"]
 
@@ -13658,4 +13658,3 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
 
     assert result["should_resume"] is True
     assert result["resume_from_unit_index"] == 0
-

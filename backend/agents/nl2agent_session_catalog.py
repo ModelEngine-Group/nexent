@@ -194,7 +194,7 @@ def register_requirements_summary(
     draft_agent_id: Optional[int],
     summary: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Register one rendered requirements summary and await textual confirmation."""
+    """Register one rendered requirements summary for explicit card confirmation."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     normalized_summary = {
         field_name: _normalize_requirement_text(summary.get(field_name))
@@ -213,21 +213,27 @@ def register_requirements_summary(
     fingerprint = _requirements_fingerprint(normalized_summary)
     state = get_nl2agent_session_state(tenant, draft_id)
     review = state["requirements_review"]
-    if review.get("fingerprint") != fingerprint:
+    existing_fingerprint = review.get("fingerprint") or ""
+    status = review.get("status")
+    is_current = False
+    if not existing_fingerprint or (
+        status == "collecting" and existing_fingerprint != fingerprint
+    ):
         review = {
             "status": "awaiting_confirmation",
             "summary": normalized_summary,
             "fingerprint": fingerprint,
         }
-    elif review.get("status") == "collecting":
-        review["status"] = "awaiting_confirmation"
+        is_current = True
+    elif existing_fingerprint == fingerprint and status != "collecting":
+        is_current = True
     state["requirements_review"] = review
     _set_nl2agent_session_state(tenant, draft_id, state)
-    return deepcopy(review)
+    return {**deepcopy(review), "is_current": is_current}
 
 
-def classify_requirements_confirmation(text: str) -> str:
-    """Classify deterministic confirmation intent as confirm, modify, or ambiguous."""
+def classify_requirements_message_intent(text: str) -> str:
+    """Classify a pending-review message without confirming from chat text."""
     normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
     normalized = re.sub(r"[^\w\u3400-\u4dbf\u4e00-\u9fff]+", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
@@ -236,37 +242,56 @@ def classify_requirements_confirmation(text: str) -> str:
     if any(marker in normalized for marker in _MODIFICATION_MARKERS):
         return "modify"
     if normalized in _CONFIRMATION_PHRASES:
-        return "confirm"
+        return "confirmation_requires_button"
     if any(
         phrase in normalized
         for phrase in _CONFIRMATION_PHRASES - _SHORT_CONFIRMATION_PHRASES
     ):
         tokens = normalized.split()
         if len(tokens) <= 6:
-            return "confirm"
+            return "confirmation_requires_button"
     return "ambiguous"
 
 
-def apply_requirements_confirmation_text(
+def apply_requirements_revision_text(
     tenant_id: Optional[str], draft_agent_id: Optional[int], text: str
 ) -> Dict[str, Any]:
-    """Apply a user confirmation or modification intent to a pending review."""
+    """Apply only explicit revision intent to a pending requirements review."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     state = get_nl2agent_session_state(tenant, draft_id)
     review = state["requirements_review"]
     intent = (
-        classify_requirements_confirmation(text)
+        classify_requirements_message_intent(text)
         if review.get("status") == "awaiting_confirmation"
         else "not_applicable"
     )
-    if intent == "confirm":
-        review["status"] = "confirmed"
-    elif intent == "modify":
+    if intent == "modify":
         review["status"] = "collecting"
-    if intent in {"confirm", "modify"}:
         state["requirements_review"] = review
         _set_nl2agent_session_state(tenant, draft_id, state)
     return {"intent": intent, **deepcopy(review)}
+
+
+def confirm_requirements_summary(
+    tenant_id: Optional[str], draft_agent_id: Optional[int], fingerprint: str
+) -> Dict[str, Any]:
+    """Confirm the current requirements revision by its stable fingerprint."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    state = get_nl2agent_session_state(tenant, draft_id)
+    review = state["requirements_review"]
+    if not fingerprint or review.get("fingerprint") != fingerprint:
+        raise Nl2AgentSessionCatalogError(
+            "The requirements summary is stale. Reload the current summary before confirming."
+        )
+    if review.get("status") == "awaiting_confirmation":
+        review["status"] = "confirmed"
+        state["requirements_review"] = review
+        _set_nl2agent_session_state(tenant, draft_id, state)
+    elif review.get("status") != "confirmed":
+        raise Nl2AgentSessionCatalogError(
+            "The requirements summary is not awaiting confirmation."
+        )
+    return deepcopy(review)
 
 
 def assert_requirements_confirmed(

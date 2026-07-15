@@ -406,6 +406,16 @@ class TestPromptTemplateUtils:
         assert "key_constraints" in prompt
         assert "```nl2agent-requirements-summary" in prompt
         assert "nl2agent-model-selection" in prompt
+        assert "Confirm Requirements" in prompt or "确认需求" in prompt
+        assert (
+            "never confirms requirements" in prompt
+            or "绝不表示需求已确认" in prompt
+        )
+        assert (
+            "Only authoritative persisted state changed by the summary card button"
+            in prompt
+            or "只有摘要卡按钮更新后的权威持久化状态" in prompt
+        )
 
     @pytest.mark.parametrize("language", ["en", "zh"])
     def test_nl2agent_prompt_collects_all_mcp_configuration_in_card(self, language):

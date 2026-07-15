@@ -95,11 +95,11 @@ _REQUIREMENTS_SUMMARY = {
 
 
 def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
-    nl2agent_session_catalog.register_requirements_summary(
+    review = nl2agent_session_catalog.register_requirements_summary(
         tenant_id, draft_agent_id, _REQUIREMENTS_SUMMARY
     )
-    nl2agent_session_catalog.apply_requirements_confirmation_text(
-        tenant_id, draft_agent_id, "confirm requirements"
+    nl2agent_session_catalog.confirm_requirements_summary(
+        tenant_id, draft_agent_id, review["fingerprint"]
     )
 
 
@@ -478,9 +478,53 @@ async def test_register_requirements_review_returns_normalized_state(monkeypatch
     assert result["status"] == "awaiting_confirmation"
     assert result["summary"]["goal"] == "Build a document assistant"
     assert result["fingerprint"]
+    assert result["is_current"] is True
 
 
-def test_process_requirements_confirmation_text_updates_nl2agent_draft(monkeypatch):
+@pytest.mark.asyncio
+async def test_confirm_requirements_review_returns_auto_continue(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    review = nl2agent_session_catalog.register_requirements_summary(
+        "tenant_1", 202, _REQUIREMENTS_SUMMARY
+    )
+
+    result = await nl2agent_service.confirm_requirements_review(
+        202, review["fingerprint"], "tenant_1"
+    )
+
+    assert result == {
+        "agent_id": 202,
+        "status": "confirmed",
+        "fingerprint": review["fingerprint"],
+        "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
+    }
+
+
+@pytest.mark.asyncio
+async def test_confirm_requirements_review_rejects_stale_fingerprint(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.register_requirements_summary(
+        "tenant_1", 202, _REQUIREMENTS_SUMMARY
+    )
+
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="requirements summary is stale",
+    ):
+        await nl2agent_service.confirm_requirements_review(
+            202, "0" * 64, "tenant_1"
+        )
+
+
+def test_process_requirements_revision_text_updates_nl2agent_draft(monkeypatch):
     nl2agent_session_catalog.register_requirements_summary(
         "tenant_1", 202, _REQUIREMENTS_SUMMARY
     )
@@ -495,7 +539,7 @@ def test_process_requirements_confirmation_text_updates_nl2agent_draft(monkeypat
         MagicMock(return_value={"agent_id": 202}),
     )
 
-    result = nl2agent_service.process_requirements_confirmation_text(
+    result = nl2agent_service.process_requirements_revision_text(
         1, 202, "tenant_1", "change the expected output"
     )
 
@@ -503,14 +547,14 @@ def test_process_requirements_confirmation_text_updates_nl2agent_draft(monkeypat
     assert result["status"] == "collecting"
 
 
-def test_process_requirements_confirmation_ignores_non_nl2agent_runner(monkeypatch):
+def test_process_requirements_revision_ignores_non_nl2agent_runner(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
         MagicMock(return_value={"agent_id": 1, "name": "other_agent"}),
     )
 
-    assert nl2agent_service.process_requirements_confirmation_text(
+    assert nl2agent_service.process_requirements_revision_text(
         1, 202, "tenant_1", "confirm requirements"
     ) == {"intent": "not_applicable"}
 

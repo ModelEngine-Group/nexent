@@ -249,9 +249,11 @@ Redis 中不得保存用户提交的 secret 值。
 
 五项内容必须来自用户明确表达，NL2AGENT 不得根据常识或上下文自行补全。`collecting` 状态下每轮只询问第一个缺失项；五项齐全后输出只读 `nl2agent-requirements-summary` 卡片并停止，不得同时选择模型或搜索资源。
 
-摘要卡实际渲染后调用 `POST /nl2agent/session/{id}/requirements/register`。后端规范化字段并生成稳定 fingerprint：相同摘要重复注册保持幂等，不同摘要会更新 fingerprint 并把状态重置为 `awaiting_confirmation`。注册失败时卡片显示错误和 Retry，同时阻止用户提交确认消息。
+摘要卡实际渲染后调用 `POST /nl2agent/session/{id}/requirements/register`。后端规范化字段并生成稳定 fingerprint。当前摘要返回 `is_current=true`；被新版替代的历史卡返回 `is_current=false`，不能覆盖 Redis 状态，也不显示确认按钮。注册失败时卡片显示错误和 Retry，同时阻止用户继续输入。
 
-用户在聊天框中自然确认或说明修改，不使用确认按钮。`/agent/run` 在保存用户消息、构造 Prompt 和运行模型之前，使用确定性中英文规则识别意图：修改或否定表达优先于确认表达；简短“是”“对”“yes”只在没有其他实质内容时确认；模糊表达不改变状态。确认后写入 `confirmed` 并在同一轮进入模型选择；修改后返回 `collecting`，保留本轮文字供 NL2AGENT 生成修订摘要。
+用户只能点击摘要卡中的“确认需求”按钮完成确认。按钮调用 `POST /nl2agent/session/{id}/requirements/confirm` 并携带当前 fingerprint；后端拒绝过期 fingerprint，相同版本重复确认保持幂等。确认成功后写入 `confirmed`，返回固定自动续跑文本并进入模型选择。
+
+用户仍可在聊天框中说明修改。`/agent/run` 在保存消息和构造 Prompt 前只识别修改或否定意图，并将状态恢复为 `collecting`；“确认需求”“可以继续”“yes”等文字不再确认需求。修订后的新摘要必须产生不同 fingerprint，旧摘要重新挂载不能恢复、覆盖或确认当前版本。
 
 模型选择、三个搜索工具和最终配置均以后端持久化的 `requirements_review.status=confirmed` 为前置条件。未完成的历史测试会话不做兼容恢复。
 
@@ -414,7 +416,7 @@ session start 只把 `status="installable"` 的候选保存到 Redis `official_s
 
 ### 4.8 卡片确认后的自动续跑
 
-模型选择保存、本地资源 Apply/Skip、联网资源全局完成以及身份保存成功后，对应后端接口返回固定的 `chat_injection_text`：
+需求摘要按钮确认、模型选择保存、本地资源 Apply/Skip、联网资源全局完成以及身份保存成功后，对应后端接口返回固定的 `chat_injection_text`：
 
 ```text
 [[NL2AGENT_AUTO_CONTINUE]]
@@ -479,7 +481,7 @@ The previous card action completed successfully. Re-read the authoritative Curre
 满足以下条件后，NL2AGENT 直接输出 `nl2agent-finalize` 卡片，不调用 Skill 名称或不存在的 finalize Tool：
 
 - 模型选择有效
-- 需求摘要已经由用户文字确认
+- 需求摘要已经由用户通过当前摘要卡按钮确认
 - 至少一张本地资源卡已经注册
 - 所有推荐批次已经 applied 或 skipped
 - 所有已安装 MCP 已经绑定工具或显式跳过
@@ -515,6 +517,7 @@ FinalizeCard 会先读取权威 session state：
 |---|---|---|
 | POST | `/session/start` | 创建 NL2AGENT 会话、草稿和 Redis Catalog |
 | POST | `/session/{id}/requirements/register` | 幂等注册已渲染的五项需求摘要 |
+| POST | `/session/{id}/requirements/confirm` | 使用当前 fingerprint 确认需求并返回自动续跑文本 |
 | PUT | `/session/{id}/models` | 保存主模型和备用模型 |
 | POST | `/session/{id}/local-resources/register` | 注册已经渲染的本地推荐批次 |
 | POST | `/session/{id}/apply-local-resources` | 应用指定批次中的本地资源 |
@@ -684,7 +687,7 @@ tenant_id + draft_agent_id + tool_name + canonical_keyword_set
 
 1. 本轮存在新搜索 Observation：原样输出对应结果卡，不再次搜索。
 2. `requirements_review.status=collecting`：按目标、使用者/场景、主要输入、期望输出、关键约束顺序，只询问第一个缺失项；五项齐全时只输出需求摘要卡。
-3. `requirements_review.status=awaiting_confirmation`：不重复摘要卡，只要求用户明确确认或说明修改。
+3. `requirements_review.status=awaiting_confirmation`：不重复摘要卡，只要求用户点击现有卡片中的确认按钮，或在聊天中说明修改；聊天文字不能完成确认。
 4. `requirements_review.status=confirmed` 但模型未确认：只输出固定说明和模型选择卡。
 5. 模型已确认但本地审查缺失：调用一次本地搜索。
 6. 本地卡已展示但未 Apply/Skip：只提示处理现有卡片。
@@ -763,7 +766,7 @@ print(result)
 
 | 卡片 | 主要职责 |
 |---|---|
-| `RequirementsSummaryCard` | 只读展示五项需求，幂等注册摘要；失败时 Retry 并阻止聊天确认 |
+| `RequirementsSummaryCard` | 只读展示五项需求，注册并按 fingerprint 确认；过期卡禁用确认，失败时 Retry |
 | `ModelSelectionCard` | 加载平台可用 LLM，保存主模型和备用模型 |
 | `LocalResourcesCard` | 注册推荐批次，Apply All 或 Continue Without Resources |
 | `WebMcpCard` | 展示配置字段，安装、重试、发现和绑定 MCP tools |
@@ -924,8 +927,10 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 
 - [ ] 五项需求缺少任一项时，每轮只询问第一个缺失项。
 - [ ] 五项齐全后只输出只读需求摘要卡，不提前选择模型或搜索。
-- [ ] 摘要注册幂等，不同摘要会重置为 `awaiting_confirmation`。
-- [ ] 中英文确认、简短肯定、否定优先和修改表达按确定性规则更新状态。
+- [ ] 摘要注册幂等，历史卡不能覆盖新版摘要。
+- [ ] 只有当前 fingerprint 对应卡片的确认按钮可以写入 `confirmed`。
+- [ ] “确认需求”“可以继续”“yes”等聊天文字不会确认需求。
+- [ ] 明确修改或否定表达会返回 `collecting` 并生成新版摘要。
 - [ ] 摘要注册失败时可以 Retry，且注册成功前不能提交确认消息。
 - [ ] 未确认需求不能保存模型、调用三个搜索工具或最终配置。
 

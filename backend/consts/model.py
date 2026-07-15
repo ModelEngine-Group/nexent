@@ -480,6 +480,14 @@ class Nl2AgentRequirementsSummaryRequest(BaseModel):
     key_constraints: str = Field(..., min_length=1, max_length=2000)
 
 
+class Nl2AgentRequirementsConfirmRequest(BaseModel):
+    """Confirm the currently registered NL2AGENT requirements summary."""
+
+    fingerprint: str = Field(
+        ..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+
+
 class Nl2AgentModelSelectionRequest(BaseModel):
     """Persist the ordered LLM selection for an NL2AGENT draft."""
 

@@ -542,6 +542,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/nl2agent/session/${agentId}/online-recommendations/register`,
     registerRequirements: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/requirements/register`,
+    confirmRequirements: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/requirements/confirm`,
     completeOnlineConfiguration: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/online-configuration/complete`,
     sessionState: (agentId: number) =>

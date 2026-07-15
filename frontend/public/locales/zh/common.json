@@ -3100,6 +3100,22 @@
   "systemPrompt.finetune.modeInsert": "插入内容",
   "systemPrompt.finetune.modeInsertDesc": "在指定位置插入新的内容",
   "systemPrompt.finetune.modeSelect": "替换选中",
-  "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围"
+  "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围",
+  "nl2agent.requirements.title": "需求摘要",
+  "nl2agent.requirements.goal": "智能体目标",
+  "nl2agent.requirements.audienceOrScenario": "使用者 / 场景",
+  "nl2agent.requirements.primaryInput": "主要输入",
+  "nl2agent.requirements.expectedOutput": "期望输出",
+  "nl2agent.requirements.keyConstraints": "关键约束",
+  "nl2agent.requirements.registering": "正在注册摘要…",
+  "nl2agent.requirements.notRegistered": "需求摘要注册失败。",
+  "nl2agent.requirements.registrationFailed": "无法注册需求摘要。",
+  "nl2agent.requirements.retry": "重试",
+  "nl2agent.requirements.superseded": "该摘要已被新版替代。",
+  "nl2agent.requirements.confirmed": "需求已确认",
+  "nl2agent.requirements.confirmInstruction": "请确认该摘要，或在聊天中说明需要修改的内容。",
+  "nl2agent.requirements.confirmationFailed": "无法确认需求摘要。",
+  "nl2agent.requirements.confirming": "正在确认…",
+  "nl2agent.requirements.confirm": "确认需求"
 
 }

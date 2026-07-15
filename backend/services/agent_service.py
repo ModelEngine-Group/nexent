@@ -3039,9 +3039,9 @@ async def run_agent_stream(
     # Normal mode: start new stream
     draft_agent_id = getattr(agent_request, "draft_agent_id", None)
     if isinstance(draft_agent_id, int) and draft_agent_id > 0:
-        from services.nl2agent_service import process_requirements_confirmation_text
+        from services.nl2agent_service import process_requirements_revision_text
 
-        process_requirements_confirmation_text(
+        process_requirements_revision_text(
             runner_agent_id=agent_request.agent_id,
             draft_agent_id=draft_agent_id,
             tenant_id=resolved_tenant_id,
