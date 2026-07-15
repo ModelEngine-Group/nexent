@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse
 from consts.exceptions import AgentRunException, UnauthorizedError
 from consts.model import (
     Nl2AgentApplyLocalResourcesRequest,
+    Nl2AgentCardDeliveryRequest,
     Nl2AgentFinalizeRequest,
     Nl2AgentInstallWebSkillRequest,
     Nl2AgentIdentityRequest,
@@ -40,6 +41,7 @@ from services.nl2agent_service import (
     register_local_resource_recommendations,
     register_online_resource_recommendations,
     register_requirements_review,
+    report_card_delivery,
     save_agent_identity,
     select_models,
     skip_mcp_tool_binding,
@@ -79,6 +81,11 @@ def _session_http_error(exc: Exception) -> HTTPException:
             "Confirm the requirements summary",
             "requirements summary is stale",
             "requirements summary is not awaiting confirmation",
+            "card type",
+            "card delivery status",
+            "card failure reason",
+            "message_key is required",
+            "card delivery receipt is stale",
         )
     ):
         return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
@@ -183,9 +190,7 @@ async def start_session_api(
             authorization, http_request
         )
     except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
         result = await start_session(
@@ -213,13 +218,9 @@ async def apply_local_resources_api(
 ):
     """Bulk-bind local tools and skills to the draft agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(
-            authorization, http_request
-        )
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
     except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
         result = await apply_local_resources_batch(
@@ -311,6 +312,28 @@ async def register_requirements_api(
         raise _session_http_error(exc) from exc
 
 
+@router.post("/session/{agent_id}/card-delivery")
+async def report_card_delivery_api(
+    agent_id: int,
+    payload: Nl2AgentCardDeliveryRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await report_card_delivery(
+            agent_id=agent_id,
+            message_key=payload.message_key,
+            card_type=payload.card_type,
+            status=payload.status,
+            card_key=payload.card_key,
+            reason=payload.reason,
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
 @router.post("/session/{agent_id}/requirements/confirm")
 async def confirm_requirements_api(
     agent_id: int,
@@ -382,9 +405,7 @@ async def install_web_skill_api(
             authorization, http_request
         )
     except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
         result = await install_web_skill(
@@ -421,9 +442,7 @@ async def finalize_agent_api(
             authorization, http_request
         )
     except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
         result = await finalize_agent(

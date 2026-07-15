@@ -10,6 +10,10 @@
 import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
+import type {
+  Nl2AgentCardFailureReason,
+  Nl2AgentCardType,
+} from "@/components/nl2agent/cardValidation";
 
 export const getAvailablePlatformLlms = async (): Promise<
   Array<{ id: number; displayName: string }>
@@ -83,6 +87,35 @@ export const confirmRequirementsSummary = async (
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.confirmRequirements(agentId),
     { method: "POST", body: JSON.stringify({ fingerprint }) }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
+export interface Nl2AgentCardDeliveryResponse {
+  agent_id: number;
+  card_type: Nl2AgentCardType;
+  status: "rendered" | "failed";
+  card_key?: string;
+  reason?: Nl2AgentCardFailureReason;
+  retry_count: number;
+  auto_retry_allowed: boolean;
+  chat_injection_text?: string;
+}
+
+export const reportNl2AgentCardDelivery = async (
+  agentId: number,
+  payload: {
+    message_key: string;
+    card_type: Nl2AgentCardType;
+    status: "rendered" | "failed";
+    card_key?: string;
+    reason?: Nl2AgentCardFailureReason;
+  }
+): Promise<Nl2AgentCardDeliveryResponse> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.cardDelivery(agentId),
+    { method: "POST", body: JSON.stringify(payload) }
   );
   if (!response.ok) throw new Error(await response.text());
   return response.json();
@@ -201,6 +234,16 @@ export interface Nl2AgentSessionState {
       }
     >;
     online_configuration_confirmed: boolean;
+    card_delivery?: Record<
+      string,
+      {
+        message_key: string;
+        status: "rendered" | "failed";
+        card_key?: string;
+        reason?: string;
+        retry_count: number;
+      }
+    >;
     mcp_workflows: Record<
       string,
       {

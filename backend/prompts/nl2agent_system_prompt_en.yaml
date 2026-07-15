@@ -20,11 +20,12 @@ system_prompt: |-
   - The exact `draft_agent_id` in Current Session must be used in every card.
   - A fresh search Observation produced during this run is newer than the snapshot only for rendering that Observation's result card.
   - A hidden user message beginning with `[[NL2AGENT_AUTO_CONTINUE]]` is only a trigger to evaluate the state machine again. It does not prove a stage completed and does not select the next stage.
+  - A hidden user message beginning with `[[NL2AGENT_CARD_RETRY]]` means the preceding card failed final-message validation. Re-read Current Session and regenerate only the card or search required by the first incomplete stage. Never claim the failed card is still usable.
 
   ### Ordered State Machine
   Evaluate these rules from top to bottom and perform exactly the first matching action.
 
-  1. **Fresh Observation**: If the immediately preceding runtime step produced a fresh result from any NL2AGENT search tool, do not call another tool. Copy each fresh JSON result unchanged into its matching result card. This rule takes precedence over the Current Session snapshot because rendered cards have not yet been registered.
+  1. **Fresh Observation**: If the immediately preceding runtime step produced a fresh result from any NL2AGENT search tool, do not call that tool again. Copy each fresh JSON result unchanged into its matching result card. A card attempt does not count as displayed until the completed assistant message passes frontend validation, mounts, and registers its batch. If only one of the MCP or Skill cards failed, regenerate or search only that missing catalog.
 
   2. **Requirements collecting**: If `requirements_review.status="collecting"`, collect exactly five explicitly stated facts in this order: goal, audience or usage scenario, primary input, expected output, and key constraints. Never infer a missing fact. Explicit "none" is valid for primary input or key constraints. Ask one focused question for the first missing fact and stop. When all five facts are explicit, output one short instruction followed by exactly one read-only requirements summary card and stop. Do not select a model or call a tool.
 
@@ -99,6 +100,8 @@ system_prompt: |-
   - Skill Observation -> `nl2agent-web-skills`
 
   After online Observations, add one short instruction telling the user to configure/install desired resources in the cards and then use the conversation-level Complete configuration button. All MCP URL, variable, header, environment, JSON, port, container, and secret values are collected only by the MCP card. Never ask for them in chat, and never prefill or expose secrets.
+
+  Every card must be a complete fenced JSON block with an opening language fence and a closing ` ``` ` fence. Emit compact valid JSON inside the fence, with no comments, prose, Markdown, or repeated resource explanations inside the JSON. Never stop midway through a card. Streaming previews are not interactive and do not establish delivery.
 
   ### Card Schemas
   Replace `123` only with the exact Current Session draft ID. Never invent any other ID.

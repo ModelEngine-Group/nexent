@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
-import { message } from "antd";
+import React, { useCallback, useEffect, useState } from "react";
+import { Alert, Button } from "antd";
 import { resolveNl2AgentCardAgentId } from "@/lib/chat/nl2agentDraftContext";
 import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
 import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
@@ -12,6 +12,7 @@ import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
 import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { validateNl2AgentCards, type Nl2AgentCardType } from "./cardValidation";
 
 export const OnlineRecommendationGroup: React.FC<{
   agentId: number;
@@ -19,38 +20,86 @@ export const OnlineRecommendationGroup: React.FC<{
   resourceType: "mcp" | "skill";
   itemKeys: string[];
   children: React.ReactNode;
-}> = ({ agentId, recommendationBatchId, resourceType, itemKeys, children }) => {
+  onRegistered?: (
+    cardType: Nl2AgentCardType,
+    cardKey?: string
+  ) => void | Promise<void>;
+  registrationEnabled?: boolean;
+}> = ({
+  agentId,
+  recommendationBatchId,
+  resourceType,
+  itemKeys,
+  children,
+  onRegistered,
+  registrationEnabled = true,
+}) => {
   const workflow = useNl2AgentWorkflow();
   const serializedKeys = JSON.stringify(itemKeys);
+  const [registered, setRegistered] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string>();
 
-  useEffect(() => {
-    if (!recommendationBatchId || !workflow.active) return;
+  const register = useCallback(async () => {
+    if (!recommendationBatchId || !workflow.active || !registrationEnabled) return;
     workflow.beginAction();
-    void registerOnlineResourceRecommendations(agentId, {
-      recommendation_batch_id: recommendationBatchId,
-      resource_type: resourceType,
-      item_keys: itemKeys,
-    })
-      .then(() => workflow.notifyStateChanged())
-      .catch((error) =>
-        message.error(
-          error instanceof Error
-            ? error.message
-            : "Failed to register online recommendations."
-        )
-      )
-      .finally(() => workflow.endAction());
-    // Stable serialized keys prevent repeated registration from array identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setRegistrationError(undefined);
+    try {
+      await registerOnlineResourceRecommendations(agentId, {
+        recommendation_batch_id: recommendationBatchId,
+        resource_type: resourceType,
+        item_keys: JSON.parse(serializedKeys),
+      });
+      setRegistered(true);
+      workflow.notifyStateChanged();
+      await onRegistered?.(
+        resourceType === "mcp" ? "web_mcp" : "web_skill",
+        recommendationBatchId
+      );
+    } catch (error) {
+      setRegistrationError(
+        error instanceof Error
+          ? error.message
+          : "Failed to register online recommendations."
+      );
+    } finally {
+      workflow.endAction();
+    }
   }, [
     agentId,
+    onRegistered,
     recommendationBatchId,
     resourceType,
     serializedKeys,
     workflow.active,
+    workflow.beginAction,
+    workflow.endAction,
+    workflow.notifyStateChanged,
+    registrationEnabled,
   ]);
 
-  return <>{children}</>;
+  useEffect(() => {
+    void register();
+  }, [register]);
+
+  return (
+    <div>
+      {registrationError && (
+        <Alert
+          className="my-2"
+          type="error"
+          message={registrationError}
+          action={
+            <Button size="small" onClick={() => void register()}>
+              Retry registration
+            </Button>
+          }
+        />
+      )}
+      <div className={!registered ? "pointer-events-none opacity-60" : ""}>
+        {children}
+      </div>
+    </div>
+  );
 };
 
 /**
@@ -76,6 +125,11 @@ export interface Nl2AgentCardRendererProps {
   /** Optional handler to open the existing AddMcpServiceModal prefilled. */
   onInstallMcp?: (item: WebMcpCardItem) => void;
   trustedDraftAgentId?: number | null;
+  onRegistered?: (
+    cardType: Nl2AgentCardType,
+    cardKey?: string
+  ) => void | Promise<void>;
+  registrationEnabled?: boolean;
 }
 
 const renderInvalidAgentId = () => (
@@ -113,7 +167,12 @@ export const tryRenderNl2AgentCard = (
   language: string,
   content: string,
   onInstallMcp?: (item: WebMcpCardItem) => void,
-  trustedDraftAgentId?: number | null
+  trustedDraftAgentId?: number | null,
+  onRegistered?: (
+    cardType: Nl2AgentCardType,
+    cardKey?: string
+  ) => void | Promise<void>,
+  registrationEnabled = false
 ): React.ReactNode | null => {
   const normalizedLanguage = language?.trim().toLowerCase();
   if (!normalizedLanguage || !normalizedLanguage.startsWith("nl2agent-")) {
@@ -147,6 +206,28 @@ export const tryRenderNl2AgentCard = (
   if (agentId == null) {
     return renderInvalidAgentId();
   }
+  if (
+    [
+      "nl2agent-web-mcp",
+      "nl2agent-web-mcps",
+      "nl2agent-web-skill",
+      "nl2agent-web-skills",
+    ].includes(normalizedLanguage) &&
+    !parsed.recommendation_batch_id
+  ) {
+    return renderMissingOnlineBatch();
+  }
+  const validation = validateNl2AgentCards(
+    `\`\`\`${normalizedLanguage}\n${content}\n\`\`\``,
+    trustedDraftAgentId
+  );
+  if (validation.failure) {
+    return (
+      <div className="my-2 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        Invalid NL2AGENT card: {validation.failure.reason}.
+      </div>
+    );
+  }
 
   switch (normalizedLanguage) {
     case "nl2agent-requirements-summary":
@@ -160,6 +241,8 @@ export const tryRenderNl2AgentCard = (
             expected_output: String(parsed.expected_output || ""),
             key_constraints: String(parsed.key_constraints || ""),
           }}
+          onRegistered={onRegistered}
+          registrationEnabled={registrationEnabled}
         />
       );
     case "nl2agent-model-selection":
@@ -192,6 +275,8 @@ export const tryRenderNl2AgentCard = (
           recommendationBatchId={String(parsed.recommendation_batch_id || "")}
           tools={tools}
           skills={skills}
+          onRegistered={onRegistered}
+          registrationEnabled={registrationEnabled}
         />
       );
     }
@@ -204,6 +289,8 @@ export const tryRenderNl2AgentCard = (
           recommendationBatchId={String(parsed.recommendation_batch_id || "")}
           resourceType="mcp"
           itemKeys={[String(item.recommendation_id || "")].filter(Boolean)}
+          onRegistered={onRegistered}
+          registrationEnabled={registrationEnabled}
         >
           <WebMcpCard agentId={agentId} item={item} onInstall={onInstallMcp} />
         </OnlineRecommendationGroup>
@@ -220,6 +307,8 @@ export const tryRenderNl2AgentCard = (
           itemKeys={items
             .map((item) => String(item.recommendation_id || ""))
             .filter(Boolean)}
+          onRegistered={onRegistered}
+          registrationEnabled={registrationEnabled}
         >
           {items.map((item, i) => (
             <WebMcpCard
@@ -246,6 +335,8 @@ export const tryRenderNl2AgentCard = (
           recommendationBatchId={String(parsed.recommendation_batch_id || "")}
           resourceType="skill"
           itemKeys={[itemKey]}
+          onRegistered={onRegistered}
+          registrationEnabled={registrationEnabled}
         >
           <WebSkillCard agentId={agentId} item={item} />
         </OnlineRecommendationGroup>
@@ -266,6 +357,8 @@ export const tryRenderNl2AgentCard = (
                   .trim()
                   .toLowerCase()}`
           )}
+          onRegistered={onRegistered}
+          registrationEnabled={registrationEnabled}
         >
           {items.map((item, i) => (
             <WebSkillCard key={i} agentId={agentId} item={item} />

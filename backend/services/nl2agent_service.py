@@ -40,6 +40,7 @@ from agents.nl2agent_session_catalog import (
     register_recommendation_batch,
     register_online_recommendation_batch,
     register_requirements_summary,
+    record_card_delivery,
     resolve_recommendation_batch,
     set_nl2agent_session_catalogs,
     update_mcp_workflow,
@@ -111,6 +112,12 @@ NL2AGENT_CHAT_INJECTION_TEXT = (
     "The previous card action completed successfully. Re-read the authoritative "
     "Current Session state and continue naturally from the next incomplete stage. "
     "Do not ask the user to type continue."
+)
+NL2AGENT_CARD_RETRY_INJECTION_TEXT = (
+    "[[NL2AGENT_CARD_RETRY]]\n"
+    "The previous card output could not be rendered. Re-read the authoritative "
+    "Current Session state and generate only the card required by the first "
+    "incomplete stage. Do not claim the previous card is still valid."
 )
 
 _NL2AGENT_SEED_PROMPT_FALLBACK = (
@@ -1324,6 +1331,79 @@ async def register_online_resource_recommendations(
         item_keys,
     )
     return {"recommendation_batch_id": recommendation_batch_id, **batch}
+
+
+async def report_card_delivery(
+    agent_id: int,
+    message_key: str,
+    card_type: str,
+    status: str,
+    card_key: Optional[str],
+    reason: Optional[str],
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Record a final-card receipt after validating draft ownership and stage."""
+    draft = _get_owned_draft(agent_id, tenant_id)
+    state = get_nl2agent_session_state(tenant_id, agent_id)
+    requirements_status = state["requirements_review"].get("status")
+    local_batches = state["recommendation_batches"]
+    local_complete = bool(local_batches) and all(
+        batch.get("status") in {"applied", "skipped"}
+        for batch in local_batches.values()
+    )
+    online_batches = state["online_recommendation_batches"]
+    online_types = {batch.get("resource_type") for batch in online_batches.values()}
+    online_complete = (
+        {"mcp", "skill"}.issubset(online_types)
+        and state.get("online_configuration_confirmed") is True
+    )
+    has_models = bool(_normalize_model_ids(draft.get("model_ids"))) and bool(
+        draft.get("business_logic_model_id")
+    )
+    current_stage = (
+        "requirements_summary"
+        if requirements_status != "confirmed"
+        else "model_selection"
+        if not has_models
+        else "local_resources"
+        if not local_complete
+        else "online_resources"
+        if not online_complete
+        else "agent_identity"
+        if not state.get("identity_confirmed")
+        else "final_review"
+    )
+    expected_stages = {
+        "requirements_summary": {"requirements_summary"},
+        "model_selection": {"model_selection"},
+        "local_resources": {"local_resources"},
+        "web_mcp": {"online_resources"},
+        "web_skill": {"online_resources"},
+        "agent_identity": {"agent_identity"},
+        "final_review": {"final_review"},
+    }
+    if current_stage not in expected_stages[card_type]:
+        raise AgentRunException(
+            "The card delivery receipt is stale for the current NL2AGENT workflow stage."
+        )
+    delivery = record_card_delivery(
+        tenant_id,
+        agent_id,
+        message_key,
+        card_type,
+        status,
+        card_key,
+        reason,
+    )
+    retry_count = int(delivery.get("retry_count", 0))
+    response = {
+        "agent_id": agent_id,
+        **delivery,
+        "auto_retry_allowed": status == "failed" and retry_count <= 2,
+    }
+    if status == "failed":
+        response["chat_injection_text"] = NL2AGENT_CARD_RETRY_INJECTION_TEXT
+    return response
 
 
 async def confirm_online_resource_configuration(

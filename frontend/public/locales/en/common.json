@@ -3122,5 +3122,8 @@
   "nl2agent.finalize.officialSkill": "Official Skill",
   "nl2agent.finalize.none": "None",
   "nl2agent.finalize.invalidReferences": "Selected models or resources are no longer valid",
-  "nl2agent.finalize.invalidReferencesDescription": "Reconfigure the draft before publishing. Invalid references: {{references}}"
+  "nl2agent.finalize.invalidReferencesDescription": "Reconfigure the draft before publishing. Invalid references: {{references}}",
+  "nl2agent.cardDelivery.generating": "Generating card…",
+  "nl2agent.cardDelivery.retryRequired": "The card could not be generated.",
+  "nl2agent.cardDelivery.regenerate": "Regenerate card"
 }

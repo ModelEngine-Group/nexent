@@ -116,6 +116,37 @@ def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     )
 
 
+@pytest.mark.asyncio
+async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
+    _confirm_requirements()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test", "model_ids": []}),
+    )
+
+    results = []
+    for index in range(1, 4):
+        results.append(
+            await nl2agent_service.report_card_delivery(
+                agent_id=202,
+                message_key=f"message-{index}",
+                card_type="model_selection",
+                status="failed",
+                card_key=None,
+                reason="truncated_fence",
+                tenant_id="tenant_1",
+            )
+        )
+
+    assert [result["retry_count"] for result in results] == [1, 2, 3]
+    assert [result["auto_retry_allowed"] for result in results] == [True, True, False]
+    assert all(
+        result["chat_injection_text"].startswith("[[NL2AGENT_CARD_RETRY]]")
+        for result in results
+    )
+
+
 class _FakeRedis:
     def __init__(self):
         self.data = {}

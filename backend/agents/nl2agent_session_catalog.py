@@ -28,6 +28,22 @@ _REQUIREMENTS_FIELDS = (
     "key_constraints",
 )
 _REQUIREMENTS_STATUSES = {"collecting", "awaiting_confirmation", "confirmed"}
+_CARD_DELIVERY_TYPES = {
+    "requirements_summary",
+    "model_selection",
+    "local_resources",
+    "web_mcp",
+    "web_skill",
+    "agent_identity",
+    "final_review",
+}
+_CARD_DELIVERY_STATUSES = {"rendered", "failed"}
+_CARD_DELIVERY_FAILURE_REASONS = {
+    "truncated_fence",
+    "invalid_json",
+    "invalid_schema",
+    "missing_card",
+}
 _CONFIRMATION_PHRASES = {
     "确认",
     "确认需求",
@@ -94,6 +110,7 @@ def _empty_session_state() -> Dict[str, Any]:
         "mcp_workflows": {},
         "online_recommendation_batches": {},
         "online_configuration_confirmed": False,
+        "card_delivery": {},
     }
 
 
@@ -155,6 +172,19 @@ def get_nl2agent_session_state(
         if not isinstance(online_confirmed, bool):
             raise ValueError("online_configuration_confirmed must be a boolean")
         state["online_configuration_confirmed"] = online_confirmed
+        card_delivery = state.get("card_delivery", {})
+        if not isinstance(card_delivery, dict):
+            raise ValueError("card_delivery must be an object")
+        for card_type, delivery in card_delivery.items():
+            if card_type not in _CARD_DELIVERY_TYPES or not isinstance(delivery, dict):
+                raise ValueError("card_delivery contains an invalid card type")
+            if delivery.get("status") not in _CARD_DELIVERY_STATUSES:
+                raise ValueError("card_delivery status is invalid")
+            if not isinstance(delivery.get("message_key"), str):
+                raise ValueError("card_delivery message_key is invalid")
+            if not isinstance(delivery.get("retry_count", 0), int):
+                raise ValueError("card_delivery retry_count is invalid")
+        state["card_delivery"] = card_delivery
         return deepcopy(state)
     except Exception as exc:
         logger.error(
@@ -207,8 +237,7 @@ def register_requirements_summary(
     ]
     if missing_fields:
         raise Nl2AgentSessionCatalogError(
-            "Requirements summary fields cannot be empty: "
-            + ", ".join(missing_fields)
+            "Requirements summary fields cannot be empty: " + ", ".join(missing_fields)
         )
     fingerprint = _requirements_fingerprint(normalized_summary)
     state = get_nl2agent_session_state(tenant, draft_id)
@@ -294,15 +323,101 @@ def confirm_requirements_summary(
     return deepcopy(review)
 
 
-def assert_requirements_confirmed(
-    tenant_id: str, draft_agent_id: int
-) -> None:
+def assert_requirements_confirmed(tenant_id: str, draft_agent_id: int) -> None:
     """Reject protected workflow actions until requirements are confirmed."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     if state["requirements_review"].get("status") != "confirmed":
         raise Nl2AgentSessionCatalogError(
             "Confirm the requirements summary before continuing configuration."
         )
+
+
+def _rollback_failed_card(
+    state: Dict[str, Any], card_type: str, card_key: Optional[str]
+) -> None:
+    """Clear only unconfirmed delivery state owned by the failed card."""
+    if card_type == "requirements_summary":
+        review = state["requirements_review"]
+        if review.get("status") == "awaiting_confirmation":
+            state["requirements_review"] = {
+                "status": "collecting",
+                "summary": None,
+                "fingerprint": "",
+            }
+        return
+
+    if card_type == "local_resources":
+        batches = state["recommendation_batches"]
+        removable = [
+            batch_id
+            for batch_id, batch in batches.items()
+            if batch.get("status") == "recommendations_ready"
+        ]
+        for batch_id in removable:
+            batches.pop(batch_id, None)
+        return
+
+    if card_type in {"web_mcp", "web_skill"}:
+        resource_type = "mcp" if card_type == "web_mcp" else "skill"
+        batches = state["online_recommendation_batches"]
+        removable = [
+            batch_id
+            for batch_id, batch in batches.items()
+            if batch.get("resource_type") == resource_type
+            and batch.get("status") == "recommendations_ready"
+        ]
+        for batch_id in removable:
+            batches.pop(batch_id, None)
+        if removable:
+            state["online_configuration_confirmed"] = False
+
+
+def record_card_delivery(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    message_key: str,
+    card_type: str,
+    status: str,
+    card_key: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persist one final-message card delivery receipt and safely recover failures."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    if card_type not in _CARD_DELIVERY_TYPES:
+        raise Nl2AgentSessionCatalogError("Invalid NL2AGENT card type.")
+    if status not in _CARD_DELIVERY_STATUSES:
+        raise Nl2AgentSessionCatalogError("Invalid NL2AGENT card delivery status.")
+    message_key = str(message_key or "").strip()
+    if not message_key:
+        raise Nl2AgentSessionCatalogError("message_key is required.")
+    if status == "failed" and reason not in _CARD_DELIVERY_FAILURE_REASONS:
+        raise Nl2AgentSessionCatalogError("Invalid NL2AGENT card failure reason.")
+
+    state = get_nl2agent_session_state(tenant, draft_id)
+    deliveries = state["card_delivery"]
+    existing = deliveries.get(card_type, {})
+    if (
+        existing.get("message_key") == message_key
+        and existing.get("status") == status
+        and existing.get("card_key") == card_key
+    ):
+        return deepcopy(existing)
+
+    retry_count = 0
+    if status == "failed":
+        retry_count = int(existing.get("retry_count", 0)) + 1
+        _rollback_failed_card(state, card_type, card_key)
+    delivery = {
+        "message_key": message_key,
+        "card_type": card_type,
+        "status": status,
+        "card_key": card_key,
+        "reason": reason if status == "failed" else None,
+        "retry_count": retry_count,
+    }
+    deliveries[card_type] = delivery
+    _set_nl2agent_session_state(tenant, draft_id, state)
+    return deepcopy(delivery)
 
 
 def confirm_agent_identity(
@@ -345,7 +460,9 @@ def update_mcp_workflow(
     workflow = state["mcp_workflows"].setdefault(
         recommendation_id, {"recommendation_id": recommendation_id}
     )
-    workflow.update({key: deepcopy(value) for key, value in values.items() if key in allowed})
+    workflow.update(
+        {key: deepcopy(value) for key, value in values.items() if key in allowed}
+    )
     _set_nl2agent_session_state(tenant, draft_id, state)
     return deepcopy(workflow)
 
@@ -386,7 +503,9 @@ def register_online_recommendation_batch(
         raise Nl2AgentSessionCatalogError("Invalid online resource type.")
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    normalized_keys = sorted({str(key).strip() for key in item_keys if str(key).strip()})
+    normalized_keys = sorted(
+        {str(key).strip() for key in item_keys if str(key).strip()}
+    )
     state = get_nl2agent_session_state(tenant, draft_id)
     batches = state["online_recommendation_batches"]
     expected = {
@@ -437,9 +556,7 @@ def complete_online_configuration(
     return sorted(batches)
 
 
-def assert_online_configuration_complete(
-    tenant_id: str, draft_agent_id: int
-) -> None:
+def assert_online_configuration_complete(tenant_id: str, draft_agent_id: int) -> None:
     """Reject finalization when rendered online batches remain unfinished."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     batches = state["online_recommendation_batches"]
@@ -448,9 +565,8 @@ def assert_online_configuration_complete(
         raise Nl2AgentSessionCatalogError(
             "Show online resource recommendations for both MCP and Skill before finalizing."
         )
-    if (
-        not state.get("online_configuration_confirmed")
-        or any(batch.get("status") != "completed" for batch in batches.values())
+    if not state.get("online_configuration_confirmed") or any(
+        batch.get("status") != "completed" for batch in batches.values()
     ):
         raise Nl2AgentSessionCatalogError(
             "Complete the online resource configuration before finalizing."
@@ -478,8 +594,13 @@ def register_recommendation_batch(
     existing = batches.get(recommendation_batch_id)
     if existing is None:
         batches[recommendation_batch_id] = expected
-    elif existing.get("tool_ids") != expected["tool_ids"] or existing.get("skill_ids") != expected["skill_ids"]:
-        raise Nl2AgentSessionCatalogError("Recommendation batch contents do not match the registered card.")
+    elif (
+        existing.get("tool_ids") != expected["tool_ids"]
+        or existing.get("skill_ids") != expected["skill_ids"]
+    ):
+        raise Nl2AgentSessionCatalogError(
+            "Recommendation batch contents do not match the registered card."
+        )
     _set_nl2agent_session_state(tenant, draft_id, state)
     return deepcopy(batches[recommendation_batch_id])
 
@@ -502,9 +623,13 @@ def resolve_recommendation_batch(
         raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
     if status == "applied":
         if not set(map(int, tool_ids or [])).issubset(set(batch["tool_ids"])):
-            raise Nl2AgentSessionCatalogError("Applied tools are not part of the recommendation batch.")
+            raise Nl2AgentSessionCatalogError(
+                "Applied tools are not part of the recommendation batch."
+            )
         if not set(map(int, skill_ids or [])).issubset(set(batch["skill_ids"])):
-            raise Nl2AgentSessionCatalogError("Applied skills are not part of the recommendation batch.")
+            raise Nl2AgentSessionCatalogError(
+                "Applied skills are not part of the recommendation batch."
+            )
         batch["applied_tool_ids"] = sorted(set(map(int, tool_ids or [])))
         batch["applied_skill_ids"] = sorted(set(map(int, skill_ids or [])))
     batch["status"] = status
@@ -519,7 +644,9 @@ def assert_resource_review_complete(tenant_id: str, draft_agent_id: int) -> None
         raise Nl2AgentSessionCatalogError(
             "Show the local resource recommendation card before finalizing."
         )
-    if any(batch.get("status") == "recommendations_ready" for batch in batches.values()):
+    if any(
+        batch.get("status") == "recommendations_ready" for batch in batches.values()
+    ):
         raise Nl2AgentSessionCatalogError(
             "Apply or skip every shown local resource recommendation before finalizing."
         )

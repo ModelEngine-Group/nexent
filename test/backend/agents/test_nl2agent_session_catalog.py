@@ -83,7 +83,9 @@ def test_malformed_catalogs_raise_contextual_error(fake_redis, caplog):
     assert "Malformed NL2AGENT catalogs" in caplog.text
 
 
-def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(fake_redis):
+def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(
+    fake_redis,
+):
     first = catalog_module.register_recommendation_batch(
         "tenant_1", 202, "batch_1", [3, 1], [7]
     )
@@ -105,9 +107,7 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
 
 
 def test_empty_recommendation_batch_can_be_explicitly_skipped(fake_redis):
-    catalog_module.register_recommendation_batch(
-        "tenant_1", 202, "empty_batch", [], []
-    )
+    catalog_module.register_recommendation_batch("tenant_1", 202, "empty_batch", [], [])
     catalog_module.resolve_recommendation_batch(
         "tenant_1", 202, "empty_batch", "skipped"
     )
@@ -135,16 +135,18 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_r
         discovered_tool_ids=[11, 12],
         bound_tool_ids=[],
     )
-    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"):
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"
+    ):
         catalog_module.assert_mcp_workflows_resolved("tenant_1", 202)
 
     catalog_module.update_mcp_workflow(
         "tenant_1", 202, "registry:github", status="tools_bound", bound_tool_ids=[11]
     )
     catalog_module.assert_mcp_workflows_resolved("tenant_1", 202)
-    workflow = catalog_module.get_nl2agent_session_state("tenant_1", 202)["mcp_workflows"][
-        "registry:github"
-    ]
+    workflow = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
+        "mcp_workflows"
+    ]["registry:github"]
     assert "config_values" not in workflow
 
 
@@ -241,9 +243,7 @@ def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
 
 
 def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
-    catalog_module.register_recommendation_batch(
-        "tenant_1", 202, "batch_1", [1], []
-    )
+    catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [1], [])
     assert catalog_module.get_nl2agent_session_state("tenant_1", 303) == {
         "requirements_review": {
             "status": "collecting",
@@ -255,6 +255,7 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
         "mcp_workflows": {},
         "online_recommendation_batches": {},
         "online_configuration_confirmed": False,
+        "card_delivery": {},
     }
     assert catalog_module.get_nl2agent_session_state("tenant_2", 202) == {
         "requirements_review": {
@@ -267,7 +268,78 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
         "mcp_workflows": {},
         "online_recommendation_batches": {},
         "online_configuration_confirmed": False,
+        "card_delivery": {},
     }
+
+
+def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
+    first = catalog_module.record_card_delivery(
+        "tenant_1",
+        202,
+        "message-1",
+        "local_resources",
+        "failed",
+        reason="truncated_fence",
+    )
+    duplicate = catalog_module.record_card_delivery(
+        "tenant_1",
+        202,
+        "message-1",
+        "local_resources",
+        "failed",
+        reason="truncated_fence",
+    )
+    second = catalog_module.record_card_delivery(
+        "tenant_1", 202, "message-2", "local_resources", "failed", reason="invalid_json"
+    )
+    third = catalog_module.record_card_delivery(
+        "tenant_1",
+        202,
+        "message-3",
+        "local_resources",
+        "failed",
+        reason="invalid_schema",
+    )
+
+    assert first == duplicate
+    assert first["retry_count"] == 1
+    assert second["retry_count"] == 2
+    assert third["retry_count"] == 3
+
+
+def test_failed_delivery_rolls_back_only_unresolved_card_state(fake_redis):
+    catalog_module.register_recommendation_batch("tenant_1", 202, "pending", [1], [])
+    catalog_module.register_recommendation_batch("tenant_1", 202, "applied", [2], [])
+    catalog_module.resolve_recommendation_batch(
+        "tenant_1", 202, "applied", "applied", [2], []
+    )
+
+    catalog_module.record_card_delivery(
+        "tenant_1",
+        202,
+        "message-1",
+        "local_resources",
+        "failed",
+        card_key="pending",
+        reason="truncated_fence",
+    )
+
+    batches = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
+        "recommendation_batches"
+    ]
+    assert "pending" not in batches
+    assert batches["applied"]["status"] == "applied"
+
+
+def test_rendered_delivery_resets_retry_count(fake_redis):
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, "message-1", "model_selection", "failed", reason="invalid_json"
+    )
+    rendered = catalog_module.record_card_delivery(
+        "tenant_1", 202, "message-2", "model_selection", "rendered"
+    )
+    assert rendered["retry_count"] == 0
+    assert rendered["status"] == "rendered"
 
 
 def test_requirements_summary_registration_and_button_confirmation(fake_redis):
@@ -279,12 +351,8 @@ def test_requirements_summary_registration_and_button_confirmation(fake_redis):
         "key_constraints": "No invented facts",
     }
 
-    first = catalog_module.register_requirements_summary(
-        "tenant_1", 202, summary
-    )
-    second = catalog_module.register_requirements_summary(
-        "tenant_1", 202, summary
-    )
+    first = catalog_module.register_requirements_summary("tenant_1", 202, summary)
+    second = catalog_module.register_requirements_summary("tenant_1", 202, summary)
 
     assert first == second
     assert first["status"] == "awaiting_confirmation"
@@ -295,9 +363,12 @@ def test_requirements_summary_registration_and_button_confirmation(fake_redis):
         "tenant_1", 202, first["fingerprint"]
     )
     assert confirmed["status"] == "confirmed"
-    assert catalog_module.confirm_requirements_summary(
-        "tenant_1", 202, first["fingerprint"]
-    )["status"] == "confirmed"
+    assert (
+        catalog_module.confirm_requirements_summary(
+            "tenant_1", 202, first["fingerprint"]
+        )["status"]
+        == "confirmed"
+    )
     catalog_module.assert_requirements_confirmed("tenant_1", 202)
 
 
@@ -313,9 +384,7 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
     catalog_module.apply_requirements_revision_text(
         "tenant_1", 202, "change the expected output"
     )
-    unchanged = catalog_module.register_requirements_summary(
-        "tenant_1", 202, summary
-    )
+    unchanged = catalog_module.register_requirements_summary("tenant_1", 202, summary)
 
     assert unchanged["status"] == "collecting"
     assert unchanged["is_current"] is False
@@ -392,9 +461,7 @@ def test_text_confirmation_requires_button(fake_redis, text):
         },
     )
 
-    result = catalog_module.apply_requirements_revision_text(
-        "tenant_1", 202, text
-    )
+    result = catalog_module.apply_requirements_revision_text("tenant_1", 202, text)
 
     assert result["intent"] == "confirmation_requires_button"
     assert result["status"] == "awaiting_confirmation"
@@ -408,9 +475,7 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
         "expected_output": "Presentation",
         "key_constraints": "No invented facts",
     }
-    first = catalog_module.register_requirements_summary(
-        "tenant_1", 202, original
-    )
+    first = catalog_module.register_requirements_summary("tenant_1", 202, original)
     catalog_module.apply_requirements_revision_text(
         "tenant_1", 202, "change the expected output"
     )
@@ -418,9 +483,7 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
         "tenant_1", 202, {**original, "expected_output": "Presentation and notes"}
     )
 
-    stale = catalog_module.register_requirements_summary(
-        "tenant_1", 202, original
-    )
+    stale = catalog_module.register_requirements_summary("tenant_1", 202, original)
 
     assert stale["is_current"] is False
     assert stale["fingerprint"] == revised["fingerprint"]

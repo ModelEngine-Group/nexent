@@ -20,6 +20,7 @@ import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
 import { tryRenderNl2AgentCard } from "@/components/nl2agent";
 import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
+import type { Nl2AgentCardType } from "@/components/nl2agent/cardValidation";
 
 interface MarkdownRendererProps {
   content: string;
@@ -36,6 +37,13 @@ interface MarkdownRendererProps {
   resolveS3Media?: boolean;
   onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
   nl2AgentDraftAgentId?: number | null;
+  /** Only a completed final assistant message may mount interactive cards. */
+  nl2AgentCardRenderMode?: "placeholder" | "interactive";
+  onNl2AgentCardRegistered?: (
+    cardType: Nl2AgentCardType,
+    cardKey?: string
+  ) => void | Promise<void>;
+  nl2AgentCardRegistrationEnabled?: boolean;
 }
 
 export interface MarkdownHeading {
@@ -1050,6 +1058,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   resolveS3Media = false,
   onInstallNl2AgentMcp,
   nl2AgentDraftAgentId,
+  nl2AgentCardRenderMode = "placeholder",
+  onNl2AgentCardRegistered,
+  nl2AgentCardRegistrationEnabled = false,
 }) => {
   const { t } = useTranslation("common");
 
@@ -1372,11 +1383,22 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     // of a plain code block when the fenced language tag is an
                     // nl2agent-* tag.
                     if (match[1].startsWith("nl2agent-")) {
+                      if (nl2AgentCardRenderMode !== "interactive") {
+                        return (
+                          <div className="my-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                            {t("nl2agent.cardDelivery.generating", {
+                              defaultValue: "Generating card…",
+                            })}
+                          </div>
+                        );
+                      }
                       const node = tryRenderNl2AgentCard(
                         match[1],
                         codeContent,
                         onInstallNl2AgentMcp,
-                        nl2AgentDraftAgentId
+                        nl2AgentDraftAgentId,
+                        onNl2AgentCardRegistered,
+                        nl2AgentCardRegistrationEnabled
                       );
                       if (node) {
                         return <>{node}</>;

@@ -17,10 +17,16 @@ import {
   type Nl2AgentRequirementsSummary,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import type { Nl2AgentCardType } from "./cardValidation";
 
 export interface RequirementsSummaryCardProps {
   agentId: number;
   summary: Nl2AgentRequirementsSummary;
+  onRegistered?: (
+    cardType: Nl2AgentCardType,
+    cardKey?: string
+  ) => void | Promise<void>;
+  registrationEnabled?: boolean;
 }
 
 export interface RequirementsRegistrationState {
@@ -52,7 +58,7 @@ const labels: Array<[keyof Nl2AgentRequirementsSummary, string]> = [
 
 export const RequirementsSummaryCard: React.FC<
   RequirementsSummaryCardProps
-> = ({ agentId, summary }) => {
+> = ({ agentId, summary, onRegistered, registrationEnabled = true }) => {
   const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
   const [loading, setLoading] = useState(true);
@@ -79,7 +85,7 @@ export const RequirementsSummaryCard: React.FC<
 
   const register = useCallback(
     async (notify = true) => {
-      if (!active) {
+      if (!active || !registrationEnabled) {
         setLoading(false);
         return;
       }
@@ -97,6 +103,7 @@ export const RequirementsSummaryCard: React.FC<
           isCurrent: result.is_current,
         });
         setInputBlocked(blockerKey, false);
+        await onRegistered?.("requirements_summary", result.fingerprint);
         if (notify) notifyStateChanged();
       } catch (registrationError) {
         setRegistration(undefined);
@@ -121,6 +128,8 @@ export const RequirementsSummaryCard: React.FC<
       blockerKey,
       endAction,
       notifyStateChanged,
+      onRegistered,
+      registrationEnabled,
       setInputBlocked,
       summaryPayload,
       t,

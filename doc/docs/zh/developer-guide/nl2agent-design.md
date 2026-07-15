@@ -447,6 +447,21 @@ The previous card action completed successfully. Re-read the authoritative Curre
 
 每次自动续跑时，NL2AGENT 都重新读取注入到 system prompt 的 Current Session。回调文本只是新一轮生成的触发器，模型必须自行选择第一个未完成阶段，不能把文本本身当作状态成功证明。
 
+### 4.9 卡片交付验收与自动恢复
+
+卡片输出分为生成、最终消息校验、真实挂载与注册、用户操作完成四个阶段。流式回答和 Task Window 只显示“正在生成卡片”占位，不解析 JSON、不挂载组件，也不写入 Redis。只有完整的 assistant 最终消息才能进入严格校验；历史消息、只读或分享模式不会触发回滚和自动续跑。
+
+前端统一校验七类卡片：需求摘要、模型选择、本地资源、MCP、在线 Skill、身份和最终审核。校验内容包括闭合 fence、合法 JSON、可信 conversation draft ID、单类卡片唯一性以及各类 schema。空的本地、MCP 或 Skill 搜索结果仍是有效卡片，但必须携带稳定批次 ID；非空资源必须包含名称和稳定资源标识，MCP 还必须包含可识别的安装选项。
+
+最终卡片成功挂载后，需要注册批次的卡片先完成原有注册 API，再向 `POST /nl2agent/session/{id}/card-delivery` 回报 `rendered`。注册失败属于 API 故障，卡片显示“重试注册”并禁用操作按钮，不要求模型重新生成。输出截断、JSON/schema 错误或卡片缺失则回报 `failed`，后端只清理当前尚未确认的交付状态：
+
+- 需求摘要恢复为 `collecting`，但已确认需求不清除。
+- 本地资源只删除 `recommendations_ready` 批次，已 Apply/Skip 批次保留。
+- MCP 或 Skill 只删除对应类型的未完成在线批次，并重置联网全局确认；安装、发现、绑定和显式跳过状态保留。
+- 模型、身份和最终审核没有“已展示”批次可清理；已经保存的模型和身份永不回滚。
+
+Redis `card_delivery` 按卡片类型记录最后 `message_key`、`card_key`、状态、失败原因和连续重试次数。同一消息回调幂等，不重复计数；成功交付把该类型计数清零。前两次生成失败由后端返回固定 `[[NL2AGENT_CARD_RETRY]]` 隐藏文本，前端通过既有 `/agent/run` 自动重试；第三次起停止自动调用并显示“重新生成卡片”按钮。回调只清理无效状态并提供文本，不选择下一阶段、不执行 Tool。
+
 运行时不把完整 Redis JSON 交给模型解释，而是注入不含模型、Tool、Skill 或 MCP ID 的阶段摘要：
 
 ```json
@@ -476,7 +491,7 @@ The previous card action completed successfully. Re-read the authoritative Curre
 
 该摘要是本次 Agent Run 开始时的快照。若本轮工具执行刚产生新 Observation，模型必须优先把 Observation 原样渲染为卡片，不能因为快照中的批次尚未注册而重复搜索。
 
-### 4.9 最终审核和配置
+### 4.10 最终审核和配置
 
 满足以下条件后，NL2AGENT 直接输出 `nl2agent-finalize` 卡片，不调用 Skill 名称或不存在的 finalize Tool：
 
@@ -521,6 +536,7 @@ FinalizeCard 会先读取权威 session state：
 | POST | `/session/start` | 创建 NL2AGENT 会话、草稿和 Redis Catalog |
 | POST | `/session/{id}/requirements/register` | 幂等注册已渲染的五项需求摘要 |
 | POST | `/session/{id}/requirements/confirm` | 使用当前 fingerprint 确认需求并返回自动续跑文本 |
+| POST | `/session/{id}/card-delivery` | 回报最终卡片渲染结果、幂等记录重试并安全回滚未确认阶段 |
 | PUT | `/session/{id}/models` | 保存主模型和备用模型 |
 | POST | `/session/{id}/local-resources/register` | 注册已经渲染的本地推荐批次 |
 | POST | `/session/{id}/apply-local-resources` | 应用指定批次中的本地资源 |

@@ -3127,6 +3127,9 @@
   "nl2agent.finalize.officialSkill": "官方技能",
   "nl2agent.finalize.none": "无",
   "nl2agent.finalize.invalidReferences": "已选择的模型或资源不再有效",
-  "nl2agent.finalize.invalidReferencesDescription": "请在发布前重新配置草稿。失效引用：{{references}}"
+  "nl2agent.finalize.invalidReferencesDescription": "请在发布前重新配置草稿。失效引用：{{references}}",
+  "nl2agent.cardDelivery.generating": "正在生成卡片…",
+  "nl2agent.cardDelivery.retryRequired": "卡片生成失败。",
+  "nl2agent.cardDelivery.regenerate": "重新生成卡片"
 
 }

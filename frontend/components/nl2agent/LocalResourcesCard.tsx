@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Checkbox, Button, message as AntMessage } from "antd";
+import { Alert, Checkbox, Button, message as AntMessage } from "antd";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import {
   applyLocalResources,
@@ -10,6 +10,7 @@ import {
   skipLocalResourceRecommendations,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import type { Nl2AgentCardType } from "./cardValidation";
 
 export interface LocalResourceItem {
   tool_id?: number;
@@ -28,6 +29,8 @@ export interface LocalResourcesCardProps {
   recommendationBatchId: string;
   tools: LocalResourceItem[];
   skills: LocalResourceItem[];
+  onRegistered?: (cardType: Nl2AgentCardType, cardKey?: string) => void | Promise<void>;
+  registrationEnabled?: boolean;
 }
 
 /**
@@ -43,8 +46,11 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   recommendationBatchId,
   tools,
   skills,
+  onRegistered,
+  registrationEnabled = true,
 }) => {
   const workflow = useNl2AgentWorkflow();
+  const { active, beginAction, endAction, notifyStateChanged } = workflow;
   const { t } = useTranslation("common");
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
@@ -55,23 +61,40 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const [applied, setApplied] = useState(false);
   const [skipped, setSkipped] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [registered, setRegistered] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string>();
+  const resourceIds = useMemo(
+    () => ({
+      tool_ids: tools.flatMap((item) => item.tool_id == null ? [] : [item.tool_id]),
+      skill_ids: skills.flatMap((item) => item.skill_id == null ? [] : [item.skill_id]),
+    }),
+    [skills, tools]
+  );
+
+  const register = React.useCallback(async () => {
+    if (!recommendationBatchId || !active || !registrationEnabled) return;
+    beginAction();
+    setRegistrationError(undefined);
+    try {
+      await registerLocalResourceRecommendations(agentId, {
+        recommendation_batch_id: recommendationBatchId,
+        ...resourceIds,
+      });
+      setRegistered(true);
+      notifyStateChanged();
+      await onRegistered?.("local_resources", recommendationBatchId);
+    } catch (error) {
+      setRegistrationError(
+        error instanceof Error ? error.message : "Failed to register resource recommendations."
+      );
+    } finally {
+      endAction();
+    }
+  }, [active, agentId, beginAction, endAction, notifyStateChanged, onRegistered, recommendationBatchId, registrationEnabled, resourceIds]);
 
   useEffect(() => {
-    if (!recommendationBatchId) return;
-    void registerLocalResourceRecommendations(agentId, {
-      recommendation_batch_id: recommendationBatchId,
-      tool_ids: tools.flatMap((item) =>
-        item.tool_id == null ? [] : [item.tool_id]
-      ),
-      skill_ids: skills.flatMap((item) =>
-        item.skill_id == null ? [] : [item.skill_id]
-      ),
-    }).catch((error) => {
-      AntMessage.error(
-        error?.message || "Failed to register resource recommendations."
-      );
-    });
-  }, [agentId, recommendationBatchId, skills, tools]);
+    void register();
+  }, [register]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -229,6 +252,14 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           </div>
         )}
       </div>
+      {registrationError && (
+        <Alert
+          className="m-3"
+          type="error"
+          message={registrationError}
+          action={<Button onClick={() => void register()}>Retry registration</Button>}
+        />
+      )}
       <div className="px-3 py-2 border-t border-gray-200 bg-white flex gap-2">
         <Button
           type="primary"
@@ -237,6 +268,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           loading={loading}
           disabled={
             !recommendationBatchId ||
+            !registered ||
             applied ||
             skipped ||
             (selectedToolIds.length === 0 && selectedSkillIds.length === 0)
@@ -260,7 +292,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           size="small"
           onClick={handleSkip}
           loading={loading}
-          disabled={!recommendationBatchId || applied || skipped}
+          disabled={!recommendationBatchId || !registered || applied || skipped}
         >
           {skipped
             ? t("nl2agent.localResources.skippedShort", "Skipped")

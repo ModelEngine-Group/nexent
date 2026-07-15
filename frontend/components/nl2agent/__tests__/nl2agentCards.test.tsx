@@ -27,6 +27,7 @@ import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
 import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
 import { getOnlineConfigurationBlockers } from "../OnlineConfigurationBar";
 import type { Nl2AgentSessionState } from "@/services/nl2agentService";
+import { validateNl2AgentCards } from "../cardValidation";
 
 function assertElement(
   node: React.ReactNode
@@ -101,7 +102,7 @@ describe("tryRenderNl2AgentCard", () => {
   it("routes agent-identity fenced data to AgentIdentityCard", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-agent-identity",
-      JSON.stringify({ agent_id: 202 })
+      JSON.stringify({ agent_id: 202, display_name: "Document Assistant" })
     );
 
     assertElement(node);
@@ -165,11 +166,13 @@ describe("tryRenderNl2AgentCard", () => {
 
   it("passes the web MCP install callback into WebMcpCard", () => {
     const item: WebMcpCardItem = {
+      recommendation_id: "community:github",
       name: "GitHub MCP",
       description: "Repository automation",
       source: "community",
       url: "https://example.com/mcp",
       transport: "sse",
+      install_options: [{ option_id: "remote", type: "remote" }],
     };
     let installedItem: WebMcpCardItem | null = null;
 
@@ -197,8 +200,18 @@ describe("tryRenderNl2AgentCard", () => {
 
   it("routes web MCP list fenced data to WebMcpCard items", () => {
     const items: WebMcpCardItem[] = [
-      { name: "Browser MCP", source: "community" },
-      { name: "GitHub MCP", source: "registry" },
+      {
+        recommendation_id: "community:browser",
+        name: "Browser MCP",
+        source: "community",
+        install_options: [{ option_id: "remote", type: "remote" }],
+      },
+      {
+        recommendation_id: "registry:github",
+        name: "GitHub MCP",
+        source: "registry",
+        install_options: [{ option_id: "remote", type: "remote" }],
+      },
     ];
 
     const node = tryRenderNl2AgentCard(
@@ -222,7 +235,13 @@ describe("tryRenderNl2AgentCard", () => {
   });
 
   it("recovers the draft agent ID from MCP list items", () => {
-    const items = [{ agent_id: 202, name: "Browser MCP", source: "community" }];
+    const items = [{
+      agent_id: 202,
+      recommendation_id: "community:browser",
+      name: "Browser MCP",
+      source: "community",
+      install_options: [{ option_id: "remote", type: "remote" }],
+    }];
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
       JSON.stringify({ recommendation_batch_id: "online_mcp", items })
@@ -240,7 +259,12 @@ describe("tryRenderNl2AgentCard", () => {
       "nl2agent-web-mcps",
       JSON.stringify({
         recommendation_batch_id: "online_mcp",
-        items: [{ name: "Browser MCP", source: "community" }],
+        items: [{
+          recommendation_id: "community:browser",
+          name: "Browser MCP",
+          source: "community",
+          install_options: [{ option_id: "remote", type: "remote" }],
+        }],
       }),
       undefined,
       202
@@ -313,7 +337,11 @@ describe("tryRenderNl2AgentCard", () => {
         RequirementsSummaryCard,
       ],
       ["nl2agent-model-selection", {}, ModelSelectionCard],
-      ["nl2agent-agent-identity", {}, AgentIdentityCard],
+      [
+        "nl2agent-agent-identity",
+        { display_name: "Document Assistant" },
+        AgentIdentityCard,
+      ],
       [
         "nl2agent-local-resources",
         { recommendation_batch_id: "batch", tools: [], skills: [] },
@@ -590,12 +618,55 @@ describe("NL2AGENT automatic continuation messages", () => {
       true
     );
     assert.equal(isNl2AgentAutoContinueText("Please continue"), false);
+    assert.equal(
+      isNl2AgentAutoContinueText(
+        "[[NL2AGENT_CARD_RETRY]]\nThe previous card was invalid."
+      ),
+      true
+    );
   });
 
   it("isolates pending continuations by conversation and draft", () => {
     assert.notEqual(
       nl2AgentContinuationScopeKey(10, 202),
       nl2AgentContinuationScopeKey(11, 303)
+    );
+  });
+});
+
+describe("NL2AGENT final card validation", () => {
+  it("rejects truncated fences and malformed schemas", () => {
+    assert.equal(
+      validateNl2AgentCards('```nl2agent-local-resources\n{"agent_id":202', 202)
+        .failure?.reason,
+      "truncated_fence"
+    );
+    assert.equal(
+      validateNl2AgentCards(
+        '```nl2agent-local-resources\n{"agent_id":202,"recommendation_batch_id":"local_1","tools":[{"tool_id":1}],"skills":[]}\n```',
+        202
+      ).failure?.reason,
+      "invalid_schema"
+    );
+  });
+
+  it("accepts empty result cards and rejects duplicate card types", () => {
+    const card =
+      '```nl2agent-web-skills\n{"agent_id":202,"recommendation_batch_id":"online_1","items":[]}\n```';
+    assert.equal(validateNl2AgentCards(card, 202).failure, undefined);
+    assert.equal(
+      validateNl2AgentCards(`${card}\n${card}`, 202).failure?.reason,
+      "invalid_schema"
+    );
+  });
+
+  it("rejects payload IDs that conflict with the conversation draft", () => {
+    assert.equal(
+      validateNl2AgentCards(
+        '```nl2agent-model-selection\n{"agent_id":303}\n```',
+        202
+      ).failure?.reason,
+      "invalid_schema"
     );
   });
 });

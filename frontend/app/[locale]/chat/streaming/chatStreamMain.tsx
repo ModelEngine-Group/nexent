@@ -95,6 +95,21 @@ export function ChatStreamMain({
   const [chatInputHeight, setChatInputHeight] = useState(130);
   const lastUserMessageIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [cardRecoveryConversationId, setCardRecoveryConversationId] = useState<
+    number | null
+  >(null);
+
+  useEffect(() => {
+    if (isStreaming && currentConversationId != null) {
+      setCardRecoveryConversationId(currentConversationId);
+    } else if (
+      !isStreaming &&
+      cardRecoveryConversationId != null &&
+      currentConversationId !== cardRecoveryConversationId
+    ) {
+      setCardRecoveryConversationId(null);
+    }
+  }, [cardRecoveryConversationId, currentConversationId, isStreaming]);
 
   // Process messages with useMemo to avoid double-render on each SSE chunk
   const processedMessages = useMemo<ProcessedMessages>(() => {
@@ -441,6 +456,15 @@ export function ChatStreamMain({
                       onCitationHover={onCitationHover}
                       onInstallNl2AgentMcp={onInstallNl2AgentMcp}
                       nl2AgentDraftAgentId={nl2AgentDraftAgentId}
+                      isLatestMessage={
+                        index === processedMessages.finalMessages.length - 1
+                      }
+                      isStreaming={isStreaming}
+                      enableNl2AgentCardRecovery={
+                        !readOnly &&
+                        !shareMode &&
+                        cardRecoveryConversationId === currentConversationId
+                      }
                     />
                   )}
                   {message.role === MESSAGE_ROLES.USER &&

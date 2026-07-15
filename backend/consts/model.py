@@ -488,6 +488,31 @@ class Nl2AgentRequirementsConfirmRequest(BaseModel):
     )
 
 
+class Nl2AgentCardDeliveryRequest(BaseModel):
+    """Report final-message rendering success or failure for one NL2AGENT card."""
+
+    message_key: str = Field(..., min_length=1, max_length=200)
+    card_type: Literal[
+        "requirements_summary",
+        "model_selection",
+        "local_resources",
+        "web_mcp",
+        "web_skill",
+        "agent_identity",
+        "final_review",
+    ]
+    status: Literal["rendered", "failed"]
+    card_key: Optional[str] = Field(default=None, max_length=300)
+    reason: Optional[
+        Literal[
+            "truncated_fence",
+            "invalid_json",
+            "invalid_schema",
+            "missing_card",
+        ]
+    ] = None
+
+
 class Nl2AgentModelSelectionRequest(BaseModel):
     """Persist the ordered LLM selection for an NL2AGENT draft."""
 
