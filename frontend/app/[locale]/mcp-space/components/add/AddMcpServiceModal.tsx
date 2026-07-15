@@ -7,7 +7,6 @@ import {
 } from "@/const/mcpTools";
 import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./registry/AddMcpServiceRegistrySection";
-import AddMcpServiceCommunitySection from "./community/AddMcpServiceCommunitySection";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 
 interface AddMcpServiceModalProps {
@@ -74,10 +73,6 @@ export default function AddMcpServiceModal({
                 label: t("mcpTools.addModal.tabRegistry"),
                 value: McpSource.REGISTRY,
               },
-              {
-                label: t("mcpTools.addModal.tabCommunity"),
-                value: McpSource.COMMUNITY,
-              },
             ]}
             className="h-9 rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
           />
@@ -91,10 +86,6 @@ export default function AddMcpServiceModal({
           />
           <AddMcpServiceRegistrySection
             active={tab === McpSource.REGISTRY}
-            onAdded={onClose}
-          />
-          <AddMcpServiceCommunitySection
-            active={tab === McpSource.COMMUNITY}
             onAdded={onClose}
           />
         </div>

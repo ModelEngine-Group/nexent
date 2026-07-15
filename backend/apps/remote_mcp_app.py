@@ -219,7 +219,6 @@ async def add_container_mcp_service_endpoint(
             tags=payload.tags,
             authorization_token=payload.authorization_token,
             registry_json=payload.registry_json,
-            version=payload.version,
             market_id=payload.market_id,
             port=payload.port,
             mcp_config=payload.mcp_config,
