@@ -19,6 +19,7 @@ from .models import (
     MCPConnectionConfig,
     RuntimeCapabilities,
     RunControl,
+    ToolSource,
     ToolSpec,
 )
 from .events import emit_runtime_event, runtime_event_from_legacy_observer_message
@@ -28,6 +29,7 @@ from .operators import (
     OperatorRunner,
     default_operator_registry,
 )
+from .tool_factory import BUILTIN_SKILL_TOOL_CLASS_NAMES
 
 
 AgentRunCallable = Callable[[Any], AsyncIterator[Any]]
@@ -304,9 +306,7 @@ class SmolagentsRuntime:
         inputs = tool.raw_inputs
         if inputs is None:
             inputs = json.dumps(tool.input_schema or {}, ensure_ascii=False)
-        source = (
-            tool.source.value if hasattr(tool.source, "value") else str(tool.source)
-        )
+        source = SmolagentsRuntime._to_legacy_tool_source(tool)
         return tool_config_class(
             class_name=tool.class_name or tool.name,
             name=tool.name,
@@ -317,6 +317,33 @@ class SmolagentsRuntime:
             source=source,
             usage=tool.usage,
             metadata=dict(tool.metadata or {}),
+        )
+
+    @staticmethod
+    def _to_legacy_tool_source(tool: ToolSpec) -> str:
+        source = (
+            tool.source.value if hasattr(tool.source, "value") else str(tool.source)
+        )
+        if source in {
+            ToolSource.LOCAL.value,
+            ToolSource.MCP.value,
+            ToolSource.LANGCHAIN.value,
+            ToolSource.BUILTIN.value,
+        }:
+            return source
+        if source in {ToolSource.KNOWLEDGE.value, ToolSource.MEMORY.value}:
+            return ToolSource.LOCAL.value
+
+        class_name = tool.class_name or tool.name
+        if (
+            source == ToolSource.SKILL.value
+            and class_name in BUILTIN_SKILL_TOOL_CLASS_NAMES
+        ):
+            return ToolSource.BUILTIN.value
+
+        raise ValueError(
+            "SmolagentsRuntime cannot map neutral tool source to the legacy SDK: "
+            f"tool={tool.name!r}, class_name={class_name!r}, source={source!r}."
         )
 
     @staticmethod

@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -287,7 +288,7 @@ def test_smolagents_runtime_maps_plan_to_legacy_agent_run_info():
     assert run_info.agent_config.prompt_templates["planning"] == {"enabled": True}
     assert run_info.agent_config.tools[0].class_name == "KnowledgeBaseSearchTool"
     assert run_info.agent_config.tools[0].inputs == '{"query": {"type": "string"}}'
-    assert run_info.agent_config.tools[0].source == "knowledge"
+    assert run_info.agent_config.tools[0].source == "local"
     assert run_info.agent_config.managed_agents[0].name == "researcher"
     assert run_info.agent_config.external_a2a_agents[0].url == "https://remote.example/a2a"
     assert run_info.agent_config.context_manager_config.enabled is True
@@ -354,7 +355,12 @@ def test_smolagents_runtime_regression_maps_ordinary_skill_memory_knowledge_mcp_
                 name="read_skill_md",
                 class_name="ReadSkillMdTool",
                 source=ToolSource.SKILL,
-                metadata={"agent_id": 1, "tenant_id": "tenant-1"},
+                params={"local_skills_dir": "/skills"},
+                metadata={
+                    "agent_id": 1,
+                    "tenant_id": "tenant-1",
+                    "version_no": 3,
+                },
             ),
             ToolSpec(
                 name="search_memory",
@@ -377,6 +383,18 @@ def test_smolagents_runtime_regression_maps_ordinary_skill_memory_knowledge_mcp_
                 model_name="sub_model",
                 max_steps=3,
                 prompt=PromptBundle(rendered_legacy_system_prompt="Research."),
+                tools=[
+                    ToolSpec(
+                        name="store_memory",
+                        class_name="StoreMemoryTool",
+                        source=ToolSource.MEMORY,
+                        metadata={
+                            "tenant_id": "tenant-1",
+                            "user_id": "user-2",
+                            "agent_id": "2",
+                        },
+                    )
+                ],
             )
         ],
     )
@@ -404,13 +422,17 @@ def test_smolagents_runtime_regression_maps_ordinary_skill_memory_knowledge_mcp_
     ] == [
         ("local_echo", "EchoTool", "local", None),
         ("mcp_search", "search", "mcp", "docs"),
-        ("read_skill_md", "ReadSkillMdTool", "skill", None),
-        ("search_memory", "SearchMemoryTool", "memory", None),
-        ("knowledge_base_search", "KnowledgeBaseSearchTool", "knowledge", None),
+        ("read_skill_md", "ReadSkillMdTool", "builtin", None),
+        ("search_memory", "SearchMemoryTool", "local", None),
+        ("knowledge_base_search", "KnowledgeBaseSearchTool", "local", None),
     ]
     assert run_info.agent_config.tools[2].metadata == {
         "agent_id": 1,
         "tenant_id": "tenant-1",
+        "version_no": 3,
+    }
+    assert run_info.agent_config.tools[2].params == {
+        "local_skills_dir": "/skills"
     }
     assert run_info.agent_config.tools[3].metadata == {
         "tenant_id": "tenant-1",
@@ -420,6 +442,138 @@ def test_smolagents_runtime_regression_maps_ordinary_skill_memory_knowledge_mcp_
         "document_paths": ["/docs/a.md"],
     }
     assert run_info.agent_config.managed_agents[0].name == "researcher"
+    assert run_info.agent_config.managed_agents[0].tools[0].source == "local"
+    assert run_info.agent_config.managed_agents[0].tools[0].metadata == {
+        "tenant_id": "tenant-1",
+        "user_id": "user-2",
+        "agent_id": "2",
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "class_name", "expected_source"),
+    [
+        (ToolSource.LOCAL, "EchoTool", "local"),
+        (ToolSource.MCP, "search", "mcp"),
+        (ToolSource.LANGCHAIN, "LangChainTool", "langchain"),
+        (ToolSource.BUILTIN, "ReadSkillMdTool", "builtin"),
+        (ToolSource.KNOWLEDGE, "KnowledgeBaseSearchTool", "local"),
+        (ToolSource.MEMORY, "SearchMemoryTool", "local"),
+        (ToolSource.SKILL, "ReadSkillConfigTool", "builtin"),
+        (ToolSource.SKILL, "ReadSkillMdTool", "builtin"),
+        (ToolSource.SKILL, "RunSkillScriptTool", "builtin"),
+        (ToolSource.SKILL, "WriteSkillFileTool", "builtin"),
+    ],
+)
+def test_smolagents_runtime_maps_neutral_tool_sources_to_legacy_sources(
+    source,
+    class_name,
+    expected_source,
+):
+    tool = ToolSpec(
+        name="tool_name",
+        class_name=class_name,
+        description="Tool description",
+        raw_inputs='{"value": {"type": "string"}}',
+        input_schema={"value": {"type": "string"}},
+        output_type="string",
+        source=source,
+        params={"setting": "value"},
+        metadata={"tenant_id": "tenant-1"},
+        usage="server-name",
+    )
+
+    tool_config = SmolagentsRuntime._to_tool_config(tool)
+
+    assert tool_config.source == expected_source
+    assert tool_config.name == tool.name
+    assert tool_config.class_name == class_name
+    assert tool_config.description == tool.description
+    assert tool_config.inputs == tool.raw_inputs
+    assert tool_config.output_type == tool.output_type
+    assert tool_config.params == tool.params
+    assert tool_config.metadata == tool.metadata
+    assert tool_config.usage == tool.usage
+    assert tool.source == source
+
+
+@pytest.mark.parametrize(
+    ("source", "class_name"),
+    [
+        (ToolSource.PLUGIN, "PluginTool"),
+        (ToolSource.SKILL, "UnknownSkillTool"),
+    ],
+)
+def test_smolagents_runtime_rejects_unmappable_tool_sources(source, class_name):
+    tool = ToolSpec(
+        name="unsupported_tool",
+        class_name=class_name,
+        source=source,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        SmolagentsRuntime._to_tool_config(tool)
+
+    message = str(exc_info.value)
+    assert "unsupported_tool" in message
+    assert class_name in message
+    assert source.value in message
+
+
+def test_smolagents_runtime_converted_sources_dispatch_in_real_nexent_agent(
+    monkeypatch,
+):
+    import services.agent_runtime.smolagents_runtime as smolagents_runtime_module
+    from nexent.core.agents.agent_model import ToolConfig
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.utils.observer import MessageObserver
+
+    monkeypatch.setattr(
+        smolagents_runtime_module,
+        "_legacy_agent_models",
+        lambda: {"ToolConfig": ToolConfig},
+    )
+    agent = NexentAgent(
+        observer=MessageObserver(),
+        model_config_list=[],
+        stop_event=threading.Event(),
+    )
+    local_factory = Mock(side_effect=lambda config: config.class_name)
+    builtin_factory = Mock(side_effect=lambda config: config.class_name)
+    monkeypatch.setattr(agent, "create_local_tool", local_factory)
+    monkeypatch.setattr(agent, "create_builtin_tool", builtin_factory)
+
+    tool_configs = [
+        SmolagentsRuntime._to_tool_config(
+            ToolSpec(
+                name="knowledge",
+                class_name="KnowledgeBaseSearchTool",
+                source=ToolSource.KNOWLEDGE,
+            )
+        ),
+        SmolagentsRuntime._to_tool_config(
+            ToolSpec(
+                name="memory",
+                class_name="SearchMemoryTool",
+                source=ToolSource.MEMORY,
+            )
+        ),
+        SmolagentsRuntime._to_tool_config(
+            ToolSpec(
+                name="skill",
+                class_name="RunSkillScriptTool",
+                source=ToolSource.SKILL,
+            )
+        ),
+    ]
+
+    assert [agent.create_tool(config) for config in tool_configs] == [
+        "KnowledgeBaseSearchTool",
+        "SearchMemoryTool",
+        "RunSkillScriptTool",
+    ]
+    assert local_factory.call_count == 2
+    assert builtin_factory.call_count == 1
 
 
 def test_smolagents_runtime_reuses_context_manager_only_for_conversation_runs():

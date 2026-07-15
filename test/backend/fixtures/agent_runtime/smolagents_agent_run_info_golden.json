@@ -25,7 +25,7 @@
       {
         "name": "search",
         "class_name": "KnowledgeBaseSearchTool",
-        "source": "knowledge",
+        "source": "local",
         "usage": null,
         "inputs": "{\"query\": {\"type\": \"string\"}}",
         "params": {

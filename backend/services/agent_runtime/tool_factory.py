@@ -217,7 +217,7 @@ class BuiltinSkillToolFactory:
         _ = context
         return (
             _normalize_source(tool.source) == ToolSource.BUILTIN.value
-            and (tool.class_name or tool.name) in _BUILTIN_SKILL_TOOL_NAMES
+            and (tool.class_name or tool.name) in BUILTIN_SKILL_TOOL_CLASS_NAMES
         )
 
     def create(self, tool: ToolSpec, context: ToolRuntimeContext) -> Any:
@@ -495,7 +495,10 @@ class _LazyNexentToolFactory:
 
     def create(self, tool: ToolSpec, context: ToolRuntimeContext) -> Any:
         class_name = tool.class_name or tool.name
-        if self._source == ToolSource.SKILL and class_name in _BUILTIN_SKILL_TOOL_NAMES:
+        if (
+            self._source == ToolSource.SKILL
+            and class_name in BUILTIN_SKILL_TOOL_CLASS_NAMES
+        ):
             return BuiltinSkillToolFactory().create(
                 tool.model_copy(update={"source": ToolSource.BUILTIN}),
                 context,
@@ -728,12 +731,14 @@ def _lookup_langchain_tool_reference(
     return None
 
 
-_BUILTIN_SKILL_TOOL_NAMES = {
-    "ReadSkillConfigTool",
-    "ReadSkillMdTool",
-    "RunSkillScriptTool",
-    "WriteSkillFileTool",
-}
+BUILTIN_SKILL_TOOL_CLASS_NAMES = frozenset(
+    {
+        "ReadSkillConfigTool",
+        "ReadSkillMdTool",
+        "RunSkillScriptTool",
+        "WriteSkillFileTool",
+    }
+)
 
 _KNOWLEDGE_INJECTED_PARAM_NAMES = {
     "display_name_to_index_map",
