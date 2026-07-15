@@ -866,14 +866,12 @@ async def create_agent_config(
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
-    available_tools = tool_list + builtin_tools
 
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
         "few_shots": few_shots_prompt,
-        "tools": {tool.name: tool for tool in available_tools},
+        "tools": {tool.name: tool for tool in tool_list},
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
@@ -968,7 +966,7 @@ async def create_agent_config(
             language=language,
             agent_id=agent_id
         ),
-        tools=available_tools,
+        tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
