@@ -268,7 +268,6 @@ export default function SkillBuildModal({
   // Sync summary content to the current assistant chat message for real-time display.
   useEffect(() => {
     if (!currentAssistantIdRef.current) return;
-    if (!summaryContent) return;
     setChatMessages((prev) => {
       if (!prev.some((m) => m.id === currentAssistantIdRef.current))
         return prev;
@@ -631,6 +630,7 @@ export default function SkillBuildModal({
           },
           onSkillBody: (content) => {
             if (isStreamingCompleteRef.current) return;
+            setSummaryContent("");
             // Frontmatter is complete when skill_body starts - clear the buffer
             frontmatterBufferRef.current = "";
             // Only add body content to textarea (no frontmatter)
@@ -638,6 +638,7 @@ export default function SkillBuildModal({
           },
           onFileContent: (path, content, isNewFile) => {
             if (isStreamingCompleteRef.current) return;
+            setSummaryContent("");
 
             if (isNewFile) {
               ensureStreamingTab(path);

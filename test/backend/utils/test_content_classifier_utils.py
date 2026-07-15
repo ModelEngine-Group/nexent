@@ -51,6 +51,23 @@ class TestContentClassifier:
         assert len(summary_events) >= 1
         assert "my summary" in summary_events[0]["content"]
 
+    def test_summary_close_tag_split_after_text(self):
+        """Test split </SUMMARY> tag after normal text is parsed as a tag."""
+        classifier = ContentClassifier()
+
+        classifier.classify("<SUMMARY>")
+        results = []
+        results.extend(classifier.classify("summary...</"))
+        results.extend(classifier.classify("SUMMARY"))
+        results.extend(classifier.classify(">"))
+        results.extend(classifier.classify("ignored"))
+
+        summary_text = "".join(r["content"] for r in results if r.get("type") == "summary")
+        others_text = "".join(r["content"] for r in results if r.get("type") == "others")
+        assert summary_text == "summary..."
+        assert others_text == "ignored"
+        assert classifier.state == "others"
+
     def test_full_skill_flow(self):
         """Test full SKILL -> body -> </SKILL> -> summary flow."""
         classifier = ContentClassifier()
@@ -85,6 +102,49 @@ class TestContentClassifier:
         assert len(results) >= 1
         assert results[0]["type"] == "file_content"
         assert "file content" in results[0]["content"]
+
+    def test_file_placeholder_path_is_not_file_content(self):
+        """Test placeholder file paths are not treated as generated files."""
+        classifier = ContentClassifier()
+
+        results = []
+        results.extend(classifier.classify('Use <FILE path="...">'))
+        results.extend(classifier.classify("wrapped content"))
+        results.extend(classifier.classify("</FILE>"))
+        results.extend(classifier.classify(" after"))
+
+        assert not any(r.get("type") == "file_content" for r in results)
+        assert classifier.state == "others"
+
+    def test_file_path_rejects_parent_traversal(self):
+        """Test parent traversal paths are not treated as generated files."""
+        classifier = ContentClassifier()
+        classifier.classify("<SKILL>")
+
+        results = []
+        results.extend(classifier.classify('<FILE path="../secret.md">'))
+        results.extend(classifier.classify("hidden"))
+        results.extend(classifier.classify("</FILE>"))
+        results.extend(classifier.classify(" body"))
+
+        assert not any(r.get("type") == "file_content" for r in results)
+        assert classifier.state == "skill_body"
+
+    def test_file_path_allows_nested_relative_path(self):
+        """Test nested relative file paths are treated as generated files."""
+        classifier = ContentClassifier()
+
+        results = classifier.classify('<FILE path="references/zodiac_data.md">')
+
+        assert classifier.state == "file"
+        assert results == [
+            {
+                "type": "file_content",
+                "content": "",
+                "path": "references/zodiac_data.md",
+                "is_new_file": True,
+            }
+        ]
 
     def test_others_content(self):
         """Test content outside tags is classified as 'others'."""
