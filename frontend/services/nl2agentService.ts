@@ -45,6 +45,31 @@ export interface Nl2AgentApplyLocalResourcesPayload {
   skill_ids: number[];
 }
 
+export interface Nl2AgentRequirementsSummary {
+  goal: string;
+  audience_or_scenario: string;
+  primary_input: string;
+  expected_output: string;
+  key_constraints: string;
+}
+
+export const registerRequirementsSummary = async (
+  agentId: number,
+  summary: Nl2AgentRequirementsSummary
+): Promise<{
+  agent_id: number;
+  status: "awaiting_confirmation" | "confirmed";
+  summary: Nl2AgentRequirementsSummary;
+  fingerprint: string;
+}> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.registerRequirements(agentId),
+    { method: "POST", body: JSON.stringify(summary) }
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+
 export const registerLocalResourceRecommendations = async (
   agentId: number,
   payload: Nl2AgentApplyLocalResourcesPayload
@@ -114,6 +139,11 @@ export interface Nl2AgentSessionState {
   tools: Array<{ tool_id: number; [key: string]: unknown }>;
   skills: Array<{ skill_id: number; [key: string]: unknown }>;
   resource_review: {
+    requirements_review: {
+      status: "collecting" | "awaiting_confirmation" | "confirmed";
+      summary: Nl2AgentRequirementsSummary | null;
+      fingerprint: string;
+    };
     identity_confirmed: boolean;
     recommendation_batches: Record<string, unknown>;
     online_recommendation_batches: Record<

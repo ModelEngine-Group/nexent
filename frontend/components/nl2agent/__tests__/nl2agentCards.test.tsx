@@ -14,6 +14,7 @@ import { OnlineRecommendationGroup, tryRenderNl2AgentCard } from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
 import { ModelSelectionCard } from "../ModelSelectionCard";
 import { AgentIdentityCard } from "../AgentIdentityCard";
+import { RequirementsSummaryCard } from "../RequirementsSummaryCard";
 import { FinalizeCard } from "../FinalizeCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
 import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
@@ -56,6 +57,27 @@ describe("tryRenderNl2AgentCard", () => {
     assertElement(node);
     assert.equal(node.type, ModelSelectionCard);
     assert.equal(node.props.agentId, 202);
+  });
+
+  it("routes the read-only requirements summary card", () => {
+    const summary = {
+      goal: "Build presentations",
+      audience_or_scenario: "Office users",
+      primary_input: "DOCX files",
+      expected_output: "PPT files",
+      key_constraints: "Preserve source facts",
+    };
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-requirements-summary",
+      JSON.stringify(summary),
+      undefined,
+      202
+    );
+
+    assertElement(node);
+    assert.equal(node.type, RequirementsSummaryCard);
+    assert.equal(node.props.agentId, 202);
+    assert.deepEqual(node.props.summary, summary);
   });
 
   it("normalizes model-selection language tags", () => {
@@ -271,6 +293,17 @@ describe("tryRenderNl2AgentCard", () => {
 
   it("uses the trusted ID for every NL2AGENT card family", () => {
     const cases = [
+      [
+        "nl2agent-requirements-summary",
+        {
+          goal: "Build presentations",
+          audience_or_scenario: "Office users",
+          primary_input: "DOCX files",
+          expected_output: "PPT files",
+          key_constraints: "Preserve source facts",
+        },
+        RequirementsSummaryCard,
+      ],
       ["nl2agent-model-selection", {}, ModelSelectionCard],
       ["nl2agent-agent-identity", {}, AgentIdentityCard],
       [
@@ -352,6 +385,11 @@ describe("tryRenderNl2AgentCard", () => {
 describe("online configuration blockers", () => {
   it("requires both online catalogs before completion", () => {
     const blockers = getOnlineConfigurationBlockers({
+      requirements_review: {
+        status: "collecting",
+        summary: null,
+        fingerprint: "",
+      },
       identity_confirmed: false,
       recommendation_batches: {},
       online_recommendation_batches: {
@@ -371,6 +409,11 @@ describe("online configuration blockers", () => {
 
   it("blocks connected MCP workflows after both catalogs render", () => {
     const blockers = getOnlineConfigurationBlockers({
+      requirements_review: {
+        status: "confirmed",
+        summary: null,
+        fingerprint: "fingerprint",
+      },
       identity_confirmed: false,
       recommendation_batches: {},
       online_recommendation_batches: {

@@ -14,6 +14,7 @@ import {
 } from "@/types/chat";
 
 import { ChatInput } from "../components/chatInput";
+import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
 import { TaskWindow } from "./taskWindow";
 import { transformMessagesToTaskMessages } from "./messageTransformer";
@@ -68,6 +69,7 @@ export function ChatStreamMain({
   onModelSelect,
 }: ChatStreamMainProps) {
   const { t } = useTranslation();
+  const nl2AgentWorkflow = useNl2AgentWorkflow();
   // Animation variants for ChatInput
   const chatInputVariants = {
     initial: {
@@ -374,7 +376,7 @@ export function ChatStreamMain({
                     >
                       <ChatInput
                         input={input}
-                        isLoading={isLoading}
+                        isLoading={isLoading || nl2AgentWorkflow.busy}
                         isStreaming={isStreaming}
                         isInitialMode={true}
                         onInputChange={onInputChange}
@@ -507,7 +509,7 @@ export function ChatStreamMain({
             <OnlineConfigurationBar agentId={nl2AgentDraftAgentId} />
             <ChatInput
               input={input}
-              isLoading={isLoading}
+              isLoading={isLoading || nl2AgentWorkflow.busy}
               isStreaming={isStreaming}
               onInputChange={onInputChange}
               onSend={onSend}

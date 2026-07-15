@@ -1,7 +1,10 @@
 """Redis-backed NL2AGENT session catalog handoff."""
 
+import hashlib
 import json
 import logging
+import re
+import unicodedata
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +20,47 @@ _CATALOG_KEYS = (
 _CACHE_KEY_PREFIX = "nl2agent:session_catalog"
 _STATE_KEY_PREFIX = "nl2agent:session_state"
 _CACHE_TTL_SECONDS = 24 * 60 * 60
+_REQUIREMENTS_FIELDS = (
+    "goal",
+    "audience_or_scenario",
+    "primary_input",
+    "expected_output",
+    "key_constraints",
+)
+_REQUIREMENTS_STATUSES = {"collecting", "awaiting_confirmation", "confirmed"}
+_CONFIRMATION_PHRASES = {
+    "确认",
+    "确认需求",
+    "需求正确",
+    "没有问题",
+    "没问题",
+    "可以继续",
+    "按此执行",
+    "是",
+    "对",
+    "confirm",
+    "confirm requirements",
+    "confirmed",
+    "looks good",
+    "correct",
+    "proceed",
+    "yes",
+}
+_SHORT_CONFIRMATION_PHRASES = {"是", "对", "yes"}
+_MODIFICATION_MARKERS = {
+    "不确认",
+    "不正确",
+    "需要修改",
+    "修改",
+    "改成",
+    "补充",
+    "不是",
+    "change",
+    "modify",
+    "incorrect",
+    "not correct",
+    "instead",
+}
 
 
 class Nl2AgentSessionCatalogError(RuntimeError):
@@ -40,6 +84,11 @@ def _state_key(tenant_id: str, draft_agent_id: int) -> str:
 
 def _empty_session_state() -> Dict[str, Any]:
     return {
+        "requirements_review": {
+            "status": "collecting",
+            "summary": None,
+            "fingerprint": "",
+        },
         "recommendation_batches": {},
         "identity_confirmed": False,
         "mcp_workflows": {},
@@ -58,6 +107,24 @@ def get_nl2agent_session_state(
         if raw is None:
             return _empty_session_state()
         state = json.loads(raw)
+        requirements_review = state.get("requirements_review")
+        if not isinstance(requirements_review, dict):
+            raise ValueError("requirements_review must be an object")
+        if requirements_review.get("status") not in _REQUIREMENTS_STATUSES:
+            raise ValueError("requirements_review status is invalid")
+        summary = requirements_review.get("summary")
+        if summary is not None and (
+            not isinstance(summary, dict)
+            or any(
+                not isinstance(summary.get(field_name), str)
+                or not summary[field_name].strip()
+                for field_name in _REQUIREMENTS_FIELDS
+            )
+        ):
+            raise ValueError("requirements_review summary is invalid")
+        if not isinstance(requirements_review.get("fingerprint", ""), str):
+            raise ValueError("requirements_review fingerprint is invalid")
+        state["requirements_review"] = requirements_review
         batches = state.get("recommendation_batches")
         if not isinstance(batches, dict):
             raise ValueError("recommendation_batches must be an object")
@@ -109,6 +176,108 @@ def _set_nl2agent_session_state(
         _CACHE_TTL_SECONDS,
         json.dumps(state, ensure_ascii=False),
     )
+
+
+def _normalize_requirement_text(value: Any) -> str:
+    """Normalize one persisted requirement field without changing its meaning."""
+    normalized = unicodedata.normalize("NFKC", str(value or "")).strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _requirements_fingerprint(summary: Dict[str, str]) -> str:
+    payload = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def register_requirements_summary(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Register one rendered requirements summary and await textual confirmation."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    normalized_summary = {
+        field_name: _normalize_requirement_text(summary.get(field_name))
+        for field_name in _REQUIREMENTS_FIELDS
+    }
+    missing_fields = [
+        field_name
+        for field_name, field_value in normalized_summary.items()
+        if not field_value
+    ]
+    if missing_fields:
+        raise Nl2AgentSessionCatalogError(
+            "Requirements summary fields cannot be empty: "
+            + ", ".join(missing_fields)
+        )
+    fingerprint = _requirements_fingerprint(normalized_summary)
+    state = get_nl2agent_session_state(tenant, draft_id)
+    review = state["requirements_review"]
+    if review.get("fingerprint") != fingerprint:
+        review = {
+            "status": "awaiting_confirmation",
+            "summary": normalized_summary,
+            "fingerprint": fingerprint,
+        }
+    elif review.get("status") == "collecting":
+        review["status"] = "awaiting_confirmation"
+    state["requirements_review"] = review
+    _set_nl2agent_session_state(tenant, draft_id, state)
+    return deepcopy(review)
+
+
+def classify_requirements_confirmation(text: str) -> str:
+    """Classify deterministic confirmation intent as confirm, modify, or ambiguous."""
+    normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    normalized = re.sub(r"[^\w\u3400-\u4dbf\u4e00-\u9fff]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return "ambiguous"
+    if any(marker in normalized for marker in _MODIFICATION_MARKERS):
+        return "modify"
+    if normalized in _CONFIRMATION_PHRASES:
+        return "confirm"
+    if any(
+        phrase in normalized
+        for phrase in _CONFIRMATION_PHRASES - _SHORT_CONFIRMATION_PHRASES
+    ):
+        tokens = normalized.split()
+        if len(tokens) <= 6:
+            return "confirm"
+    return "ambiguous"
+
+
+def apply_requirements_confirmation_text(
+    tenant_id: Optional[str], draft_agent_id: Optional[int], text: str
+) -> Dict[str, Any]:
+    """Apply a user confirmation or modification intent to a pending review."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    state = get_nl2agent_session_state(tenant, draft_id)
+    review = state["requirements_review"]
+    intent = (
+        classify_requirements_confirmation(text)
+        if review.get("status") == "awaiting_confirmation"
+        else "not_applicable"
+    )
+    if intent == "confirm":
+        review["status"] = "confirmed"
+    elif intent == "modify":
+        review["status"] = "collecting"
+    if intent in {"confirm", "modify"}:
+        state["requirements_review"] = review
+        _set_nl2agent_session_state(tenant, draft_id, state)
+    return {"intent": intent, **deepcopy(review)}
+
+
+def assert_requirements_confirmed(
+    tenant_id: str, draft_agent_id: int
+) -> None:
+    """Reject protected workflow actions until requirements are confirmed."""
+    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+    if state["requirements_review"].get("status") != "confirmed":
+        raise Nl2AgentSessionCatalogError(
+            "Confirm the requirements summary before continuing configuration."
+        )
 
 
 def confirm_agent_identity(

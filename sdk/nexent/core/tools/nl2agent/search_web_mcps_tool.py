@@ -269,6 +269,7 @@ def get_search_web_mcps_tool(
     draft_agent_id: Optional[int] = None,
     registry_results: Optional[List[Dict[str, Any]]] = None,
     community_results: Optional[List[Dict[str, Any]]] = None,
+    requirements_confirmed: bool = False,
 ) -> Tool:
     context = create_nl2agent_context(
         agent_id=agent_id,
@@ -278,6 +279,7 @@ def get_search_web_mcps_tool(
         draft_agent_id=draft_agent_id,
         registry_results=registry_results,
         community_results=community_results,
+        requirements_confirmed=requirements_confirmed,
     )
     return NL2AgentSearchWebMcpsTool(context)
 
@@ -345,6 +347,10 @@ class NL2AgentSearchWebMcpsTool(Tool):
         ctx = self.context
         if ctx.tenant_id is None:
             return error_response("NL2AGENT session context not initialized.")
+        if not ctx.requirements_confirmed:
+            return error_response(
+                "NL2AGENT requirements are not confirmed for this draft."
+            )
         if ctx.registry_results is None and ctx.community_results is None:
             return error_response("MCP catalog not available in context")
 

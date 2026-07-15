@@ -170,6 +170,7 @@ class Nl2AgentContext:
     tenant_id: Optional[str] = None
     user_id: str = ""
     language: str = "en"
+    requirements_confirmed: bool = False
 
     # Pre-fetched catalogs injected by backend (all optional — tools guard on None)
     tool_catalog: Optional[List[Dict[str, Any]]] = None
@@ -249,6 +250,7 @@ def create_nl2agent_context(
     registry_results: Optional[List[Dict[str, Any]]] = None,
     community_results: Optional[List[Dict[str, Any]]] = None,
     official_skills: Optional[List[Dict[str, Any]]] = None,
+    requirements_confirmed: bool = False,
 ) -> Nl2AgentContext:
     """Create isolated context for one NL2AGENT tool instance."""
     return Nl2AgentContext(
@@ -257,6 +259,7 @@ def create_nl2agent_context(
         tenant_id=tenant_id,
         user_id=user_id or "",
         language=language or "en",
+        requirements_confirmed=bool(requirements_confirmed),
         tool_catalog=tool_catalog,
         skill_catalog=skill_catalog,
         registry_results=registry_results,

@@ -394,6 +394,20 @@ class TestPromptTemplateUtils:
         assert "Fresh Observation" in prompt or "存在新 Observation" in prompt
 
     @pytest.mark.parametrize("language", ["en", "zh"])
+    def test_nl2agent_prompt_requires_explicit_requirements_confirmation(
+        self, language
+    ):
+        prompt = get_nl2agent_system_prompt(language=language)
+
+        assert 'requirements_review.status="collecting"' in prompt
+        assert 'requirements_review.status="awaiting_confirmation"' in prompt
+        assert 'requirements_review.status="confirmed"' in prompt
+        assert "audience_or_scenario" in prompt
+        assert "key_constraints" in prompt
+        assert "```nl2agent-requirements-summary" in prompt
+        assert "nl2agent-model-selection" in prompt
+
+    @pytest.mark.parametrize("language", ["en", "zh"])
     def test_nl2agent_prompt_collects_all_mcp_configuration_in_card(self, language):
         """The chat must not collect MCP configuration before rendering results."""
         prompt = get_nl2agent_system_prompt(language=language)

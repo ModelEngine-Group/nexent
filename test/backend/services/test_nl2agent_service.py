@@ -85,8 +85,26 @@ _EXPECTED_SESSION_CATALOGS = {
     "official_skills": _OFFICIAL_SKILLS,
 }
 
+_REQUIREMENTS_SUMMARY = {
+    "goal": "Build a document assistant",
+    "audience_or_scenario": "Office users preparing reports",
+    "primary_input": "Business documents",
+    "expected_output": "A presentation",
+    "key_constraints": "Preserve source facts",
+}
+
+
+def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
+    nl2agent_session_catalog.register_requirements_summary(
+        tenant_id, draft_agent_id, _REQUIREMENTS_SUMMARY
+    )
+    nl2agent_session_catalog.apply_requirements_confirmation_text(
+        tenant_id, draft_agent_id, "confirm requirements"
+    )
+
 
 def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
+    _confirm_requirements(tenant_id, draft_agent_id)
     nl2agent_session_catalog.register_online_recommendation_batch(
         tenant_id, draft_agent_id, "online_mcp", "mcp", []
     )
@@ -395,6 +413,7 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
 
 @pytest.mark.asyncio
 async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch):
+    _confirm_requirements()
     monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", MagicMock(
         return_value={"agent_id": 202, "name": "draft_test"}
     ))
@@ -421,7 +440,84 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_select_models_requires_confirmed_requirements(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="Confirm the requirements summary",
+    ):
+        await nl2agent_service.select_models(
+            agent_id=202,
+            primary_model_id=7,
+            fallback_model_ids=[],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_register_requirements_review_returns_normalized_state(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+
+    result = await nl2agent_service.register_requirements_review(
+        202,
+        {**_REQUIREMENTS_SUMMARY, "goal": "  Build   a document assistant  "},
+        "tenant_1",
+    )
+
+    assert result["agent_id"] == 202
+    assert result["status"] == "awaiting_confirmation"
+    assert result["summary"]["goal"] == "Build a document assistant"
+    assert result["fingerprint"]
+
+
+def test_process_requirements_confirmation_text_updates_nl2agent_draft(monkeypatch):
+    nl2agent_session_catalog.register_requirements_summary(
+        "tenant_1", 202, _REQUIREMENTS_SUMMARY
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 1, "name": "nl2agent"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+
+    result = nl2agent_service.process_requirements_confirmation_text(
+        1, 202, "tenant_1", "change the expected output"
+    )
+
+    assert result["intent"] == "modify"
+    assert result["status"] == "collecting"
+
+
+def test_process_requirements_confirmation_ignores_non_nl2agent_runner(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 1, "name": "other_agent"}),
+    )
+
+    assert nl2agent_service.process_requirements_confirmation_text(
+        1, 202, "tenant_1", "confirm requirements"
+    ) == {"intent": "not_applicable"}
+
+
+@pytest.mark.asyncio
 async def test_select_models_rejects_unavailable_model(monkeypatch):
+    _confirm_requirements()
     monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", MagicMock(
         return_value={"agent_id": 202, "name": "draft_test"}
     ))
@@ -445,6 +541,7 @@ async def test_select_models_rejects_unavailable_model(monkeypatch):
     ],
 )
 async def test_select_models_rejects_non_platform_llms(monkeypatch, records, message):
+    _confirm_requirements()
     monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", MagicMock(
         return_value={"agent_id": 202, "name": "draft_test"}
     ))
@@ -1180,6 +1277,7 @@ async def test_finalize_rejects_incomplete_generated_proposal(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_finalize_rejects_connected_mcp_until_tools_are_bound_or_skipped(monkeypatch):
+    _confirm_requirements()
     monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", MagicMock(
         return_value={
             "agent_id": 202,
@@ -1226,6 +1324,7 @@ async def test_finalize_rejects_connected_mcp_until_tools_are_bound_or_skipped(m
 async def test_finalize_requires_both_online_catalogs(
     monkeypatch, registered_resource_type
 ):
+    _confirm_requirements()
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",

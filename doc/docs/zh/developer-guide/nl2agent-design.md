@@ -180,6 +180,11 @@ nl2agent:session_state:{tenant_id}:{draft_agent_id}
 
 ```json
 {
+  "requirements_review": {
+    "status": "collecting",
+    "summary": null,
+    "fingerprint": ""
+  },
   "recommendation_batches": {},
   "identity_confirmed": false,
   "mcp_workflows": {},
@@ -234,13 +239,21 @@ Redis 中不得保存用户提交的 secret 值。
 
 ### 4.2 需求澄清
 
-需求关卡只要求确认三个事实：
+需求关卡要求用户明确提供并确认五项事实：
 
 - Agent 目标
+- 使用者或使用场景
 - 主要输入；明确无输入的任务记为“无”
 - 期望输出
+- 关键约束；明确无特殊约束时记为“无”
 
-每轮只询问第一个缺失事实。三项齐全后立即进入模型选择，不继续追问可选场景、约束、实现细节或资源偏好；这些内容可在后续已有对话信息中用于生成最终方案。
+五项内容必须来自用户明确表达，NL2AGENT 不得根据常识或上下文自行补全。`collecting` 状态下每轮只询问第一个缺失项；五项齐全后输出只读 `nl2agent-requirements-summary` 卡片并停止，不得同时选择模型或搜索资源。
+
+摘要卡实际渲染后调用 `POST /nl2agent/session/{id}/requirements/register`。后端规范化字段并生成稳定 fingerprint：相同摘要重复注册保持幂等，不同摘要会更新 fingerprint 并把状态重置为 `awaiting_confirmation`。注册失败时卡片显示错误和 Retry，同时阻止用户提交确认消息。
+
+用户在聊天框中自然确认或说明修改，不使用确认按钮。`/agent/run` 在保存用户消息、构造 Prompt 和运行模型之前，使用确定性中英文规则识别意图：修改或否定表达优先于确认表达；简短“是”“对”“yes”只在没有其他实质内容时确认；模糊表达不改变状态。确认后写入 `confirmed` 并在同一轮进入模型选择；修改后返回 `collecting`，保留本轮文字供 NL2AGENT 生成修订摘要。
+
+模型选择、三个搜索工具和最终配置均以后端持久化的 `requirements_review.status=confirmed` 为前置条件。未完成的历史测试会话不做兼容恢复。
 
 ### 4.3 模型选择
 
@@ -437,6 +450,16 @@ The previous card action completed successfully. Re-read the authoritative Curre
 ```json
 {
   "draft_agent_id": 54,
+  "requirements_review": {
+    "status": "collecting|awaiting_confirmation|confirmed",
+    "summary": {
+      "goal": "...",
+      "audience_or_scenario": "...",
+      "primary_input": "...",
+      "expected_output": "...",
+      "key_constraints": "..."
+    }
+  },
   "model_selection_confirmed": true,
   "local_review_status": "missing|pending|complete",
   "online_review": {
@@ -456,6 +479,7 @@ The previous card action completed successfully. Re-read the authoritative Curre
 满足以下条件后，NL2AGENT 直接输出 `nl2agent-finalize` 卡片，不调用 Skill 名称或不存在的 finalize Tool：
 
 - 模型选择有效
+- 需求摘要已经由用户文字确认
 - 至少一张本地资源卡已经注册
 - 所有推荐批次已经 applied 或 skipped
 - 所有已安装 MCP 已经绑定工具或显式跳过
@@ -490,6 +514,7 @@ FinalizeCard 会先读取权威 session state：
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | POST | `/session/start` | 创建 NL2AGENT 会话、草稿和 Redis Catalog |
+| POST | `/session/{id}/requirements/register` | 幂等注册已渲染的五项需求摘要 |
 | PUT | `/session/{id}/models` | 保存主模型和备用模型 |
 | POST | `/session/{id}/local-resources/register` | 注册已经渲染的本地推荐批次 |
 | POST | `/session/{id}/apply-local-resources` | 应用指定批次中的本地资源 |
@@ -658,15 +683,16 @@ tenant_id + draft_agent_id + tool_name + canonical_keyword_set
 模型必须从上到下判断并只执行第一个匹配动作：
 
 1. 本轮存在新搜索 Observation：原样输出对应结果卡，不再次搜索。
-2. 目标、主要输入或期望输出缺失：只询问第一个缺失项。
-3. 三项齐全但模型未确认：只输出固定说明和模型选择卡。
-4. 模型已确认但本地审查缺失：调用一次本地搜索。
-5. 本地卡已展示但未 Apply/Skip：只提示处理现有卡片。
-6. 本地审查完成但在线目录不完整：同时搜索缺失的 MCP/Skill 目录；两类都缺失时在同一 `<code>` 块各调用一次。
-7. 两类在线批次已展示但未全局完成：只提示使用会话级“完成配置”。
-8. 在线配置完成但身份未确认：生成显示名称并输出身份卡。
-9. 身份已确认：直接输出 final review 卡，不自动发布。
-10. 状态不一致：提示重新加载，不猜测阶段或生成卡片。
+2. `requirements_review.status=collecting`：按目标、使用者/场景、主要输入、期望输出、关键约束顺序，只询问第一个缺失项；五项齐全时只输出需求摘要卡。
+3. `requirements_review.status=awaiting_confirmation`：不重复摘要卡，只要求用户明确确认或说明修改。
+4. `requirements_review.status=confirmed` 但模型未确认：只输出固定说明和模型选择卡。
+5. 模型已确认但本地审查缺失：调用一次本地搜索。
+6. 本地卡已展示但未 Apply/Skip：只提示处理现有卡片。
+7. 本地审查完成但在线目录不完整：同时搜索缺失的 MCP/Skill 目录；两类都缺失时在同一 `<code>` 块各调用一次。
+8. 两类在线批次已展示但未全局完成：只提示使用会话级“完成配置”。
+9. 在线配置完成但身份未确认：生成显示名称并输出身份卡。
+10. 身份已确认：直接输出 final review 卡，不自动发布。
+11. 状态不一致：提示重新加载，不猜测阶段或生成卡片。
 
 新 Observation 的卡片渲染优先级高于运行开始时的 Current Session 快照。工具调用与结果卡必须处于不同模型步骤，避免调用时序、重复搜索和伪造 Observation。
 
@@ -683,6 +709,7 @@ nl2agent_search_web_skills
 连字符名称是前端卡片：
 
 ```text
+nl2agent-requirements-summary
 nl2agent-model-selection
 nl2agent-local-resources
 nl2agent-web-mcps
@@ -736,6 +763,7 @@ print(result)
 
 | 卡片 | 主要职责 |
 |---|---|
+| `RequirementsSummaryCard` | 只读展示五项需求，幂等注册摘要；失败时 Retry 并阻止聊天确认 |
 | `ModelSelectionCard` | 加载平台可用 LLM，保存主模型和备用模型 |
 | `LocalResourcesCard` | 注册推荐批次，Apply All 或 Continue Without Resources |
 | `WebMcpCard` | 展示配置字段，安装、重试、发现和绑定 MCP tools |
@@ -783,6 +811,7 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 
 | 数据 | 权威来源 |
 |---|---|
+| 五项需求摘要与确认状态 | Redis `requirements_review` |
 | 主模型和备用模型 | 草稿 Agent 数据库字段 |
 | Agent 显示名称 | 草稿 Agent `display_name` |
 | 内部名称 | 后端根据持久化显示名称生成 |
@@ -890,6 +919,15 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 - [ ] 模型卡只展示平台当前可用 LLM。
 - [ ] 不存在、非 LLM、不可用、重复或跨租户模型均无法保存。
 - [ ] 最终配置时模型变为不可用会被拒绝。
+
+### 需求确认
+
+- [ ] 五项需求缺少任一项时，每轮只询问第一个缺失项。
+- [ ] 五项齐全后只输出只读需求摘要卡，不提前选择模型或搜索。
+- [ ] 摘要注册幂等，不同摘要会重置为 `awaiting_confirmation`。
+- [ ] 中英文确认、简短肯定、否定优先和修改表达按确定性规则更新状态。
+- [ ] 摘要注册失败时可以 Retry，且注册成功前不能提交确认消息。
+- [ ] 未确认需求不能保存模型、调用三个搜索工具或最终配置。
 
 ### 本地资源
 

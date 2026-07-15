@@ -25,6 +25,7 @@ from consts.model import (
     Nl2AgentOnlineRecommendationBatchRequest,
     Nl2AgentRecommendationBatchRequest,
     Nl2AgentRecommendationSkipRequest,
+    Nl2AgentRequirementsSummaryRequest,
 )
 from services.nl2agent_service import (
     apply_local_resources_batch,
@@ -36,6 +37,7 @@ from services.nl2agent_service import (
     get_session_state,
     register_local_resource_recommendations,
     register_online_resource_recommendations,
+    register_requirements_review,
     save_agent_identity,
     select_models,
     skip_mcp_tool_binding,
@@ -71,6 +73,8 @@ def _session_http_error(exc: Exception) -> HTTPException:
             "before completing online configuration",
             "Complete the online resource",
             "display name is missing",
+            "Requirements summary",
+            "Confirm the requirements summary",
         )
     ):
         return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
@@ -91,13 +95,16 @@ async def select_models_api(
     authorization: Optional[str] = Header(None),
 ):
     user_id, tenant_id, _ = _current_user(authorization, http_request)
-    return await select_models(
-        agent_id=agent_id,
-        primary_model_id=payload.primary_model_id,
-        fallback_model_ids=payload.fallback_model_ids,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    try:
+        return await select_models(
+            agent_id=agent_id,
+            primary_model_id=payload.primary_model_id,
+            fallback_model_ids=payload.fallback_model_ids,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/mcp/install")
@@ -276,6 +283,24 @@ async def register_online_recommendations_api(
             payload.recommendation_batch_id,
             payload.resource_type,
             payload.item_keys,
+            tenant_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post("/session/{agent_id}/requirements/register")
+async def register_requirements_api(
+    agent_id: int,
+    payload: Nl2AgentRequirementsSummaryRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    _, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return await register_requirements_review(
+            agent_id,
+            payload.model_dump(),
             tenant_id,
         )
     except Exception as exc:

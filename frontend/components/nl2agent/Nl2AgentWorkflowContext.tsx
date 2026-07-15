@@ -4,6 +4,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -17,6 +18,7 @@ interface Nl2AgentWorkflowContextValue {
   continueWithText: (text?: string) => Promise<void>;
   beginAction: () => void;
   endAction: () => void;
+  setInputBlocked: (key: string, blocked: boolean) => void;
   notifyStateChanged: () => void;
   busy: boolean;
   stateVersion: number;
@@ -29,6 +31,7 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   continueWithText: async () => {},
   beginAction: () => {},
   endAction: () => {},
+  setInputBlocked: () => {},
   notifyStateChanged: () => {},
   busy: false,
   stateVersion: 0,
@@ -43,11 +46,16 @@ export const Nl2AgentWorkflowProvider: React.FC<{
 }> = ({ children, onContinue, enabled, scopeKey }) => {
   const [actionCount, setActionCount] = useState(0);
   const [continuing, setContinuing] = useState(false);
+  const [inputBlockers, setInputBlockers] = useState<Set<string>>(new Set());
   const [stateVersion, setStateVersion] = useState(0);
   const [retries, setRetries] = useState<
     Record<string, { text: string; error: string }>
   >({});
   const continuingRef = useRef(false);
+
+  useEffect(() => {
+    setInputBlockers(new Set());
+  }, [scopeKey]);
 
   const beginAction = useCallback(
     () => setActionCount((count) => count + 1),
@@ -61,6 +69,14 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     () => setStateVersion((version) => version + 1),
     []
   );
+  const setInputBlocked = useCallback((key: string, blocked: boolean) => {
+    setInputBlockers((current) => {
+      const next = new Set(current);
+      if (blocked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
 
   const continueWithText = useCallback(
     async (text?: string) => {
@@ -106,8 +122,9 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       continueWithText,
       beginAction,
       endAction,
+      setInputBlocked,
       notifyStateChanged,
-      busy: continuing || actionCount > 0,
+      busy: continuing || actionCount > 0 || inputBlockers.size > 0,
       stateVersion,
       continuationError,
       retryContinuation,
@@ -120,8 +137,10 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       continuing,
       endAction,
       enabled,
+      inputBlockers,
       notifyStateChanged,
       retryContinuation,
+      setInputBlocked,
       stateVersion,
     ]
   );

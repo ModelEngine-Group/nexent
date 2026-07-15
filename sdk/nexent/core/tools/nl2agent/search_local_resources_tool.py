@@ -91,6 +91,7 @@ def get_search_local_resources_tool(
     draft_agent_id: Optional[int] = None,
     tool_catalog: Optional[List[Dict[str, Any]]] = None,
     skill_catalog: Optional[List[Dict[str, Any]]] = None,
+    requirements_confirmed: bool = False,
 ) -> Tool:
     context = create_nl2agent_context(
         agent_id=agent_id,
@@ -100,6 +101,7 @@ def get_search_local_resources_tool(
         draft_agent_id=draft_agent_id,
         tool_catalog=tool_catalog,
         skill_catalog=skill_catalog,
+        requirements_confirmed=requirements_confirmed,
     )
     return NL2AgentSearchLocalResourcesTool(context)
 
@@ -138,6 +140,10 @@ class NL2AgentSearchLocalResourcesTool(Tool):
         ctx = self.context
         if ctx.tenant_id is None:
             return error_response("NL2AGENT session context not initialized.")
+        if not ctx.requirements_confirmed:
+            return error_response(
+                "NL2AGENT requirements are not confirmed for this draft."
+            )
         if ctx.tool_catalog is None or ctx.skill_catalog is None:
             return error_response("tool/skill catalog not available in context")
 

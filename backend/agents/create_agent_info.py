@@ -164,8 +164,17 @@ def _build_nl2agent_current_session(
         for workflow in mcp_workflows.values()
         if workflow.get("status") in {"installing", "connected"}
     )
+    requirements_review = workflow_state.get("requirements_review") or {
+        "status": "collecting",
+        "summary": None,
+        "fingerprint": "",
+    }
     return {
         "draft_agent_id": int(draft_agent_id),
+        "requirements_review": {
+            "status": requirements_review.get("status", "collecting"),
+            "summary": requirements_review.get("summary"),
+        },
         "model_selection_confirmed": bool(model_selection_confirmed),
         "local_review_status": local_review_status,
         "online_review": {
@@ -834,8 +843,11 @@ async def create_agent_config(
     nl2agent_system_prompt = (
         _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
     )
+    nl2agent_workflow_state: Dict[str, Any] = {}
     if nl2agent_system_prompt and draft_agent_id is not None:
-        resource_state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+        nl2agent_workflow_state = get_nl2agent_session_state(
+            tenant_id, draft_agent_id
+        )
         draft_agent_info = search_agent_info_by_agent_id(
             agent_id=draft_agent_id,
             tenant_id=tenant_id,
@@ -847,7 +859,7 @@ async def create_agent_config(
         current_session = _build_nl2agent_current_session(
             draft_agent_id,
             model_selection_confirmed,
-            resource_state,
+            nl2agent_workflow_state,
         )
         nl2agent_system_prompt += (
             "\n\n### Current Session\n"
@@ -1100,6 +1112,12 @@ async def create_agent_config(
                 "tenant_id": tenant_id,
                 "language": language,
                 "draft_agent_id": draft_agent_id,
+                "requirements_confirmed": (
+                    nl2agent_workflow_state.get("requirements_review", {}).get(
+                        "status"
+                    )
+                    == "confirmed"
+                ),
                 **nl2agent_catalogs,
             }
 

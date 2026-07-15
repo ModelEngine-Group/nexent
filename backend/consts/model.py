@@ -470,6 +470,16 @@ class Nl2AgentOnlineRecommendationBatchRequest(BaseModel):
     item_keys: List[str] = Field(default_factory=list, max_length=100)
 
 
+class Nl2AgentRequirementsSummaryRequest(BaseModel):
+    """Register the read-only requirements summary rendered by NL2AGENT."""
+
+    goal: str = Field(..., min_length=1, max_length=500)
+    audience_or_scenario: str = Field(..., min_length=1, max_length=500)
+    primary_input: str = Field(..., min_length=1, max_length=1000)
+    expected_output: str = Field(..., min_length=1, max_length=1000)
+    key_constraints: str = Field(..., min_length=1, max_length=2000)
+
+
 class Nl2AgentModelSelectionRequest(BaseModel):
     """Persist the ordered LLM selection for an NL2AGENT draft."""
 

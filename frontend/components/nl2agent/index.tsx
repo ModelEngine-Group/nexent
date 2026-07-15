@@ -9,6 +9,7 @@ import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
 import { FinalizeCard } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
+import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
 import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
@@ -58,6 +59,9 @@ export const OnlineRecommendationGroup: React.FC<{
  * final answer; markdownRenderer.tsx routes matching blocks here.
  *
  * Supported tags:
+ *   ```nl2agent-requirements-summary -> RequirementsSummaryCard
+ *   ```nl2agent-model-selection      -> ModelSelectionCard
+ *   ```nl2agent-agent-identity       -> AgentIdentityCard
  *   ```nl2agent-local-resources  -> LocalResourcesCard
  *   ```nl2agent-web-mcp          -> WebMcpCard (single)
  *   ```nl2agent-web-mcps         -> list of WebMcpCard
@@ -145,6 +149,19 @@ export const tryRenderNl2AgentCard = (
   }
 
   switch (normalizedLanguage) {
+    case "nl2agent-requirements-summary":
+      return (
+        <RequirementsSummaryCard
+          agentId={agentId}
+          summary={{
+            goal: String(parsed.goal || ""),
+            audience_or_scenario: String(parsed.audience_or_scenario || ""),
+            primary_input: String(parsed.primary_input || ""),
+            expected_output: String(parsed.expected_output || ""),
+            key_constraints: String(parsed.key_constraints || ""),
+          }}
+        />
+      );
     case "nl2agent-model-selection":
       return <ModelSelectionCard agentId={agentId} />;
     case "nl2agent-agent-identity":

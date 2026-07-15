@@ -81,6 +81,7 @@ def get_search_web_skills_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
     official_skills: Optional[List[Dict[str, Any]]] = None,
+    requirements_confirmed: bool = False,
 ) -> Tool:
     context = create_nl2agent_context(
         agent_id=agent_id,
@@ -89,6 +90,7 @@ def get_search_web_skills_tool(
         language=language,
         draft_agent_id=draft_agent_id,
         official_skills=official_skills,
+        requirements_confirmed=requirements_confirmed,
     )
     return NL2AgentSearchWebSkillsTool(context)
 
@@ -126,6 +128,10 @@ class NL2AgentSearchWebSkillsTool(Tool):
         ctx = self.context
         if ctx.tenant_id is None:
             return error_response("NL2AGENT session context not initialized.")
+        if not ctx.requirements_confirmed:
+            return error_response(
+                "NL2AGENT requirements are not confirmed for this draft."
+            )
         if ctx.official_skills is None:
             return error_response("skills catalog not available in context")
 

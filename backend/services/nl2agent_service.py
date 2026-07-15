@@ -25,6 +25,8 @@ from urllib.parse import urlparse
 from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
 
 from agents.nl2agent_session_catalog import (
+    apply_requirements_confirmation_text,
+    assert_requirements_confirmed,
     assert_identity_confirmed,
     assert_mcp_workflows_resolved,
     assert_online_configuration_complete,
@@ -36,6 +38,7 @@ from agents.nl2agent_session_catalog import (
     get_nl2agent_session_state,
     register_recommendation_batch,
     register_online_recommendation_batch,
+    register_requirements_summary,
     resolve_recommendation_batch,
     set_nl2agent_session_catalogs,
     update_mcp_workflow,
@@ -528,6 +531,10 @@ async def select_models(
 ) -> Dict[str, Any]:
     """Validate and persist an ordered model selection on a draft agent."""
     _get_owned_draft(agent_id, tenant_id)
+    try:
+        assert_requirements_confirmed(tenant_id, agent_id)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
     ordered_ids = [int(primary_model_id), *[int(x) for x in fallback_model_ids]]
     if len(ordered_ids) > 5 or len(set(ordered_ids)) != len(ordered_ids):
         raise AgentRunException("Select one primary model and up to four distinct fallbacks.")
@@ -1178,6 +1185,36 @@ async def confirm_online_resource_configuration(
     }
 
 
+async def register_requirements_review(
+    agent_id: int, summary: Dict[str, Any], tenant_id: str
+) -> Dict[str, Any]:
+    """Register the rendered five-field requirements summary for one draft."""
+    _get_owned_draft(agent_id, tenant_id)
+    review = register_requirements_summary(tenant_id, agent_id, summary)
+    return {
+        "agent_id": agent_id,
+        "status": review["status"],
+        "summary": review["summary"],
+        "fingerprint": review["fingerprint"],
+    }
+
+
+def process_requirements_confirmation_text(
+    runner_agent_id: Optional[int],
+    draft_agent_id: int,
+    tenant_id: str,
+    text: str,
+) -> Dict[str, Any]:
+    """Process textual confirmation only for the seeded NL2AGENT runner."""
+    runner = search_agent_info_by_agent_id(
+        agent_id=runner_agent_id, tenant_id=tenant_id
+    )
+    if not runner or runner.get("name") != NL2AGENT_AGENT_NAME:
+        return {"intent": "not_applicable"}
+    _get_owned_draft(draft_agent_id, tenant_id)
+    return apply_requirements_confirmation_text(tenant_id, draft_agent_id, text)
+
+
 async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
     """Return authoritative draft models, resource bindings, and review state."""
     draft = _get_owned_draft(agent_id, tenant_id)
@@ -1482,6 +1519,10 @@ async def finalize_agent(
         stored_model_ids,
         finalizing=True,
     )
+    try:
+        assert_requirements_confirmed(tenant_id, agent_id)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
     try:
         assert_resource_review_complete(tenant_id, agent_id)
     except Exception as exc:

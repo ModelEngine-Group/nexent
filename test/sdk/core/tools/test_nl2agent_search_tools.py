@@ -19,15 +19,30 @@ from nexent.core.tools.nl2agent._context import (
     online_recommendation_batch_id,
 )
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
-    get_search_local_resources_tool,
+    get_search_local_resources_tool as _get_search_local_resources_tool,
 )
 from nexent.core.tools.nl2agent.search_web_mcps_tool import (
-    get_search_web_mcps_tool,
+    get_search_web_mcps_tool as _get_search_web_mcps_tool,
     normalize_mcp_candidate,
 )
 from nexent.core.tools.nl2agent.search_web_skills_tool import (
-    get_search_web_skills_tool,
+    get_search_web_skills_tool as _get_search_web_skills_tool,
 )
+
+
+def get_search_local_resources_tool(**kwargs):
+    kwargs.setdefault("requirements_confirmed", True)
+    return _get_search_local_resources_tool(**kwargs)
+
+
+def get_search_web_mcps_tool(**kwargs):
+    kwargs.setdefault("requirements_confirmed", True)
+    return _get_search_web_mcps_tool(**kwargs)
+
+
+def get_search_web_skills_tool(**kwargs):
+    kwargs.setdefault("requirements_confirmed", True)
+    return _get_search_web_skills_tool(**kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +128,29 @@ def test_nl2agent_search_tools_require_tenant_context(initializer, catalog_kwarg
     )
 
     assert _loads(tool(query=query)) == {"error": "NL2AGENT session context not initialized."}
+
+
+@pytest.mark.parametrize(
+    ("initializer", "catalog_kwargs"),
+    [
+        (_get_search_local_resources_tool, {"tool_catalog": [], "skill_catalog": []}),
+        (_get_search_web_mcps_tool, {"registry_results": [], "community_results": []}),
+        (_get_search_web_skills_tool, {"official_skills": []}),
+    ],
+)
+def test_nl2agent_search_tools_require_confirmed_requirements(
+    initializer, catalog_kwargs
+):
+    tool = initializer(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        requirements_confirmed=False,
+        **catalog_kwargs,
+    )
+
+    assert _loads(tool(query="document")) == {
+        "error": "NL2AGENT requirements are not confirmed for this draft."
+    }
 
 
 def test_nl2agent_search_local_resources_returns_empty_results_for_empty_catalogs():

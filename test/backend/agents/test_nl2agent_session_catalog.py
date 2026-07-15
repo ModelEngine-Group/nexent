@@ -245,6 +245,11 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
         "tenant_1", 202, "batch_1", [1], []
     )
     assert catalog_module.get_nl2agent_session_state("tenant_1", 303) == {
+        "requirements_review": {
+            "status": "collecting",
+            "summary": None,
+            "fingerprint": "",
+        },
         "recommendation_batches": {},
         "identity_confirmed": False,
         "mcp_workflows": {},
@@ -252,9 +257,105 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
         "online_configuration_confirmed": False,
     }
     assert catalog_module.get_nl2agent_session_state("tenant_2", 202) == {
+        "requirements_review": {
+            "status": "collecting",
+            "summary": None,
+            "fingerprint": "",
+        },
         "recommendation_batches": {},
         "identity_confirmed": False,
         "mcp_workflows": {},
         "online_recommendation_batches": {},
         "online_configuration_confirmed": False,
     }
+
+
+def test_requirements_summary_registration_and_confirmation(fake_redis):
+    summary = {
+        "goal": "  Create presentations  ",
+        "audience_or_scenario": "Office   users",
+        "primary_input": "DOCX files",
+        "expected_output": "Presentation",
+        "key_constraints": "No invented facts",
+    }
+
+    first = catalog_module.register_requirements_summary(
+        "tenant_1", 202, summary
+    )
+    second = catalog_module.register_requirements_summary(
+        "tenant_1", 202, summary
+    )
+
+    assert first == second
+    assert first["status"] == "awaiting_confirmation"
+    assert first["summary"]["goal"] == "Create presentations"
+    assert first["summary"]["audience_or_scenario"] == "Office users"
+    confirmed = catalog_module.apply_requirements_confirmation_text(
+        "tenant_1", 202, "我确认需求，可以继续"
+    )
+    assert confirmed["intent"] == "confirm"
+    assert confirmed["status"] == "confirmed"
+    catalog_module.assert_requirements_confirmed("tenant_1", 202)
+
+
+def test_changed_requirements_summary_resets_confirmation(fake_redis):
+    summary = {
+        "goal": "Create presentations",
+        "audience_or_scenario": "Office users",
+        "primary_input": "DOCX files",
+        "expected_output": "Presentation",
+        "key_constraints": "No invented facts",
+    }
+    catalog_module.register_requirements_summary("tenant_1", 202, summary)
+    catalog_module.apply_requirements_confirmation_text(
+        "tenant_1", 202, "confirm requirements"
+    )
+
+    changed = catalog_module.register_requirements_summary(
+        "tenant_1", 202, {**summary, "expected_output": "Presentation and notes"}
+    )
+
+    assert changed["status"] == "awaiting_confirmation"
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="Confirm the requirements summary",
+    ):
+        catalog_module.assert_requirements_confirmed("tenant_1", 202)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("确认需求", "confirm"),
+        ("looks good", "confirm"),
+        ("yes", "confirm"),
+        ("yes I may have more details later", "ambiguous"),
+        ("是 但我还要考虑", "ambiguous"),
+        ("确认，但需要修改输出", "modify"),
+        ("not correct, change the output", "modify"),
+        ("我再考虑一下", "ambiguous"),
+    ],
+)
+def test_requirements_confirmation_classifier(text, expected):
+    assert catalog_module.classify_requirements_confirmation(text) == expected
+
+
+def test_requirements_modification_returns_to_collecting(fake_redis):
+    catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+
+    result = catalog_module.apply_requirements_confirmation_text(
+        "tenant_1", 202, "不正确，改成输出 PDF"
+    )
+
+    assert result["intent"] == "modify"
+    assert result["status"] == "collecting"

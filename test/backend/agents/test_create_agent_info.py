@@ -540,6 +540,10 @@ def test_build_nl2agent_current_session_projects_workflow_state(
 
     assert summary["draft_agent_id"] == 202
     assert summary["model_selection_confirmed"] is True
+    assert summary["requirements_review"] == {
+        "status": "collecting",
+        "summary": None,
+    }
     assert summary["local_review_status"] == expected["local_review_status"]
     assert summary["online_review"] == {
         "mcp_batch_registered": expected["mcp_batch_registered"],
@@ -548,6 +552,34 @@ def test_build_nl2agent_current_session_projects_workflow_state(
     }
     assert summary["unresolved_mcp_count"] == expected["unresolved_mcp_count"]
     assert summary["identity_confirmed"] is expected["identity_confirmed"]
+
+
+def test_build_nl2agent_current_session_includes_authoritative_requirements():
+    requirements = {
+        "goal": "Build presentations",
+        "audience_or_scenario": "Office users",
+        "primary_input": "DOCX files",
+        "expected_output": "PPT files",
+        "key_constraints": "Preserve source facts",
+    }
+
+    summary = _build_nl2agent_current_session(
+        202,
+        False,
+        {
+            "requirements_review": {
+                "status": "confirmed",
+                "summary": requirements,
+                "fingerprint": "secret-workflow-fingerprint",
+            }
+        },
+    )
+
+    assert summary["requirements_review"] == {
+        "status": "confirmed",
+        "summary": requirements,
+    }
+    assert "fingerprint" not in summary["requirements_review"]
 ValidationError = sys.modules["consts.exceptions"].ValidationError
 
 # Import ToolParamsRequest for testing
@@ -2118,7 +2150,10 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
                 patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_nl2agent_session_catalogs', return_value=session_catalogs) as mock_get_catalogs, \
-                patch('backend.agents.create_agent_info.get_nl2agent_session_state', return_value={"recommendation_batches": {}}), \
+                patch('backend.agents.create_agent_info.get_nl2agent_session_state', return_value={
+                    "requirements_review": {"status": "confirmed", "summary": {}},
+                    "recommendation_batches": {},
+                }), \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info._load_nl2agent_system_prompt', return_value="NL2AGENT prompt"), \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
@@ -2171,6 +2206,7 @@ class TestCreateAgentConfig:
                 "tenant_id": "tenant_1",
                 "language": "zh",
                 "draft_agent_id": 202,
+                "requirements_confirmed": True,
                 **session_catalogs,
             }
             assert mock_agent_config.call_args.kwargs["model_name"] == "business_model"
