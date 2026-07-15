@@ -95,6 +95,8 @@ class ConversationMessageUnit(TableBase):
     unit_status = Column(
         String(30), default='completed',
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
+    step_index = Column(
+        Integer, doc="ReAct step sequence number within this message. Increments on step_count chunks")
 
 
 class ConversationSourceImage(TableBase):

@@ -101,6 +101,25 @@ class ContextManagerConfig:
     inject_app_context: bool = True
     """Whether to inject APP_NAME, APP_DESCRIPTION, time, user_id."""
 
+    # === NEW: ContextItem Projection ===
+    use_context_items: bool = False
+    """Whether to project components into fine-grained ContextItems before assembly.
+
+    When True, uses ContextProjector to convert ContextComponent instances into
+    ContextItem candidates, then converts them back to messages for the existing
+    assembly pipeline. This enables W12 history projections and W13 policy decisions
+    in subsequent PRs. Default False for backward compatibility.
+    """
+
+    history_projector: Any = None
+    """Optional HistoryProjector instance for projecting DB conversation history into ContextItems.
+    
+    When set and use_context_items=True, the projector is called during build_context_messages
+    to produce HISTORY_TURN and TOOL_CALL_RESULT items from persisted
+    conversation history. Must be injected by the backend service layer since the SDK
+    cannot import database modules directly.
+    """
+
     # === NEW: Per-Component Token Budgets ===
     component_budgets: Dict[str, int] = field(default_factory=lambda: {
         "system_prompt": 4000,

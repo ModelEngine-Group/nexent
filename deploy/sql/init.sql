@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS "conversation_message_unit_t" (
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
+  "step_index" int4,
   CONSTRAINT "conversation_message_unit_t_pk" PRIMARY KEY ("unit_id")
 );
 ALTER TABLE "conversation_message_unit_t" OWNER TO "root";
@@ -58,6 +59,7 @@ COMMENT ON COLUMN "conversation_message_unit_t"."create_time" IS 'Creation time,
 COMMENT ON COLUMN "conversation_message_unit_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "conversation_message_unit_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "conversation_message_unit_t"."created_by" IS 'Creator ID, audit field';
+COMMENT ON COLUMN "conversation_message_unit_t"."step_index" IS 'ReAct step sequence number within this message. Increments on step_count chunks';
 COMMENT ON TABLE "conversation_message_unit_t" IS 'Carries agent output content in each message';
 
 CREATE TABLE IF NOT EXISTS "conversation_record_t" (

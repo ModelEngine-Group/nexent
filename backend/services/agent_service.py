@@ -23,7 +23,7 @@ from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
-    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -62,7 +62,7 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_by_model_id_ignore_delete, get_model_id_by_display_name, get_valid_model_ids
+from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -99,7 +99,6 @@ from services.conversation_management_service import (
     save_source_image,
     save_source_search,
     save_skill_files_to_conversation,
-    update_conversation_agent_id_service,
     update_message_content,
     update_message_status,
     update_unit_content,
@@ -107,7 +106,6 @@ from services.conversation_management_service import (
 )
 from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
-from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.memory_utils import build_memory_config
@@ -132,34 +130,6 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     """
     await asyncio.sleep(delay)
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
-
-
-async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
-    """Mirror Redis cancel signal into the local agent stop_event."""
-    while not stop_event.is_set():
-        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
-            stop_event.set()
-            logger.info(
-                "Runtime cancel signal received, user_id=%s, conversation_id=%s",
-                user_id,
-                conversation_id,
-            )
-            return
-        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
-
-
-async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, task: asyncio.Task) -> None:
-    """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
-    while not task.done():
-        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
-            task.cancel()
-            logger.info(
-                "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
-                user_id,
-                conversation_id,
-            )
-            return
-        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
 def _extract_json_objects_from_text(text: str) -> list[dict]:
@@ -925,8 +895,9 @@ async def _stream_agent_chunks(
     # so that units saved incrementally have a valid message_id to reference.
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
+        history_items = getattr(agent_request, "history", None) or []
         user_role_count = sum(
-            1 for item in getattr(agent_request, "history", [])
+            1 for item in history_items
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
@@ -947,6 +918,12 @@ async def _stream_agent_chunks(
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True)
 
+    # History projection tracking state
+    current_step_id: int = 0
+    pending_tool_content: Optional[str] = None  # Buffered tool content for merge
+    pending_tool_step: Optional[int] = None  # Step index of buffered tool
+    pending_tool_unit_index: Optional[int] = None  # Unit index assigned to buffered tool
+
     # Tracks the unit currently being accumulated in memory. Each entry is
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
     current_unit: Optional[Dict[str, Any]] = None
@@ -963,14 +940,6 @@ async def _stream_agent_chunks(
             user_id=user_id
         )
 
-    cancel_poll_task = asyncio.create_task(
-        _poll_runtime_cancel_signal(
-            conversation_id=agent_request.conversation_id,
-            user_id=user_id,
-            stop_event=agent_run_info.stop_event,
-        )
-    )
-
     # In resume mode, emit a status event first
     if is_resume_mode:
         await channel.publish(STREAM_STATUS_EVENT)
@@ -986,6 +955,9 @@ async def _stream_agent_chunks(
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
+
+                if chunk_type == ProcessType.STEP_COUNT.value:
+                    current_step_id += 1
 
                 # Add unit_index to the chunk data for frontend resume skip logic.
                 # This allows frontend to accurately skip chunks that were already persisted.
@@ -1133,6 +1105,7 @@ async def _stream_agent_chunks(
                             unit_content='{"placeholder": true}',
                             user_id=user_id,
                             unit_status="completed",
+                            step_index=current_step_id,
                         ).result()
                         try:
                             search_results = json.loads(chunk_content)
@@ -1178,6 +1151,47 @@ async def _stream_agent_chunks(
                         yield f"data: {chunk}\n\n"
                         continue
 
+                    # Handle tool call merging: buffer TOOL, merge with EXECUTION_LOGS
+                    if chunk_type == ProcessType.TOOL.value:
+                        pending_tool_content = chunk_content
+                        pending_tool_step = current_step_id
+                        pending_tool_unit_index = next_unit_index
+                        next_unit_index += 1
+                        await channel.publish(f"data: {chunk}\n\n")
+                        yield f"data: {chunk}\n\n"
+                        continue
+
+                    if chunk_type == ProcessType.EXECUTION_LOGS.value and pending_tool_content is not None:
+                        merged_content = json.dumps({
+                            "tool_call": pending_tool_content,
+                            "execution_result": chunk_content,
+                        })
+                        if streaming_message_id is not None:
+                            new_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=pending_tool_unit_index,
+                                unit_type="tool_call",
+                                unit_content=merged_content,
+                                user_id=user_id,
+                                unit_status="completed",
+                                step_index=pending_tool_step,
+                            ).result()
+                            current_unit = {
+                                "type": "tool_call",
+                                "content": merged_content,
+                                "unit_id": new_unit_id,
+                                "unit_index": pending_tool_unit_index,
+                                "mergeable": False,
+                            }
+                        pending_tool_content = None
+                        pending_tool_step = None
+                        pending_tool_unit_index = None
+                        await channel.publish(f"data: {chunk}\n\n")
+                        yield f"data: {chunk}\n\n"
+                        continue
+
                     # Default path: insert a new unit row with unit_status='streaming'.
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
@@ -1191,6 +1205,7 @@ async def _stream_agent_chunks(
                             unit_content=chunk_content,
                             user_id=user_id,
                             unit_status="streaming",
+                            step_index=current_step_id,
                         ).result()
                         current_unit = {
                             "type": chunk_type,
@@ -1204,6 +1219,21 @@ async def _stream_agent_chunks(
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
+
+        # Flush any buffered tool content that didn't receive execution_logs
+        if pending_tool_content is not None and streaming_message_id is not None:
+            submit(
+                save_message_unit,
+                message_id=streaming_message_id,
+                conversation_id=agent_request.conversation_id,
+                unit_index=pending_tool_unit_index,
+                unit_type="tool",
+                unit_content=pending_tool_content,
+                user_id=user_id,
+                unit_status="completed",
+                step_index=pending_tool_step,
+            ).result()
+            pending_tool_content = None
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
         await channel.publish(_safe_agent_stream_error_chunk())
@@ -1233,8 +1263,7 @@ async def _stream_agent_chunks(
                 except Exception:
                     logger.exception("Failed to mark last unit as completed")
 
-            was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-            terminal_status = "stopped" if was_stopped else "completed" if stream_completed_normally else "failed"
+            terminal_status = "completed" if stream_completed_normally else "failed"
             try:
                 update_message_status(
                     streaming_message_id,
@@ -1244,17 +1273,12 @@ async def _stream_agent_chunks(
             except Exception:
                 logger.exception("Failed to mark assistant message as %s", terminal_status)
 
-        if not cancel_poll_task.done():
-            cancel_poll_task.cancel()
-
-        was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-        terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
-
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id, status=terminal_status)
+            agent_request.conversation_id, user_id)
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
+            terminal_status = 'completed' if stream_completed_normally else 'failed'
             await streaming_channel_manager.complete_channel(
                 conversation_id=agent_request.conversation_id,
                 user_id=user_id,
@@ -1420,22 +1444,6 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     try:
         tool_info = search_tools_for_sub_agent(
             agent_id=agent_id, tenant_id=tenant_id)
-        # Check if selected_model_id in tool params points to a deleted model
-        for tool in tool_info:
-            unavailable_reasons: List[str] = []
-            params = tool.get("params") or []
-            if isinstance(params, list):
-                for param_def in params:
-                    if not isinstance(param_def, dict):
-                        continue
-                    if param_def.get("name") == "selected_model_id":
-                        selected_model_id = param_def.get("default")
-                        if selected_model_id is not None:
-                            model_record = get_model_by_model_id_ignore_delete(selected_model_id, tenant_id)
-                            if model_record is not None and model_record.get("delete_flag") == "Y":
-                                unavailable_reasons.append(AgentUnavailableReason.MCP_MODEL_UNAVAILABLE)
-                        break
-            tool["unavailable_reasons"] = unavailable_reasons
         agent_info["tools"] = tool_info
     except Exception as e:
         logger.error(f"Failed to get agent tools: {str(e)}")
@@ -1456,11 +1464,7 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             tenant_id=tenant_id,
             version_no=version_no
         )
-        # Keep disabled instances for their saved configuration, but do not
-        # return them as selected skills in the agent configuration.
-        agent_info["skills"] = [
-            instance for instance in instances if instance.get("enabled", True)
-        ]
+        agent_info["skills"] = instances
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
@@ -1476,22 +1480,19 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["external_sub_agent_id_list"] = []
 
     # Get model names from model_ids array
-    # Filter out deleted models (delete_flag='Y' in model_record_t)
-    model_ids = agent_info.get("model_ids") or []
-    valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
-    agent_info["model_ids"] = valid_model_ids
-
+    model_ids = agent_info.get("model_ids")
     model_names: List[str] = []
-    for mid in valid_model_ids:
-        model_info = get_model_by_model_id(mid)
-        if model_info:
-            display_name = model_info.get("display_name")
-            if display_name:
-                model_names.append(display_name)
+    if model_ids and len(model_ids) > 0:
+        for mid in model_ids:
+            model_info = get_model_by_model_id(mid)
+            if model_info:
+                display_name = model_info.get("display_name")
+                if display_name:
+                    model_names.append(display_name)
     agent_info["model_names"] = model_names
-    # Always derive model_name from valid_model_ids so the API contract is consistent.
-    if valid_model_ids:
-        first_model_info = get_model_by_model_id(valid_model_ids[0])
+    # Always derive model_name from model_ids so the API contract is consistent.
+    if model_ids and len(model_ids) > 0:
+        first_model_info = get_model_by_model_id(model_ids[0])
         agent_info["model_name"] = first_model_info.get(
             "display_name", None) if first_model_info is not None else None
     else:
@@ -2289,9 +2290,9 @@ async def import_agent_by_agent_id(
                                                  enabled=True,
                                                  params=tool.params))
     # check the validity of the agent parameters
-    if import_agent_info.max_steps <= 0:
+    if import_agent_info.max_steps <= 0 or import_agent_info.max_steps > 30:
         raise ValueError(
-            f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0.")
+            f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0 and less than 30.")
     if not import_agent_info.name.isidentifier():
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
@@ -2449,11 +2450,6 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
                 if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
-
-            # Filter out deleted models (delete_flag='Y' in model_record_t)
-            raw_model_ids = agent.get("model_ids") or []
-            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
-            agent["model_ids"] = valid_model_ids
 
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(
@@ -2651,22 +2647,6 @@ def check_agent_availability(
         if not all(tool_statuses):
             unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
 
-    # Check if any tool has a selected_model_id pointing to a deleted model
-    for tool in tool_info:
-        params = tool.get("params") or []
-        if isinstance(params, list):
-            for param_def in params:
-                if not isinstance(param_def, dict):
-                    continue
-                if param_def.get("name") == "selected_model_id":
-                    selected_model_id = param_def.get("default")
-                    if selected_model_id is not None:
-                        model_record = get_model_by_model_id_ignore_delete(
-                            selected_model_id, tenant_id)
-                        if model_record is not None and model_record.get("delete_flag") == "Y":
-                            unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
-                    break
-
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
         agent=agent_info,
@@ -2741,12 +2721,20 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        conversation_id=agent_request.conversation_id,
     )
 
     # Mount conversation-level reusable ContextManager if enabled
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
     if cm_config and cm_config.enabled:
+        from nexent.core.agents.context.history_projector import HistoryProjector
+        from services.conversation_management_service import get_message_units_by_message_id
+
+        cm_config.history_projector = HistoryProjector(
+            query_units_fn=get_message_units_by_message_id
+        )
+
         cm = agent_run_manager.get_or_create_context_manager(
             conversation_id=str(agent_request.conversation_id),
             config=cm_config,
@@ -2794,11 +2782,6 @@ async def generate_stream_with_memory(
         preprocess_manager.register_preprocess_task(
             task_id, conversation_id, current_task
         )
-    cancel_poll_task = (
-        asyncio.create_task(_cancel_task_on_runtime_signal(conversation_id, user_id, current_task))
-        if current_task
-        else None
-    )
 
     # Helper to emit memory_search token
     def _memory_token(message_text: str) -> str:
@@ -2897,8 +2880,6 @@ async def generate_stream_with_memory(
         yield _safe_agent_stream_error_chunk()
         return
     finally:
-        if cancel_poll_task and not cancel_poll_task.done():
-            cancel_poll_task.cancel()
         # Always unregister preprocess task
         preprocess_manager.unregister_preprocess_task(task_id)
 
@@ -3044,7 +3025,6 @@ async def run_agent_stream(
         conversation_data = create_new_conversation(
             title=default_title,
             user_id=resolved_user_id,
-            agent_id=agent_request.agent_id,
         )
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -3052,19 +3032,6 @@ async def run_agent_stream(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
             resolved_user_id,
-        )
-
-    if (
-        not agent_request.is_debug
-        and not resume
-        and not is_new_conversation
-        and agent_request.conversation_id is not None
-        and agent_request.agent_id is not None
-    ):
-        update_conversation_agent_id_service(
-            conversation_id=agent_request.conversation_id,
-            agent_id=agent_request.agent_id,
-            user_id=resolved_user_id,
         )
 
     # Resume mode: check for existing streaming message
@@ -3089,13 +3056,8 @@ async def run_agent_stream(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id
         )
-        run_state = await runtime_state_service.get_run_state_async(
-            user_id=resolved_user_id,
-            conversation_id=agent_request.conversation_id,
-        )
-        is_remote_running = run_state.get("status") == "running"
 
-        if existing_run_info is None and not is_remote_running:
+        if existing_run_info is None:
             # Agent has finished while frontend was disconnected
             # Update message status to completed if it's still streaming
             try:
@@ -3119,82 +3081,8 @@ async def run_agent_stream(
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id
         )
-        last_unit_index = resume_info["resume_from_unit_index"] - 1
-
-        def _resume_status_chunk(replay_chunk_count: int) -> str:
-            payload = {
-                'status': 'resumed',
-                'last_unit_index': last_unit_index,
-                'replay_chunk_count': replay_chunk_count,
-            }
-            return f"data: {json.dumps(payload)}\n\n"
-
-        def _resume_completed_chunk(status: str = "completed") -> str:
-            payload = {
-                'status': status,
-                'last_unit_index': last_unit_index,
-            }
-            return f"data: {json.dumps(payload)}\n\n"
 
         if channel is None:
-            if runtime_state_service.enabled and is_remote_running:
-                async def redis_channel_stream():
-                    replay_events = await runtime_state_service.read_stream_events_async(
-                        user_id=resolved_user_id,
-                        conversation_id=agent_request.conversation_id,
-                    )
-                    replay_chunk_count = len(replay_events)
-
-                    yield STREAM_STATUS_EVENT
-                    yield _resume_status_chunk(replay_chunk_count)
-
-                    last_event_id = "0-0"
-                    for event_id, chunk in replay_events:
-                        last_event_id = event_id
-                        if chunk:
-                            yield chunk
-
-                    while True:
-                        events = await runtime_state_service.wait_for_stream_events_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
-                            last_id=last_event_id,
-                        )
-                        for event_id, chunk in events:
-                            last_event_id = event_id
-                            if chunk:
-                                yield chunk
-
-                        stream_status = await runtime_state_service.get_stream_status_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
-                        )
-                        latest_run_state = await runtime_state_service.get_run_state_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
-                        )
-                        if stream_status.get("status") or latest_run_state.get("status") in {
-                            "completed",
-                            "failed",
-                            "stopped",
-                        }:
-                            break
-
-                    terminal_status = stream_status.get("status") or latest_run_state.get("status") or "completed"
-                    yield STREAM_STATUS_EVENT
-                    yield _resume_completed_chunk(terminal_status)
-
-                return StreamingResponse(
-                    redis_channel_stream(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Stream-Status": "resumed",
-                        "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
-                    },
-                )
-
             # No channel exists, agent might be in a different state
             return JSONResponse(
                 status_code=HTTPStatus.OK,
@@ -3211,7 +3099,7 @@ async def run_agent_stream(
 
             # Emit status event first with chunk count for skip tracking
             yield STREAM_STATUS_EVENT
-            yield _resume_status_chunk(replay_chunk_count)
+            yield f'data: {{"status": "resumed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}, "replay_chunk_count": {replay_chunk_count}}}\n\n'
 
             # Use subscribe_with_history(0) to replay ALL chunks from the buffer
             # This ensures no chunks are lost even if frontend disconnected during streaming
@@ -3221,7 +3109,7 @@ async def run_agent_stream(
 
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield _resume_completed_chunk()
+            yield f'data: {{"status": "completed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}}}\n\n'
 
         return StreamingResponse(
             channel_stream(),
@@ -3235,11 +3123,6 @@ async def run_agent_stream(
         )
 
     # Normal mode: start new stream
-    await runtime_state_service.reset_stream_async(
-        user_id=resolved_user_id,
-        conversation_id=agent_request.conversation_id,
-    )
-
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
             agent_request,

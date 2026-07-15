@@ -26,4 +26,4 @@ class ManagedRunContext:
     stable_messages: Tuple[dict, ...] = ()
     dynamic_messages: Tuple[dict, ...] = ()
     selected_component_types: Tuple[str, ...] = ()
-    components: Tuple[Any, ...] = ()
+    selected_components: Tuple[Any, ...] = ()

@@ -213,6 +213,7 @@ const isSkippedUnitType = (unitType: string): boolean => {
     'execution_logs',
     'agent_new_run',
     'tool',
+    'tool_call',
     'verification',
     'memory_search',
     'max_steps_reached',
@@ -447,6 +448,7 @@ export const handleStreamResponse = async (
                 messageType === chatConfig.messageTypes.PARSE ||
                 messageType === chatConfig.messageTypes.EXECUTION_LOGS ||
                 messageType === chatConfig.messageTypes.TOOL ||
+                messageType === chatConfig.messageTypes.TOOL_CALL ||
                 messageType === chatConfig.messageTypes.CARD ||
                 messageType === chatConfig.messageTypes.AGENT_NEW_RUN ||
                 messageType === chatConfig.messageTypes.VERIFICATION ||
@@ -859,6 +861,61 @@ export const handleStreamResponse = async (
                 case chatConfig.messageTypes.EXECUTION_LOGS:
                   // Execution result message, skip
                   break;
+
+                case chatConfig.messageTypes.TOOL_CALL: {
+                  if (!currentStep) {
+                    currentStep = {
+                      id: `step-tool-call-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 9)}`,
+                      title: "Tool Call",
+                      content: "",
+                      expanded: true,
+                      contents: [],
+                      metrics: null,
+                      thinking: { content: "", expanded: true },
+                      code: { content: "", expanded: true },
+                      output: { content: "", expanded: true },
+                    };
+                  }
+
+                  try {
+                    const toolCallData = JSON.parse(messageContent);
+                    currentStep.contents.push({
+                      id: `executing-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 7)}`,
+                      type: chatConfig.messageTypes.EXECUTING,
+                      content: toolCallData.tool_call || "",
+                      expanded: true,
+                      timestamp: Date.now(),
+                      isLoading: true,
+                    });
+                    currentStep.contents.push({
+                      id: `execution-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 7)}`,
+                      type: chatConfig.messageTypes.EXECUTION,
+                      content: toolCallData.execution_result || "",
+                      expanded: true,
+                      timestamp: Date.now(),
+                    });
+                  } catch {
+                    currentStep.contents.push({
+                      id: `executing-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 7)}`,
+                      type: chatConfig.messageTypes.EXECUTING,
+                      content: messageContent,
+                      expanded: true,
+                      timestamp: Date.now(),
+                      isLoading: true,
+                    });
+                  }
+
+                  lastContentType = chatConfig.contentTypes.EXECUTION;
+                  break;
+                }
 
                 case chatConfig.messageTypes.AGENT_NEW_RUN:
                   // If there's no currentStep, create one

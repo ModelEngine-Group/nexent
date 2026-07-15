@@ -667,6 +667,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -862,14 +863,12 @@ async def create_agent_config(
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
-    available_tools = tool_list + builtin_tools
 
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
         "few_shots": few_shots_prompt,
-        "tools": {tool.name: tool for tool in available_tools},
+        "tools": {tool.name: tool for tool in tool_list},
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
@@ -960,7 +959,6 @@ async def create_agent_config(
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
-        strategy="full",
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
@@ -971,7 +969,7 @@ async def create_agent_config(
             language=language,
             agent_id=agent_id
         ),
-        tools=available_tools,
+        tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
@@ -983,6 +981,7 @@ async def create_agent_config(
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
+        conversation_id=conversation_id,
     )
     return agent_config
 
@@ -1395,6 +1394,7 @@ async def create_agent_run_info(
     override_version_no: int | None = None,
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
+    conversation_id: Optional[int] = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     # Determine which version_no to use based on is_debug flag
@@ -1424,6 +1424,7 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
+        "conversation_id": conversation_id,
     }
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id

@@ -23,6 +23,7 @@ from database.conversation_db import (
     get_latest_assistant_message_id,
     get_last_unit_for_message,
     get_message_id_by_index,
+    get_message_units_by_message,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
@@ -105,7 +106,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
                       unit_type: str, unit_content: str,
                       user_id: Optional[str] = None,
-                      unit_status: str = 'completed') -> int:
+                      unit_status: str = 'completed',
+                      step_index: Optional[int] = None) -> int:
     """
     Insert exactly one ConversationMessageUnit row.
 
@@ -117,6 +119,7 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Identifier of the user creating the unit
         unit_status: Lifecycle status (streaming / completed)
+        step_index: Optional ReAct step sequence number within this message
 
     Returns:
         int: Newly created unit_id
@@ -129,7 +132,23 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content=unit_content,
         user_id=user_id,
         unit_status=unit_status,
+        step_index=step_index,
     )
+
+
+def get_message_units_by_message_id(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get all units for a conversation, optionally filtered by message_id.
+
+    Used by HistoryProjector to reconstruct ReAct execution timeline.
+
+    Args:
+        conversation_id: Conversation ID
+        message_id: Optional message ID to filter by
+
+    Returns:
+        List of unit dictionaries ordered by message_id, step_index, unit_index
+    """
+    return get_message_units_by_message(conversation_id, message_id)
 
 
 def update_message_status(message_id: int, status: str, user_id: str) -> None:

@@ -196,7 +196,8 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
                         unit_type: str, unit_content: str,
                         user_id: Optional[str] = None,
-                        unit_status: str = 'completed') -> int:
+                        unit_status: str = 'completed',
+                        step_index: Optional[int] = None) -> int:
     """
     Insert a single ConversationMessageUnit row.
 
@@ -208,6 +209,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Reserved parameter for created_by and updated_by fields
         unit_status: Lifecycle status (streaming / completed)
+        step_index: Optional ReAct step sequence number within this message
 
     Returns:
         int: Newly created unit ID (auto-increment ID)
@@ -226,6 +228,8 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "unit_status": unit_status,
             "delete_flag": 'N',
         }
+        if step_index is not None:
+            row_data["step_index"] = step_index
         if user_id:
             row_data["created_by"] = user_id
             row_data["updated_by"] = user_id
@@ -422,6 +426,39 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         records = session.scalars(stmt).all()
 
         # Convert SQLAlchemy model instances to dictionaries
+        return list(map(as_dict, records))
+
+
+def get_message_units_by_message(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Get all units for a conversation, optionally filtered by message_id.
+    Used by HistoryProjector to reconstruct ReAct execution timeline.
+
+    Args:
+        conversation_id: Conversation ID (integer)
+        message_id: Optional message ID to filter by. If None, returns all units.
+
+    Returns:
+        List[Dict[str, Any]]: List of message units, ordered by message_id, step_index, unit_index
+    """
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+
+        stmt = select(ConversationMessageUnit).where(
+            ConversationMessageUnit.conversation_id == conversation_id,
+            ConversationMessageUnit.delete_flag == 'N'
+        )
+
+        if message_id is not None:
+            stmt = stmt.where(ConversationMessageUnit.message_id == message_id)
+
+        stmt = stmt.order_by(
+            asc(ConversationMessageUnit.message_id),
+            asc(ConversationMessageUnit.step_index),
+            asc(ConversationMessageUnit.unit_index)
+        )
+
+        records = session.scalars(stmt).all()
         return list(map(as_dict, records))
 
 

@@ -8,14 +8,21 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from ..contracts import FinalContext
+from nexent.monitor import (
+    get_monitoring_manager,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    OPENINFERENCE_INPUT_VALUE,
+    OPENINFERENCE_OUTPUT_VALUE,
+)
 
 
 class ManagedContextRuntime:
     """Adapter for the ContextManager-owned managed path."""
 
-    def __init__(self, context_manager: Any, components: Sequence[Any] | None = None):
+    def __init__(self, context_manager: Any, components: Sequence[Any] | None = None, conversation_id: int | None = None):
         self.context_manager = context_manager
         self.components = list(components or ())
+        self.conversation_id = conversation_id
         self._run_context = None
 
     def replace_components(self, components: Sequence[Any] | None) -> None:
@@ -47,14 +54,39 @@ class ManagedContextRuntime:
         current_run_start_idx: int,
         tools: Sequence[Any] | None = None,
     ) -> FinalContext:
-        return self.context_manager.assemble_final_context(
-            model=model,
-            memory=memory,
-            current_run_start_idx=current_run_start_idx,
-            tools=tools,
-            purpose="step",
-            run_context=self._ensure_run_context(memory),
-        )
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.prepare_step",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.current_run_start_idx": current_run_start_idx,
+                "context.conversation_id": self.conversation_id,
+                OPENINFERENCE_INPUT_VALUE: {
+                    "current_run_start_idx": current_run_start_idx,
+                    "memory_steps": len(memory.steps) if hasattr(memory, 'steps') else 0,
+                    "tool_count": len(tools) if tools else 0,
+                    "conversation_id": self.conversation_id,
+                },
+            },
+        ):
+            result = self.context_manager.assemble_final_context(
+                model=model,
+                memory=memory,
+                current_run_start_idx=current_run_start_idx,
+                tools=tools,
+                purpose="step",
+                run_context=self._ensure_run_context(memory),
+                conversation_id=self.conversation_id,
+            )
+            if monitoring_manager.is_enabled:
+                monitoring_manager.set_openinference_output({
+                    "message_count": len(result.messages),
+                    "tool_count": len(result.tools),
+                    "stable_count": result.evidence.stable_message_count,
+                    "dynamic_count": result.evidence.dynamic_message_count,
+                    "context_items": len(result.evidence.context_items),
+                })
+            return result
 
     def prepare_final_answer(
         self,
@@ -66,16 +98,43 @@ class ManagedContextRuntime:
         final_answer_templates: dict,
         tools: Sequence[Any] | None = None,
     ) -> FinalContext:
-        return self.context_manager.assemble_final_context(
-            model=model,
-            memory=memory,
-            current_run_start_idx=current_run_start_idx,
-            tools=tools,
-            purpose="final_answer",
-            task=task,
-            final_answer_templates=final_answer_templates,
-            run_context=self._ensure_run_context(memory),
-        )
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.prepare_final_answer",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.current_run_start_idx": current_run_start_idx,
+                "context.conversation_id": self.conversation_id,
+                "context.task": task,
+                OPENINFERENCE_INPUT_VALUE: {
+                    "task": task[:200] if task else "",
+                    "current_run_start_idx": current_run_start_idx,
+                    "memory_steps": len(memory.steps) if hasattr(memory, 'steps') else 0,
+                    "tool_count": len(tools) if tools else 0,
+                    "conversation_id": self.conversation_id,
+                },
+            },
+        ):
+            result = self.context_manager.assemble_final_context(
+                model=model,
+                memory=memory,
+                current_run_start_idx=current_run_start_idx,
+                tools=tools,
+                purpose="final_answer",
+                task=task,
+                final_answer_templates=final_answer_templates,
+                run_context=self._ensure_run_context(memory),
+                conversation_id=self.conversation_id,
+            )
+            if monitoring_manager.is_enabled:
+                monitoring_manager.set_openinference_output({
+                    "message_count": len(result.messages),
+                    "tool_count": len(result.tools),
+                    "stable_count": result.evidence.stable_message_count,
+                    "dynamic_count": result.evidence.dynamic_message_count,
+                    "context_items": len(result.evidence.context_items),
+                })
+            return result
 
     def render_summary_messages(self, *, memory: Any) -> list[Any]:
         """Return display-only memory messages without compression side effects."""

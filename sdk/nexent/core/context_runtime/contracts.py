@@ -16,6 +16,8 @@ class ContextEvidence:
     compression_records: tuple[Any, ...] = ()
     stable_prefix_fingerprint: str | None = None
     prefix_change_reasons: tuple[str, ...] = ()
+    context_items: tuple[Any, ...] = ()
+    """Projected ContextItem candidates when use_context_items is enabled."""
 
 
 @dataclass(frozen=True)
