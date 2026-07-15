@@ -446,25 +446,32 @@ class NexentAgent:
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Choose one context runtime at construction time.  The managed and
-            # legacy implementations do not call one another after this point.
+            # ContextManager is the only runtime context assembly path.  Disabled
+            # configs are accepted for compatibility but normalized to enabled.
+            from .agent_context import ContextManager
+            from .summary_config import ContextManagerConfig
+            from ..context_runtime.managed.runtime import ManagedContextRuntime
+
             ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config and ctx_config.enabled:
-                from .agent_context import ContextManager
-                from ..context_runtime.managed.runtime import ManagedContextRuntime
-
-                context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps,
+            if ctx_config is None:
+                ctx_config = ContextManagerConfig(enabled=True)
+            elif not getattr(ctx_config, 'enabled', True):
+                logger.warning(
+                    "Agent %s supplied ContextManagerConfig(enabled=False), but this "
+                    "flag is deprecated and ignored; using managed context runtime.",
+                    agent_config.name,
                 )
-                context_runtime = ManagedContextRuntime(
-                    context_manager,
-                    components=getattr(agent_config, 'context_components', None) or [],
-                )
-            else:
-                from ..context_runtime.legacy.runtime import LegacyContextRuntime
+                ctx_config = replace(ctx_config, enabled=True)
 
-                context_runtime = LegacyContextRuntime()
+            context_manager = ContextManager(
+                config=ctx_config,
+                max_steps=agent_config.max_steps,
+            )
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                components=getattr(agent_config, 'context_components', None) or [],
+                conversation_id=getattr(agent_config, 'conversation_id', None),
+            )
 
             # Create the agent
             agent = CoreAgent(

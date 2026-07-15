@@ -1,0 +1,4 @@
+interface:
+  display_name: "SDK Functional Test Langfuse"
+  short_description: "Real SDK agent tests with Langfuse traces"
+  default_prompt: "Use $sdk-functional-test-langfuse to create a real SDK agent functional test and verify its Langfuse trace."

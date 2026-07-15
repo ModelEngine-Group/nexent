@@ -1863,18 +1863,20 @@ class TestCreateAgentConfig:
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
-        """Legacy path should render the Jinja prompt and not build managed components."""
+    async def test_create_agent_config_deprecated_false_flag_still_uses_components(self):
+        """Deprecated false flag should not restore legacy prompt rendering."""
+        components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=False,
             template="{{duty}} | {{constraint}}",
-            prepared_prompt="rendered",
+            prepared_prompt="",
+            components=components,
         )
 
-        mocks["build_components"].assert_not_called()
-        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
-        assert mocks["agent_config"].call_args.kwargs["context_components"] == []
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+        mocks["build_components"].assert_called_once()
+        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == ""
+        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
+        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):

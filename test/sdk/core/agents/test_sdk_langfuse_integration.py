@@ -1,222 +1,251 @@
-"""
-SDK Integration Test with Real Model and LangFuse Tracing
+"""Opt-in functional test for Nexent SDK real-model execution with Langfuse tracing."""
+from __future__ import annotations
 
-This test verifies:
-1. Real LLM model execution through the SDK
-2. OpenTelemetry instrumentation captures spans correctly
-3. Context management with use_context_items=True works end-to-end
-4. LangFuse receives and displays traces properly
-
-Requirements:
-- OPENAI_API_KEY environment variable must be set
-- LangFuse configuration in .env (OTEL_EXPORTER_OTLP_ENDPOINT, etc.)
-- Network access to OpenAI API and LangFuse
-
-NOTE: This test is marked as 'local_only' and will be skipped in CI environments.
-Run locally with: pytest -m local_only test/sdk/core/agents/test_sdk_langfuse_integration.py
-"""
-
+import base64
 import os
+import re
+import time
+import uuid
+from pathlib import Path
+from threading import Event
+from urllib.parse import urlparse
+
 import pytest
-from unittest.mock import MagicMock
-
-from nexent.core.agents.agent_context import ContextManager
-from nexent.core.agents.agent_model import (
-    MemoryComponent,
-    SystemPromptComponent,
-    ToolsComponent,
-)
-from nexent.core.agents.summary_config import ContextManagerConfig
-from nexent.core.agents.context.handlers import register_all
-from nexent.core.context_runtime.managed.runtime import ManagedContextRuntime
-from nexent.core.models.openai_llm import OpenAIModel
+import requests
 
 
-pytestmark = pytest.mark.local_only
+pytestmark = [
+    pytest.mark.local_only,
+    pytest.mark.functional,
+    pytest.mark.real_model,
+    pytest.mark.langfuse,
+]
+
+_RUN_FLAG = "NEXENT_RUN_SDK_LANGFUSE_FUNCTIONAL"
+_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
-@pytest.fixture(autouse=True)
-def ensure_handlers_registered():
-    """Ensure all context handlers are registered."""
-    register_all()
+def _expand_env_refs(values: dict[str, str]) -> dict[str, str]:
+    expanded = dict(values)
+    for _ in range(10):
+        changed = False
+        for key, value in list(expanded.items()):
+            def replace(match: re.Match[str]) -> str:
+                ref_key = match.group(1)
+                return expanded.get(ref_key, os.environ.get(ref_key, match.group(0)))
+
+            new_value = _VAR_PATTERN.sub(replace, value)
+            if new_value != value:
+                expanded[key] = new_value
+                changed = True
+        if not changed:
+            break
+    return expanded
 
 
-@pytest.fixture
-def real_model():
-    """Create a real OpenAI model instance for integration testing."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        pytest.skip("OPENAI_API_KEY not set - skipping real model integration test")
-    
-    return OpenAIModel(
-        model_id="gpt-3.5-turbo",
-        api_key=api_key,
-        model_name="gpt-3.5-turbo",
-        url="https://api.openai.com/v1",
-        temperature=0.1,
-        top_p=0.95,
+def _load_dotenv_no_override(project_root: Path) -> None:
+    file_values: dict[str, str] = {}
+    for rel in (".env", "backend/.env", "sdk/.env", "deploy/env/.env", "docker/.env"):
+        path = project_root / rel
+        if not path.exists():
+            continue
+        for raw in path.read_text(errors="ignore").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip().removeprefix("export ").strip()
+            value = value.strip().strip('"').strip("'")
+            file_values[key] = value
+    merged = dict(file_values)
+    merged.update({key: value for key, value in os.environ.items() if value})
+    for key, value in _expand_env_refs(merged).items():
+        os.environ.setdefault(key, value)
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _model_env() -> tuple[str, str, str] | None:
+    if os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL_NAME") and os.getenv("LLM_API_URL"):
+        return os.environ["LLM_API_KEY"], os.environ["LLM_MODEL_NAME"], os.environ["LLM_API_URL"]
+    if os.getenv("NEXENT_LLM_KEY") and os.getenv("NEXENT_LLM_NAME") and os.getenv("NEXENT_LLM_URL"):
+        return os.environ["NEXENT_LLM_KEY"], os.environ["NEXENT_LLM_NAME"], os.environ["NEXENT_LLM_URL"]
+    return None
+
+
+def _langfuse_host_from_env() -> str | None:
+    host = os.getenv("LANGFUSE_HOST")
+    if host:
+        return host.rstrip("/")
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    if not endpoint:
+        return None
+    parsed = urlparse(endpoint)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _configure_langfuse_env() -> bool:
+    public = os.getenv("LANGFUSE_PUBLIC_KEY") or os.getenv("LANGFUSE_INIT_PROJECT_PUBLIC_KEY")
+    secret = os.getenv("LANGFUSE_SECRET_KEY") or os.getenv("LANGFUSE_INIT_PROJECT_SECRET_KEY")
+    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"):
+        os.environ.setdefault("OTEL_EXPORTER_OTLP_PROTOCOL", "http")
+        os.environ.setdefault("OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION", "4")
+        if public and secret and not os.getenv("OTEL_EXPORTER_OTLP_AUTHORIZATION"):
+            token = base64.b64encode(f"{public}:{secret}".encode()).decode()
+            os.environ.setdefault("OTEL_EXPORTER_OTLP_AUTHORIZATION", "Basic " + token)
+        return True
+    host = _langfuse_host_from_env()
+    if not (host and public and secret):
+        return False
+    token = base64.b64encode(f"{public}:{secret}".encode()).decode()
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", host.rstrip("/") + "/api/public/otel")
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_AUTHORIZATION", "Basic " + token)
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_PROTOCOL", "http")
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION", "4")
+    os.environ.setdefault("OTEL_SERVICE_NAME", "nexent-sdk-functional-test")
+    return True
+
+
+def _configure_sdk_monitoring() -> None:
+    from nexent.monitor import MonitoringConfig, get_monitoring_manager
+
+    headers = {}
+    authorization = os.getenv("OTEL_EXPORTER_OTLP_AUTHORIZATION")
+    if authorization:
+        headers["Authorization"] = authorization
+    ingestion_version = os.getenv("OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION")
+    if ingestion_version:
+        headers["x-langfuse-ingestion-version"] = ingestion_version
+
+    get_monitoring_manager().configure(
+        MonitoringConfig(
+            enable_telemetry=True,
+            service_name=os.getenv("OTEL_SERVICE_NAME", "nexent-sdk-functional-test"),
+            provider="langfuse",
+            otlp_endpoint=os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"],
+            otlp_traces_endpoint=os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or None,
+            otlp_protocol=os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http"),
+            otlp_headers=headers,
+            export_metrics=False,
+            instrument_requests=False,
+        )
     )
 
 
-class TestSDKLangFuseIntegration:
-    """Integration tests with real model and LangFuse tracing."""
+def _force_flush_otel() -> None:
+    try:
+        from opentelemetry import trace
 
-    def test_context_items_with_real_model(self, real_model):
-        """Test context management with real model execution."""
-        config = ContextManagerConfig(
-            enabled=True,
-            token_threshold=10000,
-            use_context_items=True,
-        )
-        manager = ContextManager(config=config)
+        provider = trace.get_tracer_provider()
+        force_flush = getattr(provider, "force_flush", None)
+        if callable(force_flush):
+            force_flush(timeout_millis=10_000)
+    except Exception:
+        pass
 
-        system_prompt = SystemPromptComponent(
-            content="You are a helpful assistant. Answer questions concisely."
-        )
-        tools = ToolsComponent(
-            tools=[{"name": "search", "description": "Search the web"}],
-            formatted_description="Available tools: search",
-        )
-        memory_comp = MemoryComponent(
-            memories=[{"content": "User prefers Python", "memory_type": "user"}],
-            formatted_content="User preferences: Python programming language",
-        )
-        
-        manager.register_component(system_prompt)
-        manager.register_component(tools)
-        manager.register_component(memory_comp)
 
-        runtime = ManagedContextRuntime(
-            manager, 
-            components=[system_prompt, tools, memory_comp]
-        )
+def _find_langfuse_trace(marker: str) -> dict:
+    host = _langfuse_host_from_env()
+    public = os.getenv("LANGFUSE_PUBLIC_KEY") or os.getenv("LANGFUSE_INIT_PROJECT_PUBLIC_KEY")
+    secret = os.getenv("LANGFUSE_SECRET_KEY") or os.getenv("LANGFUSE_INIT_PROJECT_SECRET_KEY")
+    if not (host and public and secret):
+        pytest.skip("Set LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY or init project keys to verify trace via API")
 
-        memory = MagicMock()
-        memory.system_prompt = None
-        memory.steps = []
-
-        runtime.prepare_run(memory=memory, fallback_system_prompt="You are helpful")
-
-        final = runtime.prepare_step(
-            model=real_model,
-            memory=memory,
-            current_run_start_idx=0,
-            tools=[],
-        )
-
-        assert final is not None
-        assert len(final.messages) > 0
-        assert final.evidence.context_items is not None
-        assert len(final.evidence.context_items) > 0
-
-        roles = [msg["role"] for msg in final.messages]
-        assert "system" in roles
-        assert "user" in roles
-
-        item_types = [item.item_type for item in final.evidence.context_items]
-        assert len(item_types) > 0
-
-    def test_context_compression_with_real_model(self, real_model):
-        """Test context compression with real model when token threshold is exceeded."""
-        config = ContextManagerConfig(
-            enabled=True,
-            token_threshold=500,
-            use_context_items=True,
-        )
-        manager = ContextManager(config=config)
-
-        system_prompt = SystemPromptComponent(content="You are a helpful assistant.")
-        manager.register_component(system_prompt)
-
-        runtime = ManagedContextRuntime(manager, components=[system_prompt])
-
-        from smolagents.memory import ActionStep, TaskStep
-        
-        memory = MagicMock()
-        memory.system_prompt = None
-        
-        steps = []
-        task_step = TaskStep(task="Solve a complex problem")
-        steps.append(task_step)
-        
-        for i in range(10):
-            action_step = ActionStep(
-                step_number=i,
-                timing=MagicMock(),
-                code_action=f"action_{i}",
-                observations="This is a very long observation with lots of text. " * 50
+    auth = (public, secret)
+    deadline = time.time() + float(os.getenv("LANGFUSE_TRACE_POLL_SECONDS", "45"))
+    last_error = None
+    while time.time() < deadline:
+        try:
+            response = requests.get(
+                host.rstrip("/") + "/api/public/traces",
+                auth=auth,
+                params={"limit": 50, "page": 1},
+                timeout=10,
             )
-            steps.append(action_step)
-        
-        memory.steps = steps
+            if response.status_code == 404:
+                response = requests.get(
+                    host.rstrip("/") + "/api/public/traces",
+                    auth=auth,
+                    params={"pageSize": 50, "page": 1},
+                    timeout=10,
+                )
+            response.raise_for_status()
+            payload = response.json()
+            traces = payload.get("data") or payload.get("traces") or []
+            for trace_data in traces:
+                blob = str(trace_data)
+                if marker in blob:
+                    return trace_data
+        except Exception as exc:
+            last_error = exc
+        time.sleep(3)
+    raise AssertionError(f"Langfuse trace containing marker {marker!r} was not found; last_error={last_error}")
 
-        runtime.prepare_run(memory=memory, fallback_system_prompt="You are helpful")
 
-        final = runtime.prepare_step(
-            model=real_model,
-            memory=memory,
-            current_run_start_idx=0,
-            tools=[],
-        )
+def test_sdk_real_agent_run_emits_langfuse_trace():
+    project_root = Path(__file__).resolve().parents[4]
+    _load_dotenv_no_override(project_root)
+    if not _truthy_env(_RUN_FLAG):
+        pytest.skip(f"Set {_RUN_FLAG}=1 to run the real SDK Langfuse functional test")
 
-        assert final is not None
-        assert len(final.messages) > 0
-        
-        stats = runtime.compression_stats()
-        assert stats['calls'] > 0 or stats['cache_hits'] > 0
+    model = _model_env()
+    if model is None:
+        pytest.skip("Set LLM_API_KEY/LLM_MODEL_NAME/LLM_API_URL or NEXENT_LLM_KEY/NEXENT_LLM_NAME/NEXENT_LLM_URL")
+    if not _configure_langfuse_env():
+        pytest.skip("Set OTLP Langfuse env or LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY")
 
-    def test_history_projector_integration(self, real_model):
-        """Test HistoryProjector with real model execution."""
-        from nexent.core.agents.context.history_projector import HistoryProjector
-        
-        config = ContextManagerConfig(
-            enabled=True,
-            token_threshold=10000,
-            use_context_items=True,
-        )
-        manager = ContextManager(config=config)
+    _configure_sdk_monitoring()
 
-        def mock_query_fn(conversation_id, message_id=None):
-            return [
-                {
-                    "unit_id": 1,
-                    "unit_type": "user_input",
-                    "unit_content": "What is Python?",
-                    "message_id": 1,
-                    "step_index": 1,
-                },
-                {
-                    "unit_id": 2,
-                    "unit_type": "final_answer",
-                    "unit_content": "Python is a programming language.",
-                    "message_id": 1,
-                    "step_index": 2,
-                },
-            ]
+    api_key, model_name, api_url = model
+    marker = f"sdk-langfuse-functional-{uuid.uuid4()}"
 
-        history_projector = HistoryProjector(query_units_fn=mock_query_fn)
-        config.history_projector = history_projector
+    from nexent.core.agents.agent_model import (
+        AgentConfig,
+        ExternalAgentsComponent,
+        KnowledgeBaseComponent,
+        ManagedAgentsComponent,
+        MemoryComponent,
+        ModelConfig,
+        SkillsComponent,
+        SystemPromptComponent,
+        ToolsComponent,
+    )
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.summary_config import ContextManagerConfig
+    from nexent.core.utils.observer import MessageObserver
+    factory = NexentAgent(
+        observer=MessageObserver(),
+        model_config_list=[ModelConfig(cite_name="functional_llm", api_key=api_key, model_name=model_name, url=api_url)],
+        stop_event=Event(),
+    )
+    config = AgentConfig(
+        name="sdk_langfuse_functional_agent",
+        description="Functional test agent with representative context",
+        model_name="functional_llm",
+        tools=[],
+        max_steps=2,
+        context_manager_config=ContextManagerConfig(enabled=True, token_threshold=12000),
+        context_components=[
+            SystemPromptComponent(content=f"You are a concise SDK functional test agent. Marker: {marker}"),
+            ToolsComponent(tools=[{"name": "synthetic_lookup", "description": "Synthetic tool context only."}], formatted_description="Tool: synthetic_lookup - Synthetic tool context only."),
+            SkillsComponent(skills=[{"name": "functional-skill", "description": "Synthetic skill context for tracing."}], formatted_description="Skill: functional-skill - Synthetic skill context for tracing."),
+            MemoryComponent(formatted_content="Memory: user prefers concise answers."),
+            KnowledgeBaseComponent(summary="KB: Nexent SDK agents assemble context through ContextManager."),
+            ManagedAgentsComponent(managed_agents={"local_helper": {"description": "Synthetic local helper context."}}, formatted_description="Managed agent local_helper: Synthetic local helper context."),
+            ExternalAgentsComponent(external_a2a_agents={"external_helper": {"name": "external_helper", "description": "Synthetic external A2A context."}}, formatted_description="External A2A external_helper: Synthetic external A2A context."),
+        ],
+    )
+    agent = factory.create_single_agent(config)
+    factory.set_agent(agent)
+    factory.agent_run_with_observer(f"Return exactly this marker and one short sentence: {marker}")
 
-        system_prompt = SystemPromptComponent(content="You are helpful")
-        manager.register_component(system_prompt)
-
-        runtime = ManagedContextRuntime(manager, components=[system_prompt], conversation_id=123)
-
-        memory = MagicMock()
-        memory.system_prompt = None
-        memory.steps = []
-
-        runtime.prepare_run(memory=memory, fallback_system_prompt="You are helpful")
-
-        final = runtime.prepare_step(
-            model=real_model,
-            memory=memory,
-            current_run_start_idx=0,
-            tools=[],
-        )
-
-        assert final is not None
-        assert final.evidence.context_items is not None
-        
-        item_types = [item.item_type for item in final.evidence.context_items]
-        assert len(item_types) >= 1
+    _force_flush_otel()
+    time.sleep(float(os.getenv("LANGFUSE_TRACE_FLUSH_SECONDS", "5")))
+    trace_data = _find_langfuse_trace(marker)
+    trace_blob = str(trace_data)
+    assert marker in trace_blob
+    assert "sdk_langfuse_functional_agent" in trace_blob or "agent" in trace_blob.lower()

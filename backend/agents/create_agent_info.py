@@ -1,10 +1,9 @@
-﻿import json
-import threading
+import json
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.summary_config import ContextManagerConfig
@@ -854,11 +853,15 @@ async def create_agent_config(
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
 
-    # Select the context path once.  Managed assembly receives raw components
-    # and must never consume a Jinja-rendered legacy prompt.
-    enable_context_manager = agent_info.get("enable_context_manager", False)
+    # ContextManager is now the only runtime context assembly path. The
+    # persisted flag remains for compatibility, but false values are ignored.
+    if agent_info.get("enable_context_manager") is False:
+        logger.warning(
+            "Agent %s has enable_context_manager=false, but this flag is deprecated "
+            "and ignored; ContextManager assembly remains enabled.",
+            agent_id,
+        )
 
-    # Assemble legacy system_prompt only for the isolated fallback path.
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
@@ -879,10 +882,6 @@ async def create_agent_config(
         "user_id": user_id,
     }
     system_prompt = ""
-    if not enable_context_manager:
-        system_prompt = Template(
-            prompt_template["system_prompt"], undefined=StrictUndefined
-        ).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None
@@ -928,34 +927,32 @@ async def create_agent_config(
 
     # Managed context assembly starts from raw sources.  No legacy rendered
     # prompt is supplied on this path.
-    context_components = []
-    if enable_context_manager:
-        context_components = build_context_components(
-            duty=duty_prompt,
-            constraint=constraint_prompt,
-            few_shots=few_shots_prompt,
-            app_name=app_name,
-            app_description=app_description,
-            user_id=user_id,
-            language=language,
-            is_manager=is_manager,
-            tools=render_kwargs["tools"],
-            skills=skills,
-            managed_agents=render_kwargs["managed_agents"],
-            external_a2a_agents=render_kwargs["external_a2a_agents"],
-            memory_list=memory_list,
-            memory_search_query=last_user_query,
-            knowledge_base_summary=knowledge_base_summary,
-            kb_ids=kb_ids,
-        )
+    context_components = build_context_components(
+        duty=duty_prompt,
+        constraint=constraint_prompt,
+        few_shots=few_shots_prompt,
+        app_name=app_name,
+        app_description=app_description,
+        user_id=user_id,
+        language=language,
+        is_manager=is_manager,
+        tools=render_kwargs["tools"],
+        skills=skills,
+        managed_agents=render_kwargs["managed_agents"],
+        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        memory_list=memory_list,
+        memory_search_query=last_user_query,
+        knowledge_base_summary=knowledge_base_summary,
+        kb_ids=kb_ids,
+    )
 
-        logger.info(
-            f"Agent {agent_id} context assembly: "
-            f"skills_count={len(skills)}, "
-            f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
-        )
+    logger.info(
+        f"Agent {agent_id} context assembly: "
+        f"skills_count={len(skills)}, "
+        f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
+    )
     cm_config = ContextManagerConfig(
-        enabled=enable_context_manager,
+        enabled=True,
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
