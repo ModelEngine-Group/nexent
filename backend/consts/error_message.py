@@ -37,38 +37,36 @@ class ErrorMessage:
         ErrorCode.COMMON_RESOURCE_NOT_FOUND: "Resource not found.",
         ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: "Resource already exists.",
         ErrorCode.COMMON_RESOURCE_DISABLED: "Resource is disabled.",
-
         # ==================== 01 Chat / 开始问答 ====================
         ErrorCode.CHAT_CONVERSATION_NOT_FOUND: "Conversation not found.",
         ErrorCode.CHAT_MESSAGE_NOT_FOUND: "Message not found.",
         ErrorCode.CHAT_CONVERSATION_SAVE_FAILED: "Failed to save conversation.",
         ErrorCode.CHAT_TITLE_GENERATION_FAILED: "Failed to generate conversation title.",
-
         # ==================== 02 QuickConfig / 快速配置 ====================
         ErrorCode.QUICK_CONFIG_INVALID: "Invalid configuration.",
         ErrorCode.QUICK_CONFIG_SYNC_FAILED: "Sync configuration failed.",
-
         # ==================== 03 AgentSpace / 智能体空间 ====================
         ErrorCode.AGENTSPACE_AGENT_NOT_FOUND: "Agent not found.",
         ErrorCode.AGENTSPACE_AGENT_DISABLED: "Agent is disabled.",
         ErrorCode.AGENTSPACE_AGENT_RUN_FAILED: "Failed to run agent. Please try again later.",
         ErrorCode.AGENTSPACE_AGENT_NAME_DUPLICATE: "Agent name already exists.",
         ErrorCode.AGENTSPACE_VERSION_NOT_FOUND: "Agent version not found.",
-
+        ErrorCode.AGENTSPACE_NL2AGENT_DRAFT_NOT_FOUND: "NL2AGENT draft not found.",
+        ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT: "NL2AGENT workflow state conflicts with this action.",
+        ErrorCode.AGENTSPACE_NL2AGENT_STALE_CARD: "NL2AGENT card delivery is stale.",
+        ErrorCode.AGENTSPACE_NL2AGENT_STATE_CONFLICT: "NL2AGENT session state was updated concurrently.",
+        ErrorCode.AGENTSPACE_NL2AGENT_CATALOG_UNAVAILABLE: "NL2AGENT session catalog is unavailable.",
         # ==================== 04 AgentMarket / 智能体市场 ====================
         ErrorCode.AGENTMARKET_AGENT_NOT_FOUND: "Agent not found in market.",
-
         # ==================== 05 AgentDev / 智能体开发 ====================
         ErrorCode.AGENTDEV_CONFIG_INVALID: "Invalid agent configuration.",
         ErrorCode.AGENTDEV_PROMPT_INVALID: "Invalid prompt.",
-
         # ==================== 06 Knowledge / 知识库 ====================
         ErrorCode.KNOWLEDGE_NOT_FOUND: "Knowledge base not found.",
         ErrorCode.KNOWLEDGE_UPLOAD_FAILED: "Failed to upload knowledge.",
         ErrorCode.KNOWLEDGE_SYNC_FAILED: "Failed to sync knowledge base.",
         ErrorCode.KNOWLEDGE_INDEX_NOT_FOUND: "Search index not found.",
         ErrorCode.KNOWLEDGE_SEARCH_FAILED: "Knowledge search failed.",
-
         # ==================== 07 MCPTools / MCP 工具 ====================
         ErrorCode.MCP_TOOL_NOT_FOUND: "Tool not found.",
         ErrorCode.MCP_TOOL_EXECUTION_FAILED: "Tool execution failed.",
@@ -76,11 +74,9 @@ class ErrorMessage:
         ErrorCode.MCP_CONNECTION_FAILED: "Failed to connect to MCP service.",
         ErrorCode.MCP_CONTAINER_ERROR: "MCP container operation failed.",
         ErrorCode.MCP_NAME_ILLEGAL: "MCP name contains invalid characters.",
-
         # ==================== 08 MonitorOps / 监控与运维 ====================
         ErrorCode.MONITOROPS_METRIC_QUERY_FAILED: "Metric query failed.",
         ErrorCode.MONITOROPS_ALERT_CONFIG_INVALID: "Invalid alert configuration.",
-
         # ==================== 09 Model / 模型管理 ====================
         ErrorCode.MODEL_NOT_FOUND: "Model not found.",
         ErrorCode.MODEL_CONFIG_INVALID: "Model configuration is invalid.",
@@ -93,12 +89,10 @@ class ErrorMessage:
         ErrorCode.MODEL_RATE_LIMIT_EXCEEDED: "Rate limit exceeded. Please try again later.",
         ErrorCode.MODEL_SERVICE_UNAVAILABLE: "Model service is temporarily unavailable. Please try again later.",
         ErrorCode.MODEL_CONNECTION_ERROR: "Failed to connect to model service. Please check your network and model configuration.",
-
         # ==================== 10 Memory / 记忆管理 ====================
         ErrorCode.MEMORY_NOT_FOUND: "Memory not found.",
         ErrorCode.MEMORY_PREPARATION_FAILED: "Failed to prepare memory.",
         ErrorCode.MEMORY_CONFIG_INVALID: "Memory configuration is invalid.",
-
         # ==================== 11 Profile / 个人信息 ====================
         ErrorCode.PROFILE_USER_NOT_FOUND: "User not found.",
         ErrorCode.PROFILE_UPDATE_FAILED: "Profile update failed.",
@@ -107,13 +101,11 @@ class ErrorMessage:
         # Profile - Password
         ErrorCode.PROFILE_PASSWORD_WEAK: "Password does not meet security requirements. Please use a stronger password.",
         ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD: "New password cannot be the same as the old password.",
-
         # ==================== 12 TenantResource / 租户资源 ====================
         ErrorCode.TENANT_NOT_FOUND: "Tenant not found.",
         ErrorCode.TENANT_DISABLED: "Tenant is disabled.",
         ErrorCode.TENANT_CONFIG_ERROR: "Tenant configuration error.",
         ErrorCode.TENANT_RESOURCE_EXCEEDED: "Tenant resource exceeded.",
-
         # ==================== 13 External / 外部服务 ====================
         ErrorCode.DATAMATE_CONNECTION_FAILED: "Failed to connect to DataMate service.",
         ErrorCode.DIFY_SERVICE_ERROR: "Dify service error.",
@@ -133,15 +125,12 @@ class ErrorMessage:
         ErrorCode.AIDP_CONFIG_INVALID: "AIDP configuration invalid. Please check URL and API key format.",
         ErrorCode.AIDP_CONNECTION_ERROR: "Failed to connect to AIDP. Please check network connection and URL.",
         ErrorCode.AIDP_AUTH_ERROR: "AIDP authentication failed. Please check your API key.",
-
         # ==================== 14 Northbound / 北向接口 ====================
         ErrorCode.NORTHBOUND_REQUEST_FAILED: "Northbound request failed.",
         ErrorCode.NORTHBOUND_CONFIG_INVALID: "Invalid northbound configuration.",
-
         # ==================== 15 DataProcess / 数据处理 ====================
         ErrorCode.DATAPROCESS_TASK_FAILED: "Data process task failed.",
         ErrorCode.DATAPROCESS_PARSE_FAILED: "Data parsing failed.",
-
         # ==================== 99 System / 系统级 ====================
         # 01 - System Errors
         ErrorCode.SYSTEM_UNKNOWN_ERROR: "An unknown error occurred. Please try again later.",

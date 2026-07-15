@@ -186,21 +186,15 @@ async def start_session_api(
     and this conversation_id.
     """
     try:
-        user_id, tenant_id, language = get_current_user_info(
-            authorization, http_request
-        )
+        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
-        result = await start_session(
-            user_id=user_id, tenant_id=tenant_id, language=language
-        )
+        result = await start_session(user_id=user_id, tenant_id=tenant_id, language=language)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AgentRunException as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
         logger.exception(f"Failed to start NL2AGENT session: {exc}")
         raise HTTPException(
@@ -233,9 +227,7 @@ async def apply_local_resources_api(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AgentRunException as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
         logger.exception(f"Failed to apply local resources: {exc}")
         raise HTTPException(
@@ -269,9 +261,7 @@ async def skip_local_resources_api(
     authorization: Optional[str] = Header(None),
 ):
     _, tenant_id, _ = _current_user(authorization, http_request)
-    return await skip_local_resource_recommendations(
-        agent_id, payload.recommendation_batch_id, tenant_id
-    )
+    return await skip_local_resource_recommendations(agent_id, payload.recommendation_batch_id, tenant_id)
 
 
 @router.post("/session/{agent_id}/online-recommendations/register")
@@ -319,16 +309,17 @@ async def report_card_delivery_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return await report_card_delivery(
             agent_id=agent_id,
-            message_key=payload.message_key,
+            message_id=payload.message_id,
             card_type=payload.card_type,
             status=payload.status,
             card_key=payload.card_key,
             reason=payload.reason,
             tenant_id=tenant_id,
+            user_id=user_id,
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc
@@ -343,9 +334,7 @@ async def confirm_requirements_api(
 ):
     _, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await confirm_requirements_review(
-            agent_id, payload.fingerprint, tenant_id
-        )
+        return await confirm_requirements_review(agent_id, payload.fingerprint, tenant_id)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
@@ -385,9 +374,7 @@ async def save_agent_identity_api(
 ):
     user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await save_agent_identity(
-            agent_id, payload.display_name, tenant_id, user_id
-        )
+        return await save_agent_identity(agent_id, payload.display_name, tenant_id, user_id)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
@@ -401,9 +388,7 @@ async def install_web_skill_api(
 ):
     """Install a single official/web skill into the tenant."""
     try:
-        user_id, tenant_id, language = get_current_user_info(
-            authorization, http_request
-        )
+        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
@@ -418,9 +403,7 @@ async def install_web_skill_api(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AgentRunException as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-        )
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
         logger.exception(f"Failed to install web skill: {exc}")
         raise HTTPException(
@@ -438,9 +421,7 @@ async def finalize_agent_api(
 ):
     """Finalize the draft agent by generating its full prompt set."""
     try:
-        user_id, tenant_id, language = get_current_user_info(
-            authorization, http_request
-        )
+        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 

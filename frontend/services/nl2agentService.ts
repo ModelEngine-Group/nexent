@@ -106,7 +106,7 @@ export interface Nl2AgentCardDeliveryResponse {
 export const reportNl2AgentCardDelivery = async (
   agentId: number,
   payload: {
-    message_key: string;
+    message_id: number;
     card_type: Nl2AgentCardType;
     status: "rendered" | "failed";
     card_key?: string;
@@ -182,6 +182,20 @@ export const completeOnlineResourceConfiguration = async (
 
 export interface Nl2AgentSessionState {
   agent_id: number;
+  schema_version: 2;
+  revision: number;
+  current_stage:
+    | "requirements_collecting"
+    | "requirements_confirmation"
+    | "model_selection"
+    | "local_resource_search"
+    | "local_resource_review"
+    | "online_resource_search"
+    | "online_resource_review"
+    | "agent_identity"
+    | "final_review";
+  expected_card_types: Nl2AgentCardType[];
+  allowed_actions: string[];
   display_name?: string;
   internal_name: string;
   identity_confirmed: boolean;
@@ -237,7 +251,7 @@ export interface Nl2AgentSessionState {
     card_delivery?: Record<
       string,
       {
-        message_key: string;
+        message_id: number;
         status: "rendered" | "failed";
         card_key?: string;
         reason?: string;

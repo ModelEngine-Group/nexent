@@ -50,7 +50,8 @@ test = [
     "pytest-mock",
     "fastapi[testclient]",
     "selenium",
-    "botocore"
+    "botocore",
+    "fakeredis>=2.31.0",
 ]
 
 [tool.setuptools]

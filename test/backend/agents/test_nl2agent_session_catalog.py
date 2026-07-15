@@ -1,38 +1,22 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
+import fakeredis
 import pytest
 
 from agents import nl2agent_session_catalog as catalog_module
 
 
-class FakeRedis:
-    def __init__(self):
-        self.data = {}
-
-    def setex(self, key, ttl, value):
-        self.data[key] = value
-
-    def get(self, key):
-        return self.data.get(key)
-
-    def scan_iter(self, match):
-        prefix = match.removesuffix("*")
-        return (key for key in self.data if key.startswith(prefix))
-
-    def delete(self, *keys):
-        for key in keys:
-            self.data.pop(key, None)
-
-
 @pytest.fixture
 def fake_redis(monkeypatch):
-    client = FakeRedis()
+    client = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(
         catalog_module,
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
+    catalog_module.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     return client
 
 
@@ -72,7 +56,7 @@ def test_missing_catalogs_raise_contextual_error(fake_redis, caplog):
 
 def test_malformed_catalogs_raise_contextual_error(fake_redis, caplog):
     key = catalog_module._cache_key("tenant_1", 202)
-    fake_redis.data[key] = json.dumps({"tool_catalog": "not-a-list"})
+    fake_redis.set(key, json.dumps({"tool_catalog": "not-a-list"}))
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
@@ -86,42 +70,28 @@ def test_malformed_catalogs_raise_contextual_error(fake_redis, caplog):
 def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(
     fake_redis,
 ):
-    first = catalog_module.register_recommendation_batch(
-        "tenant_1", 202, "batch_1", [3, 1], [7]
-    )
-    second = catalog_module.register_recommendation_batch(
-        "tenant_1", 202, "batch_1", [1, 3], [7]
-    )
+    first = catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [3, 1], [7])
+    second = catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [1, 3], [7])
     assert first == second
     assert first["status"] == "recommendations_ready"
 
-    with pytest.raises(
-        catalog_module.Nl2AgentSessionCatalogError, match="Apply or skip"
-    ):
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Apply or skip"):
         catalog_module.assert_resource_review_complete("tenant_1", 202)
 
-    catalog_module.resolve_recommendation_batch(
-        "tenant_1", 202, "batch_1", "applied", [1], [7]
-    )
+    catalog_module.resolve_recommendation_batch("tenant_1", 202, "batch_1", "applied", [1], [7])
     catalog_module.assert_resource_review_complete("tenant_1", 202)
 
 
 def test_empty_recommendation_batch_can_be_explicitly_skipped(fake_redis):
     catalog_module.register_recommendation_batch("tenant_1", 202, "empty_batch", [], [])
-    catalog_module.resolve_recommendation_batch(
-        "tenant_1", 202, "empty_batch", "skipped"
-    )
+    catalog_module.resolve_recommendation_batch("tenant_1", 202, "empty_batch", "skipped")
     catalog_module.assert_resource_review_complete("tenant_1", 202)
 
 
 def test_identity_confirmation_round_trip(fake_redis):
-    assert not catalog_module.get_nl2agent_session_state("tenant_1", 202)[
-        "identity_confirmed"
-    ]
+    assert not catalog_module.get_nl2agent_session_state("tenant_1", 202)["identity_confirmed"]
     catalog_module.confirm_agent_identity("tenant_1", 202)
-    assert catalog_module.get_nl2agent_session_state("tenant_1", 202)[
-        "identity_confirmed"
-    ]
+    assert catalog_module.get_nl2agent_session_state("tenant_1", 202)["identity_confirmed"]
 
 
 def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_redis):
@@ -135,18 +105,12 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_r
         discovered_tool_ids=[11, 12],
         bound_tool_ids=[],
     )
-    with pytest.raises(
-        catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"
-    ):
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"):
         catalog_module.assert_mcp_workflows_resolved("tenant_1", 202)
 
-    catalog_module.update_mcp_workflow(
-        "tenant_1", 202, "registry:github", status="tools_bound", bound_tool_ids=[11]
-    )
+    catalog_module.update_mcp_workflow("tenant_1", 202, "registry:github", status="tools_bound", bound_tool_ids=[11])
     catalog_module.assert_mcp_workflows_resolved("tenant_1", 202)
-    workflow = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
-        "mcp_workflows"
-    ]["registry:github"]
+    workflow = catalog_module.get_nl2agent_session_state("tenant_1", 202)["mcp_workflows"]["registry:github"]
     assert "config_values" not in workflow
 
 
@@ -164,9 +128,7 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
         "status": "recommendations_ready",
     }
 
-    catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_skill", "skill", []
-    )
+    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_skill", "skill", [])
 
     assert catalog_module.complete_online_configuration("tenant_1", 202) == [
         "online_mcp",
@@ -174,42 +136,26 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
     ]
     catalog_module.assert_online_configuration_complete("tenant_1", 202)
 
-    catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_skill_new", "skill", ["skill:new"]
-    )
+    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_skill_new", "skill", ["skill:new"])
     state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
     assert not state["online_configuration_confirmed"]
-    with pytest.raises(
-        catalog_module.Nl2AgentSessionCatalogError, match="Complete the online"
-    ):
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Complete the online"):
         catalog_module.assert_online_configuration_complete("tenant_1", 202)
 
 
 def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
-    catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_mcp", "mcp", []
-    )
-    catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_skill", "skill", []
-    )
-    catalog_module.update_mcp_workflow(
-        "tenant_1", 202, "registry:github", status="connected", mcp_id=5
-    )
-    with pytest.raises(
-        catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"
-    ):
+    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_mcp", "mcp", [])
+    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_skill", "skill", [])
+    catalog_module.update_mcp_workflow("tenant_1", 202, "registry:github", status="connected", mcp_id=5)
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"):
         catalog_module.complete_online_configuration("tenant_1", 202)
 
-    catalog_module.update_mcp_workflow(
-        "tenant_1", 202, "registry:github", status="failed"
-    )
+    catalog_module.update_mcp_workflow("tenant_1", 202, "registry:github", status="failed")
     catalog_module.complete_online_configuration("tenant_1", 202)
 
 
 def test_online_completion_requires_both_catalogs(fake_redis):
-    catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_mcp", "mcp", []
-    )
+    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_mcp", "mcp", [])
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
@@ -225,13 +171,14 @@ def test_online_completion_requires_both_catalogs(fake_redis):
 
 
 def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
-    fake_redis.data[catalog_module._state_key("tenant_1", 202)] = json.dumps(
-        {
-            "recommendation_batches": {},
-            "online_recommendation_batches": {
-                "online_bad": {"resource_type": "mcp", "item_keys": "not-a-list"}
-            },
-        }
+    fake_redis.set(
+        catalog_module._state_key("tenant_1", 202),
+        json.dumps(
+            {
+                "recommendation_batches": {},
+                "online_recommendation_batches": {"online_bad": {"resource_type": "mcp", "item_keys": "not-a-list"}},
+            }
+        ),
     )
 
     with pytest.raises(
@@ -244,39 +191,17 @@ def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
 
 def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
     catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [1], [])
-    assert catalog_module.get_nl2agent_session_state("tenant_1", 303) == {
-        "requirements_review": {
-            "status": "collecting",
-            "summary": None,
-            "fingerprint": "",
-        },
-        "recommendation_batches": {},
-        "identity_confirmed": False,
-        "mcp_workflows": {},
-        "online_recommendation_batches": {},
-        "online_configuration_confirmed": False,
-        "card_delivery": {},
-    }
-    assert catalog_module.get_nl2agent_session_state("tenant_2", 202) == {
-        "requirements_review": {
-            "status": "collecting",
-            "summary": None,
-            "fingerprint": "",
-        },
-        "recommendation_batches": {},
-        "identity_confirmed": False,
-        "mcp_workflows": {},
-        "online_recommendation_batches": {},
-        "online_configuration_confirmed": False,
-        "card_delivery": {},
-    }
+    catalog_module.initialize_nl2agent_session_state("tenant_1", 303, 903)
+    catalog_module.initialize_nl2agent_session_state("tenant_2", 202, 904)
+    assert not catalog_module.get_nl2agent_session_state("tenant_1", 303)["recommendation_batches"]
+    assert not catalog_module.get_nl2agent_session_state("tenant_2", 202)["recommendation_batches"]
 
 
 def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
     first = catalog_module.record_card_delivery(
         "tenant_1",
         202,
-        "message-1",
+        1,
         "local_resources",
         "failed",
         reason="truncated_fence",
@@ -284,18 +209,18 @@ def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
     duplicate = catalog_module.record_card_delivery(
         "tenant_1",
         202,
-        "message-1",
+        1,
         "local_resources",
         "failed",
         reason="truncated_fence",
     )
     second = catalog_module.record_card_delivery(
-        "tenant_1", 202, "message-2", "local_resources", "failed", reason="invalid_json"
+        "tenant_1", 202, 2, "local_resources", "failed", reason="invalid_json"
     )
     third = catalog_module.record_card_delivery(
         "tenant_1",
         202,
-        "message-3",
+        3,
         "local_resources",
         "failed",
         reason="invalid_schema",
@@ -307,37 +232,29 @@ def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
     assert third["retry_count"] == 3
 
 
-def test_failed_delivery_rolls_back_only_unresolved_card_state(fake_redis):
+def test_failed_delivery_never_rolls_back_business_state(fake_redis):
     catalog_module.register_recommendation_batch("tenant_1", 202, "pending", [1], [])
     catalog_module.register_recommendation_batch("tenant_1", 202, "applied", [2], [])
-    catalog_module.resolve_recommendation_batch(
-        "tenant_1", 202, "applied", "applied", [2], []
-    )
+    catalog_module.resolve_recommendation_batch("tenant_1", 202, "applied", "applied", [2], [])
 
     catalog_module.record_card_delivery(
         "tenant_1",
         202,
-        "message-1",
+        1,
         "local_resources",
         "failed",
         card_key="pending",
         reason="truncated_fence",
     )
 
-    batches = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
-        "recommendation_batches"
-    ]
-    assert "pending" not in batches
+    batches = catalog_module.get_nl2agent_session_state("tenant_1", 202)["recommendation_batches"]
+    assert batches["pending"]["status"] == "recommendations_ready"
     assert batches["applied"]["status"] == "applied"
 
 
 def test_rendered_delivery_resets_retry_count(fake_redis):
-    catalog_module.record_card_delivery(
-        "tenant_1", 202, "message-1", "model_selection", "failed", reason="invalid_json"
-    )
-    rendered = catalog_module.record_card_delivery(
-        "tenant_1", 202, "message-2", "model_selection", "rendered"
-    )
+    catalog_module.record_card_delivery("tenant_1", 202, 1, "model_selection", "failed", reason="invalid_json")
+    rendered = catalog_module.record_card_delivery("tenant_1", 202, 2, "model_selection", "rendered")
     assert rendered["retry_count"] == 0
     assert rendered["status"] == "rendered"
 
@@ -359,16 +276,9 @@ def test_requirements_summary_registration_and_button_confirmation(fake_redis):
     assert first["is_current"] is True
     assert first["summary"]["goal"] == "Create presentations"
     assert first["summary"]["audience_or_scenario"] == "Office users"
-    confirmed = catalog_module.confirm_requirements_summary(
-        "tenant_1", 202, first["fingerprint"]
-    )
+    confirmed = catalog_module.confirm_requirements_summary("tenant_1", 202, first["fingerprint"])
     assert confirmed["status"] == "confirmed"
-    assert (
-        catalog_module.confirm_requirements_summary(
-            "tenant_1", 202, first["fingerprint"]
-        )["status"]
-        == "confirmed"
-    )
+    assert catalog_module.confirm_requirements_summary("tenant_1", 202, first["fingerprint"])["status"] == "confirmed"
     catalog_module.assert_requirements_confirmed("tenant_1", 202)
 
 
@@ -381,9 +291,7 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
         "key_constraints": "No invented facts",
     }
     catalog_module.register_requirements_summary("tenant_1", 202, summary)
-    catalog_module.apply_requirements_revision_text(
-        "tenant_1", 202, "change the expected output"
-    )
+    catalog_module.apply_requirements_revision_text("tenant_1", 202, "change the expected output")
     unchanged = catalog_module.register_requirements_summary("tenant_1", 202, summary)
 
     assert unchanged["status"] == "collecting"
@@ -392,9 +300,7 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
         catalog_module.Nl2AgentSessionCatalogError,
         match="not awaiting confirmation",
     ):
-        catalog_module.confirm_requirements_summary(
-            "tenant_1", 202, unchanged["fingerprint"]
-        )
+        catalog_module.confirm_requirements_summary("tenant_1", 202, unchanged["fingerprint"])
 
     changed = catalog_module.register_requirements_summary(
         "tenant_1", 202, {**summary, "expected_output": "Presentation and notes"}
@@ -439,9 +345,7 @@ def test_requirements_modification_returns_to_collecting(fake_redis):
         },
     )
 
-    result = catalog_module.apply_requirements_revision_text(
-        "tenant_1", 202, "不正确，改成输出 PDF"
-    )
+    result = catalog_module.apply_requirements_revision_text("tenant_1", 202, "不正确，改成输出 PDF")
 
     assert result["intent"] == "modify"
     assert result["status"] == "collecting"
@@ -476,9 +380,7 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
         "key_constraints": "No invented facts",
     }
     first = catalog_module.register_requirements_summary("tenant_1", 202, original)
-    catalog_module.apply_requirements_revision_text(
-        "tenant_1", 202, "change the expected output"
-    )
+    catalog_module.apply_requirements_revision_text("tenant_1", 202, "change the expected output")
     revised = catalog_module.register_requirements_summary(
         "tenant_1", 202, {**original, "expected_output": "Presentation and notes"}
     )
@@ -491,6 +393,73 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
         catalog_module.Nl2AgentSessionCatalogError,
         match="requirements summary is stale",
     ):
-        catalog_module.confirm_requirements_summary(
-            "tenant_1", 202, first["fingerprint"]
-        )
+        catalog_module.confirm_requirements_summary("tenant_1", 202, first["fingerprint"])
+
+
+def test_concurrent_online_batch_registration_preserves_both_updates(fake_redis):
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                catalog_module.register_online_recommendation_batch,
+                "tenant_1",
+                202,
+                "online_mcp",
+                "mcp",
+                ["registry:one"],
+            ),
+            executor.submit(
+                catalog_module.register_online_recommendation_batch,
+                "tenant_1",
+                202,
+                "online_skill",
+                "skill",
+                ["skill:one"],
+            ),
+        ]
+        for future in futures:
+            future.result()
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert set(state["online_recommendation_batches"]) == {
+        "online_mcp",
+        "online_skill",
+    }
+    assert state["revision"] == 2
+
+
+def test_workflow_summary_is_authoritative(fake_redis):
+    summary = catalog_module.get_workflow_summary("tenant_1", 202)
+    assert summary["current_stage"] == "requirements_collecting"
+    assert summary["allowed_actions"] == [
+        "clarify_requirements",
+        "render_requirements_summary",
+    ]
+
+    review = catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+    summary = catalog_module.get_workflow_summary("tenant_1", 202)
+    assert summary["current_stage"] == "requirements_confirmation"
+    assert summary["expected_card_types"] == ["requirements_summary"]
+    catalog_module.confirm_requirements_summary("tenant_1", 202, review["fingerprint"])
+    assert catalog_module.get_workflow_summary("tenant_1", 202)["current_stage"] == "model_selection"
+
+
+def test_missing_or_old_workflow_state_is_rejected(fake_redis):
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="missing"):
+        catalog_module.get_nl2agent_session_state("tenant_1", 999)
+
+    fake_redis.set(
+        catalog_module._state_key("tenant_1", 303),
+        json.dumps({"schema_version": 1}),
+    )
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Malformed"):
+        catalog_module.get_nl2agent_session_state("tenant_1", 303)

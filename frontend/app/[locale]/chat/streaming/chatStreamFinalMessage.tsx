@@ -69,8 +69,6 @@ interface FinalMessageProps {
   enableNl2AgentCardRecovery?: boolean;
 }
 
-const processedCardDeliveryMessages = new Set<string>();
-
 // TTS playback status
 type TTSStatus =
   (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus];
@@ -104,9 +102,9 @@ function ChatStreamFinalMessageInner({
   const [isVisible, setIsVisible] = useState(false);
   const [manualCardRetryText, setManualCardRetryText] = useState<string>();
   const [cardDeliveryError, setCardDeliveryError] = useState<string>();
+  const [cardDeliveryRetryNonce, setCardDeliveryRetryNonce] = useState(0);
   const workflow = useNl2AgentWorkflow();
   const sawActiveStreamRef = useRef(false);
-  const reportedDeliveryRef = useRef<string>();
   const finalCardValidation = useMemo(
     () =>
       validateNl2AgentCards(
@@ -130,18 +128,25 @@ function ChatStreamFinalMessageInner({
       ) {
         return;
       }
-      const messageKey = String(message.message_id ?? message.id ?? "");
-      if (!messageKey) return;
-      await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
-        message_key: messageKey,
-        card_type: cardType,
-        status: "rendered",
-        card_key: cardKey,
-      });
+      const messageId = message.message_id;
+      if (typeof messageId !== "number") return;
+      const deliveryKey = `${nl2AgentDraftAgentId}:${messageId}:${cardType}:rendered:${cardKey ?? ""}`;
+      if (!workflow.claimCardDelivery(deliveryKey)) return;
+      try {
+        await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
+          message_id: messageId,
+          card_type: cardType,
+          status: "rendered",
+          card_key: cardKey,
+        });
+        workflow.completeCardDelivery(deliveryKey);
+      } catch (error) {
+        workflow.failCardDelivery(deliveryKey);
+        throw error;
+      }
     },
     [
       isLatestMessage,
-      message.id,
       message.message_id,
       nl2AgentDraftAgentId,
       readOnly,
@@ -166,83 +171,62 @@ function ChatStreamFinalMessageInner({
     ) {
       return;
     }
-    const messageKey = String(message.message_id ?? message.id ?? "");
-    const deliveryScope = `${nl2AgentDraftAgentId}:${messageKey}`;
+    const messageId = message.message_id;
     const rawContent = message.finalAnswer || message.content || "";
-    if (
-      !messageKey ||
-      reportedDeliveryRef.current === messageKey ||
-      processedCardDeliveryMessages.has(deliveryScope)
-    )
-      return;
-    reportedDeliveryRef.current = messageKey;
-    processedCardDeliveryMessages.add(deliveryScope);
+    if (typeof messageId !== "number") return;
     const validation = validateNl2AgentCards(rawContent, nl2AgentDraftAgentId);
     const immediatelyRendered = validation.cards.filter(
       (card) => !card.requiresRegistration
     );
     void (async () => {
       try {
+        setCardDeliveryError(undefined);
         for (const card of immediatelyRendered) {
+          const deliveryKey = `${nl2AgentDraftAgentId}:${messageId}:${card.cardType}:rendered:${card.cardKey ?? ""}`;
+          if (!workflow.claimCardDelivery(deliveryKey)) continue;
           await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
-            message_key: messageKey,
+            message_id: messageId,
             card_type: card.cardType,
             status: "rendered",
             card_key: card.cardKey,
-          });
+          }).then(
+            () => workflow.completeCardDelivery(deliveryKey),
+            (error) => {
+              workflow.failCardDelivery(deliveryKey);
+              throw error;
+            }
+          );
         }
         let failure = validation.failure;
         if (!failure) {
           const state = await getNl2AgentSessionState(nl2AgentDraftAgentId);
           const emitted = new Set(validation.cards.map((card) => card.cardType));
-          const requirements = state.resource_review.requirements_review.status;
-          const localBatches = Object.values(
-            state.resource_review.recommendation_batches
-          ) as Array<{ status?: string }>;
-          const localComplete =
-            localBatches.length > 0 &&
-            localBatches.every((batch) =>
-              ["applied", "skipped"].includes(String(batch.status))
-            );
-          const onlineTypes = new Set(
-            Object.values(
-              state.resource_review.online_recommendation_batches
-            ).map((batch) => batch.resource_type)
+          const missing = state.expected_card_types.find(
+            (cardType) => !emitted.has(cardType)
           );
-          const expectedCards =
-            requirements !== "confirmed"
-              ? []
-              : !state.business_logic_model_id
-                ? (["model_selection"] as const)
-                : !localComplete
-                  ? localBatches.length === 0
-                    ? (["local_resources"] as const)
-                    : []
-                  : !onlineTypes.has("mcp") || !onlineTypes.has("skill")
-                    ? ([
-                        ...(!onlineTypes.has("mcp") ? ["web_mcp" as const] : []),
-                        ...(!onlineTypes.has("skill")
-                          ? ["web_skill" as const]
-                          : []),
-                      ] as const)
-                    : state.resource_review.online_configuration_confirmed
-                      ? !state.identity_confirmed
-                        ? (["agent_identity"] as const)
-                        : (["final_review"] as const)
-                      : [];
-          const missing = expectedCards.find((cardType) => !emitted.has(cardType));
           if (missing) {
             failure = { cardType: missing, reason: "missing_card" };
           }
         }
         if (!failure) return;
+        const failureKey = `${nl2AgentDraftAgentId}:${messageId}:${failure.cardType}:failed:${failure.cardKey ?? ""}`;
+        if (!workflow.claimCardDelivery(failureKey)) return;
         const result = await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
-          message_key: messageKey,
+          message_id: messageId,
           card_type: failure.cardType,
           status: "failed",
           card_key: failure.cardKey,
           reason: failure.reason,
-        });
+        }).then(
+          (response) => {
+            workflow.completeCardDelivery(failureKey);
+            return response;
+          },
+          (error) => {
+            workflow.failCardDelivery(failureKey);
+            throw error;
+          }
+        );
         workflow.notifyStateChanged();
         if (result.auto_retry_allowed && result.chat_injection_text) {
           await workflow.continueWithText(result.chat_injection_text);
@@ -262,13 +246,13 @@ function ChatStreamFinalMessageInner({
     isStreaming,
     message.content,
     message.finalAnswer,
-    message.id,
     message.isComplete,
     message.message_id,
     nl2AgentDraftAgentId,
     readOnly,
     workflow,
     enableNl2AgentCardRecovery,
+    cardDeliveryRetryNonce,
   ]);
 
   // TTS related states
@@ -564,7 +548,18 @@ function ChatStreamFinalMessageInner({
                     })
                   }
                   action={
-                    manualCardRetryText ? (
+                    cardDeliveryError ? (
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          setCardDeliveryRetryNonce((value) => value + 1)
+                        }
+                      >
+                        {t("nl2agent.cardDelivery.retryReceipt", {
+                          defaultValue: "Retry receipt",
+                        })}
+                      </Button>
+                    ) : manualCardRetryText ? (
                       <Button
                         size="small"
                         onClick={() =>

@@ -6,7 +6,15 @@ from urllib.parse import urljoin
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
+from nexent.core.agents.agent_model import (
+    AgentRunInfo,
+    ModelConfig,
+    AgentConfig,
+    ToolConfig,
+    ExternalA2AAgentConfig,
+    AgentHistory,
+    AgentVerificationConfig,
+)
 from nexent.core.agents.summary_config import ContextManagerConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
@@ -56,8 +64,15 @@ from .nl2agent_session_catalog import (
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
 )
+from .nl2agent_workflow import Nl2AgentWorkflowState, evaluate_workflow
 from utils.context_utils import build_context_components, build_system_prompt_component
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
+from consts.const import (
+    LOCAL_MCP_SERVER,
+    MODEL_CONFIG_MAPPING,
+    LANGUAGE,
+    DATA_PROCESS_SERVICE,
+    MINIO_DEFAULT_BUCKET,
+)
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
@@ -102,9 +117,7 @@ def _resolve_agent_run_model_id(
     if override is not None:
         return override
 
-    business_logic_model_id = _coerce_model_id(
-        agent_info.get("business_logic_model_id")
-    )
+    business_logic_model_id = _coerce_model_id(agent_info.get("business_logic_model_id"))
     if business_logic_model_id is not None:
         return business_logic_model_id
 
@@ -123,17 +136,11 @@ def _is_nl2agent_model_selection_confirmed(
     draft_agent_info: Dict[str, Any],
 ) -> bool:
     """Return whether a draft has one persisted primary model in its model list."""
-    primary_model_id = _coerce_model_id(
-        draft_agent_info.get("business_logic_model_id")
-    )
+    primary_model_id = _coerce_model_id(draft_agent_info.get("business_logic_model_id"))
     raw_model_ids = draft_agent_info.get("model_ids") or []
     if isinstance(raw_model_ids, (str, int)):
         raw_model_ids = [raw_model_ids]
-    model_ids = {
-        resolved_id
-        for raw_id in raw_model_ids
-        if (resolved_id := _coerce_model_id(raw_id)) is not None
-    }
+    model_ids = {resolved_id for raw_id in raw_model_ids if (resolved_id := _coerce_model_id(raw_id)) is not None}
     return primary_model_id is not None and primary_model_id in model_ids
 
 
@@ -142,53 +149,33 @@ def _build_nl2agent_current_session(
     model_selection_confirmed: bool,
     workflow_state: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Project persisted NL2AGENT state into an ID-free workflow summary."""
-    local_batches = workflow_state.get("recommendation_batches") or {}
-    if not local_batches:
-        local_review_status = "missing"
-    elif any(
-        batch.get("status") == "recommendations_ready"
-        for batch in local_batches.values()
-    ):
-        local_review_status = "pending"
-    else:
-        local_review_status = "complete"
-
-    online_batches = workflow_state.get("online_recommendation_batches") or {}
-    online_resource_types = {
-        batch.get("resource_type") for batch in online_batches.values()
-    }
-    mcp_workflows = workflow_state.get("mcp_workflows") or {}
-    unresolved_mcp_count = sum(
-        1
-        for workflow in mcp_workflows.values()
-        if workflow.get("status") in {"installing", "connected"}
-    )
-    requirements_review = workflow_state.get("requirements_review") or {
-        "status": "collecting",
-        "summary": None,
-        "fingerprint": "",
-    }
+    """Project persisted state through the shared deterministic evaluator."""
+    state = Nl2AgentWorkflowState.model_validate(workflow_state)
+    state.model_selection_confirmed = bool(model_selection_confirmed)
+    summary = evaluate_workflow(state)
+    requirements_review = state.requirements_review
     return {
         "draft_agent_id": int(draft_agent_id),
         "requirements_review": {
-            "status": requirements_review.get("status", "collecting"),
-            "summary": requirements_review.get("summary"),
+            "status": requirements_review.status,
+            "summary": requirements_review.summary,
         },
-        "model_selection_confirmed": bool(model_selection_confirmed),
-        "local_review_status": local_review_status,
+        "schema_version": state.schema_version,
+        "revision": state.revision,
+        "current_stage": summary.current_stage,
+        "expected_card_types": summary.expected_card_types,
+        "allowed_actions": summary.allowed_actions,
+        "model_selection_confirmed": summary.model_selection_confirmed,
+        "local_review_status": summary.local_review_status,
         "online_review": {
-            "mcp_batch_registered": "mcp" in online_resource_types,
-            "skill_batch_registered": "skill" in online_resource_types,
-            "configuration_confirmed": bool(
-                workflow_state.get("online_configuration_confirmed", False)
-            ),
+            "mcp_batch_registered": summary.mcp_batch_registered,
+            "skill_batch_registered": summary.skill_batch_registered,
+            "configuration_confirmed": summary.online_configuration_confirmed,
         },
-        "unresolved_mcp_count": unresolved_mcp_count,
-        "identity_confirmed": bool(
-            workflow_state.get("identity_confirmed", False)
-        ),
+        "unresolved_mcp_count": summary.unresolved_mcp_count,
+        "identity_confirmed": summary.identity_confirmed,
     }
+
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -265,7 +252,14 @@ def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
         return None
-    for preferred in ("operator", "profile", "provider_candidate", "legacy", "default", "unknown"):
+    for preferred in (
+        "operator",
+        "profile",
+        "provider_candidate",
+        "legacy",
+        "default",
+        "unknown",
+    ):
         if preferred in values:
             return preferred
     return values[0]
@@ -310,9 +304,7 @@ def _resolve_safe_input_budget(
             requested_output_tokens=request_requested_output_tokens,
         )
 
-    output_reserve_source = (
-        "agent" if agent_requested_output_tokens is not None else "model_default"
-    )
+    output_reserve_source = "agent" if agent_requested_output_tokens is not None else "model_default"
     try:
         snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
             capacity_snapshot=capacity_snapshot,
@@ -369,9 +361,7 @@ def _resolve_input_budget(
     model_id = model_info.get("model_name") or ""
     provider_missing_detail = None
     if not provider:
-        provider_missing_detail = (
-            "model_factory/provider is missing; capacity catalog matching is disabled"
-        )
+        provider_missing_detail = "model_factory/provider is missing; capacity catalog matching is disabled"
     try:
         snapshot = resolve_capacity(
             model_id=model_id,
@@ -381,7 +371,8 @@ def _resolve_input_budget(
         )
         logger.debug(
             "Capacity resolved for (%s, %s): input_limit=%s source=%s profile=%s fingerprint=%s",
-            provider, model_id,
+            provider,
+            model_id,
             snapshot.provider_input_limit_tokens,
             dict(snapshot.field_sources),
             snapshot.capability_profile_version,
@@ -396,12 +387,18 @@ def _resolve_input_budget(
         )
     except ProviderCapabilityUnknown:
         _warn_missing_capacity_once(
-            model_info, provider, model_id, detail=provider_missing_detail,
+            model_info,
+            provider,
+            model_id,
+            detail=provider_missing_detail,
         )
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
     except ResolverError as exc:
         _warn_missing_capacity_once(
-            model_info, provider, model_id, detail=str(exc),
+            model_info,
+            provider,
+            model_id,
+            detail=str(exc),
         )
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
 
@@ -418,9 +415,7 @@ def _warn_missing_capacity_once(
     them what is disabled, which model is affected, and how to fix it
     through the existing UI.
     """
-    db_model_id = (
-        model_info.get("model_id") if isinstance(model_info, dict) else None
-    )
+    db_model_id = model_info.get("model_id") if isinstance(model_info, dict) else None
     dedup_key = db_model_id if db_model_id is not None else f"{provider}/{model_id_str}"
     # Test-and-set inside the lock so concurrent first-time callers don't
     # both make it past the membership check. Logging happens outside the
@@ -430,23 +425,24 @@ def _warn_missing_capacity_once(
             return
         _CAPACITY_WARNING_EMITTED.add(dedup_key)
 
-    reason = (
-        f"resolver error: {detail}"
-        if detail
-        else "no context_window_tokens or max_output_tokens configured"
-    )
+    reason = f"resolver error: {detail}" if detail else "no context_window_tokens or max_output_tokens configured"
     logger.warning(
         "Output token cap and budget consistency check are not enforced for "
         "model '%s' (model_id=%s, provider=%s) because %s. "
         "To enable enforcement, open the Nexent model management UI, edit "
         "this model, and fill in 'Context window tokens' and 'Max output "
         "tokens'. Falling back to a default context threshold of %s tokens.",
-        model_id_str, db_model_id, provider, reason,
+        model_id_str,
+        db_model_id,
+        provider,
+        reason,
         _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     )
 
 
-def _normalize_tool_params_request(tool_params: Optional[ToolParamsRequest | Dict[str, Any]]) -> ToolParamsRequest:
+def _normalize_tool_params_request(
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]],
+) -> ToolParamsRequest:
     """Normalize request-scoped tool parameter overrides into a ToolParamsRequest."""
     if tool_params is None:
         return ToolParamsRequest()
@@ -527,11 +523,7 @@ def _build_internal_s3_url(file: dict) -> str:
     return "s3:/" + url
 
 
-def _get_skills_for_template(
-    agent_id: int,
-    tenant_id: str,
-    version_no: int = 0
-) -> List[dict]:
+def _get_skills_for_template(agent_id: int, tenant_id: str, version_no: int = 0) -> List[dict]:
     """Get skills list for prompt template injection.
 
     Args:
@@ -544,18 +536,17 @@ def _get_skills_for_template(
     """
     try:
         from services.skill_service import SkillService
+
         skill_service = SkillService()
         enabled_skills = skill_service.get_enabled_skills_for_agent(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no
+            agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
         )
-        return [
-            {"name": s.get("name", ""), "description": s.get("description", "")}
-            for s in enabled_skills
-        ]
+        return [{"name": s.get("name", ""), "description": s.get("description", "")} for s in enabled_skills]
     except Exception as e:
-        logger.error(f"Failed to get skills for agent {agent_id} (tenant={tenant_id}, version={version_no}): {e}", exc_info=True)
+        logger.error(
+            f"Failed to get skills for agent {agent_id} (tenant={tenant_id}, version={version_no}): {e}",
+            exc_info=True,
+        )
         return []
 
 
@@ -601,11 +592,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
     )
 
 
-def _get_external_a2a_agents(
-    agent_id: int,
-    tenant_id: str,
-    version_no: int = 0
-) -> List[ExternalA2AAgentConfig]:
+def _get_external_a2a_agents(agent_id: int, tenant_id: str, version_no: int = 0) -> List[ExternalA2AAgentConfig]:
     """Get external A2A agent configurations for an agent.
 
     Args:
@@ -632,9 +619,7 @@ def _get_external_a2a_agents(
         for agent in external_agents:
             agent_url = agent.get("agent_url", "") or _extract_url_from_card(agent.get("raw_card"))
             if not agent_url:
-                logger.warning(
-                    f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available"
-                )
+                logger.warning(f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available")
                 continue
 
             result.append(_build_external_agent_config(agent, agent_url))
@@ -648,11 +633,7 @@ def _get_external_a2a_agents(
         return []
 
 
-def _get_skill_script_tools(
-    agent_id: int,
-    tenant_id: str,
-    version_no: int = 0
-) -> List[ToolConfig]:
+def _get_skill_script_tools(agent_id: int, tenant_id: str, version_no: int = 0) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
 
     Args:
@@ -716,7 +697,7 @@ def _get_skill_script_tools(
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
-            )
+            ),
         ]
     except Exception as e:
         logger.warning(f"Failed to load skill script tool: {e}")
@@ -728,56 +709,60 @@ async def create_model_config_list(tenant_id):
     model_list = []
     for record in records:
         model_list.append(
-            ModelConfig(cite_name=record["display_name"],
-                        api_key=record.get("api_key", ""),
-                        model_name=add_repo_to_name(
-                                model_repo=record["model_repo"],
-                                model_name=record["model_name"],
-                            ),
-                        url=record["base_url"],
-                        ssl_verify=record.get("ssl_verify", True),
-                        model_factory=record.get("model_factory"),
-                        timeout_seconds=record.get("timeout_seconds"),
-                        concurrency_limit=record.get("concurrency_limit"),
-                        prompt_cache=resolve_prompt_cache_profile(
-                            record.get("model_factory")),
-                        # W1 step 6: pass capacity columns through so SDK can
-                        # honor operator-configured values end to end.
-                        max_output_tokens=record.get("max_output_tokens"),
-                        max_tokens=record.get("max_tokens"),
-                        context_window_tokens=record.get("context_window_tokens"),
-                        max_input_tokens=record.get("max_input_tokens"),
-                        default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
-                        tokenizer_family=record.get("tokenizer_family"),
-                        capacity_source=record.get("capacity_source"),
-                        capability_profile_version=record.get("capability_profile_version")))
+            ModelConfig(
+                cite_name=record["display_name"],
+                api_key=record.get("api_key", ""),
+                model_name=add_repo_to_name(
+                    model_repo=record["model_repo"],
+                    model_name=record["model_name"],
+                ),
+                url=record["base_url"],
+                ssl_verify=record.get("ssl_verify", True),
+                model_factory=record.get("model_factory"),
+                timeout_seconds=record.get("timeout_seconds"),
+                concurrency_limit=record.get("concurrency_limit"),
+                prompt_cache=resolve_prompt_cache_profile(record.get("model_factory")),
+                # W1 step 6: pass capacity columns through so SDK can
+                # honor operator-configured values end to end.
+                max_output_tokens=record.get("max_output_tokens"),
+                max_tokens=record.get("max_tokens"),
+                context_window_tokens=record.get("context_window_tokens"),
+                max_input_tokens=record.get("max_input_tokens"),
+                default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
+                tokenizer_family=record.get("tokenizer_family"),
+                capacity_source=record.get("capacity_source"),
+                capability_profile_version=record.get("capability_profile_version"),
+            )
+        )
     # fit for old version, main_model and sub_model use default model
-    main_model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    main_prompt_cache = resolve_prompt_cache_profile(
-        main_model_config.get("model_factory"))
+    main_model_config = tenant_config_manager.get_model_config(key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    main_prompt_cache = resolve_prompt_cache_profile(main_model_config.get("model_factory"))
     model_list.append(
-        ModelConfig(cite_name="main_model",
-                    api_key=main_model_config.get("api_key", ""),
-                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
-                        "model_name") else "",
-                    url=main_model_config.get("base_url", ""),
-                    ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+        ModelConfig(
+            cite_name="main_model",
+            api_key=main_model_config.get("api_key", ""),
+            model_name=get_model_name_from_config(main_model_config) if main_model_config.get("model_name") else "",
+            url=main_model_config.get("base_url", ""),
+            ssl_verify=main_model_config.get("ssl_verify", True),
+            model_factory=main_model_config.get("model_factory"),
+            timeout_seconds=main_model_config.get("timeout_seconds"),
+            concurrency_limit=main_model_config.get("concurrency_limit"),
+            prompt_cache=main_prompt_cache,
+        )
+    )
     model_list.append(
-        ModelConfig(cite_name="sub_model",
-                    api_key=main_model_config.get("api_key", ""),
-                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
-                        "model_name") else "",
-                    url=main_model_config.get("base_url", ""),
-                    ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+        ModelConfig(
+            cite_name="sub_model",
+            api_key=main_model_config.get("api_key", ""),
+            model_name=get_model_name_from_config(main_model_config) if main_model_config.get("model_name") else "",
+            url=main_model_config.get("base_url", ""),
+            ssl_verify=main_model_config.get("ssl_verify", True),
+            model_factory=main_model_config.get("model_factory"),
+            timeout_seconds=main_model_config.get("timeout_seconds"),
+            concurrency_limit=main_model_config.get("concurrency_limit"),
+            prompt_cache=main_prompt_cache,
+        )
+    )
 
     return model_list
 
@@ -796,18 +781,16 @@ async def create_agent_config(
     draft_agent_id: Optional[int] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
-    agent_info = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
-    sub_agent_relations = query_sub_agent_relations(
-        main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    sub_agent_relations = query_sub_agent_relations(main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
     for rel in sub_agent_relations:
-        sub_agent_id = rel['selected_agent_id']
+        sub_agent_id = rel["selected_agent_id"]
         sub_agent_version_no = resolve_sub_agent_version_no(
             selected_agent_id=sub_agent_id,
-            selected_agent_version_no=rel.get('selected_agent_version_no'),
+            selected_agent_version_no=rel.get("selected_agent_version_no"),
             tenant_id=tenant_id,
         )
         sub_agent_config = await create_agent_config(
@@ -840,22 +823,16 @@ async def create_agent_config(
     constraint_prompt = agent_info.get("constraint_prompt", "")
     few_shots_prompt = agent_info.get("few_shots_prompt", "")
     is_nl2agent_agent = agent_info.get("name") == "nl2agent"
-    nl2agent_system_prompt = (
-        _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
-    )
+    nl2agent_system_prompt = _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
     nl2agent_workflow_state: Dict[str, Any] = {}
     if nl2agent_system_prompt and draft_agent_id is not None:
-        nl2agent_workflow_state = get_nl2agent_session_state(
-            tenant_id, draft_agent_id
-        )
+        nl2agent_workflow_state = get_nl2agent_session_state(tenant_id, draft_agent_id)
         draft_agent_info = search_agent_info_by_agent_id(
             agent_id=draft_agent_id,
             tenant_id=tenant_id,
             version_no=0,
         )
-        model_selection_confirmed = _is_nl2agent_model_selection_confirmed(
-            draft_agent_info
-        )
+        model_selection_confirmed = _is_nl2agent_model_selection_confirmed(draft_agent_info)
         current_session = _build_nl2agent_current_session(
             draft_agent_id,
             model_selection_confirmed,
@@ -875,11 +852,13 @@ async def create_agent_config(
     prompt_template = get_agent_prompt_template(is_manager=is_manager, language=language)
 
     # Get app information
-    default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
-    app_name = tenant_config_manager.get_app_config(
-        'APP_NAME', tenant_id=tenant_id) or "Nexent"
-    app_description = tenant_config_manager.get_app_config(
-        'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
+    default_app_description = (
+        "Nexent 是一个开源智能体SDK和平台" if language == "zh" else "Nexent is an open-source agent SDK and platform"
+    )
+    app_name = tenant_config_manager.get_app_config("APP_NAME", tenant_id=tenant_id) or "Nexent"
+    app_description = (
+        tenant_config_manager.get_app_config("APP_DESCRIPTION", tenant_id=tenant_id) or default_app_description
+    )
 
     # Get memory list
     memory_context = build_memory_context(user_id, tenant_id, agent_id, skip_query=not allow_memory_search)
@@ -930,13 +909,16 @@ async def create_agent_config(
                     "Do NOT store transient information like temporary calculations, information "
                     "already in the knowledge base, or data the user explicitly says to forget."
                 ),
-                inputs=json.dumps({
-                    "content": {
-                        "type": "string",
-                        "description": "The information to remember",
-                        "description_zh": "需要记住的信息"
-                    }
-                }, ensure_ascii=False),
+                inputs=json.dumps(
+                    {
+                        "content": {
+                            "type": "string",
+                            "description": "The information to remember",
+                            "description_zh": "需要记住的信息",
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
                 output_type="string",
                 params={},
                 source="local",
@@ -955,20 +937,23 @@ async def create_agent_config(
                     "The system already provides some memory context automatically -- use this tool "
                     "when you need to search for specific information not already available."
                 ),
-                inputs=json.dumps({
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language query describing what to search for",
-                        "description_zh": "描述要搜索内容的自然语言查询"
+                inputs=json.dumps(
+                    {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language query describing what to search for",
+                            "description_zh": "描述要搜索内容的自然语言查询",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Maximum number of results to return",
+                            "description_zh": "返回结果的最大数量",
+                            "default": 5,
+                            "nullable": True,
+                        },
                     },
-                    "top_k": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return",
-                        "description_zh": "返回结果的最大数量",
-                        "default": 5,
-                        "nullable": True
-                    }
-                }, ensure_ascii=False),
+                    ensure_ascii=False,
+                ),
                 output_type="string",
                 params={},
                 source="local",
@@ -990,7 +975,9 @@ async def create_agent_config(
                 if index_names:
                     # Reuse the index_name -> display_name mapping from tool.metadata
                     # (already computed in create_tool_config_list to avoid redundant DB query)
-                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
+                    index_name_to_display_map = (
+                        tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
+                    )
                     for index_name in index_names:
                         try:
                             display_name = index_name_to_display_map.get(index_name, index_name)
@@ -999,11 +986,14 @@ async def create_agent_config(
                             knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
                             kb_ids.append(index_name)
                         except Exception as e:
-                            logger.warning(
-                                f"Failed to get summary for knowledge base {index_name}: {e}")
+                            logger.warning(f"Failed to get summary for knowledge base {index_name}: {e}")
                 else:
                     # TODO: Prompt should be refactored to yaml file
-                    knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
+                    knowledge_base_summary = (
+                        "当前没有可用的知识库索引。\n"
+                        if language == "zh"
+                        else "No knowledge base indexes are currently available.\n"
+                    )
                 break  # Only process the first KnowledgeBaseSearchTool found
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
@@ -1037,9 +1027,7 @@ async def create_agent_config(
         if nl2agent_system_prompt:
             system_prompt = nl2agent_system_prompt
         else:
-            system_prompt = Template(
-                prompt_template["system_prompt"], undefined=StrictUndefined
-            ).render(render_kwargs)
+            system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = _resolve_agent_run_model_id(agent_info, override_model_id)
     model_info = None
@@ -1050,9 +1038,7 @@ async def create_agent_config(
         # treating model_info["max_tokens"] (a deprecated output cap) as a
         # context threshold. Falls back to a safe constant when capacity is
         # unknown during the migration window.
-        input_budget, capacity_snapshot, resolved_capacity_snapshot = (
-            _resolve_input_budget(model_info)
-        )
+        input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
     else:
         model_name = "main_model"
         input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
@@ -1094,11 +1080,7 @@ async def create_agent_config(
         "NL2AgentSearchWebMcpsTool",
         "NL2AgentSearchWebSkillsTool",
     }
-    nl2agent_catalogs = (
-        get_nl2agent_session_catalogs(tenant_id, draft_agent_id)
-        if draft_agent_id is not None
-        else {}
-    )
+    nl2agent_catalogs = get_nl2agent_session_catalogs(tenant_id, draft_agent_id) if draft_agent_id is not None else {}
     for tool_cfg in tool_list:
         try:
             class_name = tool_cfg.class_name
@@ -1113,10 +1095,7 @@ async def create_agent_config(
                 "language": language,
                 "draft_agent_id": draft_agent_id,
                 "requirements_confirmed": (
-                    nl2agent_workflow_state.get("requirements_review", {}).get(
-                        "status"
-                    )
-                    == "confirmed"
+                    nl2agent_workflow_state.get("requirements_review", {}).get("status") == "confirmed"
                 ),
                 **nl2agent_catalogs,
             }
@@ -1175,7 +1154,7 @@ async def create_agent_config(
             is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,
             system_prompt=system_prompt,
             language=language,
-            agent_id=agent_id
+            agent_id=agent_id,
         ),
         tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
         max_steps=agent_info.get("max_steps", 15),
@@ -1239,7 +1218,7 @@ async def create_tool_config_list(
             output_type=tool.get("output_type"),
             params=param_dict,
             source=tool.get("source"),
-            usage=tool.get("usage")
+            usage=tool.get("usage"),
         )
 
         if tool.get("source") == "langchain":
@@ -1265,9 +1244,7 @@ async def create_tool_config_list(
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
             if rerank and rerank_model_name:
-                rerank_model = get_rerank_model(
-                    tenant_id=tenant_id, model_name=rerank_model_name
-                )
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
@@ -1294,22 +1271,22 @@ async def create_tool_config_list(
             if not index_names:
                 raise ValidationError(
                     f"[{agent_name or agent_id}] knowledge_base_search tool requires index_names, "
-                    f"but it is not configured in the agent and not provided via tool_params.")
+                    f"but it is not configured in the agent and not provided via tool_params."
+                )
 
             embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
             if not embedding_model:
                 raise ValidationError(
                     f"No embedding model found for index '{index_names[0]}'. "
-                    f"Please configure an embedding model for this knowledge base.")
+                    f"Please configure an embedding model for this knowledge base."
+                )
             tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
             if rerank and rerank_model_name:
-                rerank_model = get_rerank_model(
-                    tenant_id=tenant_id, model_name=rerank_model_name
-                )
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
             tool_config.metadata = {
                 "rerank_model": rerank_model,
@@ -1320,7 +1297,7 @@ async def create_tool_config_list(
                 "llm_model": get_llm_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
         elif tool_config.class_name == "AnalyzeImageTool":
             selected_model_id = param_dict.get("selected_model_id")
@@ -1328,14 +1305,14 @@ async def create_tool_config_list(
                 # get_vlm_model reads the first multimodal slot, now shown as image understanding.
                 "vlm_model": get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
         elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
                 "vlm_model": get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
 
         tool_config_list.append(tool_config)
@@ -1365,16 +1342,13 @@ async def discover_langchain_tools():
         for obj, filename in discovered_tools:
             try:
                 # Log successful tool discovery
-                logger.info(
-                    f"Loaded LangChain tool '{obj.name}' from {filename}")
+                logger.info(f"Loaded LangChain tool '{obj.name}' from {filename}")
                 langchain_tools.append(obj)
             except Exception as e:
-                logger.error(
-                    f"Error processing LangChain tool from {filename}: {e}")
+                logger.error(f"Error processing LangChain tool from {filename}: {e}")
 
     except Exception as e:
-        logger.error(
-            f"Unexpected error scanning LangChain tools directory: {e}")
+        logger.error(f"Unexpected error scanning LangChain tools directory: {e}")
 
     return langchain_tools
 
@@ -1382,7 +1356,7 @@ async def discover_langchain_tools():
 async def prepare_prompt_templates(
     is_manager: bool,
     system_prompt: str,
-    language: str = 'zh',
+    language: str = "zh",
     agent_id: int = None,
 ):
     """
@@ -1576,8 +1550,7 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
         # Check current agent tools
         for tool in agent_config.tools:
             if tool.source == "mcp" and tool.usage in mcp_info_dict:
-                used_mcp_urls.add(
-                    mcp_info_dict[tool.usage]["remote_mcp_server"])
+                used_mcp_urls.add(mcp_info_dict[tool.usage]["remote_mcp_server"])
 
         # Recursively check sub-agents (only internal AgentConfig, not external A2A)
         for sub_agent_config in agent_config.managed_agents:
@@ -1618,11 +1591,7 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
-    final_query = await join_minio_file_description_to_query(
-        minio_files=minio_files,
-        query=query,
-        history=history
-    )
+    final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query, history=history)
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
         "agent_id": agent_id,
@@ -1644,12 +1613,14 @@ async def create_agent_run_info(
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
-    remote_mcp_list.append({
-        "remote_mcp_server_name": "outer-apis",
-        "remote_mcp_server": default_mcp_url,
-        "status": True,
-        "authorization_token": None
-    })
+    remote_mcp_list.append(
+        {
+            "remote_mcp_server_name": "outer-apis",
+            "remote_mcp_server": default_mcp_url,
+            "status": True,
+            "authorization_token": None,
+        }
+    )
     remote_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list if record["status"]}
 
     # Filter MCP servers and tools, and build mcp_host with authorization
@@ -1668,7 +1639,7 @@ async def create_agent_run_info(
         if mcp_record:
             mcp_config = {
                 "url": url,
-                "transport": "sse" if url.endswith("/sse") else "streamable-http"
+                "transport": "sse" if url.endswith("/sse") else "streamable-http",
             }
             headers = {}
             auth_token = mcp_record.get("authorization_token")

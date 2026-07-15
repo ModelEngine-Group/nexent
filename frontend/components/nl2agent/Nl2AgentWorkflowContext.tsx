@@ -24,6 +24,9 @@ interface Nl2AgentWorkflowContextValue {
   stateVersion: number;
   continuationError?: string;
   retryContinuation: () => Promise<void>;
+  claimCardDelivery: (key: string) => boolean;
+  completeCardDelivery: (key: string) => void;
+  failCardDelivery: (key: string) => void;
 }
 
 const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
@@ -36,6 +39,9 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   busy: false,
   stateVersion: 0,
   retryContinuation: async () => {},
+  claimCardDelivery: () => false,
+  completeCardDelivery: () => {},
+  failCardDelivery: () => {},
 });
 
 export const Nl2AgentWorkflowProvider: React.FC<{
@@ -52,10 +58,27 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     Record<string, { text: string; error: string }>
   >({});
   const continuingRef = useRef(false);
+  const cardDeliveriesRef = useRef<
+    Map<string, "pending" | "succeeded" | "failed">
+  >(new Map());
 
   useEffect(() => {
     setInputBlockers(new Set());
+    cardDeliveriesRef.current.clear();
   }, [scopeKey]);
+
+  const claimCardDelivery = useCallback((key: string) => {
+    const status = cardDeliveriesRef.current.get(key);
+    if (status === "pending" || status === "succeeded") return false;
+    cardDeliveriesRef.current.set(key, "pending");
+    return true;
+  }, []);
+  const completeCardDelivery = useCallback((key: string) => {
+    cardDeliveriesRef.current.set(key, "succeeded");
+  }, []);
+  const failCardDelivery = useCallback((key: string) => {
+    cardDeliveriesRef.current.set(key, "failed");
+  }, []);
 
   const beginAction = useCallback(
     () => setActionCount((count) => count + 1),
@@ -128,6 +151,9 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       stateVersion,
       continuationError,
       retryContinuation,
+      claimCardDelivery,
+      completeCardDelivery,
+      failCardDelivery,
     }),
     [
       actionCount,
@@ -140,6 +166,9 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       inputBlockers,
       notifyStateChanged,
       retryContinuation,
+      claimCardDelivery,
+      completeCardDelivery,
+      failCardDelivery,
       setInputBlocked,
       stateVersion,
     ]
