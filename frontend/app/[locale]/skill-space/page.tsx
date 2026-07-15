@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { App, ConfigProvider, Input, Modal } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
@@ -173,6 +173,20 @@ export default function SkillRepositoryPage() {
     detailRepositoryId,
     detailRepositoryId != null
   );
+
+  useEffect(() => {
+    const refreshActiveTab = async () => {
+      if (tab === SkillRepositoryTab.REPOSITORY) {
+        await refetchRepository();
+      } else if (tab === SkillRepositoryTab.MINE) {
+        await refetchMine();
+      } else if (tab === SkillRepositoryTab.REVIEW) {
+        await refetchReview();
+      }
+    };
+
+    refreshActiveTab().catch(() => {});
+  }, [tab, refetchRepository, refetchMine, refetchReview]);
 
   const repositoryItems = repositoryData?.items ?? [];
   const repositoryTotal = repositoryData?.pagination?.total ?? 0;
