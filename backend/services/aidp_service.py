@@ -718,6 +718,84 @@ def upload_aidp_docs_impl(
         )
 
 
+def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
+    """Get total document count in a KB via AIDP POST .../Count endpoint.
+
+    Mirrors the KB Count API pattern. Endpoint:
+        POST /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kdsId}/KnowledgeFiles/Count
+    Body: (empty)
+    Response: {"count": <int>}
+
+    AIDP's document list endpoint does NOT return a true total count (its
+    `total_count` field is the current page count, not the global total),
+    so we must use this dedicated Count API to get the accurate number.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    count_path = f"{_LIST_PATH}/{kds_id}/KnowledgeFiles/Count"
+    count_url = urljoin(f"{normalized_url}/", count_path)
+    logger.info("Counting AIDP documents in KB %s from %s", kds_id, count_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        # Body is empty per AIDP contract; use content=b"" to send an explicit
+        # empty POST (httpx may skip the body otherwise).
+        response = client.post(count_url, headers=headers, content=b"")
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP doc count response format",
+            )
+        return int(result.get("count") or 0)
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 404:
+            # KB does not exist or Count endpoint is not supported
+            logger.warning("AIDP doc Count API returned 404 for KB %s", kds_id)
+            return 0
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
 def list_aidp_docs_impl(
     server_url: str,
     api_key: str,

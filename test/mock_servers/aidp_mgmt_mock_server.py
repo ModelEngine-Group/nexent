@@ -183,9 +183,11 @@ def list_knowledge_bases(
         next_link = f"{_KB_PREFIX}?page={page + 1}&page_size={page_size}"
 
     logger.info("LIST  page=%d page_size=%d returned=%d total=%d", page, page_size, len(items), len(all_items))
+    # Real AIDP returns `total_count` = current page count (len(items)), not
+    # the true total. Use the Count endpoint for the true total.
     return JSONResponse(content={
         "value": items,
-        "total_count": len(all_items),
+        "total_count": len(items),
         "next_link": next_link,
     })
 
@@ -199,6 +201,23 @@ def count_knowledge_bases(
     _check_auth(authorization)
     count = len(_KNOWLEDGE_BASES)
     logger.info("COUNT  kds_id=%s count=%d", kds_id, count)
+    return JSONResponse(content={"count": count})
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Count")
+def count_documents(
+    kds_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Count documents in a knowledge base.
+    AIDP uses POST .../KnowledgeBases/{kds_id}/KnowledgeFiles/Count with
+    empty body, returning {"count": <int>}.
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    count = len(_DOCUMENTS_BY_KB.get(kds_id, []))
+    logger.info("COUNT DOCS  kds_id=%s count=%d", kds_id, count)
     return JSONResponse(content={"count": count})
 
 
@@ -358,10 +377,18 @@ def list_documents(
     end = start + page_size
     items = all_docs[start:end]
 
+    # Real AIDP returns `next_link` as the authoritative "more pages exist"
+    # signal. When there are no more docs, next_link is simply absent.
+    # `total_count` is the current page count, not the true total.
+    next_link = None
+    if end < len(all_docs):
+        next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+
     logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
     return JSONResponse(content={
         "value": items,
-        "total_count": len(all_docs),
+        "total_count": len(items),
+        "next_link": next_link,
     })
 
 

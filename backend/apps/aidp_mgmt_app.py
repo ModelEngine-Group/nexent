@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 from services.aidp_service import (
+    count_aidp_docs_impl,
     count_aidp_kbs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
@@ -65,12 +66,17 @@ async def list_knowledge_bases(
             page=page,
             page_size=page_size,
         )
-        # AIDP list API may not return total; try Count endpoint separately.
-        # If Count fails, fall back to total_count from list response or page length.
+        # AIDP list response behavior:
+        #   - `total_count` field is the CURRENT PAGE count (equal to
+        #     len(value)), NOT the true total. We must NOT use it as total.
+        #   - `next_link` is the authoritative "more pages" signal.
+        # Therefore we call the Count API to obtain the true total, and fall
+        # back to `next_link` + page fullness only when Count fails.
         page_items = result.get("value", [])
         page_count = len(page_items) if isinstance(page_items, list) else 0
 
         count_reliable = False
+        count_failed = False
         try:
             total_count = count_aidp_kbs_impl(
                 server_url=server_url,
@@ -79,25 +85,28 @@ async def list_knowledge_bases(
             count_reliable = True
         except Exception as count_err:
             logger.warning(
-                "AIDP Count API failed, falling back to list total_count: %s", count_err
+                "AIDP Count API failed; true total unknown: %s", count_err
             )
-            list_total = result.get("total_count")
-            total_count = (
-                int(list_total)
-                if isinstance(list_total, (int, float)) and list_total is not None
-                else page_count
-            )
+            total_count = page_count
+            count_failed = True
 
-        # has_more: reliable signal derived from page fullness (works even when
-        # Count API is unavailable). A full page strongly implies more data exists.
+        # has_more: use Count API when available, otherwise combine next_link
+        # and page fullness to detect additional pages.
         has_more = (
             total_count > page * page_size
             if count_reliable
-            else page_count >= page_size
+            else bool(result.get("next_link")) or page_count >= page_size
         )
 
+        # When Count failed, do not expose AIDP's misleading total_count
+        # (which is just the page count). Keep `total_count` at the page
+        # count as a defensive lower bound.
         result["total_count"] = int(total_count)
         result["has_more"] = has_more
+        # Always include count_failed flag so the frontend knows the total
+        # is approximate (useful for "共 N 条" display).
+        if count_failed:
+            result["total_reliable"] = False
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AppException:
         raise
@@ -279,16 +288,43 @@ async def list_documents(
             page=page,
             page_size=page_size,
         )
-        # Compute has_more: AIDP doc list may or may not return reliable total_count.
+        # AIDP's doc list response does NOT return the true total count —
+        # its `total_count` field is just the current page count. We must
+        # call the dedicated Count API to get the accurate total, identical
+        # to the KB list pattern.
         page_items = result.get("value", [])
         page_count = len(page_items) if isinstance(page_items, list) else 0
-        doc_total = result.get("total_count")
+
+        count_reliable = False
+        count_failed = False
+        try:
+            total_count = count_aidp_docs_impl(
+                server_url=server_url,
+                api_key=api_key,
+                kds_id=kds_id,
+            )
+            count_reliable = True
+        except Exception as count_err:
+            logger.warning(
+                "AIDP doc Count API failed for KB %s; true total unknown: %s",
+                kds_id,
+                count_err,
+            )
+            total_count = page_count
+            count_failed = True
+
+        # has_more: use Count API when available, otherwise combine next_link
+        # and page fullness to detect additional pages.
         has_more = (
-            int(doc_total) > page * page_size
-            if isinstance(doc_total, (int, float)) and doc_total is not None
-            else page_count >= page_size
+            total_count > page * page_size
+            if count_reliable
+            else bool(result.get("next_link")) or page_count >= page_size
         )
+
+        result["total_count"] = int(total_count)
         result["has_more"] = has_more
+        if count_failed:
+            result["total_reliable"] = False
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AppException:
         raise
