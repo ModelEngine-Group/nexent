@@ -94,9 +94,6 @@ export default function McpCommunityDetailModal({
                   </div>
                 </div>
                 <p className="mt-1.5 text-sm text-slate-500 truncate">
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 mr-1">
-                    {service.version ? formatRegistryVersion(service.version) : "v1.0.0"}
-                  </span>
                   {service.description || t("mcpTools.detail.noDescription")}
                 </p>
               </div>
