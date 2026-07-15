@@ -54,6 +54,14 @@ _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _KNOWLEDGE_BASES: Dict[str, Dict[str, Any]] = {}
 _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
 
+# =============================================================================
+# Failure injection counters (used to test retry logic end-to-end)
+# =============================================================================
+# _FAIL_NEXT_N: how many upcoming requests should fail with _FAIL_STATUS_CODE
+_FAIL_NEXT_N: int = 0
+_FAIL_STATUS_CODE: int = 503
+_FAIL_TOTAL_TRIGGERED: int = 0  # lifetime counter of how many 5xx/4xx we've sent
+
 
 def _seed_initial_data() -> None:
     """Populate seed knowledge bases and documents for list/get testing.
@@ -155,6 +163,96 @@ def _check_auth(authorization: Optional[str]) -> None:
     expected = f"Bearer {EXPECTED_API_KEY}"
     if authorization != expected:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# =============================================================================
+# Failure injection middleware (tests retry logic end-to-end)
+# =============================================================================
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
+
+
+class FailNextMiddleware(BaseHTTPMiddleware):
+    """Intercepts real AIDP calls (under /KnowledgeBase/) and returns a
+    configured error status for the next N requests, then lets them through.
+    Use POST /_mock/fail-next?n=2&status=503 to schedule the next 2 requests
+    to fail with 503, then verify the client retries them successfully.
+    """
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        global _FAIL_NEXT_N, _FAIL_TOTAL_TRIGGERED
+        # Only intercept the real AIDP-looking endpoints (not the admin ones)
+        if request.url.path.startswith("/KnowledgeBase"):
+            if _FAIL_NEXT_N > 0:
+                _FAIL_NEXT_N -= 1
+                _FAIL_TOTAL_TRIGGERED += 1
+                logger.info(
+                    "MOCK INJECT  %d failures remaining, returning %d on %s",
+                    _FAIL_NEXT_N, _FAIL_STATUS_CODE, request.url.path,
+                )
+                return JSONResponse(
+                    status_code=_FAIL_STATUS_CODE,
+                    content={
+                        "error": "mock-injected failure for retry testing",
+                        "status": _FAIL_STATUS_CODE,
+                    },
+                )
+        return await call_next(request)
+
+
+app.add_middleware(FailNextMiddleware)
+
+
+# =============================================================================
+# Admin-only endpoints: control failure injection
+# =============================================================================
+@app.post("/_mock/fail-next")
+def schedule_failures(
+    n: int = Query(1, ge=0, description="Number of upcoming AIDP requests to fail"),
+    status: int = Query(503, description="HTTP status code to return on each failure"),
+) -> JSONResponse:
+    """Schedule the next N real AIDP endpoints (GET/POST /KnowledgeBase/...) to
+    fail with the given status code. Returns 200 with the current plan.
+
+    Example — simulate 2 transient 503 errors before the client succeeds:
+        curl -X POST 'http://localhost:30081/_mock/fail-next?n=2&status=503'
+    Then trigger any AIDP-backed action and watch the client retry logic kick in.
+    """
+    global _FAIL_NEXT_N, _FAIL_STATUS_CODE
+    _FAIL_NEXT_N = n
+    _FAIL_STATUS_CODE = status
+    logger.info("MOCK SCHEDULE  next %d requests will return status %d", n, status)
+    return JSONResponse(content={
+        "fail_next": _FAIL_NEXT_N,
+        "status_code": _FAIL_STATUS_CODE,
+        "total_triggered": _FAIL_TOTAL_TRIGGERED,
+    })
+
+
+@app.get("/_mock/fail-status")
+def get_fail_status() -> JSONResponse:
+    """Check the current failure-injection state. Does not mutate counters."""
+    return JSONResponse(content={
+        "fail_next": _FAIL_NEXT_N,
+        "status_code": _FAIL_STATUS_CODE,
+        "total_triggered": _FAIL_TOTAL_TRIGGERED,
+    })
+
+
+@app.post("/_mock/fail-reset")
+def reset_failures() -> JSONResponse:
+    """Reset the failure-injection counters to zero without restarting the server."""
+    global _FAIL_NEXT_N, _FAIL_TOTAL_TRIGGERED, _FAIL_STATUS_CODE
+    _FAIL_NEXT_N = 0
+    _FAIL_STATUS_CODE = 503
+    _FAIL_TOTAL_TRIGGERED = 0
+    logger.info("MOCK RESET  failure injection counters cleared")
+    return JSONResponse(content={
+        "fail_next": _FAIL_NEXT_N,
+        "status_code": _FAIL_STATUS_CODE,
+        "total_triggered": _FAIL_TOTAL_TRIGGERED,
+    })
 
 
 # =============================================================================

@@ -3,8 +3,9 @@ AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
 import logging
+import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 from urllib.parse import urljoin
 
 import httpx
@@ -73,6 +74,82 @@ def _validate_params(server_url: str, api_key: str) -> str:
     return server_url.rstrip("/")
 
 
+# ==================== Retry helpers ====================
+# Retry on ANY non-200 response. Simple and predictable.
+_AIDP_RETRY_MAX_ATTEMPTS = 3
+# Exponential backoff: 0.5s, 1s, 2s
+_AIDP_RETRY_BACKOFF_FACTOR = 0.5
+
+
+def _request_with_retry(
+    request_fn: Callable[[], httpx.Response],
+    context: str,
+    max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
+) -> httpx.Response:
+    """Execute a sync httpx request with retry on any non-200 response.
+
+    Retries on:
+        * Any HTTP status code != 200
+        * httpx.RequestError (connection refused, timeouts, DNS, etc.)
+
+    Exponential backoff: 0.5s, 1s, 2s. Respects Retry-After header on 429.
+
+    The last response (successful or final failure) is returned to the
+    caller so `response.raise_for_status()` can raise the existing AppException
+    flow. On a final RequestError, the exception propagates directly.
+    """
+    last_exception: Exception | None = None
+
+    for attempt in range(max_attempts):
+        try:
+            response = request_fn()
+            if response.status_code == 200:
+                return response
+            # Non-200 — decide whether to retry
+            if attempt < max_attempts - 1:
+                wait_time = _compute_retry_wait(response, attempt)
+                logger.warning(
+                    "HTTP %d for %s, retrying in %ss (attempt %d/%d)",
+                    response.status_code, context, wait_time,
+                    attempt + 1, max_attempts,
+                )
+                time.sleep(wait_time)
+                continue
+            # Last attempt — return so callers can raise_for_status()
+            return response
+        except httpx.RequestError as e:
+            last_exception = e
+            if attempt < max_attempts - 1:
+                wait_time = _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
+                logger.warning(
+                    "AIDP request error for %s: [%s] %s, retrying in %ss (%d/%d)",
+                    context, type(e).__name__, e, wait_time,
+                    attempt + 1, max_attempts,
+                )
+                time.sleep(wait_time)
+            else:
+                break
+
+    # All retries exhausted on RequestError — let caller translate to AppException.
+    assert last_exception is not None
+    raise last_exception
+
+
+def _compute_retry_wait(response: httpx.Response, attempt: int) -> float:
+    """Determine backoff wait time for a retryable response.
+
+    Honors the standard ``Retry-After`` header (seconds) when present.
+    Falls back to exponential backoff: ``backoff_factor * 2^attempt``.
+    """
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            pass
+    return _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
+
+
 def fetch_aidp_knowledge_bases_impl(
     server_url: str,
     api_key: str,
@@ -97,7 +174,10 @@ def fetch_aidp_knowledge_bases_impl(
             timeout=60.0,
             verify_ssl=False,
         )
-        response = client.get(list_url, headers=headers)
+        response = _request_with_retry(
+            lambda: client.get(list_url, headers=headers),
+            context="list-kbs",
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
@@ -206,8 +286,10 @@ def fetch_all_aidp_knowledge_bases_impl(
                 current_page,
                 current_url,
             )
-
-            response = client.get(current_url, headers=headers)
+            response = _request_with_retry(
+                lambda: client.get(current_url, headers=headers),
+                context=f"list-kbs-all:page{page}",
+            )
             response.raise_for_status()
             result = response.json()
             if not isinstance(result, dict):
@@ -311,7 +393,10 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
             timeout=60.0,
             verify_ssl=False,
         )
-        response = client.post(count_url, headers=headers, json={"is_personal": 0})
+        response = _request_with_retry(
+            lambda: client.post(count_url, headers=headers, json={"is_personal": 0}),
+            context="count-kbs",
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
@@ -481,7 +566,10 @@ def get_aidp_kb_impl(
             timeout=60.0,
             verify_ssl=False,
         )
-        response = client.get(get_url, headers=headers)
+        response = _request_with_retry(
+            lambda: client.get(get_url, headers=headers),
+            context="get-kb-detail",
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
@@ -749,7 +837,10 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
         )
         # Body is empty per AIDP contract; use content=b"" to send an explicit
         # empty POST (httpx may skip the body otherwise).
-        response = client.post(count_url, headers=headers, content=b"")
+        response = _request_with_retry(
+            lambda: client.post(count_url, headers=headers, content=b""),
+            context=f"count-docs:{kds_id}",
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
@@ -821,7 +912,10 @@ def list_aidp_docs_impl(
             timeout=60.0,
             verify_ssl=False,
         )
-        response = client.get(list_url, headers=headers)
+        response = _request_with_retry(
+            lambda: client.get(list_url, headers=headers),
+            context=f"list-docs:{kds_id}",
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
