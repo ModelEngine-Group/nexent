@@ -18,6 +18,10 @@ class ContextEvidence:
     prefix_change_reasons: tuple[str, ...] = ()
     context_items: tuple[Any, ...] = ()
     """Projected ContextItem candidates when use_context_items is enabled."""
+    selection_decision: Any = None
+    """SelectionDecision from the selection engine when use_context_items is enabled."""
+    reduction_warnings: tuple = ()
+    """Tuple of reduction warning dicts when items fail reduction."""
 
 
 @dataclass(frozen=True)
