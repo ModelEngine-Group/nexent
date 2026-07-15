@@ -137,9 +137,9 @@ mock_langchain.tools = mock_langchain_tools
 
 mock_openai_chat_completion_message = MagicMock()
 
-# Mock memory_service to avoid importing mem0
-mock_memory_service = MagicMock()
-mock_memory_service.add_memory_in_levels = MagicMock()
+# Stub for the legacy ``nexent.memory.memory_service`` module has been
+# removed because that module no longer exists; tests that depend on it
+# will be migrated to the new ``MemoryService`` facade in a follow-up.
 
 # Mock nexent.skills module for run_skill_script_tool
 mock_nexent = ModuleType("nexent")
@@ -177,8 +177,6 @@ module_mocks = {
     "openai.types.chat.chat_completion_message_param": MagicMock(),
     # exa_py is imported by sdk.nexent.core.tools – provide dummy to skip real import
     "exa_py": MagicMock(Exa=MagicMock()),
-    # Mock memory_service to avoid importing mem0
-    "sdk.nexent.memory.memory_service": mock_memory_service,
     # Mock nexent.skills for skill tools
     "nexent.skills": mock_nexent.skills,
     "nexent.skills.skill_manager": MagicMock(),

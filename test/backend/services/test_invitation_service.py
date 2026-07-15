@@ -44,32 +44,8 @@ setattr(nexent_module, "storage", nexent_storage_module)
 setattr(nexent_storage_module, "storage_client_factory", nexent_storage_factory_module)
 setattr(nexent_storage_module, "minio_config", nexent_minio_config_module)
 
-# Mock mem0 to prevent optional dependency import failures during test collection
-mem0_module = types.ModuleType("mem0")
-setattr(mem0_module, "__path__", [])
-mem0_memory_module = types.ModuleType("mem0.memory")
-mem0_memory_main_module = types.ModuleType("mem0.memory.main")
-mem0_embeddings_module = types.ModuleType("mem0.embeddings")
-mem0_embeddings_base_module = types.ModuleType("mem0.embeddings.base")
-
-
-class _MockAsyncMemory:
-    pass
-
-
-mem0_memory_main_module.AsyncMemory = _MockAsyncMemory
-
-
-class _MockEmbeddingBase:
-    pass
-
-
-mem0_embeddings_base_module.EmbeddingBase = _MockEmbeddingBase
-sys.modules["mem0"] = mem0_module
-sys.modules["mem0.memory"] = mem0_memory_module
-sys.modules["mem0.memory.main"] = mem0_memory_main_module
-sys.modules["mem0.embeddings"] = mem0_embeddings_module
-sys.modules["mem0.embeddings.base"] = mem0_embeddings_base_module
+# The legacy mem0 stub block has been removed because the SDK no longer
+# imports mem0 at module load time.
 
 # Stub database modules used by invitation_service to avoid loading real SQLAlchemy client
 _db_client_stub = types.ModuleType("database.client")

@@ -13,15 +13,7 @@ _sdk_dir = str(PROJECT_ROOT / "sdk")
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
-_mem0_stubs = {
-    "mem0": MagicMock(),
-    "mem0.memory": MagicMock(),
-    "mem0.memory.main": MagicMock(),
-    "mem0.embeddings": MagicMock(),
-    "mem0.embeddings.base": MagicMock(),
-    "mem0.configs": MagicMock(),
-    "mem0.configs.embeddings": MagicMock(),
-    "mem0.configs.embeddings.base": MagicMock(),
+_external_stubs = {
     "smolagents": MagicMock(),
     "smolagents.memory": MagicMock(),
     "smolagents.agents": MagicMock(),
@@ -68,15 +60,12 @@ _mem0_stubs = {
     "rich.panel": MagicMock(),
     "rich.text": MagicMock(),
 }
-for _mod, _mock in _mem0_stubs.items():
+for _mod, _mock in _external_stubs.items():
     if _mod not in sys.modules:
         sys.modules[_mod] = _mock
 
 _nexent_sub_stubs = {
     "nexent.memory": MagicMock(),
-    "nexent.memory.memory_core": MagicMock(),
-    "nexent.memory.memory_service": MagicMock(),
-    "nexent.memory.embedder_adaptor": MagicMock(),
     "nexent.datamate": MagicMock(),
     "nexent.datamate.datamate_client": MagicMock(),
     "nexent.storage": MagicMock(),

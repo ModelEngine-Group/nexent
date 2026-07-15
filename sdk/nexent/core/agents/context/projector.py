@@ -150,7 +150,7 @@ class ContextProjector:
                 ContextItem(
                     item_id=_make_item_id(ContextItemType.MEMORY, f"{memory_type}:{idx}"),
                     item_type=ContextItemType.MEMORY,
-                    source_refs=[f"mem0:{memory_type}"],
+                    source_refs=[f"memory:{memory_type}"],
                     authority_tier=AuthorityTier.RETRIEVED_MEMORY,
                     minimum_fidelity=_MINIMUM_FIDELITY_MAP[ContextItemType.MEMORY],
                     current_representation=RepresentationTier.FULL,

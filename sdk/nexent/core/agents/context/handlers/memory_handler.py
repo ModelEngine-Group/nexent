@@ -8,17 +8,22 @@ from ..reducer_models import ReductionResult
 
 
 class MemoryHandler(ContextItemHandler):
-    """Scores and reduces long-term memory (mem0) search results."""
+    """Scores and reduces long-term memory search results.
+
+    This handler processes memory context items retrieved from the Nexent
+    memory system. Memory items carry scoring metadata from the retrieval
+    pipeline including relevance score, recency, and authority tier.
+    """
 
     def supported_types(self) -> List[ContextItemType]:
         return [ContextItemType.MEMORY]
 
     def score(self, item: ContextItem, query: str, context: Dict[str, Any]) -> float:
         # TODO(W13): Implement weighted scoring:
-        #   score = mem0_relevance_score * 0.5
+        #   score = relevance_score * 0.5
         #         + recency * 0.2
         #         + authority_weight * 0.3
-        #   Signals: item.metadata["mem0_score"], item.metadata["created_at"],
+        #   Signals: item.metadata["retrieval_score"], item.metadata["created_at"],
         #            item.authority_tier (user_agent > agent > user > tenant)
         return 1.0
 

@@ -1,3 +1,18 @@
+"""Search memory tool for the new Memory system.
+
+This tool is invoked by the agent to retrieve relevant memories. Under the
+new Memory architecture:
+
+- Searches default to the agent's own short-term memory (vector search).
+- Tenant / user long-term memories can be exposed as full-context (handled by
+  the backend ``memory_context_service``); the tool surfaces a stable prompt
+  contract regardless of which retrieval backend is in use.
+- The legacy mem0-based ``search_memory_in_levels`` multi-level fan-out has
+  been removed in favor of a single ``MemoryService.search_memory`` call.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import concurrent.futures
 import logging
@@ -8,6 +23,7 @@ from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import ToolSign, ToolCategory
+
 
 logger = logging.getLogger("search_memory_tool")
 
@@ -22,16 +38,24 @@ def _run_coroutine(coro):
 
 
 class SearchMemoryTool(Tool):
+    """Tool that searches memories for the current agent.
+
+    The new architecture enforces:
+    ``agent_id`` is part of every search so that sub-agents and parent agents
+    do not share short-term memory.
+    """
+
     name = "search_memory"
     description = (
-        "Search long-term memory for relevant information from previous interactions. "
-        "Use this when you need context about the user's preferences, past decisions, "
-        "or previously discussed topics that aren't in the current conversation. "
-        "The system already provides some memory context automatically -- use this tool "
-        "when you need to search for specific information not already available."
+        "Search memory for relevant information from previous interactions. "
+        "Use this when you need context about the user's preferences, past "
+        "decisions, or previously discussed topics that aren't in the current "
+        "conversation. The system already provides some memory context "
+        "automatically -- use this tool when you need to search for specific "
+        "information not already available."
     )
     description_zh = (
-        "搜索长期记忆中来自之前交互的相关信息。"
+        "在记忆中搜索来自之前交互的相关信息。"
         "当你需要了解用户的偏好、过去的决策或当前对话中未提及的之前讨论过的话题时使用此工具。"
         "系统已自动提供一些记忆上下文 -- 仅在需要搜索尚未提供的特定信息时使用此工具。"
     )
@@ -47,8 +71,8 @@ class SearchMemoryTool(Tool):
             "description": "Maximum number of results to return",
             "description_zh": "返回结果的最大数量",
             "default": 5,
-            "nullable": True
-        }
+            "nullable": True,
+        },
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -56,73 +80,109 @@ class SearchMemoryTool(Tool):
 
     def __init__(
         self,
-        memory_config: dict = Field(description="Mem0 configuration", exclude=True),
-        tenant_id: str = Field(description="Tenant ID", default="", exclude=True),
-        user_id: str = Field(description="User ID", default="", exclude=True),
-        agent_id: str = Field(description="Agent ID", default="", exclude=True),
-        memory_user_config: Any = Field(description="User memory preferences", default=None, exclude=True),
-        observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
+        memory_service: Any = Field(
+            description="MemoryService instance (new SDK facade)",
+            default=None,
+            exclude=True,
+        ),
+        tenant_id: str = Field(
+            description="Tenant ID",
+            default="",
+            exclude=True,
+        ),
+        user_id: str = Field(
+            description="User ID",
+            default="",
+            exclude=True,
+        ),
+        agent_id: str = Field(
+            description="Agent ID",
+            default="",
+            exclude=True,
+        ),
+        conversation_id: str = Field(
+            description="Conversation ID",
+            default="",
+            exclude=True,
+        ),
+        observer: MessageObserver = Field(
+            description="Message observer",
+            default=None,
+            exclude=True,
+        ),
     ):
         super().__init__()
-        self.memory_config = memory_config
+        self.memory_service = memory_service
         self.tenant_id = tenant_id
         self.user_id = user_id
         self.agent_id = agent_id
-        self.memory_user_config = memory_user_config
+        self.conversation_id = conversation_id
         self.observer = observer
         self.running_prompt_en = "Searching memory..."
         self.running_prompt_zh = "搜索记忆中..."
 
-    def _resolve_memory_levels(self) -> list[str]:
-        """Determine which memory levels to search based on user preferences.
-
-        Conservative default: when config is unavailable, assume "never"
-        (no agent-level sharing) to protect user privacy.
-        """
-        levels = ["tenant", "user", "agent", "user_agent"]
-        if not self.memory_user_config or self.memory_user_config.agent_share_option == "never":
-            levels.remove("agent")
-        if self.memory_user_config and self.agent_id in getattr(self.memory_user_config, "disable_agent_ids", []):
-            if "agent" in levels:
-                levels.remove("agent")
-        if self.memory_user_config and self.agent_id in getattr(self.memory_user_config, "disable_user_agent_ids", []):
-            if "user_agent" in levels:
-                levels.remove("user_agent")
-        return levels
-
     def forward(self, query: str, top_k: int = 5) -> str:
-        logger.info(f"[ACTIVE MEMORY] SearchMemoryTool invoked: query={query[:200]}, top_k={top_k}, user_id={self.user_id}, agent_id={self.agent_id}")
+        """Search memories relevant to ``query``.
+
+        Args:
+            query: Natural language query describing what to search for.
+            top_k: Maximum number of results to return.
+
+        Returns:
+            A formatted string describing the search results.
+        """
+        logger.info(
+            f"[ACTIVE MEMORY] SearchMemoryTool invoked: query={query[:200]}, "
+            f"top_k={top_k}, user_id={self.user_id}, agent_id={self.agent_id}"
+        )
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            running_prompt = (
+                self.running_prompt_zh
+                if self.observer.lang == "zh"
+                else self.running_prompt_en
+            )
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
-        memory_levels = self._resolve_memory_levels()
+        if self.memory_service is None:
+            return (
+                "Memory search failed: MemoryService is not configured. "
+                "Pass a MemoryService instance when constructing "
+                "SearchMemoryTool."
+            )
 
         try:
-            from ...memory.memory_service import search_memory_in_levels
-            result = _run_coroutine(search_memory_in_levels(
-                query_text=query,
-                memory_config=self.memory_config,
-                tenant_id=self.tenant_id,
-                user_id=self.user_id,
-                agent_id=self.agent_id,
-                top_k=top_k,
-                memory_levels=memory_levels,
-            ))
+            from ..memory import MemoryLayer
 
-            items = result.get("results", [])
-            logger.info(f"[ACTIVE MEMORY] SearchMemoryTool completed: found {len(items)} memories, levels={[item.get('memory_level', 'unknown') for item in items]}")
-            if not items:
+            async def _search():
+                return await self.memory_service.search_memory(
+                    query=query,
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    agent_id=self.agent_id,
+                    conversation_id=self.conversation_id or None,
+                    layers=[MemoryLayer.AGENT],
+                    top_k=top_k,
+                )
+
+            results = _run_coroutine(_search())
+
+            logger.info(
+                f"[ACTIVE MEMORY] SearchMemoryTool completed: "
+                f"found {len(results)} memories"
+            )
+            if not results:
                 return "No relevant memories found."
 
-            lines = [f"Found {len(items)} relevant memories:"]
-            for i, item in enumerate(items):
-                content = item.get("memory", "") or item.get("content", "")
-                score = item.get("score", 0.0)
-                level = item.get("memory_level", "unknown")
-                lines.append(f"[{i+1}] (score: {score:.2f}, level: {level}) {content}")
+            lines = [f"Found {len(results)} relevant memories:"]
+            for i, item in enumerate(results):
+                lines.append(
+                    f"[{i + 1}] (score: {item.score:.2f}, "
+                    f"layer: {item.layer}, source: {item.source}) {item.content}"
+                )
             return "\n".join(lines)
-
-        except Exception as e:
-            logger.error(f"search_memory failed: {e}")
-            return f"Memory search failed: {str(e)}. Continuing without memory results."
+        except Exception as exc:
+            logger.error(f"search_memory failed: {exc}")
+            return (
+                f"Memory search failed: {exc}. "
+                "Continuing without memory results."
+            )
