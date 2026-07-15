@@ -1937,7 +1937,8 @@ class TestCreateAgentConfig:
                 context_components=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
-                verification_config=ANY
+                verification_config=ANY,
+                conversation_id=None
             )
 
     @pytest.mark.asyncio
@@ -2012,7 +2013,8 @@ class TestCreateAgentConfig:
                     context_components=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
-                    verification_config=ANY
+                    verification_config=ANY,
+                    conversation_id=None
                 )
 
     @pytest.mark.asyncio
@@ -2274,7 +2276,8 @@ class TestCreateAgentConfig:
                 context_components=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
-                verification_config=ANY
+                verification_config=ANY,
+                conversation_id=None
             )
 
     @pytest.mark.asyncio
@@ -2684,6 +2687,9 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info.get_knowledge_name_map_by_index_names"
             ) as mock_get_knowledge_name_map,
+            patch(
+                "backend.agents.create_agent_info.build_context_components"
+            ) as mock_build_components,
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2751,8 +2757,8 @@ class TestCreateAgentConfig:
             mock_logger.warning.assert_called_once()
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
-            mock_prepare_templates.assert_called_once()
-            assert mock_prepare_templates.call_args[1]["system_prompt"] == "**idx_a**: AAA\n\n"
+            mock_build_components.assert_called_once()
+            assert mock_build_components.call_args.kwargs["knowledge_base_summary"] == "**idx_a**: AAA\n\n"
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
@@ -2802,6 +2808,9 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info.get_knowledge_name_map_by_index_names"
             ) as mock_get_knowledge_name_map,
+            patch(
+                "backend.agents.create_agent_info.build_context_components"
+            ) as mock_build_components,
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2861,13 +2870,13 @@ class TestCreateAgentConfig:
             # because we're using the mapping from tool.metadata
             mock_get_knowledge_name_map.assert_not_called()
 
-            # Verify the system prompt uses the display names from metadata
-            mock_prepare_templates.assert_called_once()
-            system_prompt = mock_prepare_templates.call_args[1]["system_prompt"]
-            assert "**Custom Name 1**" in system_prompt
-            assert "**Custom Name 2**" in system_prompt
-            assert "idx1" not in system_prompt
-            assert "idx2" not in system_prompt
+            # Verify the context components use the display names from metadata
+            mock_build_components.assert_called_once()
+            knowledge_base_summary = mock_build_components.call_args.kwargs["knowledge_base_summary"]
+            assert "**Custom Name 1**" in knowledge_base_summary
+            assert "**Custom Name 2**" in knowledge_base_summary
+            assert "idx1" not in knowledge_base_summary
+            assert "idx2" not in knowledge_base_summary
 
     @pytest.mark.asyncio
     async def test_create_agent_config_metadata_without_index_name_to_display_map(self):
@@ -2913,6 +2922,9 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info.get_knowledge_name_map_by_index_names"
             ) as mock_get_knowledge_name_map,
+            patch(
+                "backend.agents.create_agent_info.build_context_components"
+            ) as mock_build_components,
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2960,10 +2972,10 @@ class TestCreateAgentConfig:
 
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
-            mock_prepare_templates.assert_called_once()
-            system_prompt = mock_prepare_templates.call_args[1]["system_prompt"]
-            assert "**idx1**" in system_prompt
-            assert "**idx2**" in system_prompt
+            mock_build_components.assert_called_once()
+            knowledge_base_summary = mock_build_components.call_args.kwargs["knowledge_base_summary"]
+            assert "**idx1**" in knowledge_base_summary
+            assert "**idx2**" in knowledge_base_summary
 
     @pytest.mark.parametrize(
         "language,expected_message",
@@ -3004,6 +3016,9 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info.get_model_by_model_id"
             ) as mock_get_model_by_id,
+            patch(
+                "backend.agents.create_agent_info.build_context_components"
+            ) as mock_build_components,
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -3040,7 +3055,8 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            assert mock_prepare_templates.call_args[1]["system_prompt"] == expected_message
+            mock_build_components.assert_called_once()
+            assert mock_build_components.call_args.kwargs["knowledge_base_summary"] == expected_message
 
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_error(self):
@@ -3423,6 +3439,7 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=1,
+                conversation_id=None,
                 tool_params=None,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
@@ -3960,6 +3977,7 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=False,
                 version_no=1,
+                conversation_id=None,
                 tool_params=None,
             )
 
@@ -4007,6 +4025,7 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=0,  # Debug mode uses draft version 0
+                conversation_id=None,
                 tool_params=None,
             )
 
@@ -4060,6 +4079,7 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
+                conversation_id=None,
                 tool_params=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
