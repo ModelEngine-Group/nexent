@@ -599,12 +599,15 @@ class DataProcessService:
         logger.info(
             f"Processing uploaded file: {filename} using SDK DataProcessCore")
 
-        data_processor = DataProcessCore()
-        chunks, _ = data_processor.file_process(
-            file_data=file_content,
-            filename=filename,
-            chunking_strategy=chunking_strategy
-        )
+        def _sync_process():
+            data_processor = DataProcessCore()
+            return data_processor.file_process(
+                file_data=file_content,
+                filename=filename,
+                chunking_strategy=chunking_strategy
+            )
+
+        chunks, _ = await asyncio.to_thread(_sync_process)
 
         full_text = ""
         chunk_texts: List[str] = []

@@ -342,12 +342,34 @@ type KnowledgeSiteInfo = {
   canOpenWeb: boolean;
 };
 
+const PREPROCESS_I18N_MAP: Record<string, string> = {
+  file_processing: "chatPreprocess.fileProcessing",
+  file_processed: "chatPreprocess.fileProcessed",
+  file_process_failed: "chatPreprocess.fileProcessFailed",
+  file_already_processed: "chatPreprocess.fileAlreadyProcessed",
+  file_download_failed: "chatPreprocess.fileDownloadFailed",
+};
+
+function formatPreprocessMessage(raw: string, t: (key: string, opts?: any) => string): string {
+  if (!raw) return raw;
+  try {
+    const data = JSON.parse(raw);
+    const i18nKey = PREPROCESS_I18N_MAP[data.status];
+    if (i18nKey) {
+      return t(i18nKey, { filename: data.filename });
+    }
+  } catch {
+    // Not JSON — return raw content as-is for backward compatibility
+  }
+  return raw;
+}
+
 // Define the handlers for different types of messages to improve extensibility
 const messageHandlers: MessageHandler[] = [
   // Preprocess type processor - handles contents array logic
   {
     canHandle: (message) => message.type === chatConfig.contentTypes.PREPROCESS,
-    render: (message, _t) => {
+    render: (message, t) => {
       // For preprocess messages, display content from contents array if available
       let displayContent = message.content;
       if (message.contents && message.contents.length > 0) {
@@ -359,6 +381,7 @@ const messageHandlers: MessageHandler[] = [
           displayContent = preprocessContent.content;
         }
       }
+      displayContent = formatPreprocessMessage(displayContent, t);
 
       return (
         <div

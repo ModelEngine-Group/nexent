@@ -19,6 +19,7 @@ from jinja2 import Template
 from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
+from services.conversation_file_service import preprocess_files_streaming
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
@@ -2653,6 +2654,7 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        conversation_id=agent_request.conversation_id,
     )
 
     # Mount conversation-level reusable ContextManager if enabled
@@ -2732,6 +2734,17 @@ async def generate_stream_with_memory(
 
     memory_enabled = False
     try:
+        # Stream file preprocessing events before memory/agent preparation.
+        if agent_request.conversation_id and agent_request.minio_files:
+            async for chunk in preprocess_files_streaming(
+                minio_files=agent_request.minio_files,
+                conversation_id=str(agent_request.conversation_id),
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ):
+                await channel.publish(chunk)
+                yield chunk
+
         memory_context_preview = build_memory_context(
             user_id, tenant_id, agent_request.agent_id
         )
@@ -2817,6 +2830,20 @@ async def generate_stream_no_memory(
     channel: Optional[Any] = None,
 ):
     """Stream agent responses without any memory preprocessing tokens or fallback logic."""
+
+    # Stream file preprocessing events before preparing the agent run.
+    # Results are persisted to DB; create_agent_run_info reads them via
+    # assemble_fulltext_query (and skips already-processed files).
+    if agent_request.conversation_id and agent_request.minio_files:
+        async for chunk in preprocess_files_streaming(
+            minio_files=agent_request.minio_files,
+            conversation_id=str(agent_request.conversation_id),
+            tenant_id=tenant_id,
+            user_id=user_id,
+        ):
+            if channel:
+                await channel.publish(chunk)
+            yield chunk
 
     # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
     agent_run_info, memory_context = await prepare_agent_run(

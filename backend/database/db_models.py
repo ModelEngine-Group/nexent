@@ -1535,3 +1535,35 @@ class AgentEvaluationCase(TableBase):
         Index("ix_agent_eval_case_pass_status", "tenant_id", "agent_evaluation_id", "pass_status"),
         {"schema": SCHEMA},
     )
+
+
+# -----------------------------------------------------------------------------
+# Conversation file preprocessing
+# -----------------------------------------------------------------------------
+class ConversationFile(TableBase):
+    """Tracks uploaded files preprocessed for conversation-level Q&A."""
+
+    __tablename__ = "conversation_file_t"
+
+    id = Column(
+        BigInteger,
+        Sequence("conversation_file_t_id_seq", schema=SCHEMA),
+        primary_key=True,
+        doc=_PRIMARY_KEY_DOC,
+    )
+    conversation_id = Column(String(64), nullable=False, doc="Conversation this file belongs to")
+    tenant_id = Column(String(64), nullable=False, doc=_TENANT_ID_DOC)
+    object_name = Column(String(512), nullable=False, doc="MinIO object key for the original file")
+    filename = Column(String(256), nullable=False, doc="Original filename")
+    content_hash = Column(String(64), doc="SHA-256 hash of file content for deduplication")
+    status = Column(String(16), nullable=False, default="pending", doc="Processing status: pending/ready/failed")
+    chunk_count = Column(Integer, nullable=False, default=0, doc="Number of chunks produced")
+    fulltext_key = Column(String(512), doc="MinIO object key for the cached fulltext extraction")
+    embedding_model = Column(String(128), doc="Embedding model used for chunk_search mode")
+    error_message = Column(Text, doc="Error details when status is failed")
+
+    __table_args__ = (
+        Index("ix_conv_file_conversation_id", "conversation_id"),
+        Index("ix_conv_file_tenant_id", "tenant_id"),
+        {"schema": SCHEMA},
+    )

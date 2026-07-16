@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from threading import Event
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 logger = logging.getLogger("context_strategy")
@@ -196,6 +197,11 @@ class AgentVerificationConfig(BaseModel):
     )
 
 
+class FileMode(str, Enum):
+    FULL_TEXT_REFERENCE = "full_text_reference"
+    CHUNK_SEARCH = "chunk_search"
+
+
 class FilePreprocessConfig(BaseModel):
     """Per-mode tuning for conversation-level file preprocess (Q&A)."""
 
@@ -218,8 +224,8 @@ class FilePreprocessConfig(BaseModel):
         default="auto",
         description="Prompt strategy name. Fixed to 'auto' for now; may expand later. Coexists with file_mode.",
     )
-    file_mode: Literal["full_text_reference", "chunk_search"] = Field(
-        default="full_text_reference",
+    file_mode: FileMode = Field(
+        default=FileMode.FULL_TEXT_REFERENCE,
         description="User-selected processing mode. Defaults to full_text_reference, switchable to chunk_search.",
     )
 

@@ -99,6 +99,11 @@
   "chatPreprocess.filePreprocessingFailed": "File preprocessing failed:",
   "chatPreprocess.fileUploadFailed": "File upload failed:",
   "chatPreprocess.parsingFile": "Parsing file...",
+  "chatPreprocess.fileProcessing": "Processing file: {{filename}}",
+  "chatPreprocess.fileProcessed": "File processed: {{filename}}",
+  "chatPreprocess.fileProcessFailed": "File processing failed: {{filename}}",
+  "chatPreprocess.fileAlreadyProcessed": "File ready: {{filename}}",
+  "chatPreprocess.fileDownloadFailed": "File download failed: {{filename}}",
 
   "extractMsg.unknownTitle": "Unknown Title",
   "extractMsg.noContentDescription": "No content description",

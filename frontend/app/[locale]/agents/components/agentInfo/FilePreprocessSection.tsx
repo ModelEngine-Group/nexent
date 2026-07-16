@@ -18,7 +18,12 @@ import { QuestionCircleOutlined } from "@ant-design/icons";
 import { Settings } from "lucide-react";
 
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { DEFAULT_AGENT_FILE_PREPROCESS_CONFIG } from "@/types/agentConfig";
+import {
+  DEFAULT_AGENT_FILE_PREPROCESS_CONFIG,
+  FILE_MODE,
+  FILE_PREPROCESS_FALLBACK_MAX_TOKENS,
+  type FileMode,
+} from "@/types/agentConfig";
 
 // Shared overlay style for the per-mode settings popover.
 const SETTING_POPOVER_OVERLAY_STYLE: CSSProperties = {
@@ -85,7 +90,14 @@ function FilePreprocessSettingRow({
 // Enable toggle + two mode cards (full_text_reference / chunk_search) for the
 // conversation-level file preprocess config. Reads/writes the agent config
 // store directly, so it stays in sync with the rest of the agent form.
-export default function FilePreprocessSection() {
+export default function FilePreprocessSection({
+  modelMaxInputTokens,
+}: {
+  modelMaxInputTokens?: number;
+}) {
+  const tokenMax = modelMaxInputTokens && modelMaxInputTokens > 0
+    ? modelMaxInputTokens
+    : FILE_PREPROCESS_FALLBACK_MAX_TOKENS;
   const { t } = useTranslation("common");
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const updateAgentConfig = useAgentConfigStore(
@@ -110,9 +122,7 @@ export default function FilePreprocessSection() {
       file_preprocess: { ...fp, config: { ...fp.config, ...partial } },
     });
   };
-  const setFilePreprocessMode = (
-    mode: "full_text_reference" | "chunk_search"
-  ) => {
+  const setFilePreprocessMode = (mode: FileMode) => {
     const fp =
       editedAgent.file_preprocess || DEFAULT_AGENT_FILE_PREPROCESS_CONFIG;
     updateAgentConfig({
@@ -152,11 +162,11 @@ export default function FilePreprocessSection() {
           {/* full_text_reference card */}
           <Card
             size="small"
-            onClick={() => setFilePreprocessMode("full_text_reference")}
+            onClick={() => setFilePreprocessMode(FILE_MODE.FULL_TEXT_REFERENCE)}
             className="fp-mode-card"
             style={{
               borderColor:
-                selectedFileMode === "full_text_reference"
+                selectedFileMode === FILE_MODE.FULL_TEXT_REFERENCE
                   ? "#1677ff"
                   : undefined,
             }}
@@ -179,7 +189,7 @@ export default function FilePreprocessSection() {
                   className="fp-settings-trigger"
                   style={{
                     visibility:
-                      selectedFileMode === "full_text_reference"
+                      selectedFileMode === FILE_MODE.FULL_TEXT_REFERENCE
                         ? "visible"
                         : "hidden",
                   }}
@@ -196,9 +206,9 @@ export default function FilePreprocessSection() {
                           tooltip={t(
                             "agent.filePreprocess.maxParseLength.tooltip"
                           )}
-                          value={filePreprocessConfig.max_parse_length}
+                          value={Math.min(filePreprocessConfig.max_parse_length, tokenMax)}
                           min={1}
-                          max={200000}
+                          max={tokenMax}
                           step={1000}
                           onChange={(v) =>
                             setFilePreprocessConfig({ max_parse_length: v })
@@ -209,9 +219,9 @@ export default function FilePreprocessSection() {
                           tooltip={t(
                             "agent.filePreprocess.promptMaxTokenLength.tooltip"
                           )}
-                          value={filePreprocessConfig.prompt_max_token_length}
+                          value={Math.min(filePreprocessConfig.prompt_max_token_length, tokenMax)}
                           min={1}
-                          max={200000}
+                          max={tokenMax}
                           step={1000}
                           onChange={(v) =>
                             setFilePreprocessConfig({
@@ -228,7 +238,7 @@ export default function FilePreprocessSection() {
                   </Popover>
                 </span>
                 <Radio
-                  checked={selectedFileMode === "full_text_reference"}
+                  checked={selectedFileMode === FILE_MODE.FULL_TEXT_REFERENCE}
                   onChange={() => {}}
                   className="fp-radio"
                 />
@@ -242,11 +252,13 @@ export default function FilePreprocessSection() {
           {/* chunk_search card */}
           <Card
             size="small"
-            onClick={() => setFilePreprocessMode("chunk_search")}
+            onClick={() => setFilePreprocessMode(FILE_MODE.CHUNK_SEARCH)}
             className="fp-mode-card"
             style={{
               borderColor:
-                selectedFileMode === "chunk_search" ? "#1677ff" : undefined,
+                selectedFileMode === FILE_MODE.CHUNK_SEARCH
+                  ? "#1677ff"
+                  : undefined,
             }}
           >
             <Flex justify="space-between" align="center" gap={12}>
@@ -265,7 +277,7 @@ export default function FilePreprocessSection() {
                   className="fp-settings-trigger"
                   style={{
                     visibility:
-                      selectedFileMode === "chunk_search"
+                      selectedFileMode === FILE_MODE.CHUNK_SEARCH
                         ? "visible"
                         : "hidden",
                   }}
@@ -293,9 +305,9 @@ export default function FilePreprocessSection() {
                           tooltip={t(
                             "agent.filePreprocess.promptMaxTokenLength.tooltip"
                           )}
-                          value={filePreprocessConfig.prompt_max_token_length}
+                          value={Math.min(filePreprocessConfig.prompt_max_token_length, tokenMax)}
                           min={1}
-                          max={200000}
+                          max={tokenMax}
                           step={1000}
                           onChange={(v) =>
                             setFilePreprocessConfig({
@@ -312,7 +324,7 @@ export default function FilePreprocessSection() {
                   </Popover>
                 </span>
                 <Radio
-                  checked={selectedFileMode === "chunk_search"}
+                  checked={selectedFileMode === FILE_MODE.CHUNK_SEARCH}
                   onChange={() => {}}
                   className="fp-radio"
                 />

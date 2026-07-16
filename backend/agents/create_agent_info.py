@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig, AgentFilePreprocessConfig, FileMode
 from nexent.core.agents.summary_config import ContextManagerConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
@@ -32,6 +32,7 @@ from services.vectordatabase_service import (
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+from services.conversation_file_service import assemble_fulltext_query, is_document_file
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
@@ -1393,6 +1394,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: str | int | None = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1407,9 +1409,39 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
+    # File context assembly: read cached fulltext from DB and build prompt.
+    # Actual file preprocessing (extraction + caching) is handled earlier in the
+    # streaming generators via preprocess_files_streaming, which yields real-time
+    # SSE events so the frontend can show per-file progress.
+    remaining_minio_files = minio_files
+    preprocessed_query = query
+    if conversation_id:
+        try:
+            agent_info_for_preprocess = search_agent_info_by_agent_id(
+                agent_id=agent_id, tenant_id=tenant_id, version_no=version_no,
+            )
+            file_preprocess_raw = agent_info_for_preprocess.get("file_preprocess") if agent_info_for_preprocess else None
+            if file_preprocess_raw:
+                fp_config = AgentFilePreprocessConfig.model_validate(file_preprocess_raw)
+                if fp_config.enable:
+                    if minio_files:
+                        remaining_minio_files = [
+                            f for f in minio_files
+                            if not is_document_file(f.get("name", ""))
+                        ]
+
+                    if fp_config.config.file_mode == FileMode.FULL_TEXT_REFERENCE:
+                        preprocessed_query = assemble_fulltext_query(
+                            query=query,
+                            conversation_id=str(conversation_id),
+                            file_preprocess_config=fp_config.config,
+                        )
+        except Exception as e:
+            logger.warning("File context assembly failed, falling back to default: %s", e)
+
     final_query = await join_minio_file_description_to_query(
-        minio_files=minio_files,
-        query=query,
+        minio_files=remaining_minio_files,
+        query=preprocessed_query,
         history=history
     )
     model_list = await create_model_config_list(tenant_id)

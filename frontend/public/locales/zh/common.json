@@ -99,6 +99,11 @@
   "chatPreprocess.filePreprocessingFailed": "文件预处理失败:",
   "chatPreprocess.fileUploadFailed": "文件上传失败:",
   "chatPreprocess.parsingFile": "正在解析文件...",
+  "chatPreprocess.fileProcessing": "正在解析文件：{{filename}}",
+  "chatPreprocess.fileProcessed": "文件解析完成：{{filename}}",
+  "chatPreprocess.fileProcessFailed": "文件解析失败：{{filename}}",
+  "chatPreprocess.fileAlreadyProcessed": "文件已就绪：{{filename}}",
+  "chatPreprocess.fileDownloadFailed": "文件下载失败：{{filename}}",
 
   "extractMsg.unknownTitle": "未知标题",
   "extractMsg.noContentDescription": "无内容描述",

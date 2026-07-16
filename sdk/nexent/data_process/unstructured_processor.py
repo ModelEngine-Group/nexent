@@ -68,7 +68,7 @@ class UnstructuredProcessor(FileProcessor):
         else:
             # Prepare partition parameters
             partition_kwargs = self._prepare_partition_kwargs(
-                file_data, chunking_strategy, processed_params)
+                file_data, chunking_strategy, processed_params, filename=filename)
             from unstructured.partition.auto import partition
             # Execute file partitioning
             elements = partition(**partition_kwargs)
@@ -90,7 +90,10 @@ class UnstructuredProcessor(FileProcessor):
         merged_params.update(user_params)
         return merged_params
 
-    def _prepare_partition_kwargs(self, file_data: bytes, chunking_strategy: str, params: Dict) -> Dict:
+    def _prepare_partition_kwargs(
+        self, file_data: bytes, chunking_strategy: str, params: Dict,
+        filename: Optional[str] = None,
+    ) -> Dict:
         """
         Prepare parameters required for unstructured.partition.
 
@@ -98,6 +101,7 @@ class UnstructuredProcessor(FileProcessor):
             file_data: File byte data
             chunking_strategy: Chunking strategy
             params: Processing parameters
+            filename: Original filename for file-type detection
 
         Returns:
             Parameter dictionary for partition function
@@ -113,6 +117,8 @@ class UnstructuredProcessor(FileProcessor):
 
         # Set file input source
         partition_kwargs["file"] = io.BytesIO(file_data)
+        if filename:
+            partition_kwargs["metadata_filename"] = filename
 
         return partition_kwargs
 

@@ -24,6 +24,7 @@ import {
   AgentConfigUpdate,
   DEFAULT_AGENT_VERIFICATION_CONFIG,
   PromptTemplate,
+  computeFilePreprocessMaxTokens,
 } from "@/types/agentConfig";
 import {
   clearExpiredGenerationCaches
@@ -1161,7 +1162,9 @@ export default function AgentGenerateDetail({}) {
                         </Col>
                       </Row>
 
-                      <FilePreprocessSection />
+                      <FilePreprocessSection
+                        modelMaxInputTokens={computeFilePreprocessMaxTokens(selectedMainAgentModel)}
+                      />
 
                       <Form.Item
                         name="agentDescription"

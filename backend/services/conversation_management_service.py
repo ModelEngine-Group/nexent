@@ -39,6 +39,7 @@ from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
 from agents.agent_run_manager import agent_run_manager
+from services.conversation_file_service import cleanup_conversation_files
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -365,6 +366,12 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         # Defensive cleanup: release the ContextManager associated with this conversation
         # to avoid memory leaks in edge cases
         agent_run_manager.clear_conversation_context_manager(conversation_id)
+
+        # Clean up conversation file data (PG records + MinIO fulltext caches)
+        try:
+            cleanup_conversation_files(str(conversation_id))
+        except Exception as cleanup_err:
+            logging.warning("Conversation file cleanup failed for conversation %s: %s", conversation_id, cleanup_err)
 
         return True
     except Exception as e:

@@ -76,18 +76,27 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
 // Fixed to "auto" for now; may expand later.
 export type FilePreprocessStrategy = "auto";
 
+export const FILE_MODE = {
+  FULL_TEXT_REFERENCE: "full_text_reference",
+  CHUNK_SEARCH: "chunk_search",
+} as const;
+
+export type FileMode = (typeof FILE_MODE)[keyof typeof FILE_MODE];
+
 export interface FilePreprocessConfig {
   rerank_top_n: number;
   max_parse_length: number;
   prompt_max_token_length: number;
   prompt_strategy_name: FilePreprocessStrategy;
-  file_mode: "full_text_reference" | "chunk_search";
+  file_mode: FileMode;
 }
 
 export interface AgentFilePreprocessConfig {
   enable: boolean;
   config: FilePreprocessConfig;
 }
+
+export const FILE_PREPROCESS_FALLBACK_MAX_TOKENS = 200000;
 
 export const DEFAULT_AGENT_FILE_PREPROCESS_CONFIG: AgentFilePreprocessConfig = {
   enable: false,
@@ -96,9 +105,29 @@ export const DEFAULT_AGENT_FILE_PREPROCESS_CONFIG: AgentFilePreprocessConfig = {
     max_parse_length: 2000,
     prompt_max_token_length: 5000,
     prompt_strategy_name: "auto",
-    file_mode: "full_text_reference",
+    file_mode: FILE_MODE.FULL_TEXT_REFERENCE,
   },
 };
+
+export function computeFilePreprocessMaxTokens(model?: {
+  maxInputTokens?: number;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+}): number {
+  if (!model) return FILE_PREPROCESS_FALLBACK_MAX_TOKENS;
+  if (model.maxInputTokens && model.maxInputTokens > 0) {
+    return model.maxInputTokens;
+  }
+  if (
+    model.contextWindowTokens &&
+    model.contextWindowTokens > 0 &&
+    model.maxOutputTokens &&
+    model.maxOutputTokens > 0
+  ) {
+    return model.contextWindowTokens - model.maxOutputTokens;
+  }
+  return FILE_PREPROCESS_FALLBACK_MAX_TOKENS;
+}
 
 // ========== Core Interfaces ==========
 
