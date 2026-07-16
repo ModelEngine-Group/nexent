@@ -2,10 +2,10 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Button } from "antd";
-import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
-import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
-import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
-import { FinalizeCard, type FinalizeCardData } from "./FinalizeCard";
+import { LocalResourcesCard } from "./LocalResourcesCard";
+import { WebMcpCard } from "./WebMcpCard";
+import { WebSkillCard } from "./WebSkillCard";
+import { FinalizeCard } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
@@ -17,6 +17,10 @@ import {
   type Nl2AgentCardType,
   type ValidatedNl2AgentCard,
 } from "./cardValidation";
+import {
+  toWebSkillCardItem,
+  webSkillRecommendationKey,
+} from "./cardPayloadTypes";
 
 export const OnlineRecommendationGroup: React.FC<{
   agentId: number;
@@ -242,22 +246,14 @@ export const renderValidatedNl2AgentCard = (
   ) => void | Promise<void>,
   registrationEnabled = false
 ): React.ReactNode => {
-  const normalizedLanguage = card.language;
-  const parsed = card.payload;
   const agentId = card.agentId;
 
-  switch (normalizedLanguage) {
+  switch (card.language) {
     case "nl2agent-requirements-summary":
       return (
         <RequirementsSummaryCard
           agentId={agentId}
-          summary={{
-            goal: String(parsed.goal || ""),
-            audience_or_scenario: String(parsed.audience_or_scenario || ""),
-            primary_input: String(parsed.primary_input || ""),
-            expected_output: String(parsed.expected_output || ""),
-            key_constraints: String(parsed.key_constraints || ""),
-          }}
+          summary={card.payload}
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         />
@@ -268,30 +264,22 @@ export const renderValidatedNl2AgentCard = (
       return (
         <AgentIdentityCard
           agentId={agentId}
-          suggestedDisplayName={
-            typeof parsed.display_name === "string"
-              ? parsed.display_name
-              : undefined
-          }
+          suggestedDisplayName={card.payload.display_name}
         />
       );
     case "nl2agent-local-resources": {
-      const tools = (
-        (parsed.tools ?? []) as Array<Omit<LocalResourceItem, "kind">>
-      ).map((item) => ({
+      const tools = card.payload.tools.map((item) => ({
         ...item,
         kind: "tool" as const,
       }));
-      const skills = (
-        (parsed.skills ?? []) as Array<Omit<LocalResourceItem, "kind">>
-      ).map((item) => ({
+      const skills = card.payload.skills.map((item) => ({
         ...item,
         kind: "skill" as const,
       }));
       return (
         <LocalResourcesCard
           agentId={agentId}
-          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          recommendationBatchId={card.payload.recommendation_batch_id}
           tools={tools}
           skills={skills}
           onRegistered={onRegistered}
@@ -300,14 +288,13 @@ export const renderValidatedNl2AgentCard = (
       );
     }
     case "nl2agent-web-mcp": {
-      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
-      const item = parsed as WebMcpCardItem;
+      const item = card.payload;
       return (
         <OnlineRecommendationGroup
           agentId={agentId}
-          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          recommendationBatchId={item.recommendation_batch_id}
           resourceType="mcp"
-          itemKeys={[String(item.recommendation_id || "")].filter(Boolean)}
+          itemKeys={[item.recommendation_id]}
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
@@ -316,16 +303,14 @@ export const renderValidatedNl2AgentCard = (
       );
     }
     case "nl2agent-web-mcps": {
-      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
-      const items: WebMcpCardItem[] = parsed.items || [];
+      const { items, recommendation_batch_id: recommendationBatchId } =
+        card.payload;
       return (
         <OnlineRecommendationGroup
           agentId={agentId}
-          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          recommendationBatchId={recommendationBatchId}
           resourceType="mcp"
-          itemKeys={items
-            .map((item) => String(item.recommendation_id || ""))
-            .filter(Boolean)}
+          itemKeys={items.map((item) => item.recommendation_id)}
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
@@ -336,19 +321,13 @@ export const renderValidatedNl2AgentCard = (
       );
     }
     case "nl2agent-web-skill": {
-      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
-      const item = parsed as WebSkillCardItem;
-      const itemKey = item.skill_id
-        ? `skill:${item.skill_id}`
-        : `skill-name:${String(item.skill_name || item.name || "")
-            .trim()
-            .toLowerCase()}`;
+      const item = toWebSkillCardItem(card.payload);
       return (
         <OnlineRecommendationGroup
           agentId={agentId}
-          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          recommendationBatchId={card.payload.recommendation_batch_id}
           resourceType="skill"
-          itemKeys={[itemKey]}
+          itemKeys={[webSkillRecommendationKey(item)]}
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
@@ -357,20 +336,13 @@ export const renderValidatedNl2AgentCard = (
       );
     }
     case "nl2agent-web-skills": {
-      if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
-      const items: WebSkillCardItem[] = parsed.items || [];
+      const items = card.payload.items.map(toWebSkillCardItem);
       return (
         <OnlineRecommendationGroup
           agentId={agentId}
-          recommendationBatchId={String(parsed.recommendation_batch_id || "")}
+          recommendationBatchId={card.payload.recommendation_batch_id}
           resourceType="skill"
-          itemKeys={items.map((item) =>
-            item.skill_id
-              ? `skill:${item.skill_id}`
-              : `skill-name:${String(item.skill_name || item.name || "")
-                  .trim()
-                  .toLowerCase()}`
-          )}
+          itemKeys={items.map(webSkillRecommendationKey)}
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
@@ -381,11 +353,7 @@ export const renderValidatedNl2AgentCard = (
       );
     }
     case "nl2agent-finalize": {
-      return (
-        <FinalizeCard
-          data={{ ...parsed, agent_id: agentId } as unknown as FinalizeCardData}
-        />
-      );
+      return <FinalizeCard data={{ ...card.payload, agent_id: agentId }} />;
     }
     default:
       return null;

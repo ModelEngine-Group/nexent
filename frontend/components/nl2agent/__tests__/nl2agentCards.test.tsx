@@ -454,6 +454,24 @@ describe("tryRenderNl2AgentCard", () => {
       assert.deepEqual(child.props.item, items[index]);
     });
   });
+
+  it("derives a web skill display name from skill_name", () => {
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-web-skill",
+      JSON.stringify({
+        agent_id: 202,
+        recommendation_batch_id: "online_skill",
+        skill_id: 12,
+        skill_name: "doc-review",
+      })
+    );
+
+    assertElement(node);
+    const [card] = onlineChildren(node);
+    assertElement(card);
+    assert.equal(card.type, WebSkillCard);
+    assert.equal(card.props.item.name, "doc-review");
+  });
 });
 
 describe("online configuration blockers", () => {

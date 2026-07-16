@@ -30,6 +30,20 @@ describe("canonical NL2AGENT card validation", () => {
     expect(result.failure).toBeUndefined();
   });
 
+  it("rejects singular and plural online payloads under the wrong tag", () => {
+    const listPayload = JSON.stringify({
+      recommendation_batch_id: "online_empty",
+      items: [],
+    });
+
+    expect(
+      parseNl2AgentCard("nl2agent-web-mcp", listPayload, 202).failure?.reason
+    ).toBe("invalid_schema");
+    expect(
+      parseNl2AgentCard("nl2agent-web-skill", listPayload, 202).failure?.reason
+    ).toBe("invalid_schema");
+  });
+
   it("rejects malformed MCP installation options", () => {
     const result = parseNl2AgentCard(
       "nl2agent-web-mcps",

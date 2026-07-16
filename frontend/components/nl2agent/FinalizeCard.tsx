@@ -10,29 +10,14 @@ import { useParams } from "next/navigation";
 import {
   finalizeNl2Agent,
   getNl2AgentSessionState,
-  type Nl2AgentFinalizePayload,
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
+import type {
+  FinalizeCardData,
+  FinalizeVerificationConfig,
+} from "./cardPayloadTypes";
 
-/** Unsaved descriptive, prompt, and runtime fields proposed for publication. */
-export interface FinalizeCardData {
-  agent_id: number;
-  description?: string;
-  business_description: string;
-
-  duty_prompt: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
-
-  greeting_message: string;
-  example_questions?: string[];
-
-  max_steps?: number;
-  requested_output_tokens?: number;
-  provide_run_summary?: boolean;
-  verification_config?: FinalizeVerificationConfig;
-  enable_context_manager?: boolean;
-}
+export type { FinalizeCardData } from "./cardPayloadTypes";
 
 export interface FinalizeCardProps {
   data: FinalizeCardData;
@@ -82,10 +67,6 @@ export const canPublishFinalReview = (
     !stateLoading &&
     !stateError
   );
-
-export type FinalizeVerificationConfig = NonNullable<
-  Nl2AgentFinalizePayload["verification_config"]
-> & { enabled: boolean };
 
 export const getVerificationReviewFields = (
   config: FinalizeVerificationConfig

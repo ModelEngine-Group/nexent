@@ -1,6 +1,17 @@
 import Ajv, { type ValidateFunction } from "ajv";
 
 import cardSchema from "@/contracts/generated/nl2agent-card.schema.json";
+import type {
+  AgentIdentityCardPayload,
+  FinalReviewCardPayload,
+  LocalResourcesCardPayload,
+  ModelSelectionCardPayload,
+  RequirementsSummaryCardPayload,
+  WebMcpCardPayload,
+  WebMcpListCardPayload,
+  WebSkillCardPayload,
+  WebSkillListCardPayload,
+} from "./cardPayloadTypes";
 
 export type Nl2AgentCardType =
   | "requirements_summary"
@@ -14,14 +25,57 @@ export type Nl2AgentCardType =
 export type Nl2AgentCardFailureReason =
   "truncated_fence" | "invalid_json" | "invalid_schema" | "missing_card";
 
-export interface ValidatedNl2AgentCard {
-  cardType: Nl2AgentCardType;
-  language: string;
-  payload: Record<string, any>;
+interface Nl2AgentCardDefinitionMap {
+  "nl2agent-requirements-summary": {
+    cardType: "requirements_summary";
+    payload: RequirementsSummaryCardPayload;
+  };
+  "nl2agent-model-selection": {
+    cardType: "model_selection";
+    payload: ModelSelectionCardPayload;
+  };
+  "nl2agent-local-resources": {
+    cardType: "local_resources";
+    payload: LocalResourcesCardPayload;
+  };
+  "nl2agent-web-mcp": {
+    cardType: "web_mcp";
+    payload: WebMcpCardPayload;
+  };
+  "nl2agent-web-mcps": {
+    cardType: "web_mcp";
+    payload: WebMcpListCardPayload;
+  };
+  "nl2agent-web-skill": {
+    cardType: "web_skill";
+    payload: WebSkillCardPayload;
+  };
+  "nl2agent-web-skills": {
+    cardType: "web_skill";
+    payload: WebSkillListCardPayload;
+  };
+  "nl2agent-agent-identity": {
+    cardType: "agent_identity";
+    payload: AgentIdentityCardPayload;
+  };
+  "nl2agent-finalize": {
+    cardType: "final_review";
+    payload: FinalReviewCardPayload;
+  };
+}
+
+export type Nl2AgentCardLanguage = keyof Nl2AgentCardDefinitionMap;
+
+interface ValidatedNl2AgentCardBase {
   agentId: number;
   cardKey?: string;
   requiresRegistration: boolean;
 }
+
+export type ValidatedNl2AgentCard = {
+  [Language in Nl2AgentCardLanguage]: ValidatedNl2AgentCardBase &
+    Nl2AgentCardDefinitionMap[Language] & { language: Language };
+}[Nl2AgentCardLanguage];
 
 export interface Nl2AgentCardValidationResult {
   cards: ValidatedNl2AgentCard[];
@@ -33,7 +87,11 @@ export interface Nl2AgentCardValidationResult {
   };
 }
 
-const LANGUAGE_TO_TYPE: Record<string, Nl2AgentCardType> = {
+const LANGUAGE_TO_TYPE: {
+  [
+    Language in Nl2AgentCardLanguage
+  ]: Nl2AgentCardDefinitionMap[Language]["cardType"];
+} = {
   "nl2agent-requirements-summary": "requirements_summary",
   "nl2agent-model-selection": "model_selection",
   "nl2agent-local-resources": "local_resources",
@@ -55,23 +113,34 @@ const REGISTRATION_CARD_TYPES = new Set<Nl2AgentCardType>([
 const ajv = new Ajv({ allErrors: true, strict: false });
 ajv.addSchema(cardSchema);
 
-const schemaValidators = Object.fromEntries(
-  (Object.values(LANGUAGE_TO_TYPE) as Nl2AgentCardType[]).map((cardType) => {
-    const schemaId = `${cardSchema.$id}#/$defs/${cardType}`;
-    const validator = ajv.getSchema(schemaId);
-    if (!validator)
-      throw new Error(`Missing NL2AGENT card schema: ${cardType}`);
-    return [cardType, validator];
-  })
-) as Record<Nl2AgentCardType, ValidateFunction>;
+const getSchemaValidator = (cardType: Nl2AgentCardType) => {
+  const schemaId = `${cardSchema.$id}#/$defs/${cardType}`;
+  const validator = ajv.getSchema(schemaId);
+  if (!validator) throw new Error(`Missing NL2AGENT card schema: ${cardType}`);
+  return validator;
+};
 
-const isRecord = (value: unknown): value is Record<string, any> =>
+const schemaValidators: Record<Nl2AgentCardType, ValidateFunction> = {
+  requirements_summary: getSchemaValidator("requirements_summary"),
+  model_selection: getSchemaValidator("model_selection"),
+  local_resources: getSchemaValidator("local_resources"),
+  web_mcp: getSchemaValidator("web_mcp"),
+  web_skill: getSchemaValidator("web_skill"),
+  agent_identity: getSchemaValidator("agent_identity"),
+  final_review: getSchemaValidator("final_review"),
+};
+
+const isNl2AgentCardLanguage = (
+  language: string
+): language is Nl2AgentCardLanguage => language in LANGUAGE_TO_TYPE;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 const positiveInteger = (value: unknown) =>
   Number.isInteger(Number(value)) && Number(value) > 0;
 
-const payloadAgentIds = (payload: Record<string, any>): number[] => [
+const payloadAgentIds = (payload: Record<string, unknown>): number[] => [
   ...(positiveInteger(payload.agent_id) ? [Number(payload.agent_id)] : []),
   ...(Array.isArray(payload.items)
     ? payload.items.flatMap((item: unknown) =>
@@ -83,9 +152,11 @@ const payloadAgentIds = (payload: Record<string, any>): number[] => [
 ];
 
 const resolveAgentId = (
-  payload: Record<string, any>,
+  payload: Record<string, unknown>,
   trustedDraftAgentId?: number | null
-): { agentId?: number; error?: "missing" | "mismatch" } => {
+):
+  | { agentId: number; error?: never }
+  | { agentId?: never; error: "missing" | "mismatch" } => {
   const ids = payloadAgentIds(payload);
   if (trustedDraftAgentId != null) {
     return ids.every((id) => id === trustedDraftAgentId)
@@ -98,11 +169,43 @@ const resolveAgentId = (
     : { error: "mismatch" };
 };
 
-const cardKeyFromPayload = (payload: Record<string, any>) =>
+const cardKeyFromPayload = (payload: Record<string, unknown>) =>
   typeof payload.recommendation_batch_id === "string" &&
   payload.recommendation_batch_id.trim()
     ? payload.recommendation_batch_id
     : undefined;
+
+const payloadMatchesLanguage = (
+  language: Nl2AgentCardLanguage,
+  payload: Record<string, unknown>
+) => {
+  if (language === "nl2agent-web-mcps" || language === "nl2agent-web-skills") {
+    return Array.isArray(payload.items);
+  }
+  if (language === "nl2agent-web-mcp" || language === "nl2agent-web-skill") {
+    return !Object.hasOwn(payload, "items");
+  }
+  return true;
+};
+
+const createValidatedCard = <Language extends Nl2AgentCardLanguage>(
+  language: Language,
+  payload: Record<string, unknown>,
+  agentId: number,
+  cardKey: string | undefined
+): ValidatedNl2AgentCard =>
+  // This is the only trust boundary: AJV and payloadMatchesLanguage have
+  // established the payload member selected by the normalized language.
+  ({
+    cardType: LANGUAGE_TO_TYPE[language],
+    language,
+    payload,
+    agentId,
+    cardKey,
+    requiresRegistration: REGISTRATION_CARD_TYPES.has(
+      LANGUAGE_TO_TYPE[language]
+    ),
+  }) as ValidatedNl2AgentCard;
 
 export const parseNl2AgentCard = (
   language: string,
@@ -110,10 +213,10 @@ export const parseNl2AgentCard = (
   trustedDraftAgentId?: number | null
 ): Nl2AgentCardValidationResult => {
   const normalizedLanguage = language.trim().toLowerCase();
+  if (!isNl2AgentCardLanguage(normalizedLanguage)) return { cards: [] };
   const cardType = LANGUAGE_TO_TYPE[normalizedLanguage];
-  if (!cardType) return { cards: [] };
 
-  let payload: Record<string, any>;
+  let payload: Record<string, unknown>;
   try {
     const parsed = JSON.parse(content.trim());
     if (!isRecord(parsed)) throw new Error("Card payload must be an object");
@@ -124,7 +227,11 @@ export const parseNl2AgentCard = (
 
   const cardKey = cardKeyFromPayload(payload);
   const resolvedAgent = resolveAgentId(payload, trustedDraftAgentId);
-  if (resolvedAgent.error || !schemaValidators[cardType](payload)) {
+  if (
+    resolvedAgent.error ||
+    !schemaValidators[cardType](payload) ||
+    !payloadMatchesLanguage(normalizedLanguage, payload)
+  ) {
     return {
       cards: [],
       failure: {
@@ -139,12 +246,12 @@ export const parseNl2AgentCard = (
   return {
     cards: [
       {
-        cardType,
-        language: normalizedLanguage,
-        payload,
-        agentId: resolvedAgent.agentId as number,
-        cardKey,
-        requiresRegistration: REGISTRATION_CARD_TYPES.has(cardType),
+        ...createValidatedCard(
+          normalizedLanguage,
+          payload,
+          resolvedAgent.agentId,
+          cardKey
+        ),
       },
     ],
   };
@@ -161,8 +268,8 @@ export const validateNl2AgentCards = (
 
   while ((match = opening.exec(content)) !== null) {
     const language = match[1].toLowerCase();
+    if (!isNl2AgentCardLanguage(language)) continue;
     const cardType = LANGUAGE_TO_TYPE[language];
-    if (!cardType) continue;
     const bodyStart = opening.lastIndex;
     const closingIndex = content.indexOf("```", bodyStart);
     if (closingIndex < 0) {

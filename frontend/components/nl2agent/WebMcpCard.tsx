@@ -23,14 +23,11 @@ export interface WebMcpCardProps {
 }
 
 const initialFieldValues = (
-  option: NonNullable<WebMcpCardItem["install_options"]>[number] | undefined,
-  prefill: Record<string, string> | undefined
+  option: NonNullable<WebMcpCardItem["install_options"]>[number] | undefined
 ) =>
   (option?.fields ?? []).reduce<Record<string, string>>((values, field) => {
     if (!field.secret && field.default != null)
       values[field.key] = String(field.default);
-    if (!field.secret && prefill?.[field.key] != null)
-      values[field.key] = String(prefill[field.key]);
     return values;
   }, {});
 
@@ -80,7 +77,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
     options[0]?.option_id ?? "remote"
   );
   const [fieldValues, setFieldValues] = React.useState<Record<string, string>>(
-    () => initialFieldValues(options[0], item.prefill)
+    () => initialFieldValues(options[0])
   );
   const [installError, setInstallError] = React.useState<string>();
   const [installed, setInstalled] = React.useState<{
@@ -149,7 +146,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
     const nextOption = options.find(
       (option) => option.option_id === nextOptionId
     );
-    setFieldValues(initialFieldValues(nextOption, item.prefill));
+    setFieldValues(initialFieldValues(nextOption));
     setInstallError(undefined);
   };
 
@@ -305,11 +302,6 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
           {item.reason && (
             <div className="text-xs text-gray-400 mt-1 italic">
               {item.reason}
-            </div>
-          )}
-          {item.url && (
-            <div className="text-[11px] text-gray-400 mt-1 truncate">
-              {item.url}
             </div>
           )}
         </div>

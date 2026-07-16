@@ -9,17 +9,9 @@ import {
   type Nl2AgentInstallWebSkillPayload,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
+import type { WebSkillCardItem } from "./cardPayloadTypes";
 
-export interface WebSkillCardItem {
-  skill_id?: number;
-  skill_name?: string;
-  name: string;
-  description?: string;
-  tags?: string[];
-  score?: number;
-  reason?: string;
-  status?: string;
-}
+export type { WebSkillCardItem } from "./cardPayloadTypes";
 
 export interface WebSkillCardProps {
   agentId: number;
