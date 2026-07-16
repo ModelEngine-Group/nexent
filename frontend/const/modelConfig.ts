@@ -21,6 +21,7 @@ export const MODEL_SOURCES = {
   DASHSCOPE: "dashscope",
   TOKENPONY: "tokenpony",
   VOLCENGINE: "volcengine",
+  MINIMAX: "minimax",
 } as const;
 
 // Model status constants
@@ -47,7 +48,8 @@ export const MODEL_PROVIDER_KEYS = [
   "aliyuncs",
   "tokenpony",
   "dashscope",
-  "volcengine"
+  "volcengine",
+  "minimax",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -62,7 +64,8 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   aliyuncs: "aliyuncs",
   tokenpony: "tokenpony",
   dashscope: "dashscope",
-  volcengine:"bytedance"
+  volcengine: "bytedance",
+  minimax: "minimax",
 };
 
 // Icon filenames for providers
@@ -75,7 +78,8 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   aliyuncs: "/aliyuncs.png",
   dashscope:"/aliyuncs.png",
   tokenpony: "/tokenpony.png",
-  volcengine: "/volcengine.png"
+  volcengine: "/volcengine.png",
+  minimax: "/minimax.png",
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
@@ -93,7 +97,8 @@ export const PROVIDER_LINKS: Record<string, string> = {
   baai: "https://www.baai.ac.cn/",
   dashscope: "https://dashscope.aliyun.com/",
   tokenpony: "https://www.tokenpony.cn/",
-  volcengine:"https://www.volcengine.com/"
+  volcengine: "https://www.volcengine.com/",
+  minimax: "https://www.minimaxi.com/",
 };
 
 // User role constants
