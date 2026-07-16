@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import logging
 from typing import Any, Dict, List, Optional
 
 from smolagents.tools import Tool
@@ -13,12 +12,7 @@ from ._context import (
     canonical_search_query,
     create_nl2agent_context,
     error_response,
-    get_cached_search,
-    set_cached_search,
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 def _recommendation_batch_id(
@@ -113,9 +107,6 @@ class NL2AgentSearchLocalResourcesTool(Tool):
     user's stated goal. Returns a frontend card JSON string with ``agent_id``,
     ``tools``, and ``skills``. The ``agent_id`` is the draft agent being built.
 
-    Only searches when the query has not been searched before in this session.
-    Applied resources from prior searches are preserved in context.
-
     Args:
         query: Concise search keywords (2-6 words) for one capability,
             e.g. "web search" or "PDF summarization". Never a full sentence.
@@ -147,34 +138,8 @@ class NL2AgentSearchLocalResourcesTool(Tool):
         if ctx.tool_catalog is None or ctx.skill_catalog is None:
             return error_response("tool/skill catalog not available in context")
 
-        cache_key = ("nl2agent_search_local_resources", query)
-
-        if cached := get_cached_search(ctx, *cache_key):
-            logger.info(f"nl2agent_search_local_resources cache hit for query: {query}")
-            return cached
-
-        # Guard: do not re-search if already searched this session.
-        if ctx.was_searched("nl2agent_search_local_resources", query):
-            tools, skills = _rank_local_resources(ctx, query)
-            result = json.dumps(
-                {
-                    "agent_id": ctx.target_agent_id,
-                    "recommendation_batch_id": _recommendation_batch_id(
-                        ctx.target_agent_id, query, tools, skills
-                    ),
-                    "tools": tools,
-                    "skills": skills,
-                    "already_searched": True,
-                    "applied_tool_ids": list(ctx.applied_tool_ids),
-                    "applied_skill_ids": list(ctx.applied_skill_ids),
-                },
-                ensure_ascii=False,
-            )
-            set_cached_search(ctx, *cache_key, result)
-            return result
-
         tools, skills = _rank_local_resources(ctx, query)
-        result = json.dumps(
+        return json.dumps(
             {
                 "agent_id": ctx.target_agent_id,
                 "recommendation_batch_id": _recommendation_batch_id(
@@ -185,6 +150,3 @@ class NL2AgentSearchLocalResourcesTool(Tool):
             },
             ensure_ascii=False,
         )
-        set_cached_search(ctx, *cache_key, result)
-        ctx.mark_searched("nl2agent_search_local_resources", query)
-        return result

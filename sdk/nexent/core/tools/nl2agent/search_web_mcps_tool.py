@@ -1,7 +1,6 @@
 """NL2AGENT tool: search web MCP marketplaces for individual install."""
 
 import json
-import logging
 import re
 from typing import Any, Dict, List, Optional
 
@@ -13,13 +12,8 @@ from ._context import (
     canonical_search_query,
     create_nl2agent_context,
     error_response,
-    get_cached_search,
     online_recommendation_batch_id,
-    set_cached_search,
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 def _field_type(spec: Dict[str, Any], name: str) -> str:
@@ -297,9 +291,6 @@ class NL2AgentSearchWebMcpsTool(Tool):
     the selected option, discovers its tools, and lets the user bind or skip
     those tools explicitly.
 
-    Only searches when the query has not been searched before in this session.
-    Installed MCP servers are tracked in context to avoid re-recommending.
-
     Args:
         query: 1-3 short keywords matching MCP server names or tags
             (e.g. "github", "email"). Never a full sentence.
@@ -360,36 +351,6 @@ class NL2AgentSearchWebMcpsTool(Tool):
         if ctx.community_results:
             candidates += [normalize_mcp_candidate("community", r) for r in ctx.community_results]
 
-        cache_key = ("nl2agent_search_web_mcps", query)
-        if cached := get_cached_search(ctx, *cache_key):
-            logger.info(f"nl2agent_search_web_mcps cache hit for query: {query}")
-            return cached
-
-        # Guard: if already searched, return cached + applied state
-        if ctx.was_searched("nl2agent_search_web_mcps", query):
-            scored = self._rank_candidates(candidates, query)
-            scored = [
-                {**item, "agent_id": ctx.target_agent_id} for item in scored
-            ]
-            batch_id = online_recommendation_batch_id(
-                ctx.target_agent_id,
-                "mcp",
-                query,
-                [str(item.get("recommendation_id") or "") for item in scored],
-            )
-            result = json.dumps(
-                {
-                    "agent_id": ctx.target_agent_id,
-                    "recommendation_batch_id": batch_id,
-                    "items": scored,
-                    "already_searched": True,
-                    "applied_mcp_names": list(ctx.applied_mcp_names),
-                },
-                ensure_ascii=False,
-            )
-            set_cached_search(ctx, *cache_key, result)
-            return result
-
         scored = self._rank_candidates(candidates, query)
         # Keep the draft identity on every recommendation as well as the
         # wrapper. This makes both plural and per-item MCP card rendering safe.
@@ -400,7 +361,7 @@ class NL2AgentSearchWebMcpsTool(Tool):
             query,
             [str(item.get("recommendation_id") or "") for item in scored],
         )
-        result = json.dumps(
+        return json.dumps(
             {
                 "agent_id": ctx.target_agent_id,
                 "recommendation_batch_id": batch_id,
@@ -408,6 +369,3 @@ class NL2AgentSearchWebMcpsTool(Tool):
             },
             ensure_ascii=False,
         )
-        set_cached_search(ctx, *cache_key, result)
-        ctx.mark_searched("nl2agent_search_web_mcps", query)
-        return result

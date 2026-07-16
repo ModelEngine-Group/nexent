@@ -10,7 +10,6 @@ SDK_SOURCE_ROOT = PROJECT_ROOT / "sdk"
 if str(SDK_SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SDK_SOURCE_ROOT))
 
-from nexent.core.tools.nl2agent import _context as context_module
 from nexent.core.tools.nl2agent import search_local_resources_tool as local_tool_module
 from nexent.core.tools.nl2agent._context import (
     _score_candidates,
@@ -43,13 +42,6 @@ def get_search_web_mcps_tool(**kwargs):
 def get_search_web_skills_tool(**kwargs):
     kwargs.setdefault("requirements_confirmed", True)
     return _get_search_web_skills_tool(**kwargs)
-
-
-@pytest.fixture(autouse=True)
-def reset_nl2agent_state():
-    context_module._search_cache.clear()
-    yield
-    context_module._search_cache.clear()
 
 
 def _loads(raw_result):
@@ -306,7 +298,7 @@ def test_mcp_search_deduplicates_registry_and_community_names_with_registry_prec
     assert payload["items"][0]["source"] == "registry"
 
 
-def test_mcp_search_cache_survives_tool_rebuild_for_equivalent_keyword_sets():
+def test_mcp_search_tool_rebuild_uses_latest_catalog():
     first = get_search_web_mcps_tool(
         draft_agent_id=202,
         tenant_id="tenant_1",
@@ -320,13 +312,14 @@ def test_mcp_search_cache_survives_tool_rebuild_for_equivalent_keyword_sets():
         community_results=[],
     )
 
-    first_result = first(query="docx ppt")
-    rebuilt_result = rebuilt(query="PPT, DOCX")
+    first_result = _loads(first(query="docx ppt"))
+    rebuilt_result = _loads(rebuilt(query="PPT, DOCX"))
 
-    assert rebuilt_result == first_result
+    assert [item["name"] for item in first_result["items"]] == ["DOCX Parser"]
+    assert [item["name"] for item in rebuilt_result["items"]] == ["PPT Generator"]
 
 
-def test_mcp_search_cache_is_isolated_by_tenant_and_draft():
+def test_mcp_search_instances_are_isolated_by_tenant_and_draft():
     first = get_search_web_mcps_tool(
         draft_agent_id=202,
         tenant_id="tenant_1",
@@ -534,7 +527,7 @@ def test_web_skill_search_defensively_filters_non_installable_statuses():
     assert [item["skill_id"] for item in payload["items"]] == [1]
 
 
-def test_web_skill_cache_changes_when_catalog_fingerprint_changes():
+def test_web_skill_tool_rebuild_uses_latest_catalog():
     first_tool = get_search_web_skills_tool(
         draft_agent_id=202,
         tenant_id="tenant_1",
@@ -607,7 +600,7 @@ def test_web_skill_search_deduplicates_ids_and_normalized_names():
     assert len(payload["items"]) == 1
 
 
-def test_nl2agent_search_local_resources_cache_hit_returns_without_rescoring(monkeypatch):
+def test_nl2agent_search_local_resources_recomputes_from_immutable_catalog(monkeypatch):
     score_calls = []
 
     def fake_score_candidates(candidates, query, name_field, score_field="score"):
@@ -629,7 +622,7 @@ def test_nl2agent_search_local_resources_cache_hit_returns_without_rescoring(mon
     second = tool(query="  Web Search  ")
 
     assert first == second
-    assert len(score_calls) == 2
+    assert len(score_calls) == 4
 
 
 def test_constructing_all_search_tools_preserves_each_tool_context():
