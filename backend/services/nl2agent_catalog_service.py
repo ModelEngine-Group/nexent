@@ -1,11 +1,16 @@
 """Catalog loading and sanitization for NL2AGENT sessions."""
 
+import logging
 import re
+import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from consts.exceptions import Nl2AgentCatalogUnavailableError
+from consts.exceptions import AgentRunException
+
+logger = logging.getLogger(__name__)
 
 
 CatalogItem = Dict[str, Any]
@@ -21,6 +26,17 @@ class CatalogDependencies:
     list_registry_mcp_services: Callable[..., Awaitable[Dict[str, Any]]]
     list_community_mcp_services: Callable[..., Dict[str, Any]]
     get_official_skills_with_status: Callable[..., List[CatalogItem]]
+
+
+@dataclass(frozen=True)
+class SkillInstallationDependencies:
+    """Trusted catalog and tenant installation operations for official Skills."""
+
+    get_owned_draft: Callable[..., Dict[str, Any]]
+    get_session_catalogs: Callable[..., SessionCatalogs]
+    mutate_session_catalogs: Callable[..., Any]
+    install_by_name: Callable[..., List[str]]
+    install_by_id: Callable[..., List[int]]
 
 
 def recommendation_id(source: str, item: CatalogItem) -> str:
@@ -167,3 +183,159 @@ async def load_session_catalogs(
         "community_results": community_results,
         "official_skills": official_skills,
     }, resource_missing_names
+
+
+def _normalized_skill_name(value: Any) -> str:
+    return unicodedata.normalize("NFKC", str(value or "")).casefold().strip()
+
+
+def _require_installable_skill(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    tenant_id: str,
+    skill_id: Optional[int],
+    skill_name: Optional[str],
+) -> CatalogItem:
+    catalogs = dependencies.get_session_catalogs(tenant_id, agent_id)
+    normalized_name = _normalized_skill_name(skill_name)
+    for item in catalogs.get("official_skills", []):
+        item_name = _normalized_skill_name(item.get("skill_name") or item.get("name"))
+        try:
+            matches_id = bool(skill_id and int(item.get("skill_id")) == int(skill_id))
+        except (TypeError, ValueError):
+            matches_id = False
+        if not matches_id and not (normalized_name and item_name == normalized_name):
+            continue
+        if item.get("status") == "installable":
+            return item
+        break
+    raise AgentRunException(
+        "The requested Skill is not available for installation in this "
+        "NL2AGENT session."
+    )
+
+
+def _remove_installed_skill(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    tenant_id: str,
+    skill_id: Optional[int],
+    skill_name: Optional[str],
+    installed_ids: Optional[List[int]] = None,
+) -> None:
+    removed_ids = {int(value) for value in [skill_id, *(installed_ids or [])] if value}
+    normalized_name = _normalized_skill_name(skill_name)
+
+    def remove(catalogs: SessionCatalogs) -> None:
+        retained = []
+        for item in catalogs.get("official_skills", []):
+            item_id = item.get("skill_id")
+            try:
+                matches_id = item_id is not None and int(item_id) in removed_ids
+            except (TypeError, ValueError):
+                matches_id = False
+            item_name = _normalized_skill_name(
+                item.get("skill_name") or item.get("name")
+            )
+            if not matches_id and not (
+                normalized_name and item_name == normalized_name
+            ):
+                retained.append(item)
+        catalogs["official_skills"] = retained
+
+    dependencies.mutate_session_catalogs(tenant_id, agent_id, remove)
+
+
+async def install_web_skill(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    skill_id: Optional[int],
+    tenant_id: str,
+    user_id: str,
+    skill_name: Optional[str] = None,
+    locale: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Install one recommendation resolved from the trusted session catalog."""
+    dependencies.get_owned_draft(agent_id, tenant_id)
+    _require_installable_skill(
+        dependencies,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        skill_id=skill_id,
+        skill_name=skill_name,
+    )
+    if skill_name:
+        try:
+            installed_names = dependencies.install_by_name(
+                skill_names=[skill_name],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                locale=locale,
+            )
+        except Exception as exc:
+            logger.error("Failed to install web skill %s: %s", skill_name, exc)
+            raise AgentRunException(f"Failed to install skill {skill_name}.") from exc
+        result = {
+            "skill_id": skill_id or 0,
+            "skill_name": skill_name,
+            "installed": bool(installed_names),
+            "installed_ids": [],
+            "installed_names": installed_names,
+        }
+        if installed_names:
+            try:
+                _remove_installed_skill(
+                    dependencies,
+                    agent_id=agent_id,
+                    tenant_id=tenant_id,
+                    skill_id=skill_id,
+                    skill_name=skill_name,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to refresh NL2AGENT Skill catalog after installation: "
+                    "tenant_id=%s draft_agent_id=%s skill_name=%s",
+                    tenant_id,
+                    agent_id,
+                    skill_name,
+                )
+        return result
+
+    if not skill_id or skill_id <= 0:
+        raise AgentRunException("Either skill_name or a positive skill_id is required.")
+    try:
+        installed_ids = dependencies.install_by_id(
+            skill_ids=[skill_id],
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        logger.error("Failed to install web skill %s: %s", skill_id, exc)
+        raise AgentRunException(f"Failed to install skill {skill_id}.") from exc
+    result = {
+        "skill_id": skill_id,
+        "installed": bool(installed_ids),
+        "installed_ids": installed_ids,
+    }
+    if installed_ids:
+        try:
+            _remove_installed_skill(
+                dependencies,
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                skill_id=skill_id,
+                skill_name=None,
+                installed_ids=installed_ids,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to refresh NL2AGENT Skill catalog after installation: "
+                "tenant_id=%s draft_agent_id=%s skill_id=%s",
+                tenant_id,
+                agent_id,
+                skill_id,
+            )
+    return result
