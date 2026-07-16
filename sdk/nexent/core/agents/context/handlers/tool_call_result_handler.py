@@ -1,23 +1,15 @@
 """Handler for tool call result context items."""
 
-import hashlib
 from typing import Any, Dict, List
 
 from ..context_item import ContextItem, ContextItemType, RepresentationTier
 from ..item_handler import ContextItemHandler
 from ..reducer_models import ReductionResult
+from ._utils import fingerprint, token_estimate
 
 
 _GENERATOR_DETERMINISTIC = "tool_call_result_handler_deterministic"
 _VERSION = "1.0.0"
-
-
-def _fingerprint(content: Any) -> str:
-    return hashlib.sha256(str(content).encode()).hexdigest()[:16]
-
-
-def _token_estimate(content: Any) -> int:
-    return len(str(content)) // 4
 
 
 class ToolCallResultHandler(ContextItemHandler):
@@ -38,13 +30,13 @@ class ToolCallResultHandler(ContextItemHandler):
         self, item: ContextItem, target: RepresentationTier, budget: int
     ) -> ReductionResult:
         content = item.content
-        fp = _fingerprint(content)
+        fp = fingerprint(content)
 
         if target == RepresentationTier.FULL:
             return ReductionResult(
                 representation=RepresentationTier.FULL,
                 source_fingerprint=fp,
-                token_count=_token_estimate(content),
+                token_count=token_estimate(content),
                 generator=_GENERATOR_DETERMINISTIC,
                 generator_version=_VERSION,
                 admissible=True,
@@ -69,7 +61,7 @@ class ToolCallResultHandler(ContextItemHandler):
             return ReductionResult(
                 representation=RepresentationTier.COMPRESSED,
                 source_fingerprint=fp,
-                token_count=_token_estimate(reduced),
+                token_count=token_estimate(reduced),
                 generator=_GENERATOR_DETERMINISTIC,
                 generator_version=_VERSION,
                 admissible=True,
@@ -85,7 +77,7 @@ class ToolCallResultHandler(ContextItemHandler):
             return ReductionResult(
                 representation=RepresentationTier.STRUCTURED,
                 source_fingerprint=fp,
-                token_count=_token_estimate(reduced),
+                token_count=token_estimate(reduced),
                 generator=_GENERATOR_DETERMINISTIC,
                 generator_version=_VERSION,
                 admissible=True,
@@ -101,7 +93,7 @@ class ToolCallResultHandler(ContextItemHandler):
         return ReductionResult(
             representation=RepresentationTier.POINTER,
             source_fingerprint=fp,
-            token_count=_token_estimate(reduced),
+            token_count=token_estimate(reduced),
             generator=_GENERATOR_DETERMINISTIC,
             generator_version=_VERSION,
             admissible=True,

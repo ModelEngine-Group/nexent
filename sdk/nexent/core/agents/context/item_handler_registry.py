@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, ClassVar, Dict
 
 from .context_item import ContextItemType
 from .item_handler import ContextItemHandler
@@ -20,7 +20,7 @@ class ItemHandlerRegistry:
     Ensures every ContextItemType has exactly one registered handler.
     """
 
-    _handlers: Dict[ContextItemType, ContextItemHandler] = {}
+    _handlers: ClassVar[Dict[ContextItemType, ContextItemHandler]] = {}
 
     @classmethod
     def register(cls, handler: ContextItemHandler) -> None:

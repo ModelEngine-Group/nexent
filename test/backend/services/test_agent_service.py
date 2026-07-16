@@ -249,6 +249,12 @@ class MockProcessType:
         value = "model_output_thinking"
     class MODEL_OUTPUT_DEEP_THINKING:
         value = "model_output_deep_thinking"
+    class STEP_COUNT:
+        value = "step_count"
+    class TOOL:
+        value = "tool"
+    class EXECUTION_LOGS:
+        value = "execution_logs"
 
 sys.modules['nexent.core.utils.observer'] = MagicMock()
 sys.modules['nexent.core.utils.observer'].ProcessType = MockProcessType

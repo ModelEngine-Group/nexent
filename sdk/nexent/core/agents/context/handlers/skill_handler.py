@@ -1,12 +1,12 @@
 """Handler for skill context items."""
 
-import hashlib
 import re
 from typing import Any, Dict, List
 
 from ..context_item import ContextItem, ContextItemType, RepresentationTier
 from ..item_handler import ContextItemHandler
 from ..reducer_models import ReductionResult
+from ._utils import fingerprint, token_estimate
 
 
 _GENERATOR = "skill_handler_deterministic"
@@ -16,14 +16,6 @@ _VERSION = "1.0.0"
 def _first_sentence(text: str) -> str:
     match = re.split(r"[.\n]", text, maxsplit=1)
     return match[0].strip() if match else text.strip()
-
-
-def _fingerprint(content: Any) -> str:
-    return hashlib.sha256(str(content).encode()).hexdigest()[:16]
-
-
-def _token_estimate(content: Any) -> int:
-    return len(str(content)) // 4
 
 
 class SkillHandler(ContextItemHandler):
@@ -39,13 +31,13 @@ class SkillHandler(ContextItemHandler):
         self, item: ContextItem, target: RepresentationTier, budget: int
     ) -> ReductionResult:
         content = item.content
-        fp = _fingerprint(content)
+        fp = fingerprint(content)
 
         if target == RepresentationTier.FULL:
             return ReductionResult(
                 representation=RepresentationTier.FULL,
                 source_fingerprint=fp,
-                token_count=_token_estimate(content),
+                token_count=token_estimate(content),
                 generator=_GENERATOR,
                 generator_version=_VERSION,
                 admissible=True,
@@ -57,7 +49,7 @@ class SkillHandler(ContextItemHandler):
             return ReductionResult(
                 representation=RepresentationTier.COMPRESSED,
                 source_fingerprint=fp,
-                token_count=_token_estimate(content),
+                token_count=token_estimate(content),
                 generator=_GENERATOR,
                 generator_version=_VERSION,
                 admissible=True,
@@ -80,7 +72,7 @@ class SkillHandler(ContextItemHandler):
             return ReductionResult(
                 representation=RepresentationTier.STRUCTURED,
                 source_fingerprint=fp,
-                token_count=_token_estimate(reduced),
+                token_count=token_estimate(reduced),
                 generator=_GENERATOR,
                 generator_version=_VERSION,
                 admissible=True,
@@ -92,7 +84,7 @@ class SkillHandler(ContextItemHandler):
         return ReductionResult(
             representation=RepresentationTier.POINTER,
             source_fingerprint=fp,
-            token_count=_token_estimate(reduced),
+            token_count=token_estimate(reduced),
             generator=_GENERATOR,
             generator_version=_VERSION,
             admissible=True,

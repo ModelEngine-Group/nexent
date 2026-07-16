@@ -1414,6 +1414,7 @@ async def _stream_agent_chunks(
             # Create and store the background task to avoid warnings
             background_task = asyncio.create_task(_add_memory_background())
             # Add done callback to handle any exceptions that might occur
+            # Add done callback to handle any exceptions that might occur
             background_task.add_done_callback(
                 lambda t: t.exception() if t.exception() else None)
         except Exception as schedule_err:

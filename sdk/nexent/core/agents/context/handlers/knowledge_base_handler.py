@@ -1,24 +1,16 @@
 """Handler for knowledge base context items."""
 
-import hashlib
 from typing import Any, Dict, List
 
 from ..context_item import ContextItem, ContextItemType, RepresentationTier
 from ..item_handler import ContextItemHandler
 from ..reducer_models import ReductionResult
+from ._utils import fingerprint, token_estimate
 
 
 _GENERATOR_SEMANTIC = "knowledge_base_handler"
 _GENERATOR_DETERMINISTIC = "knowledge_base_handler_deterministic"
 _VERSION = "1.0.0"
-
-
-def _fingerprint(content: Any) -> str:
-    return hashlib.sha256(str(content).encode()).hexdigest()[:16]
-
-
-def _token_estimate(content: Any) -> int:
-    return len(str(content)) // 4
 
 
 def _extract_text(content: Any) -> str:
@@ -44,13 +36,13 @@ class KnowledgeBaseHandler(ContextItemHandler):
         self, item: ContextItem, target: RepresentationTier, budget: int
     ) -> ReductionResult:
         content = item.content
-        fp = _fingerprint(content)
+        fp = fingerprint(content)
 
         if target == RepresentationTier.FULL:
             return ReductionResult(
                 representation=RepresentationTier.FULL,
                 source_fingerprint=fp,
-                token_count=_token_estimate(content),
+                token_count=token_estimate(content),
                 generator=_GENERATOR_SEMANTIC,
                 generator_version=_VERSION,
                 admissible=True,
@@ -63,7 +55,7 @@ class KnowledgeBaseHandler(ContextItemHandler):
             return ReductionResult(
                 representation=RepresentationTier.FULL,
                 source_fingerprint=fp,
-                token_count=_token_estimate(content),
+                token_count=token_estimate(content),
                 generator=_GENERATOR_DETERMINISTIC,
                 generator_version=_VERSION,
                 admissible=False,
@@ -78,7 +70,7 @@ class KnowledgeBaseHandler(ContextItemHandler):
                 return ReductionResult(
                     representation=RepresentationTier.COMPRESSED,
                     source_fingerprint=fp,
-                    token_count=_token_estimate(compressed_summary),
+                    token_count=token_estimate(compressed_summary),
                     generator=_GENERATOR_SEMANTIC,
                     generator_version=_VERSION,
                     admissible=True,
@@ -91,7 +83,7 @@ class KnowledgeBaseHandler(ContextItemHandler):
             return ReductionResult(
                 representation=RepresentationTier.COMPRESSED,
                 source_fingerprint=fp,
-                token_count=_token_estimate(truncated),
+                token_count=token_estimate(truncated),
                 generator=_GENERATOR_DETERMINISTIC,
                 generator_version=_VERSION,
                 admissible=True,
@@ -115,7 +107,7 @@ class KnowledgeBaseHandler(ContextItemHandler):
         return ReductionResult(
             representation=RepresentationTier.STRUCTURED,
             source_fingerprint=fp,
-            token_count=_token_estimate(reduced),
+            token_count=token_estimate(reduced),
             generator=_GENERATOR_DETERMINISTIC,
             generator_version=_VERSION,
             admissible=True,

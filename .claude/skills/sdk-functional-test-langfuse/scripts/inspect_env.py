@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import os
 import re
 from pathlib import Path
@@ -110,8 +109,7 @@ def main() -> int:
         print(f"{key}={redact(key, env.get(key))}")
 
     if has_langfuse_api and not env.get("OTEL_EXPORTER_OTLP_AUTHORIZATION"):
-        token = base64.b64encode(f"{env['LANGFUSE_PUBLIC_KEY']}:{env['LANGFUSE_SECRET_KEY']}".encode()).decode()
-        print(f"derived_OTEL_EXPORTER_OTLP_AUTHORIZATION={redact('OTEL_EXPORTER_OTLP_AUTHORIZATION', 'Basic ' + token)}")
+        print("derived_OTEL_EXPORTER_OTLP_AUTHORIZATION=present")
 
     if not selected_model:
         print("status=model-env-missing")
