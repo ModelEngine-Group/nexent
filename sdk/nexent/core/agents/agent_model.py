@@ -146,6 +146,58 @@ VerificationEvent = Literal[
 VerificationStrictness = Literal["lenient", "balanced", "strict"]
 VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
 
+GuardrailSeverity = Literal["block", "mask", "pass"]
+
+
+class GuardrailRule(BaseModel):
+    """A single pattern-matching rule for the guardrail engine.
+
+    Each rule compiles to a regex and is matched at every guardrail checkpoint.
+
+    Attributes:
+        name: Human-readable rule identifier, e.g. "cn_id_number".
+        pattern: Regular expression string (Python ``re`` syntax).
+        severity: What to do when the pattern matches.
+        description: Optional free-text explanation shown in the UI.
+    """
+
+    name: str = Field(description="Human-readable rule identifier")
+    pattern: str = Field(description="Regular expression in Python re syntax")
+    severity: GuardrailSeverity = Field(
+        description="Action when pattern matches: block, mask, or pass",
+        default="block",
+    )
+    description: Optional[str] = Field(
+        description="Optional explanation shown in configuration UI",
+        default=None,
+    )
+
+
+class GuardrailConfig(BaseModel):
+    """Configuration container for the guardrail subsystem.
+
+    Stored as a nested object inside ``AgentVerificationConfig.guardrail_config``
+    and persisted to the database as part of the ``verification_config`` JSONB
+    column — no separate database migration is needed.
+
+    Attributes:
+        enabled: Master switch. When False, GuardrailEngine is not created.
+        rules: Ordered list of pattern rules. Evaluated in order; first
+               match wins (later rules for the same text are skipped).
+        default_action: Fallback action when a rule matches but has an
+                        unknown severity value (defensive, should not happen).
+    """
+
+    enabled: bool = Field(description="Whether guardrail screening is active", default=False)
+    rules: List[GuardrailRule] = Field(
+        description="Ordered pattern rules; first match wins",
+        default_factory=list,
+    )
+    default_action: GuardrailSeverity = Field(
+        description="Fallback severity when a rule matches but severity is unset",
+        default="pass",
+    )
+
 
 class AgentVerificationConfig(BaseModel):
     """Configuration for layered ReAct self-verification."""
@@ -193,6 +245,10 @@ class AgentVerificationConfig(BaseModel):
             "handoff",
             "final_answer",
         ],
+    )
+    guardrail_config: Optional[GuardrailConfig] = Field(
+        description="Guardrail screening configuration (blacklist/whitelist patterns)",
+        default=None,
     )
 
 class AgentConfig(BaseModel):

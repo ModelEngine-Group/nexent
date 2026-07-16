@@ -16,6 +16,7 @@ import {
   AgentConfigUpdate,
   Skill,
   DEFAULT_AGENT_VERIFICATION_CONFIG,
+  DEFAULT_GUARDRAIL_CONFIG,
 } from "@/types/agentConfig";
 import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
@@ -180,7 +181,10 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     business_logic_model_id: llmConfig?.id || 0,
     prompt_template_id: 0,
     prompt_template_name: "system_default",
-    verification_config: { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
+    verification_config: {
+      ...DEFAULT_AGENT_VERIFICATION_CONFIG,
+      guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
+    },
     sub_agent_id_list: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",

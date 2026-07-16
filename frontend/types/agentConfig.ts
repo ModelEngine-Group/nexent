@@ -49,7 +49,65 @@ export interface AgentVerificationConfig {
     | "handoff"
     | "final_answer"
   >;
+  guardrail_config?: GuardrailConfig;
 }
+
+// Guardrail types
+
+export type GuardrailSeverity = "block" | "mask" | "pass";
+
+export interface GuardrailRule {
+  /** Human-readable rule identifier */
+  name: string;
+  /** Regular expression in Python re syntax */
+  pattern: string;
+  /** Action when pattern matches */
+  severity: GuardrailSeverity;
+  /** Optional explanation shown in configuration UI */
+  description?: string;
+}
+
+export interface GuardrailConfig {
+  /** Master switch; when false the engine is not created */
+  enabled: boolean;
+  /** Ordered pattern rules; first match wins */
+  rules: GuardrailRule[];
+  /** Fallback severity when a matched rule has unknown severity */
+  default_action: GuardrailSeverity;
+}
+
+export const DEFAULT_GUARDRAIL_RULES: GuardrailRule[] = [
+  {
+    name: "cn_id_number",
+    pattern: "\\d{17}[\\dXx]",
+    severity: "block",
+    description: "Chinese national ID number (18 digits)",
+  },
+  {
+    name: "cn_phone",
+    pattern: "1[3-9]\\d{9}",
+    severity: "mask",
+    description: "Chinese mobile phone number",
+  },
+  {
+    name: "email_address",
+    pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+    severity: "mask",
+    description: "Email address",
+  },
+  {
+    name: "bank_card",
+    pattern: "\\d{16,19}",
+    severity: "block",
+    description: "Bank card number (16-19 digits)",
+  },
+];
+
+export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = {
+  enabled: false,
+  rules: [...DEFAULT_GUARDRAIL_RULES],
+  default_action: "pass",
+};
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
   enabled: false,
@@ -68,6 +126,7 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
     "handoff",
     "final_answer",
   ],
+  guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
 };
 
 // ========== Core Interfaces ==========

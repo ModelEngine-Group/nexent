@@ -4,14 +4,14 @@ import ast
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.utils import truncate_content
 
 from ...monitor import get_monitoring_manager
 from ..utils.observer import MessageObserver, ProcessType
-from .agent_model import AgentVerificationConfig
+from .agent_model import AgentVerificationConfig, GuardrailConfig, GuardrailRule
 
 
 @dataclass
@@ -64,6 +64,726 @@ class _SilentObserver:
         return None
 
 
+GuardrailSource = Literal["new_input", "history", "tool_input", "tool_output"]
+
+EffectiveAction = Literal["pass", "mask", "block", "terminate"]
+
+
+class SeverityResolver:
+    """Resolve ``(user_severity, source) -> effective_action``.
+
+    Honors user intent unless the source can't block, per ``_BLOCK_TABLE``
+    (block + new_input -> terminate, history/tool_output -> mask, tool_input
+    -> block). mask/pass are source-independent. Hardcoded safety invariant,
+    not user-configurable.
+    """
+
+    _BLOCK_TABLE: Dict[str, str] = {
+        "new_input": "terminate",
+        "history": "mask",
+        "tool_input": "block",
+        "tool_output": "mask",
+    }
+
+    @staticmethod
+    def resolve(user_severity: str, source: str) -> str:
+        """Resolve (user_severity, source) to the effective action.
+
+        Args:
+            user_severity: Severity the user configured (block/mask/pass).
+            source: Where the content came from (new_input/history/tool_input/tool_output).
+
+        Returns:
+            The effective action (pass/mask/block/terminate).
+        """
+        if user_severity == "block":
+            return SeverityResolver._BLOCK_TABLE.get(source, "mask")
+        if user_severity in ("mask", "pass"):
+            return user_severity
+        # Unknown severity: fail-open.
+        return "pass"
+
+    @staticmethod
+    def is_downgraded(user_severity: str, effective_action: str) -> bool:
+        """True if the effective action differs from the user's severity.
+
+        Args:
+            user_severity: Severity the user configured.
+            effective_action: Action resolved by ``resolve``.
+
+        Returns:
+            True if the resolver changed the user's severity.
+        """
+        return effective_action != user_severity
+
+
+@dataclass
+class GuardrailDecision:
+    """The full result of one guardrail checkpoint evaluation.
+
+    Carries both the verification result (for emit/feedback, unchanged in
+    shape from before) and the resolved effective action + masked payload
+    (for the executor to act on).
+    """
+
+    source: str
+    user_severity: str
+    effective_action: str
+    downgraded: bool
+    rule_name: str
+    matched_texts: List[str]
+    verification_result: "VerificationResult"
+    # Masked payload, populated when effective_action == "mask":
+    masked_messages: Optional[List[Dict[str, Any]]] = None
+    cleaned_content: Optional[str] = None
+    masked_args: Optional[tuple] = None
+    masked_kwargs: Optional[Dict[str, Any]] = None
+
+    @property
+    def passed(self) -> bool:
+        """True if the run may continue past this checkpoint."""
+        return self.effective_action in ("pass", "mask")
+
+    @property
+    def message(self) -> str:
+        """The user-visible note, or the repair instruction if absent."""
+        vr = self.verification_result
+        return vr.user_visible_note or vr.repair_instruction
+
+
+class GuardrailEngine:
+    """Pattern-matching guardrail engine for LLM input and tool output screening.
+
+    Pre-compiles regex patterns (first match wins). All public methods are
+    fail-open -- engine errors degrade to a pass so the guardrail never
+    becomes an attack surface.
+
+    Args:
+        config: Guardrail configuration loaded from AgentVerificationConfig.
+    """
+
+    def __init__(self, config: GuardrailConfig) -> None:
+        self._rules: List[tuple] = []
+        self._default_action: str = config.default_action
+        # Token substituted for matched spans when effective_action == "mask".
+        self._mask_token: str = "***"
+        # Circuit-breaker state: a repeated identical (rule, matched_text, source) block upgrades to terminate.
+        self._breaker_last_sig: Optional[tuple] = None
+        self._breaker_repeat: int = 0
+        self._breaker_threshold: int = 2
+
+        for rule in config.rules:
+            try:
+                compiled = re.compile(rule.pattern, re.IGNORECASE)
+                self._rules.append((compiled, rule))
+            except re.error:
+                # Skip invalid patterns so one bad rule can't disable the engine.
+                continue
+
+    @property
+    def rule_count(self) -> int:
+        """Number of successfully compiled rules."""
+        return len(self._rules)
+
+    def check_input(
+        self,
+        input_messages: List[Dict[str, Any]],
+        step_number: int,
+    ) -> GuardrailDecision:
+        """Screen the messages about to be sent to the LLM, per message.
+
+        Each message is classified as ``new_input`` (latest user turn) or
+        ``history`` and resolved via SeverityResolver. On ``mask`` all matching
+        messages are redacted in a copy returned as ``masked_messages``; the
+        overall action is the highest-rank across messages.
+
+        Args:
+            input_messages: Messages about to be sent to the LLM.
+            step_number: Current ReAct step number, for telemetry.
+
+        Returns:
+            A GuardrailDecision; carries ``masked_messages`` when masking.
+            Never raises -- engine failures degrade to a pass.
+        """
+        try:
+            new_input_idx = self._find_new_input_index(input_messages)
+            overall = "pass"
+            chosen = None  # (rule, matched_text, source, user_severity)
+            any_mask = False
+            # Shallow-copy each message so we can rewrite content on mask.
+            messages_copy = [
+                (dict(m) if isinstance(m, dict) else m)
+                for m in (input_messages or [])
+            ]
+            for i, msg in enumerate(messages_copy):
+                source = "new_input" if i == new_input_idx else "history"
+                screened = self._screen_message(msg, source)
+                if screened is None:
+                    continue
+                eff, rule, matched_text, user_sev, masked_content = screened
+                if self._action_rank(eff) > self._action_rank(overall):
+                    overall = eff
+                    chosen = (rule, matched_text, source, user_sev)
+                if masked_content is not None:
+                    any_mask = True
+                    self._set_msg_text(msg, masked_content)
+
+            if chosen is None:
+                return self._pass_decision("new_input", "guardrail_input")
+
+            rule, matched_text, source, user_sev = chosen
+            eff = self._apply_breaker(rule.name, matched_text, source, overall)
+            downgraded = SeverityResolver.is_downgraded(user_sev, eff)
+            vr = self._build_vr(
+                rule, matched_text, eff, "guardrail_input", source, downgraded
+            )
+            return GuardrailDecision(
+                source=source,
+                user_severity=user_sev,
+                effective_action=eff,
+                downgraded=downgraded,
+                rule_name=rule.name,
+                matched_texts=[matched_text],
+                verification_result=vr,
+                masked_messages=messages_copy if any_mask else None,
+            )
+        except Exception:
+            # Fail-open: the engine's own bug must never block the agent.
+            return self._pass_decision("new_input", "guardrail_input")
+
+    def _screen_message(self, msg: Any, source: str) -> Optional[tuple]:
+        """Scan one message and resolve its guardrail action.
+
+        Args:
+            msg: A chat message (dict or ChatMessage).
+            source: Guardrail source for this message (new_input/history).
+
+        Returns:
+            A ``(effective_action, rule, matched_text, user_severity, masked_content)``
+            tuple, or ``None`` if no rule matched. ``masked_content`` is the redacted
+            text when the action is ``mask``, otherwise ``None``.
+        """
+        content = self._msg_text(msg)
+        matches = self._scan(content)
+        if not matches:
+            return None
+        first_rule = matches[0][1]
+        user_sev = first_rule.severity or self._default_action
+        eff = SeverityResolver.resolve(user_sev, source)
+        matched_text = matches[0][2][0] if matches[0][2] else ""
+        masked = self._mask_value(content, matches) if eff == "mask" else None
+        return eff, first_rule, matched_text, user_sev, masked
+
+    def check_output(
+        self,
+        observation: str,
+        code_action: str,
+        step_number: int,
+        is_final_answer: bool,
+    ) -> GuardrailDecision:
+        """Screen a tool's observation before it enters agent memory.
+
+        Source is ``tool_output`` -- the tool already ran, so ``block`` is not
+        possible and SeverityResolver downgrades it to ``mask`` (matched spans
+        are redacted in the observation, then written back). ``mask``/``pass``
+        behave as configured.
+
+        Args:
+            observation: The tool's output text.
+            code_action: The code_action that produced this observation.
+            step_number: The current ReAct step number, for telemetry.
+            is_final_answer: Whether this observation is a final-answer candidate.
+
+        Returns:
+            A GuardrailDecision; when masking, ``cleaned_content`` carries the
+            redacted observation. Never raises -- engine failures degrade to a pass.
+        """
+        try:
+            text = observation or ""
+            matches = self._scan(text)
+            if not matches:
+                return self._pass_decision("tool_output", "guardrail_output")
+            first_rule = matches[0][1]
+            user_sev = first_rule.severity or self._default_action
+            eff = SeverityResolver.resolve(user_sev, "tool_output")
+            matched_text = matches[0][2][0] if matches[0][2] else ""
+            eff = self._apply_breaker(first_rule.name, matched_text, "tool_output", eff)
+            downgraded = SeverityResolver.is_downgraded(user_sev, eff)
+            cleaned = None
+            if eff == "mask":
+                cleaned = text
+                for compiled, _rule, _texts in matches:
+                    try:
+                        cleaned = compiled.sub(self._mask_token, cleaned)
+                    except Exception:
+                        pass
+            vr = self._build_vr(
+                first_rule, matched_text, eff, "guardrail_output",
+                "tool_output", downgraded,
+            )
+            return GuardrailDecision(
+                source="tool_output",
+                user_severity=user_sev,
+                effective_action=eff,
+                downgraded=downgraded,
+                rule_name=first_rule.name,
+                matched_texts=matches[0][2],
+                verification_result=vr,
+                cleaned_content=cleaned,
+            )
+        except Exception:
+            return self._pass_decision("tool_output", "guardrail_output")
+
+    def check_tool_args(
+        self,
+        tool_name: str,
+        args: tuple,
+        kwargs: Dict[str, Any],
+        step_number: int = 0,
+    ) -> GuardrailDecision:
+        """Screen the resolved arguments of a tool call before it executes.
+
+        Source is ``tool_input`` -- ``block`` is genuine (the tool doesn't run),
+        ``mask`` redacts string args and runs on the masked values. Sees actual
+        runtime arg values (inside the wrapped ``forward``), so it also catches
+        content that flowed in via a variable or a prior tool's return.
+
+        Args:
+            tool_name: Name of the tool whose call is being screened.
+            args: Positional argument values as resolved at runtime.
+            kwargs: Keyword argument values as resolved at runtime.
+            step_number: Current ReAct step number, for telemetry.
+
+        Returns:
+            A GuardrailDecision; carries ``masked_args`` / ``masked_kwargs``
+            when masking. Never raises -- engine failures degrade to a pass.
+        """
+        try:
+            parts: List[str] = []
+            for value in list(args) + list(kwargs.values()):
+                if value is None:
+                    continue
+                try:
+                    parts.append(str(value))
+                except Exception:
+                    # Skip unstringifiable values; one bad arg can't disable screening.
+                    continue
+            text = "\n".join(parts)
+            matches = self._scan(text)
+            if not matches:
+                return self._pass_decision("tool_input", "guardrail_tool_input")
+            first_rule = matches[0][1]
+            user_sev = first_rule.severity or self._default_action
+            eff = SeverityResolver.resolve(user_sev, "tool_input")
+            matched_text = matches[0][2][0] if matches[0][2] else ""
+            eff = self._apply_breaker(first_rule.name, matched_text, "tool_input", eff)
+            downgraded = SeverityResolver.is_downgraded(user_sev, eff)
+            masked_args = None
+            masked_kwargs = None
+            if eff == "mask":
+                masked_args = tuple(self._mask_value(v, matches) for v in args)
+                masked_kwargs = {
+                    k: self._mask_value(v, matches) for k, v in kwargs.items()
+                }
+            vr = self._build_vr(
+                first_rule, matched_text, eff, "guardrail_tool_input",
+                "tool_input", downgraded,
+            )
+            return GuardrailDecision(
+                source="tool_input",
+                user_severity=user_sev,
+                effective_action=eff,
+                downgraded=downgraded,
+                rule_name=first_rule.name,
+                matched_texts=matches[0][2],
+                verification_result=vr,
+                masked_args=masked_args,
+                masked_kwargs=masked_kwargs,
+            )
+        except Exception:
+            return self._pass_decision("tool_input", "guardrail_tool_input")
+
+    @staticmethod
+    def _msg_role(msg: Any) -> str:
+        """Role of a chat message as a lowercase string (dict or ChatMessage).
+
+        Args:
+            msg: A chat message (dict or smolagents ChatMessage).
+
+        Returns:
+            The role lowercased, or ``""`` if it has none.
+        """
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        if role is None:
+            return ""
+        value = getattr(role, "value", None)
+        return str(value if value is not None else role).lower()
+
+    @staticmethod
+    def _msg_text(msg: Any) -> str:
+        """Best-effort text of a chat message (string, None, or OpenAI-style list parts).
+
+        Args:
+            msg: A chat message whose ``content`` may be a string, None, or a
+                list of ``{"text": ...}``/``{"content": ...}`` parts.
+
+        Returns:
+            The concatenated text, or ``""`` if none can be extracted.
+        """
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if text is None:
+                        text = item.get("content")
+                    if text:
+                        parts.append(str(text))
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "".join(parts)
+        return str(content)
+
+    @staticmethod
+    def _set_msg_text(msg: Any, text: str) -> None:
+        """Write masked text back into a dict or ChatMessage message.
+
+        Args:
+            msg: The message to mutate (dict or ChatMessage).
+            text: The redacted text to store as ``content``.
+        """
+        try:
+            if isinstance(msg, dict):
+                msg["content"] = text
+            else:
+                setattr(msg, "content", text)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _find_new_input_index(messages: List[Any]) -> int:
+        """Index of the latest user message; every other message is history.
+
+        Args:
+            messages: Prompt messages (dict or ChatMessage).
+
+        Returns:
+            The index of the last user-role message, or ``-1`` if there is none.
+        """
+        idx = -1
+        for i, msg in enumerate(messages or []):
+            if GuardrailEngine._msg_role(msg) == "user":
+                idx = i
+        return idx
+
+    def _scan(
+        self, text: str
+    ) -> List[tuple]:
+        """Scan all rules; returns ``(compiled, rule, [matched_texts])`` for every match.
+
+        First match decides the action; all matches are returned so mask can
+        redact every occurrence.
+
+        Args:
+            text: Text to scan against every compiled rule.
+
+        Returns:
+            A list of ``(compiled_regex, rule, [matched_texts])`` for every rule
+            that matched; empty if none.
+        """
+        results: List[tuple] = []
+        if not text:
+            return results
+        for compiled, rule in self._rules:
+            try:
+                texts = [m.group(0) for m in compiled.finditer(text)]
+            except Exception:
+                continue
+            if texts:
+                results.append((compiled, rule, texts))
+        return results
+
+    def _mask_value(self, value: Any, matches: List[tuple]) -> Any:
+        """Redact matched spans in a string arg value; non-strings pass through.
+
+        Args:
+            value: A single tool-call argument value.
+            matches: Match tuples from ``_scan`` (compiled regex + rule + texts).
+
+        Returns:
+            The value with matched spans replaced by the mask token; non-string
+            values are returned unchanged.
+        """
+        if not isinstance(value, str):
+            return value
+        out = value
+        for compiled, _rule, _texts in matches:
+            try:
+                out = compiled.sub(self._mask_token, out)
+            except Exception:
+                pass
+        return out
+
+    @staticmethod
+    def _action_rank(action: str) -> int:
+        """Rank for the overall action: terminate > block > mask > pass.
+
+        Args:
+            action: One of pass/mask/block/terminate.
+
+        Returns:
+            Numeric rank (pass=0, mask=2, block=3, terminate=4); unknown -> 0.
+        """
+        return {"pass": 0, "mask": 2, "block": 3, "terminate": 4}.get(
+            action, 0
+        )
+
+    def _apply_breaker(
+        self, rule_name: str, matched_text: str, source: str, effective_action: str
+    ) -> str:
+        """Upgrade a repeated identical block to terminate (stops stubborn-retry loops).
+
+        Args:
+            rule_name: Name of the matched rule.
+            matched_text: The text that matched the rule.
+            source: Guardrail source (new_input/history/tool_input/tool_output).
+            effective_action: Action resolved before the breaker is applied.
+
+        Returns:
+            ``terminate`` if the same (rule, matched_text, source) block repeats
+            past the threshold, otherwise the input action unchanged.
+        """
+        if effective_action not in ("block", "terminate"):
+            return effective_action
+        sig = (rule_name, matched_text, source)
+        if sig == self._breaker_last_sig:
+            self._breaker_repeat += 1
+        else:
+            self._breaker_last_sig = sig
+            self._breaker_repeat = 1
+        if self._breaker_repeat >= self._breaker_threshold:
+            return "terminate"
+        return effective_action
+
+    def _build_vr(
+        self,
+        rule: GuardrailRule,
+        matched_text: str,
+        effective_action: str,
+        event: str,
+        source: str,
+        downgraded: bool,
+    ) -> VerificationResult:
+        """Build the VerificationResult (for emit/feedback) from a matched decision.
+
+        Args:
+            rule: The rule that matched.
+            matched_text: The text that matched the rule.
+            effective_action: Resolved action (pass/mask/block/terminate).
+            event: Verification event name (e.g. ``guardrail_input``).
+            source: Guardrail source (new_input/history/tool_input/tool_output).
+            downgraded: Whether the action was downgraded from the user severity.
+
+        Returns:
+            The VerificationResult to emit/feed back for this match.
+        """
+        severity = {
+            "terminate": "blocking",
+            "block": "blocking",
+            "mask": "warning",
+            "pass": "info",
+        }.get(effective_action, "info")
+        phase = {
+            "terminate": "blocked",
+            "block": "blocked",
+            "mask": "warning",
+            "pass": "pass",
+        }.get(effective_action, "pass")
+        if effective_action == "terminate":
+            note = f"Input terminated by guardrail: rule '{rule.name}' matched"
+        elif effective_action == "block":
+            note = f"Content blocked by rule '{rule.name}'"
+        elif effective_action == "mask":
+            note = f"Content masked by rule '{rule.name}'"
+            if downgraded:
+                note += " (downgraded from block: source is non-blockable)"
+        else:
+            note = ""
+        return VerificationResult(
+            passed=effective_action in ("pass", "mask"),
+            severity=severity,
+            event=event,
+            phase=phase,
+            failed_criteria=[rule.name] if rule.name else [],
+            repair_instruction=(
+                f"Guardrail rule '{rule.name}' matched: '{matched_text}'. "
+                f"Source: {source}. Effective action: {effective_action}."
+            ),
+            user_visible_note=note,
+            checks=[
+                VerificationCheck(
+                    name=rule.name,
+                    passed=False,
+                    reason=f"Pattern matched: {matched_text}",
+                    fix_hint=rule.description
+                    or "Revise the content to avoid the matched pattern.",
+                )
+            ] if rule.name else [],
+        )
+
+    def _pass_decision(self, source: str, event: str) -> GuardrailDecision:
+        """Build a pass decision (no rule matched / fail-open).
+
+        Args:
+            source: Guardrail source (new_input/history/tool_input/tool_output).
+            event: Verification event name (e.g. ``guardrail_input``).
+
+        Returns:
+            A GuardrailDecision whose effective action is ``pass``.
+        """
+        vr = VerificationResult(
+            passed=True,
+            severity="info",
+            event=event,
+            phase="pass",
+        )
+        return GuardrailDecision(
+            source=source,
+            user_severity="pass",
+            effective_action="pass",
+            downgraded=False,
+            rule_name="",
+            matched_texts=[],
+            verification_result=vr,
+        )
+
+
+# Pre-built refusal for a terminal new_input block. {matched}=user's matched input, {rule}=rule name.
+GUARDRAIL_REFUSAL_TPL = {
+    "zh": (
+        "您的输入包含受限内容「{matched}」，已根据安全策略「{rule}」中止处理。\n"
+        "原因：该内容被配置为禁止输入。\n"
+        "建议：请移除或替换该内容后重新提问。\n"
+        "如需调整规则，请联系管理员在护栏配置中修改。"
+    ),
+    "en": (
+        'Your input contains restricted content "{matched}" and was halted by '
+        'safety policy "{rule}".\n'
+        "Reason: this content is configured as a blocked input.\n"
+        "Suggestion: remove or replace it and try again.\n"
+        "To adjust the rule, contact an administrator in the guardrail configuration."
+    ),
+}
+
+
+def _guardrail_locale(text: str) -> str:
+    """Pick zh/en from the language of ``text`` (CJK -> zh, else en).
+
+    Args:
+        text: The text whose language to detect.
+
+    Returns:
+        ``"zh"`` if the text contains CJK characters, otherwise ``"en"``.
+    """
+    if any("一" <= ch <= "鿿" for ch in (text or "")):
+        return "zh"
+    return "en"
+
+
+def latest_user_message_text(messages: List[Any]) -> str:
+    """Best-effort text of the latest user-role message in ``messages``.
+
+    Args:
+        messages: Prompt messages as plain dicts or smolagents ChatMessage objects,
+            with string or OpenAI-style list-part content.
+
+    Returns:
+        The latest user message text, or "" if there is none.
+    """
+    last_idx = -1
+    for i, msg in enumerate(messages or []):
+        role = getattr(msg, "role", None) if not isinstance(msg, dict) else msg.get("role")
+        value = getattr(role, "value", None)
+        role_str = str(value if value is not None else role).lower()
+        if role_str == "user":
+            last_idx = i
+    if last_idx < 0:
+        return ""
+    msg = messages[last_idx]
+    content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text") if item.get("text") is not None else item.get("content")
+                if text:
+                    parts.append(str(text))
+            elif isinstance(item, str):
+                parts.append(item)
+        return "".join(parts)
+    return str(content)
+
+
+def render_guardrail_refusal(decision: "GuardrailDecision", messages: List[Any]) -> str:
+    """Render the pre-built refusal for a terminal new_input block.
+
+    Args:
+        decision: The guardrail decision (supplies matched text + rule name).
+        messages: The prompt messages, used to pick zh/en by the user's language.
+
+    Returns:
+        The localized refusal string. No LLM call is made; the caller ends the run.
+    """
+    matched = decision.matched_texts[0] if decision.matched_texts else ""
+    user_text = latest_user_message_text(messages)
+    if not matched:
+        matched = user_text
+    tpl = GUARDRAIL_REFUSAL_TPL[_guardrail_locale(user_text)]
+    return tpl.format(matched=matched or "", rule=decision.rule_name or "")
+
+
+# Pre-built refusal for a terminal tool_input block. {matched}=blocked arg, {rule}=rule name, {tool}=tool name.
+GUARDRAIL_TOOL_INPUT_REFUSAL_TPL = {
+    "zh": (
+        "工具「{tool}」的调用入参包含受限内容「{matched}」，已根据安全策略「{rule}」中止处理。\n"
+        "原因：该内容被配置为禁止输入。\n"
+        "建议：请调整请求内容后重新提问。\n"
+        "如需调整规则，请联系管理员在护栏配置中修改。"
+    ),
+    "en": (
+        'The call to tool "{tool}" contained restricted content "{matched}" in its '
+        'arguments and was halted by safety policy "{rule}".\n'
+        "Reason: this content is configured as a blocked input.\n"
+        "Suggestion: adjust your request and try again.\n"
+        "To adjust the rule, contact an administrator in the guardrail configuration."
+    ),
+}
+
+
+def render_tool_input_refusal(decision: "GuardrailDecision", tool_name: str) -> str:
+    """Render the pre-built refusal for a terminal tool_input block.
+
+    Args:
+        decision: The guardrail decision (supplies matched text + rule name).
+        tool_name: The tool whose call was blocked.
+
+    Returns:
+        The localized refusal string. Locale follows the matched content's language.
+    """
+    matched = decision.matched_texts[0] if decision.matched_texts else ""
+    tpl = GUARDRAIL_TOOL_INPUT_REFUSAL_TPL[_guardrail_locale(matched)]
+    return tpl.format(matched=matched or "", rule=decision.rule_name or "", tool=tool_name or "")
+
+
 class VerificationController:
     """Layered verification for critical ReAct events and final answers."""
 
@@ -100,6 +820,12 @@ class VerificationController:
         self.agent_name = agent_name
         self.model = model
         self.logger = logger
+
+        # Instantiate the guardrail engine if guardrail config is present and enabled.
+        self.guardrail_engine: Optional[GuardrailEngine] = None
+        guardrail_cfg = getattr(config, "guardrail_config", None)
+        if guardrail_cfg and guardrail_cfg.enabled:
+            self.guardrail_engine = GuardrailEngine(guardrail_cfg)
 
     def is_enabled(self) -> bool:
         return bool(self.config and self.config.enabled)

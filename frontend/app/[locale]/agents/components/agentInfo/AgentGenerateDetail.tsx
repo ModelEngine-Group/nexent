@@ -44,6 +44,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
+import GuardrailConfigPanel from "./GuardrailConfigPanel";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
@@ -1174,6 +1175,27 @@ export default function AgentGenerateDetail({}) {
                           }
                         />
                       </Form.Item>
+
+                      {/* Guardrail configuration panel — panel has its own header, no Form.Item label needed */}
+                      <div className="mb-3">
+                        <GuardrailConfigPanel
+                          config={
+                            (editedAgent.verification_config?.guardrail_config) || {
+                              enabled: false,
+                              rules: [],
+                              default_action: "pass",
+                            }
+                          }
+                          onChange={(guardrailConfig) => {
+                            updateAgentConfig({
+                              verification_config: {
+                                ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+                                guardrail_config: guardrailConfig,
+                              },
+                            });
+                          }}
+                        />
+                      </div>
                     </Form>
                   </Col>
                 </Row>
