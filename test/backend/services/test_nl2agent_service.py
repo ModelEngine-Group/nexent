@@ -1255,7 +1255,22 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
             {
                 "server": {
                     "name": "github",
-                    "remotes": [{"url": "https://mcp.example/sse", "type": "sse"}],
+                    "remotes": [
+                        {
+                            "url": "https://{workspace}.example/sse",
+                            "type": "sse",
+                            "variables": [
+                                {"name": "workspace", "isRequired": True}
+                            ],
+                            "headers": [
+                                {
+                                    "name": "Authorization",
+                                    "isRequired": True,
+                                    "isSecret": True,
+                                }
+                            ],
+                        }
+                    ],
                 }
             }
         ],
@@ -1271,7 +1286,7 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
     record = {
         "mcp_id": 5,
         "mcp_name": "github",
-        "mcp_server": "https://mcp.example/sse",
+        "mcp_server": "https://old.example/sse",
         "registry_json": {"nl2agent_installation_key": installation_key},
     }
     monkeypatch.setattr(
@@ -1296,6 +1311,8 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
     )
     add_mcp = AsyncMock()
     monkeypatch.setattr(nl2agent_service, "add_mcp_service", add_mcp)
+    update_mcp = AsyncMock()
+    monkeypatch.setattr(nl2agent_service, "update_mcp_service", update_mcp)
     monkeypatch.setattr(
         nl2agent_service,
         "get_tool_from_remote_mcp_server",
@@ -1311,13 +1328,29 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
         agent_id=202,
         recommendation_id="registry:github",
         option_id="remote-0",
-        config_values={"fields": {}},
+        config_values={
+            "fields": {
+                "variable:workspace:0": "corrected",
+                "header:Authorization:0": "corrected-token",
+            }
+        },
         tenant_id="tenant_1",
         user_id="user_1",
     )
 
     assert result["mcp_id"] == 5
     add_mcp.assert_not_called()
+    update_mcp.assert_awaited_once_with(
+        tenant_id="tenant_1",
+        user_id="user_1",
+        mcp_id=5,
+        new_name="github",
+        description="",
+        server_url="https://corrected.example/sse",
+        authorization_token="corrected-token",
+        custom_headers=None,
+        tags=[],
+    )
     workflow = nl2agent_session_catalog.get_nl2agent_session_state(
         "tenant_1", 202
     )["mcp_workflows"]["registry:github"]
@@ -1449,6 +1482,118 @@ async def test_install_recommended_package_preserves_registry_arguments_and_envi
     assert server.command == "npx"
     assert server.args == ["--yes", "@example/package-mcp", "--mode=safe"]
     assert server.env == {"REGION": "eu"}
+
+
+@pytest.mark.asyncio
+async def test_install_recommended_package_reconfigures_existing_container(
+    monkeypatch,
+):
+    catalogs = {
+        "tool_catalog": [],
+        "skill_catalog": [],
+        "community_results": [],
+        "official_skills": [],
+        "registry_results": [
+            {
+                "server": {
+                    "name": "package-mcp",
+                    "packages": [
+                        {
+                            "registryType": "npm",
+                            "runtimeHint": "npx",
+                            "identifier": "@example/package-mcp",
+                            "transport": {"type": "stdio"},
+                            "environmentVariables": [
+                                {"name": "REGION", "value": "eu"}
+                            ],
+                        }
+                    ],
+                }
+            }
+        ],
+    }
+    installation_key = nl2agent_service._mcp_installation_key(
+        202,
+        "registry:package-mcp",
+        "package-0",
+    )
+    record = {
+        "mcp_id": 6,
+        "mcp_name": "package-mcp",
+        "mcp_server": "http://old-container/mcp",
+        "registry_json": {"nl2agent_installation_key": installation_key},
+    }
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1",
+        202,
+        catalogs,
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_nl2agent_session_catalogs",
+        MagicMock(return_value=catalogs),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_mcp_records_by_tenant",
+        MagicMock(return_value=[record]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_mcp_record_by_id_and_tenant",
+        MagicMock(return_value=record),
+    )
+    add_container = AsyncMock()
+    reconfigure_container = AsyncMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "add_container_mcp_service",
+        add_container,
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "reconfigure_container_mcp_service",
+        reconfigure_container,
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_tool_from_remote_mcp_server",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "upsert_discovered_mcp_tools",
+        MagicMock(return_value=[]),
+    )
+
+    result = await nl2agent_service.install_recommended_mcp(
+        agent_id=202,
+        recommendation_id="registry:package-mcp",
+        option_id="package-0",
+        config_values={
+            "fields": {
+                "environment:REGION:0": "us",
+                "container:port:0": "5011",
+            }
+        },
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["mcp_id"] == 6
+    add_container.assert_not_called()
+    reconfigure_container.assert_awaited_once()
+    kwargs = reconfigure_container.call_args.kwargs
+    assert kwargs["mcp_id"] == 6
+    assert kwargs["port"] == 5011
+    assert kwargs["mcp_config"].mcpServers["package-mcp"].env == {
+        "REGION": "us"
+    }
 
 
 @pytest.mark.asyncio

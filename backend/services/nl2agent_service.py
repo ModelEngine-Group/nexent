@@ -137,6 +137,8 @@ from utils.nl2agent_card_validation import message_contains_valid_card
 from services.remote_mcp_service import (
     add_container_mcp_service,
     add_mcp_service,
+    reconfigure_container_mcp_service,
+    update_mcp_service,
 )
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.skill_service import (
@@ -721,6 +723,8 @@ def _mcp_installation_dependencies() -> McpInstallationDependencies:
         get_mcp_records=get_mcp_records_by_tenant,
         add_remote_mcp=add_mcp_service,
         add_container_mcp=add_container_mcp_service,
+        update_remote_mcp=update_mcp_service,
+        reconfigure_container_mcp=reconfigure_container_mcp_service,
         get_mcp_record=get_mcp_record_by_id_and_tenant,
         discover_tools=get_tool_from_remote_mcp_server,
         upsert_discovered_tools=upsert_discovered_mcp_tools,

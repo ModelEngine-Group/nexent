@@ -24,6 +24,7 @@ from database.remote_mcp_db import (
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
     update_mcp_record_manage_fields_by_id,
+    update_mcp_record_installation_config_by_id,
     update_mcp_record_enabled_by_id,
     update_mcp_record_container_fields_by_id,
     update_mcp_record_status_by_id,
@@ -409,6 +410,55 @@ async def add_container_mcp_service(
         "host_port": container_info.get("host_port"),
         "mcp_id": mcp_id,
     }
+
+
+async def reconfigure_container_mcp_service(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+    name: str,
+    description: str | None,
+    source: str,
+    tags: list | None,
+    authorization_token: str | None,
+    registry_json: dict,
+    port: int,
+    mcp_config: MCPConfigRequest,
+) -> None:
+    """Rebuild an existing container MCP from corrected installation values."""
+    current_record = get_mcp_record_by_id_and_tenant(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+    )
+    if not current_record:
+        raise McpNotFoundError("MCP record not found")
+
+    await update_mcp_service_enabled(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        mcp_id=mcp_id,
+        enabled=False,
+    )
+    update_mcp_record_installation_config_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name=name,
+        description=description,
+        tags=tags,
+        source=source,
+        authorization_token=authorization_token,
+        registry_json=registry_json,
+        config_json=mcp_config.model_dump(exclude_none=True),
+        container_port=port,
+    )
+    await update_mcp_service_enabled(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        mcp_id=mcp_id,
+        enabled=True,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,8 @@ class McpInstallationDependencies:
     get_mcp_records: Callable[..., List[Dict[str, Any]]]
     add_remote_mcp: Callable[..., Awaitable[int]]
     add_container_mcp: Callable[..., Awaitable[Dict[str, Any]]]
+    update_remote_mcp: Callable[..., Awaitable[None]]
+    reconfigure_container_mcp: Callable[..., Awaitable[None]]
     get_mcp_record: Callable[..., Optional[Dict[str, Any]]]
     discover_tools: Callable[..., Awaitable[List[Any]]]
     upsert_discovered_tools: Callable[..., List[Dict[str, Any]]]
@@ -367,6 +369,17 @@ async def _install_remote(
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
     if existing_mcp_id is not None:
+        await dependencies.update_remote_mcp(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            mcp_id=existing_mcp_id,
+            new_name=name,
+            description=description,
+            server_url=str(server_url),
+            authorization_token=authorization_token,
+            custom_headers=custom_headers or None,
+            tags=raw.get("tags") or [],
+        )
         return existing_mcp_id
     return await dependencies.add_remote_mcp(
         tenant_id=tenant_id,
@@ -440,7 +453,21 @@ async def _install_container(
         raise AgentRunException("MCP container port must be between 1 and 65535.")
     if not isinstance(config_json, dict):
         raise AgentRunException("This MCP requires container configuration and a port.")
+    mcp_config = MCPConfigRequest(**config_json)
     if existing_mcp_id is not None:
+        await dependencies.reconfigure_container_mcp(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            mcp_id=existing_mcp_id,
+            name=name,
+            description=description,
+            source=persisted_source,
+            tags=raw.get("tags") or [],
+            authorization_token=authorization_token,
+            registry_json=persisted_registry_json,
+            port=port_number,
+            mcp_config=mcp_config,
+        )
         return existing_mcp_id
     result = await dependencies.add_container_mcp(
         tenant_id=tenant_id,
@@ -452,7 +479,7 @@ async def _install_container(
         authorization_token=authorization_token,
         registry_json=persisted_registry_json,
         port=port_number,
-        mcp_config=MCPConfigRequest(**config_json),
+        mcp_config=mcp_config,
     )
     return int(result["mcp_id"])
 

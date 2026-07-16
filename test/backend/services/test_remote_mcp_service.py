@@ -53,6 +53,7 @@ from backend.services.remote_mcp_service import (
     add_remote_mcp_server_list,
     add_mcp_service,
     add_container_mcp_service,
+    reconfigure_container_mcp_service,
     update_remote_mcp_server_list,
     update_mcp_service,
     update_mcp_service_enabled,
@@ -564,6 +565,65 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
                 call_args[1]['custom_headers'],
                 {"X-Container-Custom": "container-value"}
             )
+
+
+class TestReconfigureContainerMcpService(unittest.IsolatedAsyncioTestCase):
+    """Corrected container values are persisted before the rebuild."""
+
+    @patch('backend.services.remote_mcp_service.update_mcp_service_enabled', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.update_mcp_record_installation_config_by_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_reconfigure_persists_then_rebuilds(
+        self,
+        mock_get_record,
+        mock_update_config,
+        mock_set_enabled,
+    ):
+        mock_get_record.return_value = {
+            "mcp_id": 9,
+            "container_id": "old-container",
+        }
+        mcp_config = MCPConfigRequest(
+            mcpServers={
+                "service": {
+                    "command": "npx",
+                    "args": ["package"],
+                    "env": {"TOKEN": "corrected"},
+                }
+            }
+        )
+
+        await reconfigure_container_mcp_service(
+            tenant_id="tenant",
+            user_id="user",
+            mcp_id=9,
+            name="service",
+            description="description",
+            source="mcp_registry",
+            tags=["tag"],
+            authorization_token="corrected-token",
+            registry_json={"nl2agent_installation_key": "stable"},
+            port=5011,
+            mcp_config=mcp_config,
+        )
+
+        self.assertEqual(
+            [call.kwargs["enabled"] for call in mock_set_enabled.await_args_list],
+            [False, True],
+        )
+        mock_update_config.assert_called_once_with(
+            mcp_id=9,
+            tenant_id="tenant",
+            user_id="user",
+            name="service",
+            description="description",
+            tags=["tag"],
+            source="mcp_registry",
+            authorization_token="corrected-token",
+            registry_json={"nl2agent_installation_key": "stable"},
+            config_json=mcp_config.model_dump(exclude_none=True),
+            container_port=5011,
+        )
 
 
 # ============================================================================

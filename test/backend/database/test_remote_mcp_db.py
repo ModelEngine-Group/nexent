@@ -74,6 +74,7 @@ from backend.database.remote_mcp_db import (
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
     update_mcp_record_manage_fields_by_id,
+    update_mcp_record_installation_config_by_id,
     update_mcp_record_enabled_by_id,
     update_mcp_record_status_by_id,
     update_mcp_record_container_fields_by_id,
@@ -137,7 +138,6 @@ def test_create_mcp_record_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.remote_mcp_db.filter_property", lambda data, model: data)
     record = MagicMock(mcp_id=12)
     monkeypatch.setattr("backend.database.remote_mcp_db.McpRecord", lambda **kwargs: record)
     monkeypatch.setattr(
@@ -160,7 +160,6 @@ def test_create_mcp_record_with_custom_headers(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.remote_mcp_db.filter_property", lambda data, model: data)
 
     captured_kwargs = {}
 
@@ -191,7 +190,6 @@ def test_create_mcp_record_failure(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.remote_mcp_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.remote_mcp_db.McpRecord", lambda **kwargs: MagicMock())
 
     with pytest.raises(SQLAlchemyError):
@@ -429,6 +427,41 @@ def test_update_mcp_record_manage_fields_by_id_with_custom_headers(monkeypatch, 
     assert call_args["custom_headers"] == custom_headers
     assert call_args["mcp_name"] == "new-name"
     assert call_args["authorization_token"] == "new_token"
+
+
+def test_update_mcp_record_installation_config_by_id(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_update = MagicMock()
+    query.filter.return_value.update = mock_update
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session",
+        lambda: mock_ctx,
+    )
+
+    update_mcp_record_installation_config_by_id(
+        mcp_id=9,
+        tenant_id="tenant",
+        user_id="user",
+        name="corrected",
+        description="description",
+        tags=["tag"],
+        source="mcp_registry",
+        authorization_token="token",
+        registry_json={"nl2agent_installation_key": "stable"},
+        config_json={"mcpServers": {}},
+        container_port=5011,
+    )
+
+    values = mock_update.call_args.args[0]
+    assert values["mcp_name"] == "corrected"
+    assert values["registry_json"] == {
+        "nl2agent_installation_key": "stable"
+    }
+    assert values["config_json"] == {"mcpServers": {}}
+    assert values["container_port"] == 5011
 
 
 # ============================================================================
@@ -995,7 +1028,6 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.remote_mcp_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.remote_mcp_db.McpRecord", MagicMock())
 
     # 1. Create
