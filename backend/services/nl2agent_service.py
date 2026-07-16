@@ -33,10 +33,8 @@ from agents.nl2agent_session_catalog import (
     confirm_requirements_summary,
     confirm_agent_identity,
     delete_nl2agent_session_catalogs,
-    find_mcp_workflow_by_id,
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
-    get_workflow_summary,
     initialize_nl2agent_session_state,
     mutate_nl2agent_session_catalogs,
     register_recommendation_batch,
@@ -52,6 +50,7 @@ from agents.nl2agent_session_catalog import (
     reserve_mcp_binding_operation,
     set_nl2agent_session_catalogs,
     set_model_selection_confirmed,
+    summarize_workflow_state,
     update_mcp_workflow,
 )
 from consts.const import LANGUAGE
@@ -812,7 +811,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         get_owned_draft=_owned_draft_reader(user_id),
         register_online_batch=register_online_recommendation_batch,
         get_session_state=get_nl2agent_session_state,
-        get_workflow_summary=get_workflow_summary,
+        summarize_workflow_state=summarize_workflow_state,
         get_message=get_message,
         get_latest_assistant_message_id=get_latest_assistant_message_id,
         message_contains_valid_card=message_contains_valid_card,
@@ -1100,4 +1099,3 @@ def seed_nl2agent_default_agent(
 ) -> Optional[int]:
     """Seed or repair the built-in builder through the focused seed service."""
     return seed_default_agent(_seed_dependencies(), tenant_id, user_id)
-    (find_mcp_workflow_by_id,)

@@ -261,10 +261,17 @@ def _mutate_session_state(
     )
 
 
+def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate a workflow snapshot without loading Redis again."""
+    return evaluate_workflow(Nl2AgentWorkflowState.model_validate(state)).model_dump(
+        mode="json"
+    )
+
+
 def get_workflow_summary(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> Dict[str, Any]:
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     state = _parse_session_state(get_redis_service().client.get(_state_key(tenant, draft_id)), tenant, draft_id)
-    return evaluate_workflow(state).model_dump(mode="json")
+    return summarize_workflow_state(state.model_dump(mode="json"))
 
 
 def _ensure_workflow_action_allowed(summary: Dict[str, Any], action: str) -> None:

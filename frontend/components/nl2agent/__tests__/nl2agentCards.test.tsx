@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import React from "react";
 import {
+  parseNl2AgentDraftMap,
   resolveNl2AgentCardAgentId,
   resolveNl2AgentDraftAgentId,
 } from "@/lib/chat/nl2agentDraftContext";
@@ -34,9 +35,21 @@ import { getOnlineConfigurationBlockers } from "../OnlineConfigurationBar";
 import type { Nl2AgentSessionState } from "@/services/nl2agentService";
 import { validateNl2AgentCards } from "../cardValidation";
 
+type RenderedCardTestProps = {
+  agentId: number;
+  children: React.ReactNode;
+  data: { agent_id?: number };
+  item: { name?: string };
+  recommendationBatchId: string;
+  skills: unknown[];
+  suggestedDisplayName: string;
+  summary: unknown;
+  tools: unknown[];
+};
+
 function assertElement(
   node: React.ReactNode
-): asserts node is React.ReactElement<any> {
+): asserts node is React.ReactElement<RenderedCardTestProps> {
   assert.equal(React.isValidElement(node), true);
 }
 
@@ -55,6 +68,20 @@ const readyMcpOption = {
   supported: true,
   status: "ready" as const,
 };
+
+describe("parseNl2AgentDraftMap", () => {
+  it("rejects non-object JSON and keeps only positive integer mappings", () => {
+    assert.deepEqual(parseNl2AgentDraftMap("null"), {});
+    assert.deepEqual(parseNl2AgentDraftMap("[]"), {});
+    assert.deepEqual(parseNl2AgentDraftMap("invalid"), {});
+    assert.deepEqual(
+      parseNl2AgentDraftMap(
+        JSON.stringify({ 10: 20, bad: 30, 40: -1, 50: "60" })
+      ),
+      { 10: 20, 50: 60 }
+    );
+  });
+});
 
 describe("tryRenderNl2AgentCard", () => {
   it("exposes the effective verification configuration in final review", () => {

@@ -34,7 +34,7 @@ class WorkflowDependencies:
     get_owned_draft: Callable[..., Dict[str, Any]]
     register_online_batch: Callable[..., Dict[str, Any]]
     get_session_state: Callable[..., Dict[str, Any]]
-    get_workflow_summary: Callable[..., Dict[str, Any]]
+    summarize_workflow_state: Callable[[Dict[str, Any]], Dict[str, Any]]
     get_message: Callable[..., Optional[Dict[str, Any]]]
     get_latest_assistant_message_id: Callable[..., Optional[int]]
     message_contains_valid_card: Callable[..., bool]
@@ -124,7 +124,7 @@ async def report_card_delivery(
             "The persisted assistant message does not contain the reported valid NL2AGENT card."
         )
 
-    summary = dependencies.get_workflow_summary(tenant_id, agent_id)
+    summary = dependencies.summarize_workflow_state(state)
     if card_type not in summary["expected_card_types"]:
         existing = state.get("card_delivery", {}).get(card_type) or {}
         is_idempotent_receipt = (
@@ -281,7 +281,7 @@ async def get_session_state(
         )
     )
     workflow_state = deepcopy(dependencies.get_session_state(tenant_id, agent_id))
-    workflow_summary = dependencies.get_workflow_summary(tenant_id, agent_id)
+    workflow_summary = dependencies.summarize_workflow_state(workflow_state)
     for batch in workflow_state.get("recommendation_batches", {}).values():
         batch.pop("operation_id", None)
         if batch.get("status") == "applying":

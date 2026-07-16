@@ -171,9 +171,13 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
     setStateError(null);
     try {
       setSessionState(await getNl2AgentSessionState(agentId));
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSessionState(null);
-      setStateError(error?.message || "Failed to load persisted agent state.");
+      setStateError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load persisted agent state."
+      );
     } finally {
       setStateLoading(false);
     }
@@ -216,9 +220,9 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
         t("nl2agent.finalize.published", "Agent published successfully!")
       );
       router.push(`/${locale}/agents?agent_id=${agentId}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       message.error(
-        error?.message ||
+        (error instanceof Error && error.message) ||
           t(
             "nl2agent.finalize.error",
             "Failed to publish agent. Please try again."

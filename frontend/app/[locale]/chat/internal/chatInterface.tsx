@@ -47,7 +47,10 @@ import {
   StreamingMessage,
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
-import { resolveNl2AgentDraftAgentId } from "@/lib/chat/nl2agentDraftContext";
+import {
+  parseNl2AgentDraftMap,
+  resolveNl2AgentDraftAgentId,
+} from "@/lib/chat/nl2agentDraftContext";
 import { Nl2AgentWorkflowProvider } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
   isNl2AgentAutoContinueText,
@@ -71,11 +74,7 @@ const parseStoredNumber = (value: string | null): number | null => {
 
 const readNl2AgentDraftMap = (): Record<string, number> => {
   if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(localStorage.getItem(NL2AGENT_DRAFT_MAP_KEY) || "{}");
-  } catch {
-    return {};
-  }
+  return parseNl2AgentDraftMap(localStorage.getItem(NL2AGENT_DRAFT_MAP_KEY));
 };
 
 const persistNl2AgentDraftForConversation = (

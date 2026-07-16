@@ -3848,6 +3848,14 @@ async def test_local_skip_returns_automatic_continuation_text(monkeypatch):
 async def test_get_session_state_returns_generated_name_when_candidate_is_available(
     monkeypatch,
 ):
+    session_state_reader = MagicMock(
+        side_effect=nl2agent_session_catalog.get_nl2agent_session_state
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_nl2agent_session_state",
+        session_state_reader,
+    )
     monkeypatch.setattr(
         nl2agent_service,
         "_get_owned_draft",
@@ -3922,6 +3930,7 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
         }
     ]
     assert result["invalid_references"] == []
+    session_state_reader.assert_called_once_with("tenant_1", 202)
     public_batch = result["resource_review"]["recommendation_batches"]["batch_in_progress"]
     assert public_batch["status"] == "recommendations_ready"
     assert "operation_id" not in public_batch
