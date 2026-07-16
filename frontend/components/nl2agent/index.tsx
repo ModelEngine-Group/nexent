@@ -5,12 +5,13 @@ import { Alert, Button } from "antd";
 import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
 import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
 import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
-import { FinalizeCard } from "./FinalizeCard";
+import { FinalizeCard, type FinalizeCardData } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
 import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import { parseNl2AgentCard, type Nl2AgentCardType } from "./cardValidation";
 
 export const OnlineRecommendationGroup: React.FC<{
@@ -34,47 +35,54 @@ export const OnlineRecommendationGroup: React.FC<{
   registrationEnabled = true,
 }) => {
   const workflow = useNl2AgentWorkflow();
+  const { execute, error } = useNl2AgentCardLifecycle(
+    `online:${agentId}:${resourceType}:${recommendationBatchId}`
+  );
   const serializedKeys = JSON.stringify(itemKeys);
   const [registered, setRegistered] = useState(false);
-  const [registrationError, setRegistrationError] = useState<string>();
 
   const register = useCallback(async () => {
-    if (!recommendationBatchId || !workflow.active || !registrationEnabled)
+    if (
+      registered ||
+      !recommendationBatchId ||
+      !workflow.active ||
+      !registrationEnabled
+    )
       return;
-    workflow.beginAction();
-    setRegistrationError(undefined);
     try {
-      await registerOnlineResourceRecommendations(agentId, {
-        recommendation_batch_id: recommendationBatchId,
-        resource_type: resourceType,
-        item_keys: JSON.parse(serializedKeys),
-      });
-      setRegistered(true);
-      workflow.notifyStateChanged();
-      await onRegistered?.(
-        resourceType === "mcp" ? "web_mcp" : "web_skill",
-        recommendationBatchId
+      await execute(
+        () =>
+          registerOnlineResourceRecommendations(agentId, {
+            recommendation_batch_id: recommendationBatchId,
+            resource_type: resourceType,
+            item_keys: JSON.parse(serializedKeys),
+          }),
+        {
+          onSuccess: async () => {
+            setRegistered(true);
+            await onRegistered?.(
+              resourceType === "mcp" ? "web_mcp" : "web_skill",
+              recommendationBatchId
+            );
+          },
+          notifyStateChanged: true,
+          blockInput: true,
+          retainInputBlockOnError: true,
+        }
       );
-    } catch (error) {
-      setRegistrationError(
-        error instanceof Error
-          ? error.message
-          : "Failed to register online recommendations."
-      );
-    } finally {
-      workflow.endAction();
+    } catch {
+      // The lifecycle exposes registration failure and retry state to the card.
     }
   }, [
     agentId,
+    execute,
     onRegistered,
     recommendationBatchId,
     resourceType,
     serializedKeys,
     workflow.active,
-    workflow.beginAction,
-    workflow.endAction,
-    workflow.notifyStateChanged,
     registrationEnabled,
+    registered,
   ]);
 
   useEffect(() => {
@@ -83,11 +91,11 @@ export const OnlineRecommendationGroup: React.FC<{
 
   return (
     <div>
-      {registrationError && (
+      {error && (
         <Alert
           className="my-2"
           type="error"
-          message={registrationError}
+          message={error}
           action={
             <Button size="small" onClick={() => void register()}>
               Retry registration
@@ -254,16 +262,18 @@ export const tryRenderNl2AgentCard = (
         />
       );
     case "nl2agent-local-resources": {
-      const tools: LocalResourceItem[] = (parsed.tools || []).map((x: any) => ({
-        ...x,
+      const tools = (
+        (parsed.tools ?? []) as Array<Omit<LocalResourceItem, "kind">>
+      ).map((item) => ({
+        ...item,
         kind: "tool" as const,
       }));
-      const skills: LocalResourceItem[] = (parsed.skills || []).map(
-        (x: any) => ({
-          ...x,
-          kind: "skill" as const,
-        })
-      );
+      const skills = (
+        (parsed.skills ?? []) as Array<Omit<LocalResourceItem, "kind">>
+      ).map((item) => ({
+        ...item,
+        kind: "skill" as const,
+      }));
       return (
         <LocalResourcesCard
           agentId={agentId}
@@ -362,10 +372,11 @@ export const tryRenderNl2AgentCard = (
       );
     }
     case "nl2agent-finalize": {
-      // Forward the full agent spec to FinalizeCard so it can display
-      // all fields and call the finalize endpoint on "Publish".
-      const { agent_id, ...rest } = parsed;
-      return <FinalizeCard data={{ agent_id: agentId, ...rest } as any} />;
+      return (
+        <FinalizeCard
+          data={{ ...parsed, agent_id: agentId } as unknown as FinalizeCardData}
+        />
+      );
     }
     default:
       return null;

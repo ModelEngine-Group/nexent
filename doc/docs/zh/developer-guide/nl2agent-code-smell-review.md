@@ -30,8 +30,8 @@
 | 4.1 SDK 全局搜索缓存 | 已解决 | 删除 `_search_cache`；每次 Agent Run 使用 Backend 注入的不可变 Catalog 重新计算。 |
 | 4.2 SDK 误导状态 | 已解决 | 删除 applied/config/searched 等实例状态。 |
 | 5.1/5.2 多套 Schema 与重复解析 | 已解决 | 增加 canonical JSON Schema；Frontend 用 Ajv 一次解析生成 typed card AST。 |
-| 5.3 卡片副作用重复 | 待处理 | 仍需完成统一 `useNl2AgentCardLifecycle`。 |
-| 5.4 前端真实交互测试 | 部分解决 | 已加入 Vitest、jsdom、React Testing Library 并纳入 `check-all`；仍需补齐完整 effect/API/会话切换用例。 |
+| 5.3 卡片副作用重复 | 已解决 | 模型、需求、本地资源、MCP、Skill、身份与联网完成统一使用 conversation/draft/card scoped `useNl2AgentCardLifecycle`。 |
+| 5.4 前端真实交互测试 | 部分解决 | 已加入 Vitest、jsdom、React Testing Library，并覆盖统一生命周期的 busy、continuation、失败重试和输入阻塞；仍需补齐完整 API 与会话切换用例。 |
 
 每个已完成阶段均以独立 Jujutsu commit 提交，并通过对应 Backend、SDK 或 Frontend 聚焦测试。
 
@@ -280,6 +280,8 @@ MCP 安装后 Backend 虽然从 Redis Catalog 删除推荐，SDK 仍可能在 TT
 - 自动续跑多次或完全不触发。
 
 建议建立统一的 card lifecycle reducer 或 mutation hook，并把 conversation/draft/message scope 作为强制 key。
+
+状态：已解决。`useNl2AgentCardLifecycle` 统一管理操作互斥、busy 计数、错误与重试、输入 blocker、状态刷新、隐藏续跑和 Card Delivery scope；各卡片只保留自身数据和展示状态。注册失败可按卡片策略保持输入阻塞，成功重试或卸载时统一释放。
 
 ### 5.4 前端测试没有覆盖真实交互副作用
 

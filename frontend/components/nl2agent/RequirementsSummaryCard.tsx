@@ -18,6 +18,7 @@ import {
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import type { Nl2AgentCardType } from "./cardValidation";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface RequirementsSummaryCardProps {
   agentId: number;
@@ -61,8 +62,8 @@ export const RequirementsSummaryCard: React.FC<
 > = ({ agentId, summary, onRegistered, registrationEnabled = true }) => {
   const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
+  const lifecycle = useNl2AgentCardLifecycle(`requirements:${agentId}`);
   const [loading, setLoading] = useState(true);
-  const [confirming, setConfirming] = useState(false);
   const [registration, setRegistration] =
     useState<RequirementsRegistrationState>();
   const [registrationError, setRegistrationError] = useState<string>();
@@ -73,14 +74,8 @@ export const RequirementsSummaryCard: React.FC<
     [serializedSummary]
   );
   const blockerKey = `requirements-summary:${agentId}`;
-  const {
-    active,
-    beginAction,
-    endAction,
-    notifyStateChanged,
-    setInputBlocked,
-    stateVersion,
-  } = workflow;
+  const { active, setInputBlocked, stateVersion } = workflow;
+  const { execute, pending } = lifecycle;
   const lastStateVersionRef = useRef(stateVersion);
 
   const register = useCallback(
@@ -89,22 +84,24 @@ export const RequirementsSummaryCard: React.FC<
         setLoading(false);
         return;
       }
-      beginAction();
       setLoading(true);
       setRegistrationError(undefined);
       try {
-        const result = await registerRequirementsSummary(
-          agentId,
-          summaryPayload
+        await execute(
+          () => registerRequirementsSummary(agentId, summaryPayload),
+          {
+            onSuccess: async (result) => {
+              setRegistration({
+                status: result.status,
+                fingerprint: result.fingerprint,
+                isCurrent: result.is_current,
+              });
+              setInputBlocked(blockerKey, false);
+              await onRegistered?.("requirements_summary", result.fingerprint);
+            },
+            notifyStateChanged: notify,
+          }
         );
-        setRegistration({
-          status: result.status,
-          fingerprint: result.fingerprint,
-          isCurrent: result.is_current,
-        });
-        setInputBlocked(blockerKey, false);
-        await onRegistered?.("requirements_summary", result.fingerprint);
-        if (notify) notifyStateChanged();
       } catch (registrationError) {
         setRegistration(undefined);
         setRegistrationError(
@@ -118,16 +115,13 @@ export const RequirementsSummaryCard: React.FC<
         setInputBlocked(blockerKey, true);
       } finally {
         setLoading(false);
-        endAction();
       }
     },
     [
       active,
       agentId,
-      beginAction,
       blockerKey,
-      endAction,
-      notifyStateChanged,
+      execute,
       onRegistered,
       registrationEnabled,
       setInputBlocked,
@@ -141,23 +135,24 @@ export const RequirementsSummaryCard: React.FC<
       !active ||
       !registration?.isCurrent ||
       registration.status !== "awaiting_confirmation" ||
-      confirming
+      pending
     ) {
       return;
     }
-    beginAction();
-    setConfirming(true);
     setConfirmationError(undefined);
     try {
-      const result = await confirmRequirementsSummary(
-        agentId,
-        registration.fingerprint
+      await execute(
+        () => confirmRequirementsSummary(agentId, registration.fingerprint),
+        {
+          onSuccess: () => {
+            setRegistration((current) =>
+              current ? { ...current, status: "confirmed" } : current
+            );
+          },
+          notifyStateChanged: true,
+          continuationText: (result) => result.chat_injection_text,
+        }
       );
-      setRegistration((current) =>
-        current ? { ...current, status: "confirmed" } : current
-      );
-      notifyStateChanged();
-      await workflow.continueWithText(result.chat_injection_text);
     } catch (confirmationFailure) {
       setConfirmationError(
         confirmationFailure instanceof Error
@@ -167,21 +162,8 @@ export const RequirementsSummaryCard: React.FC<
               "Failed to confirm the requirements summary."
             )
       );
-    } finally {
-      setConfirming(false);
-      endAction();
     }
-  }, [
-    active,
-    agentId,
-    beginAction,
-    confirming,
-    endAction,
-    notifyStateChanged,
-    registration,
-    t,
-    workflow,
-  ]);
+  }, [active, agentId, execute, pending, registration, t]);
 
   useEffect(() => {
     void register(true);
@@ -277,14 +259,14 @@ export const RequirementsSummaryCard: React.FC<
           ) : null}
           <Button
             type="primary"
-            loading={confirming}
-            disabled={confirming}
+            loading={pending}
+            disabled={pending}
             icon={
-              !confirming ? <CheckCircle2 className="h-3.5 w-3.5" /> : undefined
+              !pending ? <CheckCircle2 className="h-3.5 w-3.5" /> : undefined
             }
             onClick={() => void confirm()}
           >
-            {confirming
+            {pending
               ? t("nl2agent.requirements.confirming", "Confirming…")
               : t("nl2agent.requirements.confirm", "Confirm Requirements")}
           </Button>

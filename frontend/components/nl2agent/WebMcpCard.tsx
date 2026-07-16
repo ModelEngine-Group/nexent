@@ -18,7 +18,7 @@ import {
   installNl2AgentMcp,
   skipNl2AgentMcpTools,
 } from "@/services/nl2agentService";
-import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface WebMcpCardItem {
   recommendation_id?: string;
@@ -115,7 +115,9 @@ const fieldValueIsValid = (
 
 /** Renders the in-chat MCP configuration, installation, and tool-binding flow. */
 export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
-  const workflow = useNl2AgentWorkflow();
+  const lifecycle = useNl2AgentCardLifecycle(
+    `web-mcp:${agentId}:${item.recommendation_id ?? item.name}`
+  );
   const { t } = useTranslation("common");
   const options = item.install_options ?? [];
   const [optionId, setOptionId] = React.useState(
@@ -124,7 +126,6 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
   const [fieldValues, setFieldValues] = React.useState<Record<string, string>>(
     () => initialFieldValues(options[0], item.prefill)
   );
-  const [installing, setInstalling] = React.useState(false);
   const [installError, setInstallError] = React.useState<string>();
   const [installed, setInstalled] = React.useState<{
     mcp_id: number;
@@ -235,62 +236,72 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
         return;
       }
     }
-    workflow.beginAction();
-    setInstalling(true);
     setInstallError(undefined);
     try {
-      const result = await installNl2AgentMcp(agentId, {
-        recommendation_id: item.recommendation_id,
-        option_id: optionId,
-        config_values: {
-          fields: fieldValues,
-        },
-      });
-      setInstalled(result);
-      setSelectedTools(
-        result.tools.map((tool: { tool_id: number }) => tool.tool_id)
+      await lifecycle.execute(
+        () =>
+          installNl2AgentMcp(agentId, {
+            recommendation_id: item.recommendation_id!,
+            option_id: optionId,
+            config_values: {
+              fields: fieldValues,
+            },
+          }),
+        {
+          onSuccess: (result) => {
+            setInstalled(result);
+            setSelectedTools(
+              result.tools.map((tool: { tool_id: number }) => tool.tool_id)
+            );
+            message.success("MCP installed and connected.");
+          },
+          notifyStateChanged: true,
+        }
       );
-      message.success("MCP installed and connected.");
-      workflow.notifyStateChanged();
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "MCP installation failed.";
       setInstallError(errorMessage);
       message.error(errorMessage);
-    } finally {
-      setInstalling(false);
-      workflow.endAction();
     }
   };
 
   const bind = async () => {
     if (!installed) return;
-    workflow.beginAction();
     try {
-      await bindNl2AgentMcpTools(agentId, installed.mcp_id, selectedTools);
-      setBound(true);
-      setInstallError(undefined);
-      message.success("Selected MCP tools are bound to the draft.");
-      workflow.notifyStateChanged();
+      await lifecycle.execute(
+        () => bindNl2AgentMcpTools(agentId, installed.mcp_id, selectedTools),
+        {
+          onSuccess: () => {
+            setBound(true);
+            setInstallError(undefined);
+            message.success("Selected MCP tools are bound to the draft.");
+          },
+          notifyStateChanged: true,
+        }
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "MCP tool binding failed.";
       setInstallError(errorMessage);
       message.error(errorMessage);
-    } finally {
-      workflow.endAction();
     }
   };
 
   const skip = async () => {
     if (!installed) return;
-    workflow.beginAction();
     try {
-      await skipNl2AgentMcpTools(agentId, installed.mcp_id);
-      setSkipped(true);
-      setInstallError(undefined);
-      message.success("MCP tool binding skipped.");
-      workflow.notifyStateChanged();
+      await lifecycle.execute(
+        () => skipNl2AgentMcpTools(agentId, installed.mcp_id),
+        {
+          onSuccess: () => {
+            setSkipped(true);
+            setInstallError(undefined);
+            message.success("MCP tool binding skipped.");
+          },
+          notifyStateChanged: true,
+        }
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -298,8 +309,6 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
           : "Unable to skip MCP tool binding.";
       setInstallError(errorMessage);
       message.error(errorMessage);
-    } finally {
-      workflow.endAction();
     }
   };
 
@@ -343,8 +352,8 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
           <Button
             size="small"
             icon={<Download className="h-3.5 w-3.5" />}
-            loading={installing}
-            disabled={!canInstall || workflow.busy}
+            loading={lifecycle.pending}
+            disabled={!canInstall || lifecycle.pending}
             onClick={install}
           >
             {t("nl2agent.webMcp.install", "Install")}
@@ -486,7 +495,10 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
               size="small"
               type="primary"
               disabled={
-                bound || skipped || selectedTools.length === 0 || workflow.busy
+                bound ||
+                skipped ||
+                selectedTools.length === 0 ||
+                lifecycle.pending
               }
               onClick={bind}
             >
@@ -494,7 +506,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
             </Button>
             <Button
               size="small"
-              disabled={bound || skipped || workflow.busy}
+              disabled={bound || skipped || lifecycle.pending}
               onClick={skip}
             >
               {skipped ? "Binding skipped" : "Skip tool binding"}

@@ -9,6 +9,7 @@ import {
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export const getOnlineConfigurationBlockers = (
   review?: Nl2AgentSessionState["resource_review"]
@@ -40,6 +41,9 @@ export const OnlineConfigurationBar: React.FC<{
   agentId?: number | null;
 }> = ({ agentId }) => {
   const workflow = useNl2AgentWorkflow();
+  const lifecycle = useNl2AgentCardLifecycle(
+    `online-configuration:${agentId ?? "none"}`
+  );
   const [state, setState] = useState<Nl2AgentSessionState>();
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string>();
@@ -93,20 +97,23 @@ export const OnlineConfigurationBar: React.FC<{
 
   const complete = async () => {
     if (!agentId) return;
-    workflow.beginAction();
     try {
-      const result = await completeOnlineResourceConfiguration(agentId);
-      workflow.notifyStateChanged();
-      message.success("Online resource configuration completed.");
-      await workflow.continueWithText(result.chat_injection_text);
+      await lifecycle.execute(
+        () => completeOnlineResourceConfiguration(agentId),
+        {
+          onSuccess: () => {
+            message.success("Online resource configuration completed.");
+          },
+          notifyStateChanged: true,
+          continuationText: (result) => result.chat_injection_text,
+        }
+      );
     } catch (error) {
       message.error(
         error instanceof Error
           ? error.message
           : "Failed to complete online configuration."
       );
-    } finally {
-      workflow.endAction();
     }
   };
 
@@ -127,8 +134,11 @@ export const OnlineConfigurationBar: React.FC<{
       <Button
         type="primary"
         disabled={
-          workflow.busy || missingCatalogs.length > 0 || unresolvedMcpCount > 0
+          lifecycle.pending ||
+          missingCatalogs.length > 0 ||
+          unresolvedMcpCount > 0
         }
+        loading={lifecycle.pending}
         onClick={() => void complete()}
       >
         Complete configuration

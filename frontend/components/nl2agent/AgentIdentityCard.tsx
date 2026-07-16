@@ -8,7 +8,7 @@ import {
   getNl2AgentSessionState,
   saveNl2AgentIdentity,
 } from "@/services/nl2agentService";
-import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface AgentIdentityCardProps {
   agentId: number;
@@ -19,7 +19,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
   agentId,
   suggestedDisplayName,
 }) => {
-  const workflow = useNl2AgentWorkflow();
+  const lifecycle = useNl2AgentCardLifecycle(`identity:${agentId}`);
   const normalizedSuggestion = (suggestedDisplayName || "").trim().slice(0, 50);
   const [displayName, setDisplayName] = useState(normalizedSuggestion);
   const [internalName, setInternalName] = useState("");
@@ -49,18 +49,22 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
       message.warning("Enter an agent display name.");
       return;
     }
-    setLoading(true);
     try {
-      const result = await saveNl2AgentIdentity(agentId, value);
-      setDisplayName(result.display_name);
-      setInternalName(result.internal_name);
-      setSaved(true);
-      message.success("Agent identity saved.");
-      await workflow.continueWithText(result.chat_injection_text);
-    } catch (error: any) {
-      message.error(error?.message || "Failed to save agent identity.");
-    } finally {
-      setLoading(false);
+      await lifecycle.execute(() => saveNl2AgentIdentity(agentId, value), {
+        onSuccess: (result) => {
+          setDisplayName(result.display_name);
+          setInternalName(result.internal_name);
+          setSaved(true);
+          message.success("Agent identity saved.");
+        },
+        continuationText: (result) => result.chat_injection_text,
+      });
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to save agent identity."
+      );
     }
   };
 
@@ -87,7 +91,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
         className="mt-3"
         type="primary"
         size="small"
-        loading={loading}
+        loading={loading || lifecycle.pending}
         disabled={saved || !displayName.trim()}
         onClick={save}
         icon={saved ? <CheckCircle2 className="h-3.5 w-3.5" /> : undefined}

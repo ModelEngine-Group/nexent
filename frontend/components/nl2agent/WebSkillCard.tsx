@@ -8,7 +8,7 @@ import {
   installWebSkill,
   type Nl2AgentInstallWebSkillPayload,
 } from "@/services/nl2agentService";
-import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface WebSkillCardItem {
   skill_id?: number;
@@ -38,14 +38,13 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
   agentId,
   item,
 }) => {
-  const workflow = useNl2AgentWorkflow();
+  const lifecycle = useNl2AgentCardLifecycle(
+    `web-skill:${agentId}:${item.skill_id ?? item.skill_name ?? item.name}`
+  );
   const { t } = useTranslation("common");
-  const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(item.status === "installed");
 
   const handleInstall = async () => {
-    workflow.beginAction();
-    setInstalling(true);
     try {
       const payload: Nl2AgentInstallWebSkillPayload = {
         skill_name: item.skill_name || item.name,
@@ -53,20 +52,22 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
       if (typeof item.skill_id === "number" && item.skill_id > 0) {
         payload.skill_id = item.skill_id;
       }
-      await installWebSkill(agentId, payload);
-      AntMessage.success(
-        t("nl2agent.webSkill.installed", {
-          defaultValue: 'Skill "{{name}}" installed.',
-          name: item.name,
-        })
+      await lifecycle.execute(() => installWebSkill(agentId, payload), {
+        onSuccess: () => {
+          AntMessage.success(
+            t("nl2agent.webSkill.installed", {
+              defaultValue: 'Skill "{{name}}" installed.',
+              name: item.name,
+            })
+          );
+          setInstalled(true);
+        },
+        notifyStateChanged: true,
+      });
+    } catch (error) {
+      AntMessage.error(
+        error instanceof Error ? error.message : "Failed to install skill."
       );
-      setInstalled(true);
-      workflow.notifyStateChanged();
-    } catch (e: any) {
-      AntMessage.error(e?.message || "Failed to install skill.");
-    } finally {
-      setInstalling(false);
-      workflow.endAction();
     }
   };
 
@@ -105,12 +106,12 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
         </div>
         <Button
           size="small"
-          disabled={installed || installing || workflow.busy}
-          loading={installing}
+          disabled={installed || lifecycle.pending}
+          loading={lifecycle.pending}
           icon={
             installed ? (
               <CheckCircle2 className="h-3.5 w-3.5" />
-            ) : installing ? (
+            ) : lifecycle.pending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Download className="h-3.5 w-3.5" />
