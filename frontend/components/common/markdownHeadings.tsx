@@ -2,6 +2,7 @@ import React from "react";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { unified } from "unified";
 import { visit } from "unist-util-visit";
 
 export interface MarkdownHeading {
@@ -56,8 +57,16 @@ const createHeadingIdGenerator = () => {
   };
 };
 
-const extractTextFromMarkdownNode = (node: any): string => {
-  if (!node) return "";
+interface MarkdownTextNode {
+  value?: unknown;
+  depth?: unknown;
+  position?: { start?: { offset?: unknown } };
+  children?: unknown[];
+}
+
+const extractTextFromMarkdownNode = (value: unknown): string => {
+  if (!value || typeof value !== "object") return "";
+  const node = value as MarkdownTextNode;
   if (typeof node.value === "string") return node.value;
   if (Array.isArray(node.children)) {
     return node.children.map(extractTextFromMarkdownNode).join("");
@@ -104,13 +113,12 @@ export const extractParsedMarkdownHeadings = (
   try {
     const createId = createHeadingIdGenerator();
     const headings: ParsedMarkdownHeading[] = [];
-    const { unified } = require("unified") as { unified: () => any };
     const tree = unified()
-      .use(remarkParse)
-      .use(remarkGfm)
-      .use(remarkMath)
+      .use(remarkParse as never)
+      .use(remarkGfm as never)
+      .use(remarkMath as never)
       .parse(content);
-    visit(tree, "heading", (node: any) => {
+    visit(tree, "heading", (node: MarkdownTextNode) => {
       const text = normalizeMarkdownHeadingText(
         extractTextFromMarkdownNode(node)
       );
