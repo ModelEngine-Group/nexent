@@ -23,7 +23,7 @@
 | 2.6 MCP 幂等与补偿 | 已解决 | 稳定 installation key、Redis 安装锁、直接返回 `mcp_id`，支持发现阶段恢复及容器补偿。 |
 | 2.7 Session 初始化补偿 | 已解决 | 先验证 Catalog，再在一个数据库事务创建 draft/Conversation，Redis 与数据库失败双向补偿。 |
 | 3.1 状态机重复 | 已解决 | Backend Workflow Evaluator 统一输出 `current_stage`、`expected_card_types`、`allowed_actions`；Prompt 只消费摘要。 |
-| 3.2 God Service | 进行中 | Publication 与 Local Resource Binding 已拆为专用 Service；Session/Catalog/MCP 仍待完成物理拆分。 |
+| 3.2 God Service | 进行中 | Publication、Local Resource Binding 与 Catalog 已拆为专用 Service；Session/MCP 仍待完成物理拆分。 |
 | 3.3 Catalog 故障伪装为空 | 已解决 | 合法空目录与加载失败分离；加载失败返回带上下文的 503 领域错误。 |
 | 3.4 异常字符串映射 | 已解决 | 使用固定 ErrorCode 的领域异常；App 不再按错误文案匹配状态码。 |
 | 3.5 Finalize 失效参数 | 已解决 | 请求体只保留 proposal、Prompt 和受支持 runtime 字段，额外旧字段直接拒绝。 |

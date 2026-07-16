@@ -52,7 +52,7 @@ from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import (
     AgentRunException,
-    Nl2AgentCatalogUnavailableError,
+    Nl2AgentCatalogUnavailableError as Nl2AgentCatalogUnavailableError,
     Nl2AgentDraftNotFoundError,
     Nl2AgentStaleCardError,
 )
@@ -98,6 +98,12 @@ from services.mcp_management_service import (
     list_community_mcp_services,
     list_registry_mcp_services,
 )
+from services.nl2agent_catalog_service import (
+    CatalogDependencies,
+    load_session_catalogs,
+    recommendation_id as _recommendation_id,
+    redact_mcp_marketplace_metadata,
+)
 from services.nl2agent_publication_service import (
     PublicationDependencies,
     publish_agent,
@@ -122,6 +128,12 @@ from services.tool_configuration_service import list_all_tools
 from utils.prompt_template_utils import get_nl2agent_seed_config
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
+    """Compatibility facade for catalog sanitization."""
+    return redact_mcp_marketplace_metadata(value, parent_key)
+
 
 # Reserved name of the NL2AGENT default agent shipped with the product.
 NL2AGENT_AGENT_NAME = "nl2agent"
@@ -193,9 +205,13 @@ def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
 
 
-def _generate_internal_agent_name(display_name: str, agent_id: int, tenant_id: str) -> str:
+def _generate_internal_agent_name(
+    display_name: str, agent_id: int, tenant_id: str
+) -> str:
     """Generate a valid, tenant-unique internal identifier from a display title."""
-    ascii_name = unicodedata.normalize("NFKD", display_name).encode("ascii", "ignore").decode()
+    ascii_name = (
+        unicodedata.normalize("NFKD", display_name).encode("ascii", "ignore").decode()
+    )
     candidate = re.sub(r"[^A-Za-z0-9]+", "_", ascii_name).strip("_").lower()
     if not candidate or not re.match(r"^[A-Za-z_]", candidate):
         candidate = f"agent_{agent_id}"
@@ -253,7 +269,9 @@ def _get_available_llm_model_ids(tenant_id: str) -> List[int]:
     try:
         records = get_model_records(None, tenant_id) or []
     except Exception as exc:
-        logger.warning(f"Failed to list models for NL2AGENT seed in tenant {tenant_id}: {exc}")
+        logger.warning(
+            f"Failed to list models for NL2AGENT seed in tenant {tenant_id}: {exc}"
+        )
         return []
 
     model_ids: List[int] = []
@@ -290,7 +308,9 @@ def _build_nl2agent_seed_defaults(tenant_id: str) -> Dict[str, Any]:
     return defaults
 
 
-def _ensure_nl2agent_seed_defaults(agent: Dict[str, Any], user_id: str, tenant_id: str) -> None:
+def _ensure_nl2agent_seed_defaults(
+    agent: Dict[str, Any], user_id: str, tenant_id: str
+) -> None:
     """Backfill intended prompt/template/model defaults on existing NL2AGENT rows."""
     agent_id = agent.get("agent_id")
     if not agent_id:
@@ -315,10 +335,16 @@ def _ensure_nl2agent_seed_defaults(agent: Dict[str, Any], user_id: str, tenant_i
             update_values[field] = defaults[field]
 
     desired_model_ids = defaults.get("model_ids") or []
-    if desired_model_ids and _normalize_model_ids(agent.get("model_ids")) != desired_model_ids:
+    if (
+        desired_model_ids
+        and _normalize_model_ids(agent.get("model_ids")) != desired_model_ids
+    ):
         update_values["model_ids"] = desired_model_ids
 
-    if desired_model_ids and agent.get("business_logic_model_id") not in desired_model_ids:
+    if (
+        desired_model_ids
+        and agent.get("business_logic_model_id") not in desired_model_ids
+    ):
         update_values["business_logic_model_id"] = desired_model_ids[0]
 
     if not update_values:
@@ -332,93 +358,25 @@ def _ensure_nl2agent_seed_defaults(agent: Dict[str, Any], user_id: str, tenant_i
             version_no=0,
         )
     except Exception as exc:
-        logger.warning(f"Failed to backfill NL2AGENT seed defaults for agent_id={agent_id}: {exc}")
+        logger.warning(
+            f"Failed to backfill NL2AGENT seed defaults for agent_id={agent_id}: {exc}"
+        )
 
 
 async def _load_session_catalogs(
     tenant_id: str,
 ) -> tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
-    """Load every required catalog, distinguishing valid emptiness from failures."""
-    try:
-        all_tools = list_all_tools(tenant_id=tenant_id, labels=None) or []
-        tool_catalog = [
-            {
-                "tool_id": tool.get("tool_id"),
-                "name": tool.get("name") or tool.get("origin_name") or "",
-                "description": (tool.get("description") or "")[:400],
-                "labels": tool.get("labels") or [],
-                "source": str(tool.get("source") or "").lower(),
-                "category": tool.get("category") or "",
-                "usage": tool.get("usage") or "",
-                "params": tool.get("params") or [],
-            }
-            for tool in all_tools
-            if str(tool.get("source") or "").lower()
-            in {"local", "mcp", "langchain"}
-        ]
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT local Tool catalog is unavailable."
-        ) from exc
-
-    try:
-        tenant_skills = list_tenant_skills(tenant_id=tenant_id) or []
-        skill_catalog = [
-            {
-                "skill_id": skill.get("skill_id"),
-                "name": skill.get("name") or skill.get("skill_name") or "",
-                "description": (skill.get("description") or "")[:400],
-                "tags": skill.get("tags") or [],
-                "config_schema": skill.get("config_schema") or {},
-            }
-            for skill in tenant_skills
-        ]
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT local Skill catalog is unavailable."
-        ) from exc
-
-    try:
-        registry_data = await list_registry_mcp_services(search=None, limit=30)
-        registry_results = _redact_mcp_marketplace_metadata(
-            registry_data.get("servers", registry_data) or []
-        ) if isinstance(registry_data, dict) else []
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT Registry MCP catalog is unavailable."
-        ) from exc
-
-    try:
-        community_data = list_community_mcp_services(search=None, limit=30)
-        community_results = _redact_mcp_marketplace_metadata(
-            community_data.get("items", community_data) or []
-        ) if isinstance(community_data, dict) else []
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT community MCP catalog is unavailable."
-        ) from exc
-
-    try:
-        official_skill_catalog = get_official_skills_with_status(tenant_id=tenant_id) or []
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT official Skill catalog is unavailable."
-        ) from exc
-    resource_missing_names = [
-        str(item.get("skill_name") or item.get("name") or "")
-        for item in official_skill_catalog
-        if item.get("status") == "resource_missing"
-    ]
-    official_skills = [
-        item for item in official_skill_catalog if item.get("status") == "installable"
-    ]
-    return {
-        "tool_catalog": tool_catalog,
-        "skill_catalog": skill_catalog,
-        "registry_results": registry_results,
-        "community_results": community_results,
-        "official_skills": official_skills,
-    }, resource_missing_names
+    """Load catalogs through the focused catalog service."""
+    return await load_session_catalogs(
+        tenant_id,
+        CatalogDependencies(
+            list_all_tools=list_all_tools,
+            list_tenant_skills=list_tenant_skills,
+            list_registry_mcp_services=list_registry_mcp_services,
+            list_community_mcp_services=list_community_mcp_services,
+            get_official_skills_with_status=get_official_skills_with_status,
+        ),
+    )
 
 
 async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str, Any]:
@@ -446,7 +404,9 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
     # contract explicit so callers never confuse the builder agent with the
     # draft target.
     try:
-        nl2agent_agent_id = search_agent_id_by_agent_name(NL2AGENT_AGENT_NAME, tenant_id)
+        nl2agent_agent_id = search_agent_id_by_agent_name(
+            NL2AGENT_AGENT_NAME, tenant_id
+        )
     except ValueError as exc:
         if str(exc) != "agent not found":
             raise
@@ -455,11 +415,17 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
         ) from exc
 
     try:
-        nl2agent_agent = search_agent_info_by_agent_id(agent_id=nl2agent_agent_id, tenant_id=tenant_id)
+        nl2agent_agent = search_agent_info_by_agent_id(
+            agent_id=nl2agent_agent_id, tenant_id=tenant_id
+        )
         if nl2agent_agent:
-            _ensure_nl2agent_seed_defaults(nl2agent_agent, user_id=user_id, tenant_id=tenant_id)
+            _ensure_nl2agent_seed_defaults(
+                nl2agent_agent, user_id=user_id, tenant_id=tenant_id
+            )
     except Exception as exc:
-        logger.warning(f"Failed to verify NL2AGENT prompt template link for tenant {tenant_id}: {exc}")
+        logger.warning(
+            f"Failed to verify NL2AGENT prompt template link for tenant {tenant_id}: {exc}"
+        )
 
     draft_name = f"{DRAFT_AGENT_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
     draft_display_name = "Draft Agent (NL2AGENT)"
@@ -493,7 +459,9 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
             )
             conversation_id = conversation.get("conversation_id")
             if not isinstance(conversation_id, int) or conversation_id <= 0:
-                raise AgentRunException("Conversation creation returned no conversation_id.")
+                raise AgentRunException(
+                    "Conversation creation returned no conversation_id."
+                )
 
             initialize_nl2agent_session_state(
                 tenant_id,
@@ -517,7 +485,9 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
                 )
         if isinstance(exc, AgentRunException):
             raise
-        logger.exception("Failed to initialize NL2AGENT session for tenant_id=%s", tenant_id)
+        logger.exception(
+            "Failed to initialize NL2AGENT session for tenant_id=%s", tenant_id
+        )
         raise AgentRunException("Failed to initialize NL2AGENT session.") from exc
 
     if resource_missing_names:
@@ -572,7 +542,9 @@ async def select_models(
         raise AgentRunException(str(exc)) from exc
     ordered_ids = [int(primary_model_id), *[int(x) for x in fallback_model_ids]]
     if len(ordered_ids) > 5 or len(set(ordered_ids)) != len(ordered_ids):
-        raise AgentRunException("Select one primary model and up to four distinct fallbacks.")
+        raise AgentRunException(
+            "Select one primary model and up to four distinct fallbacks."
+        )
 
     display_names = _validate_available_llm_ids(tenant_id, ordered_ids)
 
@@ -590,7 +562,10 @@ async def select_models(
         "agent_id": agent_id,
         "primary_model_id": ordered_ids[0],
         "fallback_model_ids": ordered_ids[1:],
-        "models": [{"model_id": model_id, "display_name": display_names[model_id]} for model_id in ordered_ids],
+        "models": [
+            {"model_id": model_id, "display_name": display_names[model_id]}
+            for model_id in ordered_ids
+        ],
         "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
@@ -611,10 +586,15 @@ def _validate_available_llm_ids(
             reason = f"Model {model_id} does not exist in this tenant."
         elif str(record.get("model_type") or "").lower() != "llm":
             reason = f"Model {model_id} is not an LLM."
-        elif ModelConnectStatusEnum.get_value(record.get("connect_status")) != ModelConnectStatusEnum.AVAILABLE.value:
+        elif (
+            ModelConnectStatusEnum.get_value(record.get("connect_status"))
+            != ModelConnectStatusEnum.AVAILABLE.value
+        ):
             reason = f"Model {model_id} is currently unavailable."
         else:
-            display_name = str(record.get("display_name") or record.get("model_name") or "").strip()
+            display_name = str(
+                record.get("display_name") or record.get("model_name") or ""
+            ).strip()
             if display_name:
                 display_names[int(model_id)] = display_name
                 continue
@@ -648,7 +628,12 @@ def _resolve_model_summaries(
         if record is None:
             reason = "not_found"
         else:
-            display_name = str(record.get("display_name") or record.get("model_name") or "").strip() or None
+            display_name = (
+                str(
+                    record.get("display_name") or record.get("model_name") or ""
+                ).strip()
+                or None
+            )
             if str(record.get("model_type") or "").lower() != "llm":
                 reason = "not_llm"
             elif (
@@ -696,9 +681,13 @@ def _resolve_resource_summaries(
     """Enrich persisted resource instances and report dangling references."""
     tool_ids = [int(row["tool_id"]) for row in tool_instances]
     skill_ids = [int(row["skill_id"]) for row in skill_instances]
-    tool_info_by_id = {int(row["tool_id"]): row for row in (query_tools_by_ids(tool_ids) if tool_ids else [])}
+    tool_info_by_id = {
+        int(row["tool_id"]): row
+        for row in (query_tools_by_ids(tool_ids) if tool_ids else [])
+    }
     skill_info_by_id = {
-        int(row["skill_id"]): row for row in (query_skills_by_ids(skill_ids, tenant_id) if skill_ids else [])
+        int(row["skill_id"]): row
+        for row in (query_skills_by_ids(skill_ids, tenant_id) if skill_ids else [])
     }
 
     tools: List[Dict[str, Any]] = []
@@ -707,7 +696,9 @@ def _resolve_resource_summaries(
     for instance in tool_instances:
         tool_id = int(instance["tool_id"])
         info = tool_info_by_id.get(tool_id)
-        name = str((info or {}).get("origin_name") or (info or {}).get("name") or "").strip()
+        name = str(
+            (info or {}).get("origin_name") or (info or {}).get("name") or ""
+        ).strip()
         if not info or not name:
             invalid_references.append(
                 {
@@ -760,43 +751,12 @@ def _raise_for_invalid_resource_references(
     if not invalid_references:
         return
     references = ", ".join(
-        f"{item['reference_type']} {item['reference_id']} ({item['reason']})" for item in invalid_references
+        f"{item['reference_type']} {item['reference_id']} ({item['reason']})"
+        for item in invalid_references
     )
     raise AgentRunException(
         f"One or more selected resources are no longer valid: {references}. Reconfigure the draft before finalizing."
     )
-
-
-def _recommendation_id(source: str, item: Dict[str, Any]) -> str:
-    if source == "registry":
-        server = item.get("server") if isinstance(item.get("server"), dict) else item
-        identity = server.get("name") or server.get("id")
-    else:
-        identity = item.get("communityId") or item.get("community_id") or item.get("name")
-    return f"{source}:{identity}"
-
-
-def _redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
-    """Remove credential defaults before marketplace metadata enters Redis or API responses."""
-    if isinstance(value, list):
-        return [_redact_mcp_marketplace_metadata(item, parent_key) for item in value]
-    if not isinstance(value, dict):
-        return deepcopy(value)
-
-    declared_secret = bool(value.get("isSecret"))
-    sanitized: Dict[str, Any] = {}
-    for key, item in value.items():
-        key_text = str(key)
-        secret_container_value = parent_key.lower() in {
-            "env",
-            "headers",
-            "customheaders",
-        } and bool(re.search(r"token|secret|password|api[_-]?key|authorization", key_text, re.I))
-        if (declared_secret and key_text in {"value", "default"}) or secret_container_value:
-            sanitized[key_text] = None
-        else:
-            sanitized[key_text] = _redact_mcp_marketplace_metadata(item, key_text)
-    return sanitized
 
 
 def _resolve_mcp_recommendation(
@@ -841,12 +801,8 @@ async def _install_recommended_mcp(
     user_id: str,
 ) -> Dict[str, Any]:
     """Serialize one stable MCP installation across runtime workers."""
-    installation_key = _mcp_installation_key(
-        agent_id, recommendation_id, option_id
-    )
-    lock_token = acquire_mcp_installation_lock(
-        tenant_id, agent_id, installation_key
-    )
+    installation_key = _mcp_installation_key(agent_id, recommendation_id, option_id)
+    lock_token = acquire_mcp_installation_lock(tenant_id, agent_id, installation_key)
     if not lock_token:
         raise AgentRunException(
             "This MCP installation is already in progress. Retry after it completes."
@@ -885,13 +841,20 @@ async def _perform_recommended_mcp_install(
     source, raw = _resolve_mcp_recommendation(catalogs, recommendation_id)
     normalized = normalize_mcp_candidate(source, raw)
     option = next(
-        (candidate for candidate in normalized.get("install_options", []) if candidate.get("option_id") == option_id),
+        (
+            candidate
+            for candidate in normalized.get("install_options", [])
+            if candidate.get("option_id") == option_id
+        ),
         None,
     )
     if not option:
         raise AgentRunException("Invalid MCP installation option.")
     if not option.get("supported", True):
-        raise AgentRunException(option.get("unsupported_reason") or "This MCP installation option is unsupported.")
+        raise AgentRunException(
+            option.get("unsupported_reason")
+            or "This MCP installation option is unsupported."
+        )
     update_mcp_workflow(
         tenant_id,
         agent_id,
@@ -903,7 +866,11 @@ async def _perform_recommended_mcp_install(
 
     registry_json = raw.get("registryJson") or raw.get("registry_json")
     registry_root = registry_json if isinstance(registry_json, dict) else raw
-    server = registry_root.get("server") if isinstance(registry_root.get("server"), dict) else registry_root
+    server = (
+        registry_root.get("server")
+        if isinstance(registry_root.get("server"), dict)
+        else registry_root
+    )
     name = str(server.get("name") or raw.get("name") or "recommended-mcp")[:100]
     description = str(server.get("description") or raw.get("description") or "")
     field_values = config_values.get("fields") or {}
@@ -915,7 +882,9 @@ async def _perform_recommended_mcp_install(
         if value in (None, ""):
             value = field.get("default")
         if field.get("required") and value in (None, ""):
-            raise AgentRunException(f"Missing required MCP configuration: {field.get('label') or field.get('name')}")
+            raise AgentRunException(
+                f"Missing required MCP configuration: {field.get('label') or field.get('name')}"
+            )
         if value not in (None, ""):
             field_type = field.get("type")
             if field_type == "json" and isinstance(value, str):
@@ -978,19 +947,31 @@ async def _perform_recommended_mcp_install(
         server_url = option.get("server_url_template")
         if not server_url:
             url_field = next(
-                (field for field in option.get("fields", []) if field.get("name") == "server_url"),
+                (
+                    field
+                    for field in option.get("fields", [])
+                    if field.get("name") == "server_url"
+                ),
                 None,
             )
-            server_url = resolved_values.get(url_field.get("key")) if url_field else None
+            server_url = (
+                resolved_values.get(url_field.get("key")) if url_field else None
+            )
         for field in option.get("fields", []):
             if field.get("category") == "variable":
                 value = resolved_values.get(field.get("key"))
                 if value not in (None, ""):
                     variable_name = str(field.get("name"))
-                    server_url = str(server_url).replace("${" + variable_name + "}", str(value))
-                    server_url = str(server_url).replace("{" + variable_name + "}", str(value))
+                    server_url = str(server_url).replace(
+                        "${" + variable_name + "}", str(value)
+                    )
+                    server_url = str(server_url).replace(
+                        "{" + variable_name + "}", str(value)
+                    )
         if not server_url or re.search(r"\{[^{}]+\}", str(server_url)):
-            raise AgentRunException("MCP server URL contains unresolved configuration variables.")
+            raise AgentRunException(
+                "MCP server URL contains unresolved configuration variables."
+            )
         parsed_url = urlparse(str(server_url))
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
@@ -1013,7 +994,9 @@ async def _perform_recommended_mcp_install(
         config_json = deepcopy(raw.get("configJson") or raw.get("config_json"))
         if option_id.startswith("package-"):
             identifier = option.get("package_identifier")
-            runtime = str(option.get("runtime_hint") or option.get("registry_type") or "npx").lower()
+            runtime = str(
+                option.get("runtime_hint") or option.get("registry_type") or "npx"
+            ).lower()
             command_map = {"npm": "npx", "npx": "npx", "pypi": "uvx", "uvx": "uvx"}
             command = command_map.get(runtime, runtime)
             if not identifier or command not in {"npx", "uvx"}:
@@ -1030,18 +1013,28 @@ async def _perform_recommended_mcp_install(
                     env[str(field.get("name"))] = str(value)
                 elif category in {"runtime_argument", "package_argument"}:
                     rendered = str(value)
-                    if field.get("argument_type") == "named" and field.get("argument_name"):
+                    if field.get("argument_type") == "named" and field.get(
+                        "argument_name"
+                    ):
                         rendered = f"{field.get('argument_name')}={rendered}"
-                    (runtime_args if category == "runtime_argument" else package_args).append(rendered)
+                    (
+                        runtime_args if category == "runtime_argument" else package_args
+                    ).append(rendered)
             args = runtime_args
             args.append(identifier)
             args.extend(package_args)
-            config_json = {"mcpServers": {name: {"command": command, "args": args, "env": env}}}
+            config_json = {
+                "mcpServers": {name: {"command": command, "args": args, "env": env}}
+            }
         elif isinstance(config_json, dict):
             server_configs = config_json.get("mcpServers")
             target_config = (
                 next(
-                    (server_config for server_config in server_configs.values() if isinstance(server_config, dict)),
+                    (
+                        server_config
+                        for server_config in server_configs.values()
+                        if isinstance(server_config, dict)
+                    ),
                     None,
                 )
                 if isinstance(server_configs, dict)
@@ -1050,7 +1043,9 @@ async def _perform_recommended_mcp_install(
             if target_config is not None:
                 environment = target_config.setdefault("env", {})
                 if not isinstance(environment, dict):
-                    raise AgentRunException("MCP container environment configuration must be an object.")
+                    raise AgentRunException(
+                        "MCP container environment configuration must be an object."
+                    )
                 for field in option.get("fields", []):
                     if field.get("category") != "environment":
                         continue
@@ -1058,17 +1053,31 @@ async def _perform_recommended_mcp_install(
                     if value not in (None, ""):
                         environment[str(field.get("name"))] = str(value)
         config_field = next(
-            (field for field in option.get("fields", []) if field.get("name") == "config_json"),
+            (
+                field
+                for field in option.get("fields", [])
+                if field.get("name") == "config_json"
+            ),
             None,
         )
         if not isinstance(config_json, dict) and config_field:
             submitted_config = resolved_values.get(config_field.get("key"))
             try:
-                config_json = json.loads(submitted_config) if isinstance(submitted_config, str) else submitted_config
+                config_json = (
+                    json.loads(submitted_config)
+                    if isinstance(submitted_config, str)
+                    else submitted_config
+                )
             except json.JSONDecodeError as exc:
-                raise AgentRunException("MCP container configuration must be valid JSON.") from exc
+                raise AgentRunException(
+                    "MCP container configuration must be valid JSON."
+                ) from exc
         port_field = next(
-            (field for field in option.get("fields", []) if field.get("name") == "port"),
+            (
+                field
+                for field in option.get("fields", [])
+                if field.get("name") == "port"
+            ),
             None,
         )
         port = resolved_values.get(port_field.get("key")) if port_field else None
@@ -1079,7 +1088,9 @@ async def _perform_recommended_mcp_install(
         if not 1 <= port_number <= 65535:
             raise AgentRunException("MCP container port must be between 1 and 65535.")
         if not isinstance(config_json, dict):
-            raise AgentRunException("This MCP requires container configuration and a port.")
+            raise AgentRunException(
+                "This MCP requires container configuration and a port."
+            )
         if mcp_id is None:
             container_result = await add_container_mcp_service(
                 tenant_id=tenant_id,
@@ -1095,9 +1106,11 @@ async def _perform_recommended_mcp_install(
             )
             mcp_id = int(container_result["mcp_id"])
 
-    record = get_mcp_record_by_id_and_tenant(
-        mcp_id=int(mcp_id), tenant_id=tenant_id
-    ) if mcp_id is not None else None
+    record = (
+        get_mcp_record_by_id_and_tenant(mcp_id=int(mcp_id), tenant_id=tenant_id)
+        if mcp_id is not None
+        else None
+    )
     if not record:
         raise AgentRunException("Installed MCP record could not be resolved.")
     mcp_id = int(record["mcp_id"])
@@ -1121,7 +1134,9 @@ async def _perform_recommended_mcp_install(
             mcp_id=mcp_id,
             error="MCP tool discovery failed. Retry to resume discovery.",
         )
-        raise AgentRunException("MCP tool discovery failed. Retry installation.") from exc
+        raise AgentRunException(
+            "MCP tool discovery failed. Retry installation."
+        ) from exc
     update_mcp_workflow(
         tenant_id,
         agent_id,
@@ -1140,10 +1155,14 @@ async def _perform_recommended_mcp_install(
         current: Dict[str, List[Dict[str, Any]]],
     ) -> None:
         current[catalog_key] = [
-            item for item in current.get(catalog_key, []) if _recommendation_id(source, item) != recommendation_id
+            item
+            for item in current.get(catalog_key, [])
+            if _recommendation_id(source, item) != recommendation_id
         ]
 
-    mutate_nl2agent_session_catalogs(tenant_id, agent_id, remove_installed_recommendation)
+    mutate_nl2agent_session_catalogs(
+        tenant_id, agent_id, remove_installed_recommendation
+    )
     return {
         "agent_id": agent_id,
         "mcp_id": mcp_id,
@@ -1194,7 +1213,9 @@ async def install_recommended_mcp(
             logger.exception("Failed to persist NL2AGENT MCP failure state")
         if isinstance(exc, AgentRunException):
             raise
-        raise AgentRunException("MCP installation failed during connection or tool discovery.") from exc
+        raise AgentRunException(
+            "MCP installation failed during connection or tool discovery."
+        ) from exc
 
 
 async def bind_mcp_tools(
@@ -1215,7 +1236,9 @@ async def bind_mcp_tools(
     valid = {
         int(row["tool_id"]): row
         for row in rows
-        if row.get("author") == tenant_id and row.get("source") == "mcp" and row.get("usage") == record.get("mcp_name")
+        if row.get("author") == tenant_id
+        and row.get("source") == "mcp"
+        and row.get("usage") == record.get("mcp_name")
     }
     if set(map(int, tool_ids)) != set(valid):
         raise AgentRunException("One or more tools do not belong to the selected MCP.")
@@ -1367,7 +1390,9 @@ async def report_card_delivery(
     state = get_nl2agent_session_state(tenant_id, agent_id)
     conversation_id = int(state["conversation_id"])
     message = get_message(message_id, user_id=user_id)
-    latest_message_id = get_latest_assistant_message_id(conversation_id, user_id=user_id)
+    latest_message_id = get_latest_assistant_message_id(
+        conversation_id, user_id=user_id
+    )
     if (
         not message
         or int(message.get("conversation_id") or 0) != conversation_id
@@ -1405,7 +1430,9 @@ async def report_card_delivery(
     return response
 
 
-async def confirm_online_resource_configuration(agent_id: int, tenant_id: str) -> Dict[str, Any]:
+async def confirm_online_resource_configuration(
+    agent_id: int, tenant_id: str
+) -> Dict[str, Any]:
     """Persist the user's global decision to finish online configuration."""
     _get_owned_draft(agent_id, tenant_id)
     completed_batch_ids = complete_online_configuration_state(tenant_id, agent_id)
@@ -1417,7 +1444,9 @@ async def confirm_online_resource_configuration(agent_id: int, tenant_id: str) -
     }
 
 
-async def register_requirements_review(agent_id: int, summary: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+async def register_requirements_review(
+    agent_id: int, summary: Dict[str, Any], tenant_id: str
+) -> Dict[str, Any]:
     """Register the rendered five-field requirements summary for one draft."""
     _get_owned_draft(agent_id, tenant_id)
     review = register_requirements_summary(tenant_id, agent_id, summary)
@@ -1437,14 +1466,18 @@ def process_requirements_revision_text(
     text: str,
 ) -> Dict[str, Any]:
     """Process textual requirement revisions only for the seeded NL2AGENT runner."""
-    runner = search_agent_info_by_agent_id(agent_id=runner_agent_id, tenant_id=tenant_id)
+    runner = search_agent_info_by_agent_id(
+        agent_id=runner_agent_id, tenant_id=tenant_id
+    )
     if not runner or runner.get("name") != NL2AGENT_AGENT_NAME:
         return {"intent": "not_applicable"}
     _get_owned_draft(draft_agent_id, tenant_id)
     return apply_requirements_revision_text(tenant_id, draft_agent_id, text)
 
 
-async def confirm_requirements_review(agent_id: int, fingerprint: str, tenant_id: str) -> Dict[str, Any]:
+async def confirm_requirements_review(
+    agent_id: int, fingerprint: str, tenant_id: str
+) -> Dict[str, Any]:
     """Confirm the current registered requirements revision."""
     _get_owned_draft(agent_id, tenant_id)
     review = confirm_requirements_summary(tenant_id, agent_id, fingerprint)
@@ -1459,8 +1492,12 @@ async def confirm_requirements_review(agent_id: int, fingerprint: str, tenant_id
 async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
     """Return authoritative draft models, resource bindings, and review state."""
     draft = _get_owned_draft(agent_id, tenant_id)
-    tool_instances = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
-    skill_instances = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
+    tool_instances = (
+        query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
+    )
+    skill_instances = (
+        query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
+    )
     models, invalid_model_references = _resolve_model_summaries(draft, tenant_id)
     tools, skills, invalid_resource_references = _resolve_resource_summaries(
         tool_instances, skill_instances, tenant_id
@@ -1468,14 +1505,17 @@ async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
     workflow_state = get_nl2agent_session_state(tenant_id, agent_id)
     workflow_summary = get_workflow_summary(tenant_id, agent_id)
     for workflow in workflow_state.get("mcp_workflows", {}).values():
-        discovered_ids = [int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])]
+        discovered_ids = [
+            int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])
+        ]
         discovered_rows = query_tools_by_ids(discovered_ids) if discovered_ids else []
         discovered_by_id = {int(row["tool_id"]): row for row in discovered_rows}
         workflow["discovered_tools"] = [
             {
                 "tool_id": tool_id,
                 "name": discovered_by_id.get(tool_id, {}).get("name") or str(tool_id),
-                "description": discovered_by_id.get(tool_id, {}).get("description") or "",
+                "description": discovered_by_id.get(tool_id, {}).get("description")
+                or "",
             }
             for tool_id in discovered_ids
         ]
@@ -1487,7 +1527,9 @@ async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
         "expected_card_types": workflow_summary["expected_card_types"],
         "allowed_actions": workflow_summary["allowed_actions"],
         "display_name": draft.get("display_name"),
-        "internal_name": _generate_internal_agent_name(draft.get("display_name") or "", agent_id, tenant_id),
+        "internal_name": _generate_internal_agent_name(
+            draft.get("display_name") or "", agent_id, tenant_id
+        ),
         "business_logic_model_id": draft.get("business_logic_model_id"),
         "model_ids": _normalize_model_ids(draft.get("model_ids")),
         "models": models,
@@ -1531,7 +1573,9 @@ async def save_agent_identity(
     return {
         "agent_id": agent_id,
         "display_name": normalized_display_name,
-        "internal_name": _generate_internal_agent_name(normalized_display_name, agent_id, tenant_id),
+        "internal_name": _generate_internal_agent_name(
+            normalized_display_name, agent_id, tenant_id
+        ),
         "identity_confirmed": True,
         "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
@@ -1547,7 +1591,9 @@ def _refresh_official_skill_catalog_after_install(
 ) -> None:
     """Remove an installed Skill from one draft's Redis recommendation catalog."""
     removed_ids = {int(value) for value in [skill_id, *(installed_ids or [])] if value}
-    normalized_name = unicodedata.normalize("NFKC", str(skill_name or "")).casefold().strip()
+    normalized_name = (
+        unicodedata.normalize("NFKC", str(skill_name or "")).casefold().strip()
+    )
 
     def is_installed_recommendation(item: Dict[str, Any]) -> bool:
         item_id = item.get("skill_id")
@@ -1556,7 +1602,11 @@ def _refresh_official_skill_catalog_after_install(
         except (TypeError, ValueError):
             matches_id = False
         item_name = (
-            unicodedata.normalize("NFKC", str(item.get("skill_name") or item.get("name") or "")).casefold().strip()
+            unicodedata.normalize(
+                "NFKC", str(item.get("skill_name") or item.get("name") or "")
+            )
+            .casefold()
+            .strip()
         )
         return matches_id or bool(normalized_name and item_name == normalized_name)
 
@@ -1564,7 +1614,9 @@ def _refresh_official_skill_catalog_after_install(
         catalogs: Dict[str, List[Dict[str, Any]]],
     ) -> None:
         catalogs["official_skills"] = [
-            item for item in catalogs.get("official_skills", []) if not is_installed_recommendation(item)
+            item
+            for item in catalogs.get("official_skills", [])
+            if not is_installed_recommendation(item)
         ]
 
     mutate_nl2agent_session_catalogs(tenant_id, agent_id, remove_installed_skill)
@@ -1579,10 +1631,16 @@ def _require_installable_official_skill_recommendation(
 ) -> Dict[str, Any]:
     """Resolve an install request from the draft's trusted Skill catalog."""
     catalogs = get_nl2agent_session_catalogs(tenant_id, agent_id)
-    normalized_name = unicodedata.normalize("NFKC", str(skill_name or "")).casefold().strip()
+    normalized_name = (
+        unicodedata.normalize("NFKC", str(skill_name or "")).casefold().strip()
+    )
     for item in catalogs.get("official_skills", []):
         item_name = (
-            unicodedata.normalize("NFKC", str(item.get("skill_name") or item.get("name") or "")).casefold().strip()
+            unicodedata.normalize(
+                "NFKC", str(item.get("skill_name") or item.get("name") or "")
+            )
+            .casefold()
+            .strip()
         )
         try:
             matches_id = bool(skill_id and int(item.get("skill_id")) == int(skill_id))
@@ -1593,7 +1651,9 @@ def _require_installable_official_skill_recommendation(
         if item.get("status") != "installable":
             break
         return item
-    raise AgentRunException("The requested Skill is not available for installation in this NL2AGENT session.")
+    raise AgentRunException(
+        "The requested Skill is not available for installation in this NL2AGENT session."
+    )
 
 
 async def install_web_skill(
@@ -1653,7 +1713,9 @@ async def install_web_skill(
         raise AgentRunException("Either skill_name or a positive skill_id is required.")
 
     try:
-        installed = install_skills_for_tenant(skill_ids=[skill_id], tenant_id=tenant_id, user_id=user_id)
+        installed = install_skills_for_tenant(
+            skill_ids=[skill_id], tenant_id=tenant_id, user_id=user_id
+        )
     except Exception as exc:
         logger.error(f"Failed to install web skill {skill_id}: {exc}")
         raise AgentRunException(f"Failed to install skill {skill_id}.") from exc
@@ -1739,6 +1801,7 @@ async def finalize_agent(
         enable_context_manager=enable_context_manager,
     )
 
+
 # ---------------------------------------------------------------------------
 # Startup seeding
 # ---------------------------------------------------------------------------
@@ -1775,7 +1838,9 @@ def seed_nl2agent_default_agent(
         if (agent.get("name") or "") == NL2AGENT_AGENT_NAME:
             existing_id = agent.get("agent_id")
             _ensure_nl2agent_seed_defaults(agent, user_id=user_id, tenant_id=tenant_id)
-            logger.info(f"NL2AGENT default agent already exists (agent_id={existing_id})")
+            logger.info(
+                f"NL2AGENT default agent already exists (agent_id={existing_id})"
+            )
             return existing_id
 
     # 3. Create the NL2AGENT default agent.
@@ -1814,7 +1879,9 @@ def seed_nl2agent_default_agent(
                 version_no=0,
             )
         except Exception as exc:
-            logger.error(f"Failed to bind builtin tool {tool_id} to NL2AGENT agent: {exc}")
+            logger.error(
+                f"Failed to bind builtin tool {tool_id} to NL2AGENT agent: {exc}"
+            )
 
     logger.info(
         f"Seeded NL2AGENT default agent (agent_id={agent_id}) with "
