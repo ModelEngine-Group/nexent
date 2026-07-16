@@ -21,7 +21,8 @@ spec:
       labels:
         app: nexent-data-process
       annotations:
-        checksum/nexent-backend: {{ dig "rolloutChecksums" "backend" "" .Values.global | quote }}
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-data-process-image: {{ dig "rolloutChecksums" "dataProcessImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
       containers:

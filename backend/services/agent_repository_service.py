@@ -91,7 +91,6 @@ def _to_summary_item(
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "status": record.get("status"),
-        "category_id": record.get("category_id"),
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count") or 0,
         "version_label": record.get("version_name"),
@@ -119,13 +118,11 @@ def _matches_repository_listing_search_filter(record: dict, search: str) -> bool
         return True
     name = str(record.get("display_name") or record.get("name") or "").lower()
     description = str(record.get("description") or "").lower()
-    author = str(record.get("author") or "").lower()
     tags = record.get("tags") or []
     tag_text = " ".join(str(tag).lower() for tag in tags if isinstance(tag, str))
     return (
         query in name
         or query in description
-        or query in author
         or query in tag_text
     )
 
@@ -135,7 +132,6 @@ def list_agent_repository_listings_impl(
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
-    category_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
@@ -150,7 +146,6 @@ def list_agent_repository_listings_impl(
         publisher_tenant_id=tenant_id,
         status=status,
         agent_id=agent_id,
-        category_id=category_id,
     )
     if search and search.strip():
         records = [
@@ -224,10 +219,6 @@ def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
         raise ValueError(
             f"icon must be at most {_MAX_LISTING_ICON_LENGTH} characters"
         )
-
-    category_id = repository_data.get("category_id")
-    if category_id is None or not isinstance(category_id, int):
-        raise ValueError("category_id is required and must be an integer")
 
     tags = repository_data.get("tags")
     if tags is None:
@@ -728,7 +719,6 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "description": record.get("description"),
         "author": record.get("author"),
         "submitted_by": record.get("submitted_by"),
-        "category_id": record.get("category_id"),
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count"),
         "version_label": record.get("version_name"),
@@ -850,7 +840,7 @@ async def _build_repository_data_from_agent(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "category_id", "tool_count"):
+        for key in ("icon", "downloads", "tool_count"):
             if key in card_fields and card_fields[key] is not None:
                 repository_data[key] = card_fields[key]
         if "tags" in card_fields and card_fields["tags"] is not None:
@@ -873,7 +863,7 @@ async def create_agent_repository_listing_impl(
     then inserts or updates the marketplace table.
 
     When a listing for the same agent version already exists, its status is
-    updated to pending_review along with icon, tags, and category when provided.
+    updated to pending_review along with icon and tags when provided.
     """
     if version_no < 0:
         raise ValueError("version_no must be >= 0")
@@ -902,7 +892,7 @@ async def create_agent_repository_listing_impl(
     else:
         repository_id = int(existing["agent_repository_id"])
         updates: Dict[str, Any] = {"status": STATUS_PENDING_REVIEW}
-        for key in ("icon", "tags", "category_id", "tool_count"):
+        for key in ("icon", "tags", "tool_count"):
             if key in repository_data:
                 updates[key] = repository_data[key]
         affected = update_agent_repository_by_id(

@@ -53,6 +53,9 @@ bash deploy.sh docker
 您也可以通过参数跳过交互：
 
 ```bash
+# 使用已保存的 deploy.options 或内置默认值，不进入 TUI
+bash deploy.sh docker --defaults
+
 # 默认组件组合，development 端口策略，标准镜像源
 bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
@@ -66,7 +69,7 @@ bash deploy.sh docker --image-source mainland
 bash deploy.sh docker --image-source local-latest
 ```
 
-部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。`--defaults` 会优先复用该文件；文件不存在时使用内置默认值。下次交互部署时可选择复用本地配置或重新全量配置。
 
 
 #### ⚠️ 重要提示
@@ -183,14 +186,22 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+包目录会包含 `images/*.tar`、`load-images.sh`、`push-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
 
-在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
+在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择：
 
 ```bash
 cd offline-package
 bash deploy.sh --load-images docker
 ```
+
+如果需要先推送到内部镜像仓库并使用该前缀部署：
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
+```
+
+启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀；随后 `push-images.sh` 在推送前询问仓库账号和密码。
 
 ## 🔌 端口映射
 
@@ -213,7 +224,7 @@ bash deploy.sh --load-images docker
 
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `deploy/env/.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。前端监控入口在 speed 模式下配置 dashboard URL 后可见；标准模式下仅超级管理员可见。
 
 ```bash
 cd nexent
@@ -236,7 +247,7 @@ bash deploy.sh docker
 如需调整端口、镜像版本或 Langfuse 初始账号，请先复制并编辑监控环境变量：
 
 ```bash
-cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
+cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 ```
 
 常用变量：
@@ -249,7 +260,7 @@ cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/m
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | 本地 Langfuse 初始管理员账号 |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | 本地 Grafana 管理员账号 |
 
-选择 `langsmith` provider 前，请先在 `deploy/docker/assets/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/.env` 中调整 OTLP 目标地址：
+选择 `langsmith` provider 前，请先在 `deploy/env/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/monitoring.env` 中调整 OTLP 目标地址：
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -298,6 +309,11 @@ WECHAT_OAUTH_APP_SECRET=
 # 访问 OAuth provider 时的 TLS 校验
 OAUTH_SSL_VERIFY=true
 OAUTH_CA_BUNDLE=
+
+# disabled: 隐藏 OAuth 登录入口并禁用自动跳转
+# button: 显示已配置的 OAuth 登录按钮
+# force: 恰好配置一个 Provider 时，未登录用户自动跳转
+OAUTH_LOGIN_MODE=button
 ```
 
 Provider 启用规则：
@@ -310,6 +326,8 @@ Provider 启用规则：
 | WeChat | `ENABLE_WECHAT_OAUTH=true`、`WECHAT_OAUTH_APP_ID`、`WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 本地默认回调示例为 `http://localhost:3000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，例如 `https://nexent.example.com/api/user/oauth/callback?provider=github`，并在 OAuth provider 控制台中登记相同地址。
+
+`OAUTH_LOGIN_MODE` 支持 `disabled`、`button`、`force`，默认为 `button`。`force` 模式下，恰好有一个 Provider 满足启用条件时，未登录访问 Nexent 会直接跳转到该 Provider；没有可用 Provider 时禁用 OAuth，多个 Provider 时回退到登录按钮。若同时配置了 CAS `force` 模式，CAS 优先。
 
 ### CAS 登录配置
 

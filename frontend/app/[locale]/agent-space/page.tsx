@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   App,
   Button,
@@ -29,11 +30,7 @@ import {
   mapRepositoryListingDetail,
   type AgentDetailModalData,
 } from "@/lib/agentRepositoryDetail";
-import { AGENT_REPOSITORY_CATEGORIES } from "@/const/agentRepository";
-import type { AgentRepositoryCategoryItem, AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
-import {
-  getAgentRepositoryCategoryLabel,
-} from "@/lib/agentRepositoryLabels";
+import type { AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
@@ -62,13 +59,19 @@ const agentRepositoryTheme = {
 export default function AgentRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
+  const searchParams = useSearchParams();
   const { user } = useAuthorizationContext();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
 
-  const [tab, setTab] = useState<AgentRepositoryTab>(AgentRepositoryTab.REPOSITORY);
+  const [tab, setTab] = useState<AgentRepositoryTab>(() => {
+    const backTab = searchParams.get("back_tab");
+    if (backTab === "mine") return AgentRepositoryTab.MINE;
+    if (backTab === "repository") return AgentRepositoryTab.REPOSITORY;
+    if (backTab === "review") return AgentRepositoryTab.REVIEW;
+    return AgentRepositoryTab.REPOSITORY;
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [repositoryPage, setRepositoryPage] = useState(1);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [mineOwnership, setMineOwnership] = useState<MineOwnershipFilter>("all");
   const [minePage, setMinePage] = useState(1);
   const [mineSearch, setMineSearch] = useState("");
@@ -79,32 +82,33 @@ export default function AgentRepositoryPage() {
   const [copyOpen, setCopyOpen] = useState(false);
   const [copyListing, setCopyListing] = useState<AgentRepositoryListingItem | null>(null);
 
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === AgentRepositoryTab.MINE) {
+      setTab(AgentRepositoryTab.MINE);
+      return;
+    }
+    if (tabParam === AgentRepositoryTab.REPOSITORY) {
+      setTab(AgentRepositoryTab.REPOSITORY);
+      return;
+    }
+    if (tabParam === AgentRepositoryTab.REVIEW && isAdmin) {
+      setTab(AgentRepositoryTab.REVIEW);
+    }
+  }, [searchParams, isAdmin]);
+
   const isRepositoryTab = tab === AgentRepositoryTab.REPOSITORY;
   const isReviewTab = tab === AgentRepositoryTab.REVIEW;
   const isMineTab = tab === AgentRepositoryTab.MINE;
-
-  const categories = AGENT_REPOSITORY_CATEGORIES;
-
-  const categoryNameById = useMemo(
-    () =>
-      new Map(
-        categories.map((item) => [
-          item.id,
-          getAgentRepositoryCategoryLabel(item, t),
-        ])
-      ),
-    [categories, t]
-  );
 
   const listingParams = useMemo(
     () => ({
       status: "shared" as const,
       page: repositoryPage,
       page_size: REPOSITORY_PAGE_SIZE,
-      ...(selectedCategoryId == null ? {} : { category_id: selectedCategoryId }),
       ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
     }),
-    [repositoryPage, selectedCategoryId, searchQuery]
+    [repositoryPage, searchQuery]
   );
 
   const { data, isLoading, isError, refetch, isFetching } =
@@ -306,11 +310,6 @@ export default function AgentRepositoryPage() {
     setRepositoryPage(1);
   };
 
-  const handleRepositoryCategoryChange = (categoryId: number | null) => {
-    setSelectedCategoryId(categoryId);
-    setRepositoryPage(1);
-  };
-
   return (
     <ConfigProvider theme={agentRepositoryTheme}>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
@@ -392,10 +391,6 @@ export default function AgentRepositoryPage() {
                 <RepositoryView
                   searchQuery={searchQuery}
                   onSearchChange={handleRepositorySearchChange}
-                  categories={categories}
-                  categoryNameById={categoryNameById}
-                  selectedCategoryId={selectedCategoryId}
-                  onCategoryChange={handleRepositoryCategoryChange}
                   isLoading={isLoading}
                   isError={isError}
                   isFetching={isFetching}
@@ -494,10 +489,6 @@ export default function AgentRepositoryPage() {
 function RepositoryView({
   searchQuery,
   onSearchChange,
-  categories,
-  categoryNameById,
-  selectedCategoryId,
-  onCategoryChange,
   isLoading,
   isError,
   isFetching,
@@ -515,10 +506,6 @@ function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  categories: AgentRepositoryCategoryItem[];
-  categoryNameById: Map<number, string>;
-  selectedCategoryId: number | null;
-  onCategoryChange: (categoryId: number | null) => void;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -581,35 +568,6 @@ function RepositoryView({
         />
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          onClick={() => onCategoryChange(null)}
-          className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-            selectedCategoryId == null
-              ? "bg-primary text-white"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          }`}
-        >
-          {t("agentRepository.page.categoryAll")}
-        </button>
-        {categories.map((category) => (
-          <button
-            key={category.id}
-            type="button"
-            onClick={() => onCategoryChange(category.id)}
-            className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              selectedCategoryId === category.id
-                ? "bg-primary text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-            }`}
-          >
-            {categoryNameById.get(category.id) ??
-              getAgentRepositoryCategoryLabel(category, t)}
-          </button>
-        ))}
-      </div>
-
       <p className="text-sm text-slate-500 dark:text-slate-400">
         {t("agentRepository.page.repositoryHint")}
       </p>
@@ -639,11 +597,6 @@ function RepositoryView({
               <div key={listing.agent_repository_id} className="h-full">
                 <AgentRepositoryCard
                   listing={listing}
-                  categoryName={
-                    listing.category_id != null
-                      ? categoryNameById.get(listing.category_id)
-                      : undefined
-                  }
                   showAdminMenu={showAdminMenu}
                   isTakingDown={updatingRepositoryId === listing.agent_repository_id}
                   onCopyClick={onCopyClick}

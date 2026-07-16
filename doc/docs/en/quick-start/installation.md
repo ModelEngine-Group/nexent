@@ -53,6 +53,9 @@ After running the command, the script opens Bash TUI menus for deployment option
 You can also pass options directly:
 
 ```bash
+# Use saved deploy.options or built-in defaults without opening the TUI
+bash deploy.sh docker --defaults
+
 # Default component set, development port policy, standard image source
 bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
@@ -66,7 +69,7 @@ bash deploy.sh docker --image-source mainland
 bash deploy.sh docker --image-source local-latest
 ```
 
-After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. `--defaults` reuses that file when it exists, otherwise it uses built-in defaults. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 #### ⚠️ Important Notes
 
@@ -187,14 +190,22 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+The package directory contains `images/*.tar`, `load-images.sh`, `push-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
-On the target host, keep the deployment options consistent with the package manifest:
+On the target host, the package root `deploy.sh` uses saved `deploy.options` when present, otherwise built-in defaults, and does not open the TUI by default. Add `--config` to open the interactive configuration UI. If the package was built with a custom version, component set, port policy, or image source, pass the same options during deployment or use `--config` to select them interactively:
 
 ```bash
 cd offline-package
 bash deploy.sh --load-images docker
 ```
+
+To push packaged images to an internal registry and deploy with that prefix:
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
+```
+
+When `--push-images` is used without a prefix, `deploy.sh` prompts for the image registry prefix first. `push-images.sh` then prompts for the registry username and password before pushing.
 
 ## 🔌 Port Mapping
 
@@ -217,7 +228,7 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `deploy/env/.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`. The frontend monitoring entry is visible in speed mode when a dashboard URL is configured; in standard mode, only the super administrator can see it.
 
 ```bash
 cd nexent
@@ -240,7 +251,7 @@ Supported providers:
 To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
 
 ```bash
-cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
+cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 ```
 
 Common variables:
@@ -253,7 +264,7 @@ Common variables:
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
 
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/.env`:
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/env/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/monitoring.env`:
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -302,6 +313,11 @@ WECHAT_OAUTH_APP_SECRET=
 # TLS verification when contacting OAuth providers
 OAUTH_SSL_VERIFY=true
 OAUTH_CA_BUNDLE=
+
+# disabled: hide OAuth login entries and disable automatic redirects
+# button: show configured OAuth providers as login buttons
+# force: redirect automatically when exactly one provider is configured
+OAUTH_LOGIN_MODE=button
 ```
 
 Provider enablement rules:
@@ -314,6 +330,8 @@ Provider enablement rules:
 | WeChat | `ENABLE_WECHAT_OAUTH=true`, `WECHAT_OAUTH_APP_ID`, `WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 For local Docker, a GitHub callback example is `http://localhost:3000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain such as `https://nexent.example.com/api/user/oauth/callback?provider=github` and register the exact same URL in the OAuth provider console.
+
+`OAUTH_LOGIN_MODE` supports `disabled`, `button`, and `force`, and defaults to `button`. In `force` mode, unauthenticated users are redirected when exactly one provider is enabled. OAuth is disabled when no provider is available, while multiple providers fall back to login buttons. CAS `force` mode takes precedence when both are configured.
 
 ### CAS Login Configuration
 

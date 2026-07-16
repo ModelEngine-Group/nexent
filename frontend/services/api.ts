@@ -6,6 +6,10 @@ import type {
   AgentRepositoryListingListParams,
   MyEditableAgentListParams,
 } from "@/types/agentRepository";
+import type {
+  MyEditableSkillListParams,
+  SkillRepositoryListingListParams,
+} from "@/types/skillRepository";
 import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
@@ -26,6 +30,7 @@ export const API_ENDPOINTS = {
     updatePassword: `${API_BASE_URL}/user/password`,
   },
   oauth: {
+    config: `${API_BASE_URL}/user/oauth/config`,
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
     link: `${API_BASE_URL}/user/oauth/link`,
@@ -136,6 +141,23 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/prompt_templates/${templateId}`,
     delete: (templateId: number) =>
       `${API_BASE_URL}/prompt_templates/${templateId}`,
+  },
+  evaluationSets: {
+    list: `${API_BASE_URL}/evaluation-sets`,
+    create: `${API_BASE_URL}/evaluation-sets`,
+    detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
+    upload: `${API_BASE_URL}/evaluation-sets/upload`,
+    template: `${API_BASE_URL}/evaluation-sets/template`,
+    delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+  },
+  agentEvaluations: {
+    create: `${API_BASE_URL}/agent-evaluations`,
+    listByAgent: `${API_BASE_URL}/agent-evaluations`,
+    detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
+    delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -266,6 +288,9 @@ export const API_ENDPOINTS = {
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
   },
+  ragflow: {
+    datasets: `${API_BASE_URL}/ragflow/datasets`,
+  },
   idata: {
     knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,
     datasets: `${API_BASE_URL}/idata/datasets`,
@@ -309,10 +334,12 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+    refreshTools: `${API_BASE_URL}/mcp/refresh-tools`,
     portCheck: `${API_BASE_URL}/mcp/port/check`,
     portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
     enable: `${API_BASE_URL}/mcp/enable`,
     disable: `${API_BASE_URL}/mcp/disable`,
+    testConnection: `${API_BASE_URL}/mcp/test-connection`,
   },
   // A2A Client endpoints
   a2a: {
@@ -357,7 +384,9 @@ export const API_ENDPOINTS = {
     official: `${API_BASE_URL}/skills/official`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    getById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     updateUpload: (skillName: string) =>
       `${API_BASE_URL}/skills/${skillName}/upload`,
     delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -382,7 +411,12 @@ export const API_ENDPOINTS = {
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
+    communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
+    communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
+    communityDownload: (marketId: number) =>
+      `${API_BASE_URL}/mcp-tools/community/${marketId}/download`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -413,9 +447,6 @@ export const API_ENDPOINTS = {
       if (params?.status) queryParams.append("status", params.status);
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
-      }
-      if (params?.category_id != null) {
-        queryParams.append("category_id", String(params.category_id));
       }
       if (params?.page != null) {
         queryParams.append("page", String(params.page));
@@ -459,6 +490,60 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+  },
+  skillRepository: {
+    listings: (params?: SkillRepositoryListingListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.status) queryParams.append("status", params.status);
+      if (params?.skill_id != null) {
+        queryParams.append("skill_id", String(params.skill_id));
+      }
+      if (params?.category_id != null) {
+        queryParams.append("category_id", String(params.category_id));
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/skill${queryString ? `?${queryString}` : ""}`;
+    },
+    mineSkills: (params?: MyEditableSkillListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.ownership) {
+        queryParams.append("ownership", params.ownership);
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.new_skill_padding) {
+        queryParams.append("new_skill_padding", "true");
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
+    },
+    detail: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
+    install: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}/install`,
+    updateStatus: (skillRepositoryId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillRepositoryId}/status`,
+    createListing: (skillId: number) =>
+      `${API_BASE_URL}/repository/skill/${skillId}`,
   },
   market: {
     agents: (params?: MarketAgentListParams) => {

@@ -11,7 +11,12 @@ from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
+    NORTHBOUND_RATE_LIMIT_ENABLED,
+    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+)
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
@@ -25,6 +30,7 @@ from services.agent_service import (
     stop_agent_tasks,
     get_agent_id_by_name
 )
+from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
 from services.conversation_management_service import (
     save_conversation_user,
@@ -234,10 +240,8 @@ def _normalize_northbound_attachments(
 # In-memory idempotency and rate limit placeholders
 # -----------------------------
 _IDEMPOTENCY_RUNNING: Dict[str, float] = {}
-_IDEMPOTENCY_TTL_SECONDS_DEFAULT = 10 * 60
 _IDEMPOTENCY_LOCK = asyncio.Lock()
 
-_RATE_LIMIT_PER_MINUTE = 120  # simple default quota per tenant per minute
 _RATE_STATE: Dict[str, Dict[str, int]] = {}
 _RATE_LOCK = asyncio.Lock()
 
@@ -252,10 +256,21 @@ def _minute_bucket(ts: Optional[float] = None) -> str:
 
 
 async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
+    ttl = ttl_seconds or NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
+    if runtime_state_service.enabled:
+        try:
+            acquired = await runtime_state_service.acquire_idempotency_async(key, ttl)
+        except Exception:
+            logger.exception("Northbound idempotency Redis operation failed")
+            raise LimitExceededError("Idempotency service is unavailable. Please try again later.")
+        if not acquired:
+            raise LimitExceededError("Duplicate request is still running, please wait.")
+        return
+
     async with _IDEMPOTENCY_LOCK:
         # purge expired
         now = _now_seconds()
-        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > (ttl_seconds or _IDEMPOTENCY_TTL_SECONDS_DEFAULT)]
+        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > ttl]
         for k in expired:
             _IDEMPOTENCY_RUNNING.pop(k, None)
         if key in _IDEMPOTENCY_RUNNING:
@@ -264,6 +279,13 @@ async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None
 
 
 async def idempotency_end(key: str) -> None:
+    if runtime_state_service.enabled:
+        try:
+            await runtime_state_service.release_idempotency_async(key)
+        except Exception as exc:
+            logger.warning("Northbound idempotency release failed: %s", exc)
+        return
+
     async with _IDEMPOTENCY_LOCK:
         _IDEMPOTENCY_RUNNING.pop(key, None)
 
@@ -274,11 +296,27 @@ async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
 
 
 async def check_and_consume_rate_limit(tenant_id: str) -> None:
+    if not NORTHBOUND_RATE_LIMIT_ENABLED:
+        return
+
+    if runtime_state_service.enabled:
+        try:
+            await runtime_state_service.consume_rate_limit_async(
+                tenant_id=tenant_id,
+                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+            )
+            return
+        except ValueError:
+            raise LimitExceededError("Query rate exceeded limit. Please try again later")
+        except Exception:
+            logger.exception("Northbound rate limit Redis operation failed")
+            raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
+
     bucket = _minute_bucket()
     async with _RATE_LOCK:
         state = _RATE_STATE.setdefault(tenant_id, {})
         count = state.get(bucket, 0)
-        if count >= _RATE_LIMIT_PER_MINUTE:
+        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
             raise LimitExceededError("Query rate exceeded limit. Please try again later")
         state[bucket] = count + 1
         # cleanup old buckets, keep only current
@@ -371,8 +409,8 @@ async def start_streaming_chat(
         except Exception as e:
             raise Exception(f"Failed to persist user message: {str(e)}")
 
-    except LimitExceededError as _:
-        raise LimitExceededError("Query rate exceeded limit. Please try again later.")
+    except LimitExceededError as exc:
+        raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except Exception as e:

@@ -3,6 +3,7 @@ import type {
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
+import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
 
 export type MineCardMenuAction = "apply" | "review" | "reviewUpdate";
 
@@ -204,7 +205,6 @@ export function pickApplyListingPrefillSource(
 
 export interface ApplyListingFormPrefill {
   icon: string | null;
-  categoryId: number | null;
   tags: string[];
 }
 
@@ -228,30 +228,20 @@ function normalizeApplyListingTags(tags: string[], maxTags: number): string[] {
 export function buildApplyListingFormPrefill(
   item: AgentRepositoryListingItem | null,
   options: {
-    allowedIcons: readonly string[];
-    allowedCategoryIds: readonly number[];
     maxTags?: number;
-  }
+  } = {}
 ): ApplyListingFormPrefill | null {
   if (!item) {
     return null;
   }
 
   const maxTags = options.maxTags ?? 5;
-  const allowedIconSet = new Set(options.allowedIcons);
-  const allowedCategorySet = new Set(options.allowedCategoryIds);
+  const trimmedIcon = item.icon?.trim();
 
   const icon =
-    item.icon?.trim() && allowedIconSet.has(item.icon.trim())
-      ? item.icon.trim()
-      : null;
-
-  const categoryId =
-    item.category_id != null && allowedCategorySet.has(item.category_id)
-      ? item.category_id
-      : null;
+    trimmedIcon && isSingleSimpleEmoji(trimmedIcon) ? trimmedIcon : null;
 
   const tags = normalizeApplyListingTags(item.tags ?? [], maxTags);
 
-  return { icon, categoryId, tags };
+  return { icon, tags };
 }

@@ -26,10 +26,6 @@ agent_repository_router = APIRouter(prefix="/repository/agent")
 async def list_agent_repository_listings_api(
     status: Optional[str] = Query(None, description="Filter by listing status"),
     agent_id: Optional[int] = Query(None, description="Filter by source agent ID"),
-    category_id: Optional[int] = Query(
-        None,
-        description="Filter by marketplace category ID",
-    ),
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[
         int, Query(ge=1, le=100, description="Page size from 1 to 100")
@@ -46,7 +42,6 @@ async def list_agent_repository_listings_api(
             tenant_id,
             status=status,
             agent_id=agent_id,
-            category_id=category_id,
             page=page,
             page_size=page_size,
             search=search,

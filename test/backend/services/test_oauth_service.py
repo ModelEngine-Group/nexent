@@ -13,6 +13,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default-tenant-id"
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.OAUTH_SSL_VERIFY = True
 consts_mock.const.OAUTH_CA_BUNDLE = ""
+consts_mock.const.OAUTH_LOGIN_MODE = "button"
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
@@ -264,6 +265,7 @@ from services.oauth_service import (
     find_supabase_user_id_by_email,
     get_authorize_url,
     get_enabled_providers,
+    get_oauth_config,
     get_provider_user_info,
     get_supported_providers,
     list_linked_accounts,
@@ -393,6 +395,81 @@ class TestGetEnabledProviders(unittest.TestCase):
         names = [p["name"] for p in providers]
         self.assertIn("github", names)
         self.assertIn("wechat", names)
+
+
+def test_oauth_config_uses_button_mode_with_single_provider():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "button"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is True
+    assert config["login_mode"] == "button"
+    assert config["auto_login_provider"] is None
+    assert config["providers"] == providers
+
+
+def test_oauth_config_hides_login_entries_in_disabled_mode():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "disabled"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is True
+    assert config["login_mode"] == "disabled"
+    assert config["auto_login_provider"] is None
+    assert config["providers"] == providers
+
+
+def test_oauth_config_uses_force_mode_with_single_provider():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "force"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["login_mode"] == "force"
+    assert config["auto_login_provider"] == "github"
+
+
+def test_oauth_config_disables_force_mode_with_no_provider():
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "force"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=[]
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is False
+    assert config["login_mode"] == "disabled"
+    assert config["auto_login_provider"] is None
+
+
+def test_oauth_config_falls_back_with_multiple_providers():
+    providers = [
+        {"name": "github", "enabled": True},
+        {"name": "wechat", "enabled": True},
+    ]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "force"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["login_mode"] == "force"
+    assert config["auto_login_provider"] is None
+    assert config["providers"] == providers
+
+
+def test_oauth_config_disables_invalid_login_mode():
+    providers = [{"name": "github", "enabled": True}]
+    with patch.object(oauth_service_module, "OAUTH_LOGIN_MODE", "invalid"), patch.object(
+        oauth_service_module, "get_enabled_providers", return_value=providers
+    ):
+        config = get_oauth_config()
+
+    assert config["enabled"] is True
+    assert config["login_mode"] == "disabled"
+    assert config["providers"] == providers
 
 
 class TestGetAuthorizeUrl(unittest.TestCase):

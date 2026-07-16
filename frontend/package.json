@@ -14,7 +14,7 @@
     "check-all": "npm run type-check && npm run lint && npm run format:check && npm run build"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.0.0",
+    "@ant-design/icons": "6.2.5",
     "@dicebear/core": "^9.2.2",
     "@dicebear/icons": "^9.2.2",
     "@radix-ui/react-scroll-area": "^1.2.2",

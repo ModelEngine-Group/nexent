@@ -105,6 +105,14 @@ export default function AgentGenerateDetail({}) {
 
   // Streaming field values (accumulated from SSE, bypasses Form disabled state)
 
+  // Track form values for modal props (synced after Form mounts / setFieldsValue)
+  const [watchedPromptTemplateId, setWatchedPromptTemplateId] = useState<number | undefined>();
+  const [watchedBusinessDescription, setWatchedBusinessDescription] = useState<string>("");
+  const [watchedBusinessLogicModelId, setWatchedBusinessLogicModelId] = useState<number | undefined>();
+  const [watchedDutyPrompt, setWatchedDutyPrompt] = useState<string>("");
+  const [watchedConstraintPrompt, setWatchedConstraintPrompt] = useState<string>("");
+  const [watchedFewShotsPrompt, setWatchedFewShotsPrompt] = useState<string>("");
+
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
@@ -117,13 +125,13 @@ export default function AgentGenerateDetail({}) {
     clearExpiredGenerationCaches();
   }, []);
 
-
   // (e.g. business_description from a previously edited agent)
   useEffect(() => {
-    if (isCreatingMode) {
+    if (!isCreatingMode) return;
+    queueMicrotask(() => {
       form.resetFields();
-    }
-  }, [isCreatingMode]);
+    });
+  }, [isCreatingMode, form]);
 
   // Use agent generation hook
   const { handleGenerateAgent } = useAgentGeneration({
@@ -193,10 +201,22 @@ export default function AgentGenerateDetail({}) {
       }
     }
 
+    const defaultAuthor =
+      editedAgent.author?.trim() ||
+      user?.email ||
+      (isSpeedMode ? "Default User" : "");
+
+    if (!editedAgent.author?.trim()) {
+      const resolvedAuthor = user?.email || (isSpeedMode ? "Default User" : "");
+      if (resolvedAuthor) {
+        updateAgentConfig({ author: resolvedAuthor });
+      }
+    }
+
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
-      agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
+      agentAuthor: defaultAuthor,
       mainAgentModels: mainAgentModels,
       mainAgentModelIds: mainAgentModelIds,
       mainAgentMaxStep: editedAgent.max_step || 15,
@@ -215,17 +235,27 @@ export default function AgentGenerateDetail({}) {
       promptTemplateId: editedAgent.prompt_template_id,
       promptTemplateName: editedAgent.prompt_template_name || "system_default",
     };
-    form.setFieldsValue(initialAgentInfo);
+    queueMicrotask(() => {
+      form.setFieldsValue(initialAgentInfo);
+      setWatchedPromptTemplateId(initialAgentInfo.promptTemplateId);
+      setWatchedBusinessDescription(initialAgentInfo.businessDescription || "");
+      setWatchedBusinessLogicModelId(initialAgentInfo.businessLogicModelId);
+      setWatchedDutyPrompt(initialAgentInfo.dutyPrompt || "");
+      setWatchedConstraintPrompt(initialAgentInfo.constraintPrompt || "");
+      setWatchedFewShotsPrompt(initialAgentInfo.fewShotsPrompt || "");
+    });
 
-  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels]);
+  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels, user?.email, isSpeedMode, updateAgentConfig]);
 
   // Re-validate requested output tokens when the selected model's max changes,
   // so switching to a model with a lower cap surfaces the violation immediately
   // instead of waiting until save.
   useEffect(() => {
-    if (form.getFieldValue("requestedOutputTokens") != null) {
-      form.validateFields(["requestedOutputTokens"]).catch(() => {});
-    }
+    queueMicrotask(() => {
+      if (form.getFieldValue("requestedOutputTokens") != null) {
+        form.validateFields(["requestedOutputTokens"]).catch(() => {});
+      }
+    });
   }, [form, selectedMainAgentModel?.maxOutputTokens]);
 
   // Handle business description change
@@ -278,6 +308,10 @@ export default function AgentGenerateDetail({}) {
     if (!editable || isGenerating || !modelId) {
       return;
     }
+    // Sync watched values before opening modal to ensure they're available on render
+    setWatchedDutyPrompt(form.getFieldValue("dutyPrompt") || "");
+    setWatchedConstraintPrompt(form.getFieldValue("constraintPrompt") || "");
+    setWatchedFewShotsPrompt(form.getFieldValue("fewShotsPrompt") || "");
     setOptimizeModalType(type);
     setOptimizeModalOpen(true);
   };
@@ -1012,14 +1046,12 @@ export default function AgentGenerateDetail({}) {
                               {
                                 type: "number",
                                 min: 1,
-                                max: 30,
                                 message: t("businessLogic.config.maxSteps"),
                               },
                             ]}
                           >
                             <InputNumber
                               min={1}
-                              max={30}
                               style={{ width: "100%" }}
                               onBlur={() => {
                                 const value = form.getFieldValue("mainAgentMaxStep");
@@ -1253,7 +1285,7 @@ export default function AgentGenerateDetail({}) {
         open={promptTemplateManagerOpen}
         editable={editable}
         templates={promptTemplates}
-        selectedTemplateId={form.getFieldValue("promptTemplateId") || editedAgent.prompt_template_id || 0}
+        selectedTemplateId={watchedPromptTemplateId ?? editedAgent.prompt_template_id ?? 0}
         onClose={() => setPromptTemplateManagerOpen(false)}
         onSelectTemplate={handleSelectPromptTemplate}
         onTemplatesChanged={invalidatePromptTemplates}
@@ -1271,11 +1303,15 @@ export default function AgentGenerateDetail({}) {
           sectionType={
             optimizeModalType === "few-shots" ? "few_shots" : optimizeModalType
           }
-          taskDescription={form.getFieldValue("businessDescription") || editedAgent.business_description || ""}
+          taskDescription={watchedBusinessDescription ?? editedAgent.business_description ?? ""}
           currentContent={
-            form.getFieldValue(getPromptFieldKey(optimizeModalType)) || ""
+            optimizeModalType === "duty"
+              ? watchedDutyPrompt ?? ""
+              : optimizeModalType === "constraint"
+                ? watchedConstraintPrompt ?? ""
+                : watchedFewShotsPrompt ?? ""
           }
-          modelId={form.getFieldValue("businessLogicModelId")}
+          modelId={watchedBusinessLogicModelId ?? 0}
           agentId={currentAgentId ?? 0}
           toolIds={
             Array.isArray(editedAgent.tools)

@@ -8,7 +8,7 @@ class TestBuildMessages:
         cm = make_cm()
         t, a = make_pair("task", "action")
         memory = AgentMemory(steps=[])
-        msgs = cm._build_messages(memory, None, [], [t, a])
+        msgs = cm._renderer.build_messages(memory, None, [], [t, a])
         all_text = " ".join(
             b.get("text", "")
             for m in msgs for b in (m.content if isinstance(m.content, list) else [])
@@ -22,7 +22,7 @@ class TestBuildMessages:
         summary = SummaryTaskStep(task="history summary content")
         t, a = make_pair("current task", "current result", 1)
         memory = AgentMemory(steps=[])
-        msgs = cm._build_messages(memory, summary, [], [t, a])
+        msgs = cm._renderer.build_messages(memory, summary, [], [t, a])
         all_texts = [
             b.get("text", "")
             for m in msgs for b in (m.content if isinstance(m.content, list) else [])
@@ -35,7 +35,7 @@ class TestBuildMessages:
     def test_build_messages_with_system_prompt(self):
         cm = make_cm()
         memory = AgentMemory(steps=[], system_prompt=SystemPromptStep(system_prompt="system prompt"))
-        msgs = cm._build_messages(memory, None, [], [])
+        msgs = cm._renderer.build_messages(memory, None, [], [])
         all_text = " ".join(
             b.get("text", "")
             for m in msgs for b in (m.content if isinstance(m.content, list) else [])

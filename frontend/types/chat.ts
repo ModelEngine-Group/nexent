@@ -90,8 +90,10 @@ export interface ChatAgentSelectorProps {
   onAgentSelect: (
     agentId: string | null,
     greetingMessage?: string,
-    exampleQuestions?: string[]
-  , modelIds?: number[], modelNames?: string[]) => void;
+    exampleQuestions?: string[],
+    modelIds?: number[],
+    modelNames?: string[]
+  ) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
 }
@@ -252,7 +254,11 @@ export interface ChatStreamMainProps {
   readOnly?: boolean;
   agentModelIds?: number[];
   agentModelNames?: string[];
-  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  availableModels?: {
+    id: number;
+    displayName: string;
+    connect_status?: string;
+  }[];
   selectedModelId?: number | null;
   onModelSelect?: (modelId: number | null) => void;
 }
@@ -336,12 +342,14 @@ export interface ApiMessage {
 export interface ApiConversationDetail {
   create_time: number;
   conversation_id: number;
+  agent_id?: number | null;
   message: ApiMessage[];
 }
 
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;
+  agent_id?: number | null;
   create_time: number;
   update_time: number;
 }

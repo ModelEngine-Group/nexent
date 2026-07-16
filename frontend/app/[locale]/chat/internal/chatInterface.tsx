@@ -19,6 +19,7 @@ import {
   convertImageUrlToApiUrl,
 } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -39,14 +40,83 @@ import {
   ApiConversationDetail,
   HistoryItem,
 } from "@/types/chat";
+import type { Agent } from "@/types/agentConfig";
 import { ChatMessageType } from "@/types/chat";
-import { handleStreamResponse, ResumeConfig, StreamingMessage } from "@/app/chat/streaming/chatStreamHandler";
+import {
+  handleStreamResponse,
+  ResumeConfig,
+  StreamingMessage,
+} from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 
-import { Button, Checkbox, Layout, message } from "antd";
+import { Button, Checkbox, Input, Layout, message, Modal } from "antd";
 import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
+
+let cachedShareBaseUrl: string | null | undefined;
+
+const getConfiguredShareBaseUrl = async () => {
+  if (cachedShareBaseUrl !== undefined) return cachedShareBaseUrl;
+
+  const buildTimeBaseUrl = process.env.NEXT_PUBLIC_SHARE_BASE_URL?.trim();
+  if (buildTimeBaseUrl) {
+    cachedShareBaseUrl = buildTimeBaseUrl;
+    return cachedShareBaseUrl;
+  }
+
+  try {
+    const response = await fetch("/api/frontend-config", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      const runtimeBaseUrl = data.shareBaseUrl?.trim();
+      cachedShareBaseUrl = runtimeBaseUrl || null;
+      return cachedShareBaseUrl;
+    }
+  } catch (error) {
+    log.warn("Failed to load runtime frontend config", error);
+  }
+
+  cachedShareBaseUrl = null;
+  return cachedShareBaseUrl;
+};
+
+const buildShareUrl = async (shareId: string, locale: string) => {
+  const configuredBaseUrl = await getConfiguredShareBaseUrl();
+  const baseUrl = configuredBaseUrl || window.location.origin;
+  return `${baseUrl.replace(/\/+$/, "")}/${locale}/share/${shareId}`;
+};
+
+const copyTextToClipboard = async (text: string): Promise<boolean> => {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      log.warn("Clipboard API failed, falling back to textarea copy", error);
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch (error) {
+    log.warn("Textarea copy fallback failed", error);
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
 
 // Get internationalization key based on message type
 const getI18nKeyByType = (type: string): string => {
@@ -88,10 +158,12 @@ export function ChatInterface() {
   );
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
-  // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content
+  // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content.
+  // For pending new conversations (placeholder key -1), show messages even though no
+  // real conversation_id has been returned yet from the backend.
   const currentMessages = conversationManagement.selectedConversationId
     ? sessionMessages[conversationManagement.selectedConversationId] || []
-    : [];
+    : sessionMessages[-1] || [];
 
   // Monitor changes in currentMessages
   // Calculate if the current conversation is streaming
@@ -100,7 +172,7 @@ export function ChatInterface() {
       ? streamingConversations.has(
           conversationManagement.selectedConversationId
         )
-      : false;
+      : streamingConversations.has(-1);
 
   const [viewingImage, setViewingImage] = useState<string | null>(null);
 
@@ -142,26 +214,91 @@ export function ChatInterface() {
     Set<number>
   >(new Set());
   const [isCreatingShare, setIsCreatingShare] = useState(false);
+  const [manualShareUrl, setManualShareUrl] = useState<string | null>(null);
   const [agentModelIds, setAgentModelIds] = useState<number[]>([]);
   const [agentModelNames, setAgentModelNames] = useState<string[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+  const { agents: publishedAgents = [] } = usePublishedAgentList() as {
+    agents: Agent[];
+  };
 
   useEffect(() => {
     sessionMessagesRef.current = sessionMessages;
   }, [sessionMessages]);
 
-  const handleAgentSelectWithGreeting = (
-    agentId: string | null,
-    greeting?: string,
-    exampleQuestions?: string[]
-  , modelIds?: number[], modelNames?: string[]) => {
-    setSelectedAgentId(agentId);
-    setAgentGreeting(greeting || null);
-    setAgentExampleQuestions(exampleQuestions || []);
-    setAgentModelIds(modelIds || []);
-    setAgentModelNames(modelNames || []);
-    setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
-  };
+  const handleAgentSelectWithGreeting = useCallback(
+    (
+      agentId: string | null,
+      greeting?: string,
+      exampleQuestions?: string[],
+      modelIds?: number[],
+      modelNames?: string[]
+    ) => {
+      setSelectedAgentId(agentId);
+      setAgentGreeting(greeting || null);
+      setAgentExampleQuestions(exampleQuestions || []);
+      setAgentModelIds(modelIds || []);
+      setAgentModelNames(modelNames || []);
+      setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
+    },
+    []
+  );
+
+  const restoreConversationAgent = useCallback(
+    (agentId?: number | string | null) => {
+      if (agentId === undefined || agentId === null) {
+        handleAgentSelectWithGreeting(null);
+        return;
+      }
+
+      const normalizedAgentId = String(agentId);
+      const agent = publishedAgents.find((item) => item.id === normalizedAgentId);
+
+      if (!agent && publishedAgents.length === 0) {
+        setSelectedAgentId(normalizedAgentId);
+        setAgentGreeting(null);
+        setAgentExampleQuestions([]);
+        setAgentModelIds([]);
+        setAgentModelNames([]);
+        setSelectedModelId(null);
+        return;
+      }
+
+      if (!agent || agent.is_available === false) {
+        handleAgentSelectWithGreeting(null);
+        return;
+      }
+
+      handleAgentSelectWithGreeting(
+        normalizedAgentId,
+        agent.greeting_message,
+        agent.example_questions,
+        agent.model_ids,
+        agent.model_names
+      );
+    },
+    [handleAgentSelectWithGreeting, publishedAgents]
+  );
+
+  useEffect(() => {
+    if (!selectedAgentId || publishedAgents.length === 0) {
+      return;
+    }
+
+    const agent = publishedAgents.find((item) => item.id === selectedAgentId);
+    if (!agent || agent.is_available === false) {
+      handleAgentSelectWithGreeting(null);
+      return;
+    }
+
+    setAgentGreeting(agent.greeting_message || null);
+    setAgentExampleQuestions(agent.example_questions || []);
+    setAgentModelIds(agent.model_ids || []);
+    setAgentModelNames(agent.model_names || []);
+    setSelectedModelId(
+      agent.model_ids && agent.model_ids.length > 0 ? agent.model_ids[0] : null
+    );
+  }, [handleAgentSelectWithGreeting, publishedAgents, selectedAgentId]);
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
@@ -283,13 +420,6 @@ export function ChatInterface() {
     // Flag to track if we should reset button states in finally block
     let shouldResetButtonStates = true;
 
-    // If in new conversation state, switch to conversation state after sending message
-    // Save the value to local variable before state update for title generation logic
-    let shouldGenerateTitle = conversationManagement.isNewConversation;
-    if (conversationManagement.isNewConversation) {
-      conversationManagement.setIsNewConversation(false);
-    }
-
     // Ensure right sidebar doesn't auto-expand when sending new message
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
@@ -383,59 +513,13 @@ export function ChatInterface() {
     const currentController = new AbortController();
 
     try {
-      // Check if need to create new conversation
-      if (currentConversationId == null) {
-        // No conversation selected: create new conversation first
-        try {
-          const createData = await conversationService.create(
-            t("chatInterface.newConversation")
-          );
-          currentConversationId = createData.conversation_id;
-
-          // Update current session state
-          conversationManagement.setSelectedConversationId(
-            currentConversationId
-          );
-          conversationManagement.setConversationTitle(
-            createData.conversation_title || t("chatInterface.newConversation")
-          );
-
-          // After creating new conversation, add it to streaming list
-          setStreamingConversations((prev) => {
-            const newSet = new Set(prev).add(createData.conversation_id);
-            return newSet;
-          });
-
-          // Refresh conversation list
-          try {
-            const dialogList =
-              await conversationManagement.fetchConversationList();
-            const newDialog = dialogList.find(
-              (dialog) => dialog.conversation_id === currentConversationId
-            );
-            if (newDialog) {
-              conversationManagement.setSelectedConversationId(
-                currentConversationId
-              );
-            }
-          } catch (error) {
-            log.error(
-              t("chatInterface.refreshDialogListFailedButContinue"),
-              error
-            );
-          }
-        } catch (error) {
-          log.error(t("chatInterface.createDialogFailedButContinue"), error);
-          // Reset button states when conversation creation fails
-          setIsLoading(false);
-          setIsStreaming(false);
-          return;
-        }
-      }
-
-      // Type guard: we have a number here (either from selection or from create above)
-      if (currentConversationId == null) return;
-      const id = currentConversationId;
+      // For new conversations, the backend will auto-create the conversation and emit
+      // a conversation_created SSE event with the real conversation_id. Until that
+      // happens, store messages under a placeholder key (-1) so the UI can render them.
+      // Once the SSE event arrives, the onConversationCreated callback migrates the
+      // session messages from -1 to the real conversation_id.
+      const placeholderId = -1;
+      const id = currentConversationId ?? placeholderId;
       cid = id;
 
       // Register controller and streaming state for this conversation
@@ -495,7 +579,7 @@ export function ChatInterface() {
           currentController.signal,
           () => {}, // Empty progress callback - won't be called
           t,
-          currentConversationId
+          currentConversationId ?? undefined
         );
 
         finalQuery = result.finalQuery;
@@ -503,9 +587,10 @@ export function ChatInterface() {
       }
 
       // Send request to backend API, add signal parameter
+      const agentIdForRun =
+        selectedAgentId !== null ? Number(selectedAgentId) : null;
       const runAgentParams: any = {
         query: finalQuery, // Use preprocessed query or original query
-        conversation_id: id,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
           .map((msg) => {
@@ -553,9 +638,15 @@ export function ChatInterface() {
             : undefined, // Use complete attachment object structure
       };
 
+      // Only include conversation_id for existing conversations; omit for new ones
+      // so backend can auto-create the conversation and emit conversation_created.
+      if (currentConversationId != null) {
+        runAgentParams.conversation_id = currentConversationId;
+      }
+
       // Only add agent_id if it's not null
-      if (selectedAgentId !== null) {
-        runAgentParams.agent_id = Number(selectedAgentId);
+      if (agentIdForRun !== null) {
+        runAgentParams.agent_id = agentIdForRun;
       }
 
       // Add selected model_id for agent run
@@ -568,17 +659,30 @@ export function ChatInterface() {
         currentController.signal
       );
 
+      if (currentConversationId != null) {
+        conversationManagement.updateConversationAgentId(
+          currentConversationId,
+          agentIdForRun
+        );
+      }
+
       if (!reader) throw new Error("Response body is null");
 
       // Create dynamic setCurrentSessionMessages in handleSend function
-      // setCurrentSessionMessages factory function
+      // setCurrentSessionMessages factory function. Once the backend emits a real
+      // conversation_id via the conversation_created SSE event, subsequent writes
+      // must be redirected to that conversation_id instead of the placeholder key.
+      let resolvedTargetConversationId: number = id;
       const setCurrentSessionMessagesFactory =
         (
           targetConversationId: number
         ): React.Dispatch<React.SetStateAction<ChatMessageType[]>> =>
         (valueOrUpdater) => {
           setSessionMessages((prev) => {
-            const prevArr = prev[targetConversationId] || [];
+            const realId = resolvedTargetConversationId;
+            // If the target is the placeholder, also pull existing messages from
+            // any real conversation_id we have migrated to.
+            let prevArr = prev[realId] || [];
             let nextArr: ChatMessageType[];
             if (typeof valueOrUpdater === "function") {
               nextArr = (
@@ -587,11 +691,12 @@ export function ChatInterface() {
             } else {
               nextArr = valueOrUpdater;
             }
-            // Ensure new reference
-            return {
-              ...prev,
-              [targetConversationId]: [...nextArr],
-            };
+            const nextState = { ...prev };
+            nextState[realId] = [...nextArr];
+            if (targetConversationId !== realId) {
+              delete nextState[targetConversationId];
+            }
+            return nextState;
           });
         };
 
@@ -642,45 +747,102 @@ export function ChatInterface() {
         resetTimeout,
         stepIdCounter,
         setIsSwitchedConversation,
-        shouldGenerateTitle,
-        conversationManagement.setConversationTitle,
-        conversationManagement.fetchConversationList,
-        id,
-        conversationService,
+        (conversationId: number) => {
+          // Backend auto-created a new conversation - migrate messages from the
+          // placeholder to the real conversation ID and update frontend state.
+          if (id !== conversationId) {
+            resolvedTargetConversationId = conversationId;
+            setSessionMessages((prev) => {
+              const placeholderMessages = prev[id] || [];
+              const { [id]: _, ...rest } = prev;
+              return {
+                ...rest,
+                [conversationId]: placeholderMessages,
+              };
+            });
+            conversationControllersRef.current.delete(id);
+            conversationControllersRef.current.set(conversationId, currentController);
+            // Clear the old timeout (which was bound to the placeholder key);
+            // the active stream's resetTimeout() will re-create one as new chunks arrive.
+            const oldTimeout = conversationTimeoutsRef.current.get(id);
+            if (oldTimeout) {
+              clearTimeout(oldTimeout);
+              conversationTimeoutsRef.current.delete(id);
+            }
+            setStreamingConversations((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(id);
+              newSet.add(conversationId);
+              return newSet;
+            });
+            cid = conversationId;
+          }
+          conversationManagement.setSelectedConversationId(conversationId);
+          conversationManagement.setConversationTitle(t("chatInterface.newConversation"));
+          // Add the new conversation to the sidebar immediately so users see it
+          // appear in the conversation list during streaming (not only after stream ends)
+          conversationManagement.prependConversation(
+            conversationId,
+            t("chatInterface.newConversation"),
+            agentIdForRun
+          );
+        },
         false, // isDebug: false for normal chat mode
         t
       );
 
-      await hydrateConversationMessageIds(id);
+      // Use the resolved conversation ID (may have changed via conversation_created event)
+      const finalId = cid ?? id;
+
+      await hydrateConversationMessageIds(finalId);
 
       // Reset all related states
       setIsLoading(false);
       setIsStreaming(false);
 
       // Clean up controller and timeout for current conversation
-      conversationControllersRef.current.delete(id);
-      const timeout = conversationTimeoutsRef.current.get(id);
+      conversationControllersRef.current.delete(finalId);
+      const timeout = conversationTimeoutsRef.current.get(finalId);
       if (timeout) {
         clearTimeout(timeout);
-        conversationTimeoutsRef.current.delete(id);
+        conversationTimeoutsRef.current.delete(finalId);
       }
 
       // Remove from streaming list when we have a valid conversation id
       setStreamingConversations((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(id);
+        newSet.delete(finalId);
         return newSet;
       });
 
       // When conversation is completed, only add to completed conversation list when user is not in current conversation interface
       const currentUserConversation =
         conversationManagement.selectedConversationId;
-      if (currentUserConversation !== id) {
+      if (currentUserConversation !== finalId) {
         setCompletedConversations((prev) => {
           const newSet = new Set(prev);
-          newSet.add(id);
+          newSet.add(finalId);
           return newSet;
         });
+      }
+
+      // For new conversations, refresh the conversation list after the stream to fetch
+      // the auto-generated title created by the backend.
+      if (currentConversationId == null) {
+        try {
+          const refreshed =
+            await conversationManagement.fetchConversationList();
+          const newDialog = refreshed.find(
+            (dialog) => dialog.conversation_id === finalId
+          );
+          if (newDialog) {
+            conversationManagement.setConversationTitle(
+              newDialog.conversation_title || t("chatInterface.newConversation")
+            );
+          }
+        } catch (error) {
+          log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
+        }
       }
 
       // Note: Save operation is already implemented in agent run API, no need to save again in frontend
@@ -953,11 +1115,7 @@ export function ChatInterface() {
           () => startResumeTimeout(conversationId),
           stepIdCounter,
           setIsSwitchedConversation,
-          false,
-          conversationManagement.setConversationTitle,
-          conversationManagement.fetchConversationList,
-          conversationId,
-          conversationService,
+          () => {}, // onConversationCreated: no-op for resume mode
           false,
           t,
           resumeConfig
@@ -991,6 +1149,7 @@ export function ChatInterface() {
 
     // Use conversation management hook
     conversationManagement.handleConversationSelect(dialog);
+    restoreConversationAgent(dialog.agent_id ?? null);
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
 
@@ -1054,6 +1213,9 @@ export function ChatInterface() {
 
           if (data.code === 0 && data.data && data.data.length > 0) {
             const conversationData = data.data[0] as ApiConversationDetail;
+            restoreConversationAgent(
+              conversationData.agent_id ?? dialog.agent_id ?? null
+            );
             const formattedMessages =
               formatConversationMessagesFromResponse(conversationData, t);
 
@@ -1073,7 +1235,10 @@ export function ChatInterface() {
             if (streamingMessage && streamingMessage.status === 'streaming') {
               // Resume streaming - wait for state to update first
               setTimeout(() => {
-                resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+                resumeStreamingConversation(
+                dialog.conversation_id,
+                streamingMessage
+              );
               }, 100);
             }
 
@@ -1171,6 +1336,9 @@ export function ChatInterface() {
 
         if (data.code === 0 && data.data && data.data.length > 0) {
           const conversationData = data.data[0] as ApiConversationDetail;
+          restoreConversationAgent(
+            conversationData.agent_id ?? dialog.agent_id ?? null
+          );
           const formattedMessages =
             formatConversationMessagesFromResponse(conversationData, t);
 
@@ -1186,11 +1354,16 @@ export function ChatInterface() {
           );
 
           // Check if this conversation has an in-progress streaming message
-          const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
-          if (streamingMessage && streamingMessage.status === 'streaming') {
+          const streamingMessage = (conversationData as any).streaming_message as
+            | StreamingMessage
+            | undefined;
+          if (streamingMessage && streamingMessage.status === "streaming") {
             // Resume streaming - wait for state to update first
             setTimeout(() => {
-              resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+              resumeStreamingConversation(
+                dialog.conversation_id,
+                streamingMessage
+              );
             }, 100);
           }
 
@@ -1582,11 +1755,25 @@ export function ChatInterface() {
         selected_user_message_ids: Array.from(selectedShareMessageIds),
       });
       const locale = i18n.language?.startsWith("en") ? "en" : "zh";
-      const shareUrl = `${window.location.origin}/${locale}/share/${result.share_id}`;
-      await navigator.clipboard.writeText(shareUrl);
-      message.success(t("chatInterface.shareLinkCopied", "Share link copied"));
+      const shareUrl = await buildShareUrl(result.share_id, locale);
+      const copied = await copyTextToClipboard(shareUrl);
+
       setIsShareMode(false);
       setSelectedShareMessageIds(new Set());
+
+      if (copied) {
+        message.success(
+          t("chatInterface.shareLinkCopied", "Share link copied")
+        );
+      } else {
+        setManualShareUrl(shareUrl);
+        message.warning(
+          t(
+            "chatInterface.shareCreatedCopyFailed",
+            "Share link created, but copy is unavailable"
+          )
+        );
+      }
     } catch (error) {
       log.error("Failed to create share", error);
       message.error(
@@ -1716,6 +1903,43 @@ export function ChatInterface() {
               </div>
             )}
 
+            <Modal
+              open={!!manualShareUrl}
+              title={t("chatInterface.shareLinkReady", "Share link ready")}
+              okText={t("chatInterface.copyShareLink", "Copy link")}
+              cancelText={t("common.close", "Close")}
+              onCancel={() => setManualShareUrl(null)}
+              onOk={async () => {
+                if (!manualShareUrl) return;
+                const copied = await copyTextToClipboard(manualShareUrl);
+                if (copied) {
+                  message.success(
+                    t("chatInterface.shareLinkCopied", "Share link copied")
+                  );
+                  setManualShareUrl(null);
+                } else {
+                  message.warning(
+                    t(
+                      "chatInterface.shareManualCopyRequired",
+                      "Please copy the link manually"
+                    )
+                  );
+                }
+              }}
+            >
+              <p className="mb-3 text-sm text-slate-600">
+                {t(
+                  "chatInterface.shareManualCopyHint",
+                  "The share link has been created. Copy it from the field below."
+                )}
+              </p>
+              <Input
+                value={manualShareUrl || ""}
+                readOnly
+                onClick={(event) => event.currentTarget.select()}
+              />
+            </Modal>
+
             <ChatStreamMain
               messages={currentMessages}
               input={input}
@@ -1751,13 +1975,13 @@ export function ChatInterface() {
               shareMode={isShareMode}
               selectedShareMessageIds={selectedShareMessageIds}
               onToggleShareMessage={toggleShareMessage}
-                agentModelIds={agentModelIds}
-                agentModelNames={agentModelNames}
-                availableModels={availableModels}
-                selectedModelId={selectedModelId}
-                onModelSelect={setSelectedModelId}
-              />
-            </div>
+              agentModelIds={agentModelIds}
+              agentModelNames={agentModelNames}
+              availableModels={availableModels}
+              selectedModelId={selectedModelId}
+              onModelSelect={setSelectedModelId}
+            />
+          </div>
 
           <ChatRightPanel
             messages={currentMessages}

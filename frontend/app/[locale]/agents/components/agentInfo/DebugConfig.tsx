@@ -627,10 +627,11 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
     try {
       // Call agent_run with AbortSignal
+      // Debug mode does NOT pass conversation_id: backend skips auto-create
+      // when is_debug=True, so no conversation row is created for this run.
       const reader = await conversationService.runAgent(
         {
           query: question,
-          conversation_id: -1, // Debug mode uses -1 as conversation ID
           history: messages
             .filter(msg => msg.isComplete !== false) // Only pass completed messages
             .map(msg => {
@@ -672,11 +673,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         resetTimeout,
         stepIdCounter.current,
         () => {}, // setIsSwitchedConversation - Debug mode does not need
-        false, // isNewConversation - Debug mode does not need
-        () => {}, // setConversationTitle - Debug mode does not need
-        async () => {}, // fetchConversationList - Debug mode does not need
-        -1, // currentConversationId - Debug mode uses -1
-        conversationService,
+        () => {}, // onConversationCreated - Debug mode does not auto-create conversations
         true, // isDebug: true for debug mode
         t
       );

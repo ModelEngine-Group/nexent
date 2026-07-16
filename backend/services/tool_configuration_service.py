@@ -15,6 +15,7 @@ from pydantic_core import PydanticUndefined
 from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -482,7 +483,10 @@ async def update_tool_list(tenant_id: str, user_id: str):
         mcp_tools = await get_all_mcp_tools(tenant_id)
     except Exception as e:
         logger.error(f"failed to get all mcp tools, detail: {e}")
-        raise MCPConnectionError(f"failed to get all mcp tools, detail: {e}")
+        # Don't block local/langchain tool update when MCP is unavailable.
+        # MCP tools will be marked as is_available=False in the DB, which
+        # is the correct state when the MCP server is unreachable.
+        mcp_tools = []
 
     update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
                                           user_id=user_id,
@@ -505,6 +509,9 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     formatted_tools = []
     for tool in tools_info:
         tool_name = tool.get("name")
+
+        if tool_name in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
 
         # Always use SDK inputs for local tools to stay in sync with current tool code
         is_local = tool.get("source") == "local"
@@ -808,6 +815,7 @@ def _validate_local_tool(
             rerank = instantiation_params.get("rerank", False)
             rerank_model_name = instantiation_params.get("rerank_model_name", "")
             rerank_model = None
+
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
@@ -816,6 +824,12 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
+        elif tool_name == "ragflow_search":
+            # RAGFlowSearchTool does not accept rerank/rerank_model_name params
+            # RAGFlow handles reranking internally via its API
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                               if k not in ["rerank_model", "rerank", "rerank_model_name"]}
+            tool_instance = tool_class(**filtered_params)
         elif tool_name in ("haotian_search", "aidp_search"):
             # Haotian and AIDP share the same instantiation shape: drop the
             # backend-only rerank keys and explicitly set observer=None

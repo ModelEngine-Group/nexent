@@ -19,7 +19,7 @@ import {
   Alert,
   Space,
   Divider,
-  Tooltip
+  Tooltip,
 } from "antd";
 import {
   Users,
@@ -1040,7 +1040,7 @@ export default function UserManageComp() {
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const params = useParams();
-  const locale = (params.locale as string) || "en";
+  const locale = (params as { locale?: string })?.locale || "en";
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
@@ -1258,11 +1258,10 @@ export default function UserManageComp() {
                     <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 )}
-                
               </div>
-              
+
               <div className="flex-1 min-h-0 h-full">
-                <Divider size="small"/>
+                <Divider size="small" />
                 <div className="flex h-full w-full">
                   {tenantId ? (
                     <Tabs
@@ -1292,7 +1291,8 @@ export default function UserManageComp() {
                         {
                           key: "knowledge",
                           label:
-                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                            t("tenantResources.tabs.knowledge") ||
+                            "Knowledge Base",
                           children: <KnowledgeList tenantId={tenantId} />,
                         },
                         {
@@ -1312,7 +1312,9 @@ export default function UserManageComp() {
                         },
                         {
                           key: "invitations",
-                          label: t("tenantResources.invitation.tab") || "Invitations",
+                          label:
+                            t("tenantResources.invitation.tab") ||
+                            "Invitations",
                           children: (
                             <InvitationList
                               tenantId={tenantId}
@@ -1338,7 +1340,6 @@ export default function UserManageComp() {
                     </div>
                   )}
                 </div>
-
               </div>
             </div>
           </Col>
@@ -1358,4 +1359,4 @@ export default function UserManageComp() {
     max-width: 100%;
     overflow: hidden;
   }
-`}</style>
+`}</style>;

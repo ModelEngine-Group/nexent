@@ -83,8 +83,8 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
 | `--monitoring-provider` | Provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `--use-local-config` | Reuse saved local deployment config | Flag |
-| `--reconfigure` | Ignore saved local config and run full configuration | Flag |
-| `--config` | Deployment config path | YAML file |
+| `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
+| `--config` | Open the interactive deployment configuration | Flag |
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
 | `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |

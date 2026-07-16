@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   Pencil,
   Share2,
+  Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -27,7 +28,10 @@ interface MyAgentCardProps {
   onView: () => void;
   onApplyListing: () => void;
   onViewReview: (mode: "review" | "reviewUpdate") => void;
+  onDelete: () => void;
+  onEvaluate: () => void;
   isApplying?: boolean;
+  isDeleting?: boolean;
 }
 
 const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
@@ -54,7 +58,10 @@ export function MyAgentCard({
   onView,
   onApplyListing,
   onViewReview,
+  onDelete,
+  onEvaluate,
   isApplying = false,
+  isDeleting = false,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
 
@@ -70,6 +77,7 @@ export function MyAgentCard({
   const versionLabel = agent.version_label;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
+  const canEvaluate = canView;
   const menuActions = getMineCardMenuActions(agent);
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
@@ -93,6 +101,19 @@ export function MyAgentCard({
         onViewReview(action === "reviewUpdate" ? "reviewUpdate" : "review");
       },
     };
+  });
+
+  if (menuActions.length > 0) {
+    menuItems.push({ type: "divider" });
+  }
+
+  menuItems.push({
+    key: "delete",
+    danger: true,
+    icon: <Trash2 className="size-3.5" aria-hidden />,
+    label: t("agentRepository.mine.menu.delete"),
+    disabled: isDeleting,
+    onClick: onDelete,
   });
 
   return (
@@ -148,7 +169,7 @@ export function MyAgentCard({
           </div>
         </div>
 
-        {canEdit && menuActions.length > 0 ? (
+        {canEdit ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
               type="text"
@@ -212,7 +233,8 @@ export function MyAgentCard({
             type="default"
             className="min-w-0 flex-1"
             icon={<LineChart className="size-3.5" aria-hidden />}
-            disabled
+            onClick={onEvaluate}
+            disabled={!canEvaluate}
           >
             {t("agentRepository.mine.evaluate")}
           </Button>
