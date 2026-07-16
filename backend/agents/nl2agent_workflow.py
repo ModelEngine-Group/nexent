@@ -58,6 +58,17 @@ class OnlineRecommendationBatch(BaseModel):
     status: Literal["recommendations_ready", "completed"]
 
 
+class TrustedSearchBatch(BaseModel):
+    """Backend-recorded proof that an SDK search produced one result batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: Literal["local", "mcp", "skill"]
+    tool_ids: List[int] = Field(default_factory=list)
+    skill_ids: List[int] = Field(default_factory=list)
+    item_keys: List[str] = Field(default_factory=list)
+
+
 class McpWorkflow(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -101,6 +112,7 @@ class Nl2AgentWorkflowState(BaseModel):
     conversation_id: int = Field(ge=1)
     requirements_review: RequirementsReview = Field(default_factory=RequirementsReview)
     model_selection_confirmed: bool = False
+    trusted_search_batches: Dict[str, TrustedSearchBatch] = Field(default_factory=dict)
     recommendation_batches: Dict[str, RecommendationBatch] = Field(default_factory=dict)
     identity_confirmed: bool = False
     mcp_workflows: Dict[str, McpWorkflow] = Field(default_factory=dict)

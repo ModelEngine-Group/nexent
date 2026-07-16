@@ -2,14 +2,16 @@
 
 import hashlib
 import json
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 
 # Alias for type-annotation clarity in this module.
 _StrStrDict = Dict[str, str]
+logger = logging.getLogger(__name__)
 
 _SEARCH_STOP_WORDS = {
     "a",
@@ -170,6 +172,7 @@ class Nl2AgentContext:
     user_id: str = ""
     language: str = "en"
     requirements_confirmed: bool = False
+    record_search_result: Optional[Callable[..., Any]] = None
 
     # Pre-fetched catalogs injected by backend (all optional — tools guard on None)
     tool_catalog: Optional[List[Dict[str, Any]]] = None
@@ -195,6 +198,7 @@ def create_nl2agent_context(
     community_results: Optional[List[Dict[str, Any]]] = None,
     official_skills: Optional[List[Dict[str, Any]]] = None,
     requirements_confirmed: bool = False,
+    record_search_result: Optional[Callable[..., Any]] = None,
 ) -> Nl2AgentContext:
     """Create isolated context for one NL2AGENT tool instance."""
     return Nl2AgentContext(
@@ -204,6 +208,7 @@ def create_nl2agent_context(
         user_id=user_id or "",
         language=language or "en",
         requirements_confirmed=bool(requirements_confirmed),
+        record_search_result=record_search_result,
         tool_catalog=tool_catalog,
         skill_catalog=skill_catalog,
         registry_results=registry_results,
@@ -211,3 +216,21 @@ def create_nl2agent_context(
         official_skills=official_skills,
     )
 
+
+def record_trusted_search_result(
+    context: Nl2AgentContext,
+    **result: Any,
+) -> Optional[str]:
+    """Persist one search result through the injected backend callback."""
+    if context.record_search_result is None:
+        return error_response("trusted search result recorder not available in context")
+    try:
+        context.record_search_result(**result)
+    except Exception:
+        logger.exception(
+            "Failed to persist trusted NL2AGENT search result: tenant_id=%s draft_agent_id=%s",
+            context.tenant_id,
+            context.target_agent_id,
+        )
+        return error_response("failed to persist trusted search result")
+    return None

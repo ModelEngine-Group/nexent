@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from smolagents.tools import Tool
 
@@ -12,6 +12,7 @@ from ._context import (
     canonical_search_query,
     create_nl2agent_context,
     error_response,
+    record_trusted_search_result,
 )
 
 
@@ -86,6 +87,7 @@ def get_search_local_resources_tool(
     tool_catalog: Optional[List[Dict[str, Any]]] = None,
     skill_catalog: Optional[List[Dict[str, Any]]] = None,
     requirements_confirmed: bool = False,
+    record_search_result: Optional[Callable[..., Any]] = None,
 ) -> Tool:
     context = create_nl2agent_context(
         agent_id=agent_id,
@@ -96,6 +98,7 @@ def get_search_local_resources_tool(
         tool_catalog=tool_catalog,
         skill_catalog=skill_catalog,
         requirements_confirmed=requirements_confirmed,
+        record_search_result=record_search_result,
     )
     return NL2AgentSearchLocalResourcesTool(context)
 
@@ -139,12 +142,20 @@ class NL2AgentSearchLocalResourcesTool(Tool):
             return error_response("tool/skill catalog not available in context")
 
         tools, skills = _rank_local_resources(ctx, query)
+        batch_id = _recommendation_batch_id(ctx.target_agent_id, query, tools, skills)
+        recording_error = record_trusted_search_result(
+            ctx,
+            recommendation_batch_id=batch_id,
+            resource_type="local",
+            tool_ids=[int(item["tool_id"]) for item in tools],
+            skill_ids=[int(item["skill_id"]) for item in skills],
+        )
+        if recording_error:
+            return recording_error
         return json.dumps(
             {
                 "agent_id": ctx.target_agent_id,
-                "recommendation_batch_id": _recommendation_batch_id(
-                    ctx.target_agent_id, query, tools, skills
-                ),
+                "recommendation_batch_id": batch_id,
                 "tools": tools,
                 "skills": skills,
             },

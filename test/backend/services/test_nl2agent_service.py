@@ -1,5 +1,6 @@
 """Unit tests for NL2AGENT service orchestration."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
@@ -13,6 +14,9 @@ from agents.nl2agent_session_catalog import (
 )
 from consts.exceptions import Nl2AgentStaleCardError
 from consts.model import Nl2AgentFinalizeRequest
+from nexent.core.tools.nl2agent.search_local_resources_tool import (
+    get_search_local_resources_tool,
+)
 from services import nl2agent_service
 
 
@@ -105,11 +109,39 @@ def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
 
 def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     _confirm_requirements(tenant_id, draft_agent_id)
+    nl2agent_session_catalog.record_trusted_search_batch(
+        tenant_id,
+        draft_agent_id,
+        recommendation_batch_id="online_mcp",
+        resource_type="mcp",
+        item_keys=[],
+    )
     nl2agent_session_catalog.register_online_recommendation_batch(tenant_id, draft_agent_id, "online_mcp", "mcp", [])
+    nl2agent_session_catalog.record_trusted_search_batch(
+        tenant_id,
+        draft_agent_id,
+        recommendation_batch_id="online_skill",
+        resource_type="skill",
+        item_keys=[],
+    )
     nl2agent_session_catalog.register_online_recommendation_batch(
         tenant_id, draft_agent_id, "online_skill", "skill", []
     )
     nl2agent_session_catalog.complete_online_configuration(tenant_id, draft_agent_id)
+
+
+def _register_local_batch(batch_id, tool_ids, skill_ids):
+    nl2agent_session_catalog.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id=batch_id,
+        resource_type="local",
+        tool_ids=tool_ids,
+        skill_ids=skill_ids,
+    )
+    return nl2agent_session_catalog.register_recommendation_batch(
+        "tenant_1", 202, batch_id, tool_ids, skill_ids
+    )
 
 
 def _mock_database_transaction(monkeypatch):
@@ -1524,7 +1556,7 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
     monkeypatch.setattr(nl2agent_service, "get_tenant_skill_by_id", get_tenant_skill)
     monkeypatch.setattr(nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill)
     monkeypatch.setattr(nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202}))
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [42], [7])
+    _register_local_batch("batch_1", [42], [7])
 
     result = await nl2agent_service.apply_local_resources_batch(
         agent_id=202,
@@ -1578,7 +1610,6 @@ async def test_register_local_resources_rejects_ids_outside_session_catalog(
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
-
     with pytest.raises(
         nl2agent_service.AgentRunException,
         match="outside this session catalog",
@@ -1605,6 +1636,14 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
+    nl2agent_session_catalog.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="trusted_batch",
+        resource_type="local",
+        tool_ids=[1],
+        skill_ids=[7],
+    )
 
     result = await nl2agent_service.register_local_resource_recommendations(
         agent_id=202,
@@ -1622,6 +1661,65 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
         "applied_tool_ids": [],
         "applied_skill_ids": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_register_local_resources_rejects_unproven_catalog_batch(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
+    )
+
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="trusted search result",
+    ):
+        await nl2agent_service.register_local_resource_recommendations(
+            agent_id=202,
+            recommendation_batch_id="unproven_batch",
+            tool_ids=[1],
+            skill_ids=[7],
+            tenant_id="tenant_1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_genuine_empty_local_search_can_register_its_trusted_batch(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
+    )
+    tool = get_search_local_resources_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        tool_catalog=[],
+        skill_catalog=[],
+        requirements_confirmed=True,
+        record_search_result=lambda **result: (
+            nl2agent_session_catalog.record_trusted_search_batch(
+                "tenant_1", 202, **result
+            )
+        ),
+    )
+    payload = json.loads(tool(query="unmatched capability"))
+
+    registered = await nl2agent_service.register_local_resource_recommendations(
+        agent_id=202,
+        recommendation_batch_id=payload["recommendation_batch_id"],
+        tool_ids=[],
+        skill_ids=[],
+        tenant_id="tenant_1",
+    )
+
+    assert registered["status"] == "recommendations_ready"
 
 
 @pytest.mark.asyncio
@@ -1647,7 +1745,7 @@ async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypa
     monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
     monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool)
     monkeypatch.setattr(nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202}))
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [42], [])
+    _register_local_batch("batch_1", [42], [])
 
     result = await nl2agent_service.apply_local_resources_batch(
         agent_id=202,
@@ -1689,9 +1787,7 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(m
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
-    nl2agent_session_catalog.register_recommendation_batch(
-        "tenant_1", 202, "batch_1", [42], [7]
-    )
+    _register_local_batch("batch_1", [42], [7])
 
     with pytest.raises(
         nl2agent_service.AgentRunException,
@@ -1732,9 +1828,7 @@ async def test_apply_local_resources_batch_reconciles_after_redis_failure(monkey
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
-    nl2agent_session_catalog.register_recommendation_batch(
-        "tenant_1", 202, "batch_1", [42], []
-    )
+    _register_local_batch("batch_1", [42], [])
     real_resolve = nl2agent_service.resolve_recommendation_batch
     attempts = 0
 
@@ -1895,7 +1989,7 @@ async def test_finalize_uses_persisted_resources(monkeypatch):
             ]
         ),
     )
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [42], [7])
+    _register_local_batch("batch_1", [42], [7])
     nl2agent_session_catalog.resolve_recommendation_batch("tenant_1", 202, "batch_1", "applied", [42], [7])
     _complete_required_online_review()
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
@@ -1958,7 +2052,7 @@ async def test_finalize_rejects_dangling_resources_before_updating_draft(monkeyp
     )
     update = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_agent", update)
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [404], [])
+    _register_local_batch("batch_1", [404], [])
     nl2agent_session_catalog.resolve_recommendation_batch("tenant_1", 202, "batch_1", "applied", [404], [])
     _complete_required_online_review()
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
@@ -2003,7 +2097,7 @@ async def test_finalize_rejects_incomplete_generated_proposal(monkeypatch):
             ]
         ),
     )
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [], [])
+    _register_local_batch("batch_1", [], [])
     nl2agent_session_catalog.resolve_recommendation_batch("tenant_1", 202, "batch_1", "skipped")
     _complete_required_online_review()
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
@@ -2051,7 +2145,7 @@ async def test_finalize_rejects_connected_mcp_until_tools_are_bound_or_skipped(
             ]
         ),
     )
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [], [])
+    _register_local_batch("batch_1", [], [])
     nl2agent_session_catalog.resolve_recommendation_batch("tenant_1", 202, "batch_1", "skipped")
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
     nl2agent_session_catalog.update_mcp_workflow(
@@ -2107,8 +2201,15 @@ async def test_finalize_requires_both_online_catalogs(monkeypatch, registered_re
             ]
         ),
     )
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [], [])
+    _register_local_batch("batch_1", [], [])
     nl2agent_session_catalog.resolve_recommendation_batch("tenant_1", 202, "batch_1", "skipped")
+    nl2agent_session_catalog.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id=f"online_{registered_resource_type}",
+        resource_type=registered_resource_type,
+        item_keys=[],
+    )
     nl2agent_session_catalog.register_online_recommendation_batch(
         "tenant_1",
         202,
@@ -2224,10 +2325,24 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
         MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
     )
 
+    nl2agent_session_catalog.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="online_1",
+        resource_type="skill",
+        item_keys=["skill:7"],
+    )
     registered = await nl2agent_service.register_online_resource_recommendations(
         202, "online_1", "skill", ["skill:7"], "tenant_1"
     )
     assert registered["status"] == "recommendations_ready"
+    nl2agent_session_catalog.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="online_mcp",
+        resource_type="mcp",
+        item_keys=[],
+    )
     mcp_registered = await nl2agent_service.register_online_resource_recommendations(
         202, "online_mcp", "mcp", [], "tenant_1"
     )
@@ -2243,13 +2358,30 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_online_recommendation_rejects_unproven_empty_batch(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="trusted search result",
+    ):
+        await nl2agent_service.register_online_resource_recommendations(
+            202, "forged_empty", "mcp", [], "tenant_1"
+        )
+
+
+@pytest.mark.asyncio
 async def test_local_skip_returns_automatic_continuation_text(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
     )
-    nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "local_empty", [], [])
+    _register_local_batch("local_empty", [], [])
 
     result = await nl2agent_service.skip_local_resource_recommendations(202, "local_empty", "tenant_1")
 

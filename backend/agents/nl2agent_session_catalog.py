@@ -23,6 +23,7 @@ from agents.nl2agent_workflow import (
     OnlineRecommendationBatch,
     RecommendationBatch,
     RequirementsReview,
+    TrustedSearchBatch,
     WORKFLOW_SCHEMA_VERSION,
     Nl2AgentWorkflowState,
     evaluate_workflow,
@@ -502,6 +503,15 @@ def register_online_recommendation_batch(
     normalized_keys = sorted({str(key).strip() for key in item_keys if str(key).strip()})
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        trusted = state.trusted_search_batches.get(recommendation_batch_id)
+        if (
+            trusted is None
+            or trusted.resource_type != resource_type
+            or trusted.item_keys != normalized_keys
+        ):
+            raise Nl2AgentSessionCatalogError(
+                "Online recommendation batch does not match a trusted search result."
+            )
         batches = state.online_recommendation_batches
         existing = batches.get(recommendation_batch_id)
         if existing is None:
@@ -571,6 +581,16 @@ def register_recommendation_batch(
     normalized_skill_ids = sorted(set(map(int, skill_ids)))
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        trusted = state.trusted_search_batches.get(recommendation_batch_id)
+        if (
+            trusted is None
+            or trusted.resource_type != "local"
+            or trusted.tool_ids != normalized_tool_ids
+            or trusted.skill_ids != normalized_skill_ids
+        ):
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch does not match a trusted search result."
+            )
         batches = state.recommendation_batches
         existing = batches.get(recommendation_batch_id)
         if existing is None:
@@ -582,6 +602,42 @@ def register_recommendation_batch(
         elif existing.tool_ids != normalized_tool_ids or existing.skill_ids != normalized_skill_ids:
             raise Nl2AgentSessionCatalogError("Recommendation batch contents do not match the registered card.")
         return batches[recommendation_batch_id].model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def record_trusted_search_batch(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    *,
+    recommendation_batch_id: str,
+    resource_type: str,
+    tool_ids: Optional[List[int]] = None,
+    skill_ids: Optional[List[int]] = None,
+    item_keys: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Idempotently persist the exact batch produced by an SDK search tool."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    if not recommendation_batch_id:
+        raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
+    batch = TrustedSearchBatch(
+        resource_type=resource_type,
+        tool_ids=sorted(set(map(int, tool_ids or []))),
+        skill_ids=sorted(set(map(int, skill_ids or []))),
+        item_keys=sorted({str(key).strip() for key in item_keys or [] if str(key).strip()}),
+    )
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        existing = state.trusted_search_batches.get(recommendation_batch_id)
+        if existing is None:
+            state.trusted_search_batches[recommendation_batch_id] = batch
+        elif existing != batch:
+            raise Nl2AgentSessionCatalogError(
+                "Trusted search batch contents changed for the same identifier."
+            )
+        return state.trusted_search_batches[recommendation_batch_id].model_dump(
+            mode="json"
+        )
 
     return _mutate_session_state(tenant, draft_id, mutate)
 

@@ -396,6 +396,7 @@ class NexentAgent:
                 requirements_confirmed=metadata.get(
                     "requirements_confirmed", False
                 ),
+                record_search_result=metadata.get("record_search_result"),
             )
         elif class_name == "NL2AgentSearchWebMcpsTool":
             from ..tools.nl2agent.search_web_mcps_tool import (
@@ -414,6 +415,7 @@ class NexentAgent:
                 requirements_confirmed=metadata.get(
                     "requirements_confirmed", False
                 ),
+                record_search_result=metadata.get("record_search_result"),
             )
         elif class_name == "NL2AgentSearchWebSkillsTool":
             from ..tools.nl2agent.search_web_skills_tool import (
@@ -431,6 +433,7 @@ class NexentAgent:
                 requirements_confirmed=metadata.get(
                     "requirements_confirmed", False
                 ),
+                record_search_result=metadata.get("record_search_result"),
             )
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")

@@ -1,7 +1,7 @@
 """NL2AGENT tool: search official/web skills for individual install."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from smolagents.tools import Tool
 
@@ -12,6 +12,7 @@ from ._context import (
     create_nl2agent_context,
     error_response,
     online_recommendation_batch_id,
+    record_trusted_search_result,
 )
 
 
@@ -65,6 +66,7 @@ def get_search_web_skills_tool(
     draft_agent_id: Optional[int] = None,
     official_skills: Optional[List[Dict[str, Any]]] = None,
     requirements_confirmed: bool = False,
+    record_search_result: Optional[Callable[..., Any]] = None,
 ) -> Tool:
     context = create_nl2agent_context(
         agent_id=agent_id,
@@ -74,6 +76,7 @@ def get_search_web_skills_tool(
         draft_agent_id=draft_agent_id,
         official_skills=official_skills,
         requirements_confirmed=requirements_confirmed,
+        record_search_result=record_search_result,
     )
     return NL2AgentSearchWebSkillsTool(context)
 
@@ -122,12 +125,21 @@ class NL2AgentSearchWebSkillsTool(Tool):
             else f"skill-name:{canonical_search_query(str(item.get('skill_name') or item.get('name') or ''))}"
             for item in scored
         ]
+        batch_id = online_recommendation_batch_id(
+            ctx.target_agent_id, "skill", query, item_keys
+        )
+        recording_error = record_trusted_search_result(
+            ctx,
+            recommendation_batch_id=batch_id,
+            resource_type="skill",
+            item_keys=item_keys,
+        )
+        if recording_error:
+            return recording_error
         return json.dumps(
             {
                 "agent_id": ctx.target_agent_id,
-                "recommendation_batch_id": online_recommendation_batch_id(
-                    ctx.target_agent_id, "skill", query, item_keys
-                ),
+                "recommendation_batch_id": batch_id,
                 "items": scored,
             },
             ensure_ascii=False,

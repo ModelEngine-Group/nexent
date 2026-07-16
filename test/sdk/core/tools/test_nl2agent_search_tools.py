@@ -31,16 +31,19 @@ from nexent.core.tools.nl2agent.search_web_skills_tool import (
 
 def get_search_local_resources_tool(**kwargs):
     kwargs.setdefault("requirements_confirmed", True)
+    kwargs.setdefault("record_search_result", lambda **_result: None)
     return _get_search_local_resources_tool(**kwargs)
 
 
 def get_search_web_mcps_tool(**kwargs):
     kwargs.setdefault("requirements_confirmed", True)
+    kwargs.setdefault("record_search_result", lambda **_result: None)
     return _get_search_web_mcps_tool(**kwargs)
 
 
 def get_search_web_skills_tool(**kwargs):
     kwargs.setdefault("requirements_confirmed", True)
+    kwargs.setdefault("record_search_result", lambda **_result: None)
     return _get_search_web_skills_tool(**kwargs)
 
 
@@ -120,6 +123,73 @@ def test_nl2agent_search_tools_require_tenant_context(initializer, catalog_kwarg
     )
 
     assert _loads(tool(query=query)) == {"error": "NL2AGENT session context not initialized."}
+
+
+@pytest.mark.parametrize(
+    ("initializer", "catalog_kwargs", "query", "resource_type"),
+    [
+        (
+            get_search_local_resources_tool,
+            {"tool_catalog": [], "skill_catalog": []},
+            "documents",
+            "local",
+        ),
+        (
+            get_search_web_mcps_tool,
+            {"registry_results": [], "community_results": []},
+            "documents",
+            "mcp",
+        ),
+        (
+            get_search_web_skills_tool,
+            {"official_skills": []},
+            "documents",
+            "skill",
+        ),
+    ],
+)
+def test_nl2agent_search_tools_record_exact_trusted_batch(
+    initializer,
+    catalog_kwargs,
+    query,
+    resource_type,
+):
+    recorded = []
+    tool = initializer(
+        agent_id=101,
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        record_search_result=lambda **result: recorded.append(result),
+        **catalog_kwargs,
+    )
+
+    payload = _loads(tool(query=query))
+
+    assert recorded[0]["recommendation_batch_id"] == payload[
+        "recommendation_batch_id"
+    ]
+    assert recorded[0]["resource_type"] == resource_type
+    if resource_type == "local":
+        assert recorded[0]["tool_ids"] == []
+        assert recorded[0]["skill_ids"] == []
+    else:
+        assert recorded[0]["item_keys"] == []
+
+
+def test_nl2agent_search_tool_fails_closed_when_proof_cannot_be_recorded():
+    def fail_recording(**_result):
+        raise RuntimeError("redis unavailable")
+
+    tool = get_search_local_resources_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        tool_catalog=[],
+        skill_catalog=[],
+        record_search_result=fail_recording,
+    )
+
+    assert "failed to persist trusted" in _loads(tool(query="documents"))["error"]
 
 
 @pytest.mark.parametrize(

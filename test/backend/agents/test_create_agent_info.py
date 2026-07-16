@@ -2230,6 +2230,8 @@ class TestCreateAgentConfig:
 
             mock_get_model_by_id.assert_called_once_with(77, tenant_id="tenant_1")
             mock_get_catalogs.assert_called_once_with("tenant_1", 202)
+            record_search_result = search_tool.metadata.pop("record_search_result")
+            assert callable(record_search_result)
             assert search_tool.metadata == {
                 "agent_id": "agent_1",
                 "user_id": "user_1",

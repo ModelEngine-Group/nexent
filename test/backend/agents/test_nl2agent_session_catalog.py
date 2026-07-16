@@ -30,6 +30,33 @@ def _catalogs():
     }
 
 
+def _register_local_batch(batch_id, tool_ids, skill_ids):
+    catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id=batch_id,
+        resource_type="local",
+        tool_ids=tool_ids,
+        skill_ids=skill_ids,
+    )
+    return catalog_module.register_recommendation_batch(
+        "tenant_1", 202, batch_id, tool_ids, skill_ids
+    )
+
+
+def _register_online_batch(batch_id, resource_type, item_keys):
+    catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id=batch_id,
+        resource_type=resource_type,
+        item_keys=item_keys,
+    )
+    return catalog_module.register_online_recommendation_batch(
+        "tenant_1", 202, batch_id, resource_type, item_keys
+    )
+
+
 def test_catalogs_round_trip_through_shared_redis(fake_redis, monkeypatch):
     catalog_module.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
 
@@ -70,8 +97,8 @@ def test_malformed_catalogs_raise_contextual_error(fake_redis, caplog):
 def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(
     fake_redis,
 ):
-    first = catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [3, 1], [7])
-    second = catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [1, 3], [7])
+    first = _register_local_batch("batch_1", [3, 1], [7])
+    second = _register_local_batch("batch_1", [1, 3], [7])
     assert first == second
     assert first["status"] == "recommendations_ready"
 
@@ -83,9 +110,65 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
 
 
 def test_empty_recommendation_batch_can_be_explicitly_skipped(fake_redis):
-    catalog_module.register_recommendation_batch("tenant_1", 202, "empty_batch", [], [])
+    _register_local_batch("empty_batch", [], [])
     catalog_module.resolve_recommendation_batch("tenant_1", 202, "empty_batch", "skipped")
     catalog_module.assert_resource_review_complete("tenant_1", 202)
+
+
+def test_recommendation_registration_requires_exact_trusted_search(fake_redis):
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="trusted search result",
+    ):
+        catalog_module.register_recommendation_batch(
+            "tenant_1", 202, "forged", [], []
+        )
+
+    catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="local_1",
+        resource_type="local",
+        tool_ids=[1],
+        skill_ids=[2],
+    )
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="trusted search result",
+    ):
+        catalog_module.register_recommendation_batch(
+            "tenant_1", 202, "local_1", [1, 3], [2]
+        )
+
+
+def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
+    first = catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="mcp_1",
+        resource_type="mcp",
+        item_keys=["registry:b", "registry:a"],
+    )
+    second = catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="mcp_1",
+        resource_type="mcp",
+        item_keys=["registry:a", "registry:b"],
+    )
+    assert first == second
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="contents changed",
+    ):
+        catalog_module.record_trusted_search_batch(
+            "tenant_1",
+            202,
+            recommendation_batch_id="mcp_1",
+            resource_type="mcp",
+            item_keys=[],
+        )
 
 
 def test_identity_confirmation_round_trip(fake_redis):
@@ -115,11 +198,11 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_r
 
 
 def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_redis):
-    first = catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_mcp", "mcp", ["registry:b", "registry:a"]
+    first = _register_online_batch(
+        "online_mcp", "mcp", ["registry:b", "registry:a"]
     )
-    second = catalog_module.register_online_recommendation_batch(
-        "tenant_1", 202, "online_mcp", "mcp", ["registry:a", "registry:b"]
+    second = _register_online_batch(
+        "online_mcp", "mcp", ["registry:a", "registry:b"]
     )
     assert first == second
     assert first == {
@@ -128,7 +211,7 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
         "status": "recommendations_ready",
     }
 
-    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_skill", "skill", [])
+    _register_online_batch("online_skill", "skill", [])
 
     assert catalog_module.complete_online_configuration("tenant_1", 202) == [
         "online_mcp",
@@ -136,7 +219,7 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
     ]
     catalog_module.assert_online_configuration_complete("tenant_1", 202)
 
-    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_skill_new", "skill", ["skill:new"])
+    _register_online_batch("online_skill_new", "skill", ["skill:new"])
     state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
     assert not state["online_configuration_confirmed"]
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Complete the online"):
@@ -144,8 +227,8 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
 
 
 def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
-    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_mcp", "mcp", [])
-    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_skill", "skill", [])
+    _register_online_batch("online_mcp", "mcp", [])
+    _register_online_batch("online_skill", "skill", [])
     catalog_module.update_mcp_workflow("tenant_1", 202, "registry:github", status="connected", mcp_id=5)
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Bind discovered"):
         catalog_module.complete_online_configuration("tenant_1", 202)
@@ -155,7 +238,7 @@ def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
 
 
 def test_online_completion_requires_both_catalogs(fake_redis):
-    catalog_module.register_online_recommendation_batch("tenant_1", 202, "online_mcp", "mcp", [])
+    _register_online_batch("online_mcp", "mcp", [])
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
@@ -190,7 +273,7 @@ def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
 
 
 def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
-    catalog_module.register_recommendation_batch("tenant_1", 202, "batch_1", [1], [])
+    _register_local_batch("batch_1", [1], [])
     catalog_module.initialize_nl2agent_session_state("tenant_1", 303, 903)
     catalog_module.initialize_nl2agent_session_state("tenant_2", 202, 904)
     assert not catalog_module.get_nl2agent_session_state("tenant_1", 303)["recommendation_batches"]
@@ -233,8 +316,8 @@ def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
 
 
 def test_failed_delivery_never_rolls_back_business_state(fake_redis):
-    catalog_module.register_recommendation_batch("tenant_1", 202, "pending", [1], [])
-    catalog_module.register_recommendation_batch("tenant_1", 202, "applied", [2], [])
+    _register_local_batch("pending", [1], [])
+    _register_local_batch("applied", [2], [])
     catalog_module.resolve_recommendation_batch("tenant_1", 202, "applied", "applied", [2], [])
 
     catalog_module.record_card_delivery(
@@ -397,6 +480,20 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
 
 
 def test_concurrent_online_batch_registration_preserves_both_updates(fake_redis):
+    catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="online_mcp",
+        resource_type="mcp",
+        item_keys=["registry:one"],
+    )
+    catalog_module.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="online_skill",
+        resource_type="skill",
+        item_keys=["skill:one"],
+    )
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
             executor.submit(
@@ -424,7 +521,7 @@ def test_concurrent_online_batch_registration_preserves_both_updates(fake_redis)
         "online_mcp",
         "online_skill",
     }
-    assert state["revision"] == 2
+    assert state["revision"] == 4
 
 
 def test_workflow_summary_is_authoritative(fake_redis):

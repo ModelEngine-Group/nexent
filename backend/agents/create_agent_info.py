@@ -1,6 +1,7 @@
 import json
 import threading
 import logging
+from functools import partial
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -63,6 +64,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from .nl2agent_session_catalog import (
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
+    record_trusted_search_batch,
 )
 from .nl2agent_workflow import Nl2AgentWorkflowState, evaluate_workflow
 from utils.context_utils import build_context_components, build_system_prompt_component
@@ -1096,6 +1098,15 @@ async def create_agent_config(
                 "draft_agent_id": draft_agent_id,
                 "requirements_confirmed": (
                     nl2agent_workflow_state.get("requirements_review", {}).get("status") == "confirmed"
+                ),
+                "record_search_result": (
+                    partial(
+                        record_trusted_search_batch,
+                        tenant_id,
+                        draft_agent_id,
+                    )
+                    if draft_agent_id is not None
+                    else None
                 ),
                 **nl2agent_catalogs,
             }

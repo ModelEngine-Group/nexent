@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from smolagents.tools import Tool
 
@@ -13,6 +13,7 @@ from ._context import (
     create_nl2agent_context,
     error_response,
     online_recommendation_batch_id,
+    record_trusted_search_result,
 )
 
 
@@ -264,6 +265,7 @@ def get_search_web_mcps_tool(
     registry_results: Optional[List[Dict[str, Any]]] = None,
     community_results: Optional[List[Dict[str, Any]]] = None,
     requirements_confirmed: bool = False,
+    record_search_result: Optional[Callable[..., Any]] = None,
 ) -> Tool:
     context = create_nl2agent_context(
         agent_id=agent_id,
@@ -274,6 +276,7 @@ def get_search_web_mcps_tool(
         registry_results=registry_results,
         community_results=community_results,
         requirements_confirmed=requirements_confirmed,
+        record_search_result=record_search_result,
     )
     return NL2AgentSearchWebMcpsTool(context)
 
@@ -361,6 +364,14 @@ class NL2AgentSearchWebMcpsTool(Tool):
             query,
             [str(item.get("recommendation_id") or "") for item in scored],
         )
+        recording_error = record_trusted_search_result(
+            ctx,
+            recommendation_batch_id=batch_id,
+            resource_type="mcp",
+            item_keys=[str(item.get("recommendation_id") or "") for item in scored],
+        )
+        if recording_error:
+            return recording_error
         return json.dumps(
             {
                 "agent_id": ctx.target_agent_id,
