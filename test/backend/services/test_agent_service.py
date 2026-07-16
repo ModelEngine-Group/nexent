@@ -15224,3 +15224,245 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_ids"] == []
     assert result["model_names"] == []
     assert result["model_name"] is None
+
+
+@pytest.mark.asyncio
+async def test__stream_agent_chunks_buffers_tool_chunk(monkeypatch):
+    agent_request = AgentRequest(
+        agent_id=3,
+        conversation_id=3003,
+        query="hello",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def yield_tool(*_, **__):
+        yield json.dumps({"type": "tool", "content": "my_tool"}, ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", yield_tool, raising=False
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=9001),
+        raising=False,
+    )
+    smu_calls = []
+    smu_mock = MagicMock(side_effect=lambda **kw: smu_calls.append(kw) or 42)
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit", smu_mock, raising=False
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._cleanup_channel_later",
+        AsyncMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.register_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.get_agent_run_info",
+        MagicMock(return_value=MagicMock(query="hello")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.complete_channel",
+        AsyncMock(),
+        raising=False,
+    )
+    mock_channel = MagicMock()
+    mock_channel.publish = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.get_or_create_channel",
+        AsyncMock(return_value=mock_channel),
+        raising=False,
+    )
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    def _fake_submit(fn, *a, **kw):
+        fn(*a, **kw)
+        return _FakeFuture()
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        _fake_submit,
+        raising=False,
+    )
+
+    memory_ctx = MagicMock()
+    memory_ctx.user_config = MagicMock(
+        memory_switch=False,
+        agent_share_option="always",
+        disable_agent_ids=[],
+        disable_user_agent_ids=[],
+    )
+
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(query="hello"), memory_ctx
+    ):
+        collected.append(out)
+
+    assert len(collected) == 1
+    assert '"type": "tool"' in collected[0]
+    assert '"content": "my_tool"' in collected[0]
+
+    tool_flush_calls = [c for c in smu_calls if c.get("unit_type") == "tool"]
+    assert len(tool_flush_calls) == 1
+    assert tool_flush_calls[0]["unit_content"] == "my_tool"
+    assert tool_flush_calls[0]["unit_status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test__stream_agent_chunks_merges_tool_and_execution_logs(monkeypatch):
+    agent_request = AgentRequest(
+        agent_id=3,
+        conversation_id=3003,
+        query="hello",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def yield_tool_then_logs(*_, **__):
+        yield json.dumps({"type": "tool", "content": "my_tool"}, ensure_ascii=False)
+        yield json.dumps({"type": "execution_logs", "content": "result"}, ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", yield_tool_then_logs, raising=False
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=9001),
+        raising=False,
+    )
+    smu_calls = []
+    smu_mock = MagicMock(side_effect=lambda **kw: smu_calls.append(kw) or 42)
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit", smu_mock, raising=False
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._cleanup_channel_later",
+        AsyncMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.register_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.get_agent_run_info",
+        MagicMock(return_value=MagicMock(query="hello")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.complete_channel",
+        AsyncMock(),
+        raising=False,
+    )
+    mock_channel = MagicMock()
+    mock_channel.publish = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.get_or_create_channel",
+        AsyncMock(return_value=mock_channel),
+        raising=False,
+    )
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    def _fake_submit(fn, *a, **kw):
+        fn(*a, **kw)
+        return _FakeFuture()
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        _fake_submit,
+        raising=False,
+    )
+
+    memory_ctx = MagicMock()
+    memory_ctx.user_config = MagicMock(
+        memory_switch=False,
+        agent_share_option="always",
+        disable_agent_ids=[],
+        disable_user_agent_ids=[],
+    )
+
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(query="hello"), memory_ctx
+    ):
+        collected.append(out)
+
+    assert len(collected) == 2
+    assert '"type": "tool"' in collected[0]
+    assert '"type": "execution_logs"' in collected[1]
+
+    tool_call_calls = [c for c in smu_calls if c.get("unit_type") == "tool_call"]
+    assert len(tool_call_calls) == 1
+    merged = json.loads(tool_call_calls[0]["unit_content"])
+    assert merged["tool_call"] == "my_tool"
+    assert merged["execution_result"] == "result"
+    assert tool_call_calls[0]["unit_status"] == "completed"
+
+    tool_flush_calls = [c for c in smu_calls if c.get("unit_type") == "tool"]
+    assert len(tool_flush_calls) == 0
