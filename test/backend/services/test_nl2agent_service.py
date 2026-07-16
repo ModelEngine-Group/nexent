@@ -109,6 +109,17 @@ def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     nl2agent_session_catalog.complete_online_configuration(tenant_id, draft_agent_id)
 
 
+def _mock_database_transaction(monkeypatch):
+    session = MagicMock(name="shared_db_session")
+    transaction = MagicMock(name="database_transaction")
+    transaction.__enter__.return_value = session
+    transaction.__exit__.return_value = False
+    monkeypatch.setattr(
+        nl2agent_service, "get_db_session", MagicMock(return_value=transaction)
+    )
+    return session, transaction
+
+
 @pytest.mark.asyncio
 async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
     _confirm_requirements()
@@ -1188,19 +1199,18 @@ async def test_install_web_skill_rejects_resource_missing_catalog_item(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_draft(
+async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomically(
     monkeypatch,
 ):
     query_tools = MagicMock(return_value=[{"tool_id": 42, "params": {"path": "/tmp"}}])
     bind_tool = MagicMock()
-    get_tenant_skill = MagicMock(return_value=None)
-    install_skill = MagicMock(return_value=[107])
+    get_tenant_skill = MagicMock(return_value={"skill_id": 7, "name": "writer"})
     bind_skill = MagicMock()
+    db_session, transaction = _mock_database_transaction(monkeypatch)
 
     monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
     monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool)
     monkeypatch.setattr(nl2agent_service, "get_tenant_skill_by_id", get_tenant_skill)
-    monkeypatch.setattr(nl2agent_service, "install_skills_for_tenant", install_skill)
     monkeypatch.setattr(nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill)
     monkeypatch.setattr(nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202}))
     nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [42], [7])
@@ -1220,7 +1230,7 @@ async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_d
         "bound_tool_count": 1,
         "bound_skill_count": 1,
         "tool_ids": [42],
-        "skill_ids": [107],
+        "skill_ids": [7],
         "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
@@ -1229,16 +1239,19 @@ async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_d
     assert tool_request.agent_id == 202
     assert tool_request.params == {"path": "/tmp"}
     assert tool_request.enabled is True
+    assert bind_tool.call_args.kwargs["db_session"] is db_session
     bind_tool.assert_called_once()
 
     get_tenant_skill.assert_called_once_with(7, "tenant_1")
-    install_skill.assert_called_once_with(skill_ids=[7], tenant_id="tenant_1", user_id="user_1")
     skill_request = bind_skill.call_args.kwargs["skill_info"]
-    assert skill_request.skill_id == 107
+    assert skill_request.skill_id == 7
     assert skill_request.agent_id == 202
     assert skill_request.enabled is True
     assert skill_request.version_no == 0
+    assert bind_skill.call_args.kwargs["db_session"] is db_session
     bind_skill.assert_called_once()
+    transaction.__enter__.assert_called_once()
+    transaction.__exit__.assert_called_once_with(None, None, None)
 
 
 @pytest.mark.asyncio
@@ -1259,6 +1272,7 @@ async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypa
         ]
     )
     bind_tool = MagicMock()
+    _mock_database_transaction(monkeypatch)
 
     monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
     monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool)
@@ -1277,6 +1291,124 @@ async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypa
     assert result["bound_tool_count"] == 1
     tool_request = bind_tool.call_args.kwargs["tool_info"]
     assert tool_request.params == {}
+
+
+@pytest.mark.asyncio
+async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(monkeypatch):
+    bind_tool = MagicMock()
+    bind_skill = MagicMock(side_effect=RuntimeError("skill write failed"))
+    _, transaction = _mock_database_transaction(monkeypatch)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids",
+        MagicMock(return_value=[{"tool_id": 42, "params": {}}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_tenant_skill_by_id",
+        MagicMock(return_value={"skill_id": 7, "name": "writer"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.register_recommendation_batch(
+        "tenant_1", 202, "batch_1", [42], [7]
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="no resources were applied",
+    ):
+        await nl2agent_service.apply_local_resources_batch(
+            agent_id=202,
+            recommendation_batch_id="batch_1",
+            tool_ids=[42],
+            skill_ids=[7],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    bind_tool.assert_called_once()
+    bind_skill.assert_called_once()
+    exit_args = transaction.__exit__.call_args.args
+    assert exit_args[0] is RuntimeError
+    assert nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)[
+        "recommendation_batches"
+    ]["batch_1"]["status"] == "recommendations_ready"
+
+
+@pytest.mark.asyncio
+async def test_apply_local_resources_batch_reconciles_after_redis_failure(monkeypatch):
+    bind_tool = MagicMock()
+    _mock_database_transaction(monkeypatch)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids",
+        MagicMock(return_value=[{"tool_id": 42, "params": {}}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.register_recommendation_batch(
+        "tenant_1", 202, "batch_1", [42], []
+    )
+    real_resolve = nl2agent_service.resolve_recommendation_batch
+    attempts = 0
+
+    def flaky_resolve(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise nl2agent_session_catalog.Nl2AgentSessionCatalogError(
+                "redis unavailable"
+            )
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(
+        nl2agent_service, "resolve_recommendation_batch", flaky_resolve
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="Retry Apply All",
+    ):
+        await nl2agent_service.apply_local_resources_batch(
+            agent_id=202,
+            recommendation_batch_id="batch_1",
+            tool_ids=[42],
+            skill_ids=[],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    pending = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert pending["recommendation_batches"]["batch_1"]["status"] == "recommendations_ready"
+
+    result = await nl2agent_service.apply_local_resources_batch(
+        agent_id=202,
+        recommendation_batch_id="batch_1",
+        tool_ids=[42],
+        skill_ids=[],
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["status"] == "applied"
+    assert result["chat_injection_text"] == nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT
+    assert bind_tool.call_count == 2
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ class MockToolSourceEnum:
     LOCAL = MockEnumMember("local")
     MCP = MockEnumMember("mcp")
     LANGCHAIN = MockEnumMember("langchain")
+    BUILTIN = MockEnumMember("builtin")
 
 # Create consts.model as a proper module-like object
 
@@ -237,6 +238,29 @@ def test_create_or_update_tool_by_tool_info_update_existing(monkeypatch, mock_se
 
     # Result is now as_dict() of the tool_instance
     assert isinstance(result, dict)
+
+
+def test_create_or_update_tool_uses_caller_transaction(monkeypatch, mock_session):
+    """The repository must reuse the caller's transaction without committing it."""
+    session, query = mock_session
+    query.filter.return_value.first.return_value = MockToolInstance()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    get_session = MagicMock(return_value=mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", get_session)
+    monkeypatch.setattr(
+        "backend.database.tool_db.as_dict",
+        lambda obj: obj.__dict__ if hasattr(obj, "__dict__") else obj,
+    )
+    tool_info = MagicMock()
+    tool_info.__dict__ = {"agent_id": 1, "tool_id": 1}
+
+    create_or_update_tool_by_tool_info(
+        tool_info, "tenant1", "user1", db_session=session
+    )
+
+    get_session.assert_called_once_with(session)
 
 
 def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session):

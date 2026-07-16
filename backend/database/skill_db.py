@@ -21,7 +21,13 @@ def _params_value_for_db(raw: Any) -> Any:
     return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
 
 
-def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_skill_by_skill_info(
+    skill_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    db_session=None,
+):
     """
     Create or update a SkillInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -31,6 +37,7 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
         tenant_id: Tenant ID for filtering, mandatory
         user_id: User ID for updating (will be set as the last updater)
         version_no: Version number to filter. Default 0 = draft/editing state
+        db_session: Optional caller-owned SQLAlchemy Session for a shared transaction
 
     Returns:
         Created or updated SkillInstance object
@@ -43,7 +50,8 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     skill_info_dict.setdefault("created_by", user_id)
     skill_info_dict.setdefault("updated_by", user_id)
 
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         query = session.query(SkillInstance).filter(
             SkillInstance.tenant_id == tenant_id,
             SkillInstance.agent_id == skill_info_dict.get('agent_id'),

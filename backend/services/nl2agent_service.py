@@ -71,6 +71,7 @@ from database.conversation_db import (
     get_latest_assistant_message_id,
     get_message,
 )
+from database.client import get_db_session
 from database.model_management_db import get_model_records
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
@@ -1134,8 +1135,8 @@ async def apply_local_resources_batch(
     """Bulk-bind local tools and skills to the draft agent.
 
     Tools: creates/updates ToolInstance rows with enabled=True.
-    Skills: installs official skills for the tenant if not yet installed, then
-    binds them as SkillInstances to the agent.
+    Skills: binds existing tenant skills as SkillInstances. Official online
+    skills are installed through the separate web-skill workflow.
 
     Returns counts of bound items.
     """
@@ -1151,86 +1152,97 @@ async def apply_local_resources_batch(
     ).issubset(set(batch.get("skill_ids", []))):
         raise AgentRunException("Selected resources do not belong to this recommendation batch.")
 
-    bound_tools = 0
-    bound_skills = 0
-    bound_tool_ids: List[int] = []
-    bound_skill_ids: List[int] = []
+    selected_tool_ids = list(dict.fromkeys(map(int, tool_ids or [])))
+    selected_skill_ids = list(dict.fromkeys(map(int, skill_ids or [])))
 
-    # Bind tools.
-    for tool_id in tool_ids or []:
-        try:
-            tool_info = query_tools_by_ids([tool_id])
-            if not tool_info:
-                logger.warning(f"Tool id {tool_id} not found, skipping.")
-                continue
-            ti = tool_info[0]
-            params = ti.get("params") or {}
-            if not isinstance(params, dict):
-                params = {}
-            instance_req = ToolInstanceInfoRequest(
-                tool_id=tool_id,
-                agent_id=agent_id,
-                params=params,
-                enabled=True,
-                version_no=0,
-            )
-            create_or_update_tool_by_tool_info(
-                tool_info=instance_req,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-            )
-            bound_tools += 1
-            bound_tool_ids.append(tool_id)
-        except Exception as exc:
-            logger.error(f"Failed to bind tool {tool_id} to agent {agent_id}: {exc}")
+    tool_records = query_tools_by_ids(selected_tool_ids) if selected_tool_ids else []
+    tools_by_id = {int(item["tool_id"]): item for item in tool_records}
+    missing_tool_ids = [tool_id for tool_id in selected_tool_ids if tool_id not in tools_by_id]
+    if missing_tool_ids:
+        raise AgentRunException(
+            "Local resource binding failed because tools no longer exist: "
+            + ", ".join(map(str, missing_tool_ids))
+        )
 
-    # Bind skills. Local tenant skills already have ag_skill_info_t rows; web
-    # official skills may arrive as global template IDs and must be installed
-    # into the tenant before creating the per-agent SkillInstance row.
-    for skill_id in skill_ids or []:
-        try:
-            tenant_skill = get_tenant_skill_by_id(skill_id, tenant_id)
-            target_skill_id = skill_id
-            if not tenant_skill:
-                installed_ids = install_skills_for_tenant(skill_ids=[skill_id], tenant_id=tenant_id, user_id=user_id)
-                if not installed_ids:
-                    logger.warning(f"Skill id {skill_id} not found or installable, skipping.")
-                    continue
-                target_skill_id = installed_ids[0]
+    missing_skill_ids = [
+        skill_id
+        for skill_id in selected_skill_ids
+        if not get_tenant_skill_by_id(skill_id, tenant_id)
+    ]
+    if missing_skill_ids:
+        raise AgentRunException(
+            "Local resource binding failed because tenant skills no longer exist: "
+            + ", ".join(map(str, missing_skill_ids))
+        )
 
-            instance_req = SkillInstanceInfoRequest(
-                skill_id=target_skill_id,
-                agent_id=agent_id,
-                enabled=True,
-                version_no=0,
-            )
-            create_or_update_skill_by_skill_info(
-                skill_info=instance_req,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-            )
-            bound_skills += 1
-            bound_skill_ids.append(target_skill_id)
-        except Exception as exc:
-            logger.error(f"Failed to bind skill {skill_id} to agent {agent_id}: {exc}")
+    try:
+        with get_db_session() as db_session:
+            for tool_id in selected_tool_ids:
+                params = tools_by_id[tool_id].get("params") or {}
+                if not isinstance(params, dict):
+                    params = {}
+                create_or_update_tool_by_tool_info(
+                    tool_info=ToolInstanceInfoRequest(
+                        tool_id=tool_id,
+                        agent_id=agent_id,
+                        params=params,
+                        enabled=True,
+                        version_no=0,
+                    ),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    version_no=0,
+                    db_session=db_session,
+                )
+            for skill_id in selected_skill_ids:
+                create_or_update_skill_by_skill_info(
+                    skill_info=SkillInstanceInfoRequest(
+                        skill_id=skill_id,
+                        agent_id=agent_id,
+                        enabled=True,
+                        version_no=0,
+                    ),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    version_no=0,
+                    db_session=db_session,
+                )
+    except Exception as exc:
+        logger.exception(
+            "Failed to atomically bind local resources: tenant_id=%s draft_agent_id=%s batch_id=%s",
+            tenant_id,
+            agent_id,
+            recommendation_batch_id,
+        )
+        raise AgentRunException("Local resource binding failed; no resources were applied.") from exc
 
-    resolve_recommendation_batch(
-        tenant_id,
-        agent_id,
-        recommendation_batch_id,
-        "applied",
-        tool_ids,
-        skill_ids,
-    )
+    try:
+        resolve_recommendation_batch(
+            tenant_id,
+            agent_id,
+            recommendation_batch_id,
+            "applied",
+            selected_tool_ids,
+            selected_skill_ids,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Local resources were committed but workflow reconciliation failed: tenant_id=%s "
+            "draft_agent_id=%s batch_id=%s",
+            tenant_id,
+            agent_id,
+            recommendation_batch_id,
+        )
+        raise AgentRunException(
+            "Local resources were saved, but workflow state could not be reconciled. Retry Apply All."
+        ) from exc
     return {
         "recommendation_batch_id": recommendation_batch_id,
         "status": "applied",
-        "bound_tool_count": bound_tools,
-        "bound_skill_count": bound_skills,
-        "tool_ids": bound_tool_ids,
-        "skill_ids": bound_skill_ids,
+        "bound_tool_count": len(selected_tool_ids),
+        "bound_skill_count": len(selected_skill_ids),
+        "tool_ids": selected_tool_ids,
+        "skill_ids": selected_skill_ids,
         "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
 

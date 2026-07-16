@@ -31,7 +31,13 @@ def create_tool(tool_info, version_no: int = 0):
         session.add(new_tool_instance)
 
 
-def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_tool_by_tool_info(
+        tool_info,
+        tenant_id: str,
+        user_id: str,
+        version_no: int = 0,
+        db_session=None,
+):
     """
     Create or update a ToolInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -41,6 +47,7 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
         tenant_id: Tenant ID for filtering, mandatory
         user_id: User ID for updating (will be set as the last updater)
         version_no: Version number to filter. Default 0 = draft/editing state
+        db_session: Optional caller-owned SQLAlchemy Session for a shared transaction
 
     Returns:
         Created or updated ToolInstance object
@@ -55,7 +62,8 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
             if v is not None
         }
 
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         # Query if there is an existing ToolInstance
         # Note: Do not filter by user_id to avoid creating duplicate instances
         # for the same agent_id and tool_id when different users save

@@ -231,6 +231,36 @@ class TestCreateOrUpdateSkillBySkillInfo:
         assert mock_skill_instance.enabled is False
         assert mock_skill_instance.updated_by == 'user1'
 
+    def test_create_or_update_skill_uses_caller_transaction(
+        self, monkeypatch, mock_session
+    ):
+        """The repository must reuse the caller's transaction without committing it."""
+        session, query = mock_session
+        query.filter.return_value.first.return_value = MockSkillInstance(skill_id=1)
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        get_session = MagicMock(return_value=mock_ctx)
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", get_session
+        )
+        monkeypatch.setattr(
+            "backend.database.skill_db.as_dict",
+            lambda obj: obj.__dict__ if hasattr(obj, "__dict__") else obj,
+        )
+        skill_info = MagicMock()
+        skill_info.__dict__ = {
+            "agent_id": 1,
+            "skill_id": 1,
+            "enabled": True,
+        }
+
+        create_or_update_skill_by_skill_info(
+            skill_info, "tenant1", "user1", db_session=session
+        )
+
+        get_session.assert_called_once_with(session)
+
     def test_create_new_skill_instance(self, monkeypatch, mock_session):
         """Test creating a new skill instance."""
         session, query = mock_session
