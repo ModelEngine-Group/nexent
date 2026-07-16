@@ -6,7 +6,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
-from consts.exceptions import AgentRunException
+from consts.exceptions import (
+    AgentRunException,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
+)
 from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
 
 
@@ -48,11 +52,15 @@ def _resolve_tool_config_values(
     """Validate submitted ToolInstance values against a ToolInfo parameter schema."""
     if isinstance(schema, dict):
         if submitted:
-            raise AgentRunException(f"Tool {tool_id} does not accept user configuration values.")
+            raise Nl2AgentValidationError(
+                f"Tool {tool_id} does not accept user configuration values."
+            )
         return dict(schema)
     if not isinstance(schema, list):
         if submitted:
-            raise AgentRunException(f"Tool {tool_id} does not accept configuration values.")
+            raise Nl2AgentValidationError(
+                f"Tool {tool_id} does not accept configuration values."
+            )
         return {}
 
     fields = {
@@ -62,7 +70,7 @@ def _resolve_tool_config_values(
     }
     unknown = sorted(set(submitted) - set(fields))
     if unknown:
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             f"Tool {tool_id} received unknown configuration fields: {', '.join(unknown)}."
         )
 
@@ -84,7 +92,7 @@ def _validate_tool_config_value(
     required = field.get("required") is True or field.get("optional") is False
     if value is None or value == "":
         if required:
-            raise AgentRunException(
+            raise Nl2AgentValidationError(
                 f"Tool {tool_id} requires configuration field: {name}."
             )
         return None
@@ -92,12 +100,12 @@ def _validate_tool_config_value(
     expected_type = str(field.get("type") or "").lower()
     type_matches = _TOOL_VALUE_TYPE_CHECKS.get(expected_type)
     if type_matches and not type_matches(value):
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             f"Tool {tool_id} configuration field {name} must be {expected_type}."
         )
     choices = field.get("choices")
     if isinstance(choices, list) and choices and value not in choices:
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             f"Tool {tool_id} configuration field {name} must use a declared choice."
         )
     return value
@@ -146,7 +154,7 @@ async def apply_local_resources(
     if not requested_tool_ids.issubset(set(batch.get("tool_ids", []))) or not (
         requested_skill_ids.issubset(set(batch.get("skill_ids", [])))
     ):
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "Selected resources do not belong to this recommendation batch."
         )
 
@@ -158,7 +166,9 @@ async def apply_local_resources(
     }
     unexpected_config_ids = sorted(set(submitted_config) - set(selected_tool_ids))
     if unexpected_config_ids:
-        raise AgentRunException("Tool configuration was submitted for an unselected tool.")
+        raise Nl2AgentValidationError(
+            "Tool configuration was submitted for an unselected tool."
+        )
     tool_records = (
         dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
         if selected_tool_ids
@@ -229,7 +239,7 @@ async def apply_local_resources(
             agent_id,
             recommendation_batch_id,
         )
-        raise AgentRunException(
+        raise Nl2AgentOperationError(
             "Local resource binding failed; no resources were applied."
         ) from exc
 
@@ -250,7 +260,7 @@ async def apply_local_resources(
             agent_id,
             recommendation_batch_id,
         )
-        raise AgentRunException(
+        raise Nl2AgentOperationError(
             "Local resources were saved, but workflow state could not be reconciled. "
             "Retry Apply All."
         ) from exc
@@ -291,7 +301,7 @@ async def register_local_recommendations(
     unknown_tool_ids = sorted(set(map(int, tool_ids)) - catalog_tool_ids)
     unknown_skill_ids = sorted(set(map(int, skill_ids)) - catalog_skill_ids)
     if unknown_tool_ids or unknown_skill_ids:
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "Local recommendations contain resources outside this session catalog."
         )
     dependencies.assert_trusted_batch(

@@ -51,8 +51,11 @@ from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import (
     AgentRunException,
+    AppException,
     Nl2AgentCatalogUnavailableError as Nl2AgentCatalogUnavailableError,
     Nl2AgentDraftNotFoundError,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
 )
 from consts.model import (
     AgentInfoRequest,
@@ -287,7 +290,7 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
 
 def _validate_draft_agent_id(agent_id: int) -> None:
     if not isinstance(agent_id, int) or agent_id <= 0:
-        raise AgentRunException("Invalid NL2AGENT draft agent_id.")
+        raise Nl2AgentValidationError("Invalid NL2AGENT draft agent_id.")
 
 
 def _get_owned_draft(agent_id: int, tenant_id: str) -> Dict[str, Any]:
@@ -307,6 +310,8 @@ def _require_workflow_action(agent_id: int, tenant_id: str, action: str) -> None
     """Map workflow state errors to the service-layer exception contract."""
     try:
         assert_workflow_action_allowed(tenant_id, agent_id, action)
+    except AppException:
+        raise
     except Exception as exc:
         raise AgentRunException(str(exc)) from exc
 
@@ -323,11 +328,13 @@ async def select_models(
     _require_workflow_action(agent_id, tenant_id, "select_models")
     try:
         workflow_state = assert_requirements_confirmed(tenant_id, agent_id)
+    except AppException:
+        raise
     except Exception as exc:
         raise AgentRunException(str(exc)) from exc
     ordered_ids = [int(primary_model_id), *[int(x) for x in fallback_model_ids]]
     if len(ordered_ids) > 5 or len(set(ordered_ids)) != len(ordered_ids):
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "Select one primary model and up to four distinct fallbacks."
         )
 
@@ -364,7 +371,7 @@ async def select_models(
                     tenant_id,
                     agent_id,
                 )
-        raise AgentRunException("Failed to save the model selection.") from exc
+        raise Nl2AgentOperationError("Failed to save the model selection.") from exc
     return {
         "agent_id": agent_id,
         "primary_model_id": ordered_ids[0],
@@ -414,7 +421,7 @@ def _validate_available_llm_ids(
             reason = f"Model {model_id} has no display name."
         if finalizing:
             reason += " Reopen the model-selection card and choose an available LLM."
-        raise AgentRunException(reason)
+        raise Nl2AgentValidationError(reason)
     return validated_models
 
 

@@ -4,7 +4,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from consts.exceptions import AgentRunException
+from consts.exceptions import (
+    AgentRunException,
+    AppException,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
+)
 from consts.model import AgentInfoRequest
 
 
@@ -20,7 +25,7 @@ def _validate_requested_output_tokens(
         return
     max_output_tokens = primary_model.get("max_output_tokens")
     if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "requested_output_tokens cannot exceed the selected model "
             f"max_output_tokens ({max_output_tokens})"
         )
@@ -150,7 +155,9 @@ def _validate_publication_models(
     primary_model_id = current_draft.get("business_logic_model_id")
     model_ids = dependencies.normalize_model_ids(current_draft.get("model_ids"))
     if not primary_model_id or primary_model_id not in model_ids:
-        raise AgentRunException("Select a primary LLM before finalizing the agent.")
+        raise Nl2AgentValidationError(
+            "Select a primary LLM before finalizing the agent."
+        )
     validated_models = dependencies.validate_available_llm_ids(
         tenant_id,
         model_ids,
@@ -178,6 +185,8 @@ def _assert_publication_workflow(
     for check in checks:
         try:
             check(tenant_id, agent_id)
+        except AppException:
+            raise
         except Exception as exc:
             raise AgentRunException(str(exc)) from exc
 
@@ -194,7 +203,7 @@ def _validate_proposal(proposal: PublicationProposal) -> None:
         or not getattr(proposal, field_name).strip()
     ]
     if missing_fields:
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "The final proposal is incomplete: " + ", ".join(missing_fields)
         )
 
@@ -228,7 +237,9 @@ def _build_agent_update(
 ) -> Dict[str, Any]:
     display_name = str(current_draft.get("display_name") or "").strip()[:50]
     if not display_name:
-        raise AgentRunException("The persisted agent display name is missing.")
+        raise Nl2AgentValidationError(
+            "The persisted agent display name is missing."
+        )
     agent_update: Dict[str, Any] = {
         "display_name": display_name,
         "name": dependencies.generate_internal_name(
@@ -289,4 +300,4 @@ def _persist_agent_update(
             agent_id,
             exc_info=True,
         )
-        raise AgentRunException("Failed to finalize agent.") from exc
+        raise Nl2AgentOperationError("Failed to finalize agent.") from exc

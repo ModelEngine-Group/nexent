@@ -118,6 +118,24 @@ class AgentRunException(Exception):
     pass
 
 
+class Nl2AgentValidationError(AgentRunException):
+    """Raised when an NL2AGENT request or proposed configuration is invalid."""
+
+    pass
+
+
+class Nl2AgentOperationError(AgentRunException):
+    """Raised when an internal NL2AGENT persistence operation fails."""
+
+    pass
+
+
+class Nl2AgentExternalServiceError(AgentRunException):
+    """Raised when an external NL2AGENT installation or connection fails."""
+
+    pass
+
+
 class LimitExceededError(Exception):
     """Raised when an outer platform calling too frequently"""
 

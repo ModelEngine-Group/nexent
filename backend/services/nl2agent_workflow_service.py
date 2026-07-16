@@ -4,7 +4,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from consts.exceptions import AgentRunException, Nl2AgentStaleCardError
+from consts.exceptions import (
+    AgentRunException,
+    Nl2AgentOperationError,
+    Nl2AgentStaleCardError,
+    Nl2AgentValidationError,
+)
 from consts.model import AgentInfoRequest
 
 logger = logging.getLogger(__name__)
@@ -331,7 +336,7 @@ async def save_agent_identity(
     dependencies.get_owned_draft(agent_id, tenant_id)
     normalized_display_name = display_name.strip()
     if not normalized_display_name:
-        raise AgentRunException("Agent display name cannot be empty.")
+        raise Nl2AgentValidationError("Agent display name cannot be empty.")
     try:
         with dependencies.get_db_session() as db_session:
             dependencies.update_agent(
@@ -351,7 +356,9 @@ async def save_agent_identity(
             agent_id,
             exc_info=True,
         )
-        raise AgentRunException("Failed to save the agent display name.") from exc
+        raise Nl2AgentOperationError(
+            "Failed to save the agent display name."
+        ) from exc
     return {
         "agent_id": agent_id,
         "display_name": normalized_display_name,

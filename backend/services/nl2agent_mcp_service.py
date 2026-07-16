@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
-from consts.exceptions import AgentRunException
+from consts.exceptions import (
+    AgentRunException,
+    Nl2AgentExternalServiceError,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
+)
 from consts.model import MCPConfigRequest, ToolInstanceInfoRequest
 
 logger = logging.getLogger(__name__)
@@ -129,7 +134,7 @@ async def install_recommended_mcp(
             logger.exception("Failed to persist NL2AGENT MCP failure state")
         if isinstance(exc, AgentRunException):
             raise
-        raise AgentRunException(
+        raise Nl2AgentExternalServiceError(
             "MCP installation failed during connection or tool discovery."
         ) from exc
     finally:
@@ -222,9 +227,9 @@ async def _perform_recommended_mcp_install(
         None,
     )
     if not option:
-        raise AgentRunException("Invalid MCP installation option.")
+        raise Nl2AgentValidationError("Invalid MCP installation option.")
     if not option.get("supported", True):
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             option.get("unsupported_reason")
             or "This MCP installation option is unsupported."
         )
@@ -248,7 +253,9 @@ async def _perform_recommended_mcp_install(
     description = str(server.get("description") or raw.get("description") or "")
     field_values = config_values.get("fields") or {}
     if not isinstance(field_values, dict):
-        raise AgentRunException("MCP configuration fields must be an object.")
+        raise Nl2AgentValidationError(
+            "MCP configuration fields must be an object."
+        )
     resolved_values = _validate_configuration(option, field_values)
     authorization_token, custom_headers = _resolve_headers(option, resolved_values)
 
@@ -325,7 +332,9 @@ def _validate_configuration(
             value = field.get("default")
         label = field.get("label") or field.get("name")
         if field.get("required") and value in (None, ""):
-            raise AgentRunException(f"Missing required MCP configuration: {label}")
+            raise Nl2AgentValidationError(
+                f"Missing required MCP configuration: {label}"
+            )
         if value in (None, ""):
             continue
         _validate_mcp_field_value(field, value, label)
@@ -343,14 +352,14 @@ def _validate_mcp_field_value(
         try:
             json.loads(value)
         except json.JSONDecodeError as exc:
-            raise AgentRunException(
+            raise Nl2AgentValidationError(
                 f"Invalid JSON for MCP configuration: {label}"
             ) from exc
     elif field_type == "number":
         try:
             float(value)
         except (TypeError, ValueError) as exc:
-            raise AgentRunException(
+            raise Nl2AgentValidationError(
                 f"Invalid number for MCP configuration: {label}"
             ) from exc
     elif field_type == "url":
@@ -360,11 +369,15 @@ def _validate_mcp_field_value(
             or not parsed_field_url.netloc
             or re.search(r"\{[^{}]+\}", str(value))
         ):
-            raise AgentRunException(f"Invalid URL for MCP configuration: {label}")
+            raise Nl2AgentValidationError(
+                f"Invalid URL for MCP configuration: {label}"
+            )
 
     choices = field.get("choices") or []
     if choices and str(value) not in set(map(str, choices)):
-        raise AgentRunException(f"Invalid choice for MCP configuration: {label}")
+        raise Nl2AgentValidationError(
+            f"Invalid choice for MCP configuration: {label}"
+        )
 
 
 def _resolve_headers(
@@ -427,12 +440,14 @@ async def _install_remote(
             str(value),
         )
     if not server_url or re.search(r"\{[^{}]+\}", str(server_url)):
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "MCP server URL contains unresolved configuration variables."
         )
     parsed_url = urlparse(str(server_url))
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-        raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
+        raise Nl2AgentValidationError(
+            "MCP server URL must be a valid HTTP or HTTPS URL."
+        )
     if existing_mcp_id is not None:
         dependencies.update_remote_mcp(
             tenant_id=tenant_id,
@@ -501,7 +516,7 @@ async def _install_container(
                 else submitted_config
             )
         except json.JSONDecodeError as exc:
-            raise AgentRunException(
+            raise Nl2AgentValidationError(
                 "MCP container configuration must be valid JSON."
             ) from exc
 
@@ -513,11 +528,17 @@ async def _install_container(
     try:
         port_number = int(port)
     except (TypeError, ValueError) as exc:
-        raise AgentRunException("MCP container port must be an integer.") from exc
+        raise Nl2AgentValidationError(
+            "MCP container port must be an integer."
+        ) from exc
     if not 1 <= port_number <= 65535:
-        raise AgentRunException("MCP container port must be between 1 and 65535.")
+        raise Nl2AgentValidationError(
+            "MCP container port must be between 1 and 65535."
+        )
     if not isinstance(config_json, dict):
-        raise AgentRunException("This MCP requires container configuration and a port.")
+        raise Nl2AgentValidationError(
+            "This MCP requires container configuration and a port."
+        )
     mcp_config = MCPConfigRequest(**config_json)
     if existing_mcp_id is not None:
         await dependencies.reconfigure_container_mcp(
@@ -563,7 +584,7 @@ def _build_package_config(
         runtime,
     )
     if not identifier or command not in {"npx", "uvx"}:
-        raise AgentRunException("Unsupported MCP package runtime.")
+        raise Nl2AgentValidationError("Unsupported MCP package runtime.")
     environment: Dict[str, str] = {}
     runtime_args: List[str] = []
     package_args: List[str] = []
@@ -608,7 +629,7 @@ def _merge_environment(
         return
     environment = target_config.setdefault("env", {})
     if not isinstance(environment, dict):
-        raise AgentRunException(
+        raise Nl2AgentValidationError(
             "MCP container environment configuration must be an object."
         )
     for field in option.get("fields", []):
@@ -639,7 +660,9 @@ async def _discover_and_complete(
         tenant_id=tenant_id,
     )
     if not record:
-        raise AgentRunException("Installed MCP record could not be resolved.")
+        raise Nl2AgentOperationError(
+            "Installed MCP record could not be resolved."
+        )
     resolved_mcp_id = int(record["mcp_id"])
     try:
         discovered = await dependencies.discover_tools(
@@ -665,7 +688,7 @@ async def _discover_and_complete(
             mcp_id=resolved_mcp_id,
             error="MCP tool discovery failed. Retry to resume discovery.",
         )
-        raise AgentRunException(
+        raise Nl2AgentExternalServiceError(
             "MCP tool discovery failed. Retry installation."
         ) from exc
 
@@ -738,7 +761,9 @@ async def bind_mcp_tools(
     """Bind user-selected tools belonging to an installed MCP."""
     dependencies.get_owned_draft(agent_id, tenant_id)
     if not tool_ids:
-        raise AgentRunException("Select at least one discovered MCP tool to bind.")
+        raise Nl2AgentValidationError(
+            "Select at least one discovered MCP tool to bind."
+        )
     record = dependencies.get_mcp_record(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
         raise AgentRunException("Installed MCP not found.")
@@ -751,7 +776,9 @@ async def bind_mcp_tools(
         and row.get("usage") == record.get("mcp_name")
     }
     if set(map(int, tool_ids)) != set(valid):
-        raise AgentRunException("One or more tools do not belong to the selected MCP.")
+        raise Nl2AgentValidationError(
+            "One or more tools do not belong to the selected MCP."
+        )
     recommendation_id, _ = dependencies.find_mcp_workflow_by_id(
         tenant_id,
         agent_id,
@@ -791,7 +818,7 @@ async def bind_mcp_tools(
             )
         except Exception:
             logger.exception("Failed to compensate MCP tool binding state")
-        raise AgentRunException("Failed to bind MCP tools.") from exc
+        raise Nl2AgentOperationError("Failed to bind MCP tools.") from exc
     return {
         "agent_id": agent_id,
         "mcp_id": mcp_id,
@@ -846,7 +873,9 @@ async def skip_mcp_tool_binding(
             )
         except Exception:
             logger.exception("Failed to compensate MCP binding skip state")
-        raise AgentRunException("Failed to skip MCP tool binding.") from exc
+        raise Nl2AgentOperationError(
+            "Failed to skip MCP tool binding."
+        ) from exc
     return {
         "agent_id": agent_id,
         "mcp_id": mcp_id,

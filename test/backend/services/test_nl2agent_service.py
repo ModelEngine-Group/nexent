@@ -13,7 +13,13 @@ from agents.nl2agent_session_catalog import (
     clear_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
 )
-from consts.exceptions import Nl2AgentStaleCardError
+from consts.exceptions import (
+    Nl2AgentExternalServiceError,
+    Nl2AgentOperationError,
+    Nl2AgentStaleCardError,
+    Nl2AgentValidationError,
+    Nl2AgentWorkflowConflictError,
+)
 from consts.model import Nl2AgentFinalizeRequest
 from consts.nl2agent_response import (
     Nl2AgentApplyLocalResourcesResponse,
@@ -751,7 +757,7 @@ async def test_start_session_removes_redis_state_when_database_commit_fails(monk
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentOperationError,
         match="Failed to initialize NL2AGENT session",
     ):
         await nl2agent_service.start_session(
@@ -907,7 +913,7 @@ async def test_select_models_rolls_back_database_when_redis_write_fails(
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentOperationError,
         match="Failed to save the model selection",
     ) as exc_info:
         await nl2agent_service.select_models(
@@ -945,7 +951,7 @@ async def test_select_models_restores_redis_when_database_commit_fails(
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentOperationError,
         match="Failed to save the model selection",
     ) as exc_info:
         await nl2agent_service.select_models(
@@ -972,7 +978,7 @@ async def test_select_models_requires_confirmed_requirements(monkeypatch):
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentWorkflowConflictError,
         match="Confirm the requirements summary",
     ):
         await nl2agent_service.select_models(
@@ -1422,7 +1428,7 @@ async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
     monkeypatch.setattr(nl2agent_service, "update_mcp_workflow", update_workflow)
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentOperationError,
         match="Failed to bind MCP tools",
     ):
         await nl2agent_service.bind_mcp_tools(
@@ -1759,7 +1765,10 @@ async def test_install_recommended_mcp_rejects_missing_declared_remote_variable(
         ),
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match="Missing required MCP configuration"):
+    with pytest.raises(
+        Nl2AgentValidationError,
+        match="Missing required MCP configuration",
+    ):
         await nl2agent_service.install_recommended_mcp(
             agent_id=202,
             recommendation_id="registry:required-config",
@@ -2203,7 +2212,7 @@ async def test_install_web_skill_keeps_recommendation_when_binding_fails(monkeyp
         {**_EXPECTED_SESSION_CATALOGS, "official_skills": [recommendation]},
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match="could not be bound"):
+    with pytest.raises(Nl2AgentOperationError, match="could not be bound"):
         await nl2agent_service.install_web_skill(
             agent_id=202,
             skill_id=12,
@@ -2246,7 +2255,7 @@ async def test_install_web_skill_rejects_empty_install_result(monkeypatch):
         },
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match="Failed to install"):
+    with pytest.raises(Nl2AgentExternalServiceError, match="Failed to install"):
         await nl2agent_service.install_web_skill(
             agent_id=202,
             skill_id=12,
@@ -2678,7 +2687,7 @@ def test_resolve_tool_config_values_rejects_invalid_values(submitted, message):
         }
     ]
 
-    with pytest.raises(nl2agent_service.AgentRunException, match=message):
+    with pytest.raises(Nl2AgentValidationError, match=message):
         _resolve_tool_config_values(42, schema, submitted)
 
 
@@ -2739,7 +2748,7 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(m
     _register_local_batch("batch_1", [42], [7])
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentOperationError,
         match="no resources were applied",
     ):
         await nl2agent_service.apply_local_resources_batch(
@@ -3132,7 +3141,10 @@ async def test_finalize_rejects_connected_mcp_until_tools_are_bound_or_skipped(
         bound_tool_ids=[],
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match="Bind discovered MCP tools"):
+    with pytest.raises(
+        Nl2AgentWorkflowConflictError,
+        match="Bind discovered MCP tools",
+    ):
         await nl2agent_service.finalize_agent(
             agent_id=202,
             user_id="user_1",
@@ -3193,7 +3205,7 @@ async def test_finalize_requires_both_online_catalogs(monkeypatch, registered_re
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentWorkflowConflictError,
         match="both MCP and Skill",
     ):
         await nl2agent_service.finalize_agent(
@@ -3301,7 +3313,7 @@ async def test_save_agent_identity_rolls_back_database_when_redis_confirmation_f
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        Nl2AgentOperationError,
         match="Failed to save the agent display name",
     ):
         await nl2agent_service.save_agent_identity(

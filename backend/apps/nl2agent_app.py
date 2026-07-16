@@ -13,7 +13,14 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from consts.error_code import ErrorCode
-from consts.exceptions import AppException, AgentRunException, UnauthorizedError
+from consts.exceptions import (
+    AppException,
+    AgentRunException,
+    Nl2AgentExternalServiceError,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
+    UnauthorizedError,
+)
 from consts.model import (
     Nl2AgentApplyLocalResourcesRequest,
     Nl2AgentCardDeliveryRequest,
@@ -81,6 +88,21 @@ def _session_http_error(exc: Exception) -> Exception:
     """Convert legacy service failures without inspecting message text."""
     if isinstance(exc, AppException):
         return exc
+    if isinstance(exc, Nl2AgentValidationError):
+        return AppException(
+            ErrorCode.AGENTSPACE_NL2AGENT_INVALID_REQUEST,
+            str(exc),
+        )
+    if isinstance(exc, Nl2AgentExternalServiceError):
+        return AppException(
+            ErrorCode.AGENTSPACE_NL2AGENT_EXTERNAL_SERVICE_FAILED,
+            str(exc),
+        )
+    if isinstance(exc, Nl2AgentOperationError):
+        return AppException(
+            ErrorCode.AGENTSPACE_NL2AGENT_OPERATION_FAILED,
+            str(exc),
+        )
     if isinstance(exc, AgentRunException):
         return AppException(
             ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT,

@@ -9,6 +9,9 @@ from consts.exceptions import (
     AppException,
     AgentRunException,
     Nl2AgentDraftNotFoundError,
+    Nl2AgentExternalServiceError,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
 )
 from consts.model import Nl2AgentFinalizeRequest, Nl2AgentRecommendationBatchRequest
 
@@ -27,6 +30,38 @@ def test_session_error_converts_legacy_workflow_failure_without_message_matching
 
     assert converted.error_code == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
     assert converted.message == "A new workflow message."
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_status"),
+    [
+        (
+            Nl2AgentValidationError("invalid configuration"),
+            ErrorCode.AGENTSPACE_NL2AGENT_INVALID_REQUEST,
+            400,
+        ),
+        (
+            Nl2AgentExternalServiceError("marketplace unavailable"),
+            ErrorCode.AGENTSPACE_NL2AGENT_EXTERNAL_SERVICE_FAILED,
+            502,
+        ),
+        (
+            Nl2AgentOperationError("database unavailable"),
+            ErrorCode.AGENTSPACE_NL2AGENT_OPERATION_FAILED,
+            500,
+        ),
+    ],
+)
+def test_session_error_preserves_failure_category(
+    error: AgentRunException,
+    expected_code: ErrorCode,
+    expected_status: int,
+) -> None:
+    converted = _session_http_error(error)
+
+    assert converted.error_code == expected_code
+    assert converted.http_status == expected_status
+    assert converted.message == str(error)
 
 
 def test_session_error_converts_unexpected_failure_to_internal_error() -> None:

@@ -8,8 +8,13 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from consts.exceptions import AgentRunException
-from consts.exceptions import Nl2AgentCatalogUnavailableError
+from consts.exceptions import (
+    AgentRunException,
+    Nl2AgentCatalogUnavailableError,
+    Nl2AgentExternalServiceError,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
+)
 from consts.model import SkillInstanceInfoRequest
 
 logger = logging.getLogger(__name__)
@@ -233,7 +238,9 @@ def _require_installable_skill(
     skill_name: Optional[str],
 ) -> CatalogItem:
     if not skill_id and not _normalized_skill_name(skill_name):
-        raise AgentRunException("Either skill_name or a positive skill_id is required.")
+        raise Nl2AgentValidationError(
+            "Either skill_name or a positive skill_id is required."
+        )
     catalogs = dependencies.get_session_catalogs(tenant_id, agent_id)
     normalized_name = _normalized_skill_name(skill_name)
     for item in catalogs.get("official_skills", []):
@@ -309,7 +316,7 @@ def _bind_installed_skill(
             version_no=0,
         )
     except Exception as exc:
-        raise AgentRunException(
+        raise Nl2AgentOperationError(
             f"Installed skill {skill_label} could not be bound to the draft."
         ) from exc
 
@@ -367,7 +374,9 @@ def _install_skill_by_name(
     locale: Optional[str],
 ) -> Dict[str, Any]:
     if not canonical_name:
-        raise AgentRunException("The requested Skill has no canonical name.")
+        raise Nl2AgentValidationError(
+            "The requested Skill has no canonical name."
+        )
     try:
         installed_names = dependencies.install_by_name(
             skill_names=[canonical_name],
@@ -377,12 +386,16 @@ def _install_skill_by_name(
         )
     except Exception as exc:
         logger.error("Failed to install web skill %s: %s", canonical_name, exc)
-        raise AgentRunException(f"Failed to install skill {canonical_name}.") from exc
+        raise Nl2AgentExternalServiceError(
+            f"Failed to install skill {canonical_name}."
+        ) from exc
     if not installed_names:
-        raise AgentRunException(f"Failed to install skill {canonical_name}.")
+        raise Nl2AgentExternalServiceError(
+            f"Failed to install skill {canonical_name}."
+        )
     installed_skill = dependencies.get_installed_by_name(installed_names[0], tenant_id)
     if not installed_skill or not installed_skill.get("skill_id"):
-        raise AgentRunException(
+        raise Nl2AgentOperationError(
             f"Installed skill {canonical_name} could not be resolved for binding."
         )
     bound_skill_id = int(installed_skill["skill_id"])
@@ -420,7 +433,7 @@ def _install_skill_by_id(
     user_id: str,
 ) -> Dict[str, Any]:
     if canonical_id is None or canonical_id <= 0:
-        raise AgentRunException("The requested Skill has no canonical ID.")
+        raise Nl2AgentValidationError("The requested Skill has no canonical ID.")
     try:
         installed_ids = dependencies.install_by_id(
             skill_ids=[canonical_id],
@@ -429,9 +442,13 @@ def _install_skill_by_id(
         )
     except Exception as exc:
         logger.error("Failed to install web skill %s: %s", canonical_id, exc)
-        raise AgentRunException(f"Failed to install skill {canonical_id}.") from exc
+        raise Nl2AgentExternalServiceError(
+            f"Failed to install skill {canonical_id}."
+        ) from exc
     if not installed_ids:
-        raise AgentRunException(f"Failed to install skill {canonical_id}.")
+        raise Nl2AgentExternalServiceError(
+            f"Failed to install skill {canonical_id}."
+        )
     installed_skill_id = int(installed_ids[0])
     _bind_installed_skill(
         dependencies,

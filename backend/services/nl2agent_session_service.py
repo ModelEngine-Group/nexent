@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from consts.exceptions import AgentRunException
+from consts.exceptions import AgentRunException, Nl2AgentOperationError
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,9 @@ async def start_session(
             )
             draft_agent_id = created.get("agent_id")
             if not isinstance(draft_agent_id, int) or draft_agent_id <= 0:
-                raise AgentRunException("Draft agent creation returned no agent_id.")
+                raise Nl2AgentOperationError(
+                    "Draft agent creation returned no agent_id."
+                )
 
             conversation = dependencies.create_conversation(
                 conversation_title=f"NL2AGENT - {draft_name}",
@@ -80,7 +82,7 @@ async def start_session(
             )
             conversation_id = conversation.get("conversation_id")
             if not isinstance(conversation_id, int) or conversation_id <= 0:
-                raise AgentRunException(
+                raise Nl2AgentOperationError(
                     "Conversation creation returned no conversation_id."
                 )
 
@@ -106,7 +108,9 @@ async def start_session(
             "Failed to initialize NL2AGENT session for tenant_id=%s",
             tenant_id,
         )
-        raise AgentRunException("Failed to initialize NL2AGENT session.") from exc
+        raise Nl2AgentOperationError(
+            "Failed to initialize NL2AGENT session."
+        ) from exc
 
     if resource_missing_names:
         logger.warning(
@@ -137,7 +141,7 @@ def _resolve_builder_agent_id(
     except ValueError as exc:
         if str(exc) != "agent not found":
             raise
-        raise AgentRunException(
+        raise Nl2AgentOperationError(
             "NL2AGENT default agent is not initialized. Restart the config service first."
         ) from exc
 
