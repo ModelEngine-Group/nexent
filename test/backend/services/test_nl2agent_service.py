@@ -543,6 +543,16 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
+        "seed_nl2agent_builtin_tools",
+        MagicMock(return_value=[11, 12, 13]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_or_update_tool_by_tool_info",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
         "list_all_tools",
         AsyncMock(return_value=_RAW_TOOL_ROWS),
     )
@@ -797,6 +807,38 @@ async def test_start_session_requires_config_seed_when_builder_is_missing(
     with pytest.raises(nl2agent_service.AgentRunException, match="Restart the config service"):
         await nl2agent_service.start_session(user_id="user_1", tenant_id="tenant_1", language="en")
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
+
+
+@pytest.mark.asyncio
+async def test_start_session_fails_before_draft_creation_when_builder_is_incomplete(
+    monkeypatch,
+):
+    create_draft = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_id_by_agent_name",
+        MagicMock(return_value=101),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value=_seeded_nl2agent_info()),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_or_update_tool_by_tool_info",
+        MagicMock(side_effect=RuntimeError("binding failed")),
+    )
+    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+
+    with pytest.raises(Nl2AgentOperationError, match="default agent is not ready"):
+        await nl2agent_service.start_session(
+            user_id="user_1",
+            tenant_id="tenant_1",
+            language="en",
+        )
+
+    create_draft.assert_not_called()
 
 
 @pytest.mark.asyncio

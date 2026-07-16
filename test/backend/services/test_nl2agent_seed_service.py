@@ -2,10 +2,13 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from services.nl2agent_seed_service import (
     NL2AGENT_VERIFICATION_CONFIG,
     SeedDependencies,
     build_seed_defaults,
+    ensure_builder_ready,
     ensure_seed_defaults,
     normalize_model_ids,
     seed_default_agent,
@@ -83,6 +86,46 @@ def test_seed_default_agent_creates_builder_and_binds_builtin_tools():
         call.kwargs["tool_info"].tool_id
         for call in dependencies.bind_tool.call_args_list
     ] == [1, 2, 3]
+
+
+def test_seed_default_agent_repairs_bindings_on_existing_builder():
+    dependencies = _dependencies(
+        query_all_agents=MagicMock(
+            return_value=[{"agent_id": 101, "name": "nl2agent"}]
+        )
+    )
+
+    agent_id = seed_default_agent(dependencies, "tenant_1", "user_1")
+
+    assert agent_id == 101
+    dependencies.create_agent.assert_not_called()
+    assert [
+        call.kwargs["tool_info"].tool_id
+        for call in dependencies.bind_tool.call_args_list
+    ] == [1, 2, 3]
+
+
+def test_seed_default_agent_fails_when_any_required_binding_fails():
+    dependencies = _dependencies(
+        bind_tool=MagicMock(side_effect=[None, RuntimeError("binding failed")])
+    )
+
+    assert seed_default_agent(dependencies, "tenant_1", "user_1") is None
+    assert dependencies.bind_tool.call_count == 2
+
+
+def test_builder_readiness_propagates_partial_binding_failure():
+    dependencies = _dependencies(
+        bind_tool=MagicMock(side_effect=RuntimeError("binding failed"))
+    )
+
+    with pytest.raises(RuntimeError, match="binding failed"):
+        ensure_builder_ready(
+            dependencies,
+            {"agent_id": 101, "name": "nl2agent"},
+            "user_1",
+            "tenant_1",
+        )
 
 
 def test_normalize_model_ids_preserves_order_and_deduplicates():

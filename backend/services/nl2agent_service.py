@@ -139,7 +139,7 @@ from services.nl2agent_session_service import (
 from services.nl2agent_seed_service import (
     NL2AGENT_VERIFICATION_CONFIG,
     SeedDependencies,
-    ensure_seed_defaults,
+    ensure_builder_ready,
     is_llm_model_type,
     normalize_model_ids,
     seed_default_agent,
@@ -245,10 +245,10 @@ def _seed_dependencies() -> SeedDependencies:
     )
 
 
-def _ensure_nl2agent_seed_defaults(
+def _ensure_nl2agent_builder_ready(
     agent: Dict[str, Any], user_id: str, tenant_id: str
 ) -> None:
-    ensure_seed_defaults(_seed_dependencies(), agent, user_id, tenant_id)
+    ensure_builder_ready(_seed_dependencies(), agent, user_id, tenant_id)
 
 
 async def _load_session_catalogs(
@@ -272,7 +272,7 @@ def _session_initialization_dependencies() -> SessionInitializationDependencies:
     return SessionInitializationDependencies(
         search_agent_id_by_name=search_agent_id_by_agent_name,
         search_agent_info_by_id=search_agent_info_by_agent_id,
-        ensure_seed_defaults=_ensure_nl2agent_seed_defaults,
+        ensure_builder_ready=_ensure_nl2agent_builder_ready,
         load_session_catalogs=_load_session_catalogs,
         get_db_session=get_db_session,
         create_agent=create_agent,

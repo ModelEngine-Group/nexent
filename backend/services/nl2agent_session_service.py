@@ -15,7 +15,7 @@ class SessionInitializationDependencies:
 
     search_agent_id_by_name: Callable[..., int]
     search_agent_info_by_id: Callable[..., Optional[Dict[str, Any]]]
-    ensure_seed_defaults: Callable[..., Any]
+    ensure_builder_ready: Callable[..., Any]
     load_session_catalogs: Callable[
         [str],
         Awaitable[tuple[Dict[str, List[Dict[str, Any]]], List[str]]],
@@ -41,7 +41,7 @@ async def start_session(
     """Create a draft and Conversation, then atomically hand off Redis state."""
     del language
     builder_agent_id = _resolve_builder_agent_id(dependencies, tenant_id)
-    _ensure_builder_seed_defaults(
+    _ensure_builder_ready(
         dependencies,
         builder_agent_id=builder_agent_id,
         user_id=user_id,
@@ -146,7 +146,7 @@ def _resolve_builder_agent_id(
         ) from exc
 
 
-def _ensure_builder_seed_defaults(
+def _ensure_builder_ready(
     dependencies: SessionInitializationDependencies,
     *,
     builder_agent_id: int,
@@ -158,18 +158,19 @@ def _ensure_builder_seed_defaults(
             agent_id=builder_agent_id,
             tenant_id=tenant_id,
         )
-        if builder_agent:
-            dependencies.ensure_seed_defaults(
-                builder_agent,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-    except Exception as exc:
-        logger.warning(
-            "Failed to verify NL2AGENT prompt template link for tenant %s: %s",
-            tenant_id,
-            exc,
+        if not builder_agent:
+            raise Nl2AgentOperationError("NL2AGENT default agent record is missing.")
+        dependencies.ensure_builder_ready(
+            builder_agent,
+            user_id=user_id,
+            tenant_id=tenant_id,
         )
+    except Exception as exc:
+        if isinstance(exc, AgentRunException):
+            raise
+        raise Nl2AgentOperationError(
+            "NL2AGENT default agent is not ready. Restart the config service and retry."
+        ) from exc
 
 
 def _compensate_session_catalogs(

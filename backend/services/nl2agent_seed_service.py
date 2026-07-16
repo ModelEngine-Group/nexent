@@ -192,19 +192,62 @@ def ensure_seed_defaults(
         update_values["business_logic_model_id"] = desired_model_ids[0]
     if not update_values:
         return
-    try:
-        dependencies.update_agent(
-            agent_id=agent_id,
-            agent_info=AgentInfoRequest(**update_values),
+    dependencies.update_agent(
+        agent_id=agent_id,
+        agent_info=AgentInfoRequest(**update_values),
+        user_id=user_id,
+        version_no=0,
+    )
+
+
+def _bind_builtin_tools(
+    dependencies: SeedDependencies,
+    *,
+    agent_id: int,
+    tool_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Idempotently bind every required builder tool or fail readiness."""
+    if not tool_ids:
+        raise RuntimeError("NL2AGENT builtin tool seeding returned no tools.")
+    for tool_id in tool_ids:
+        dependencies.bind_tool(
+            tool_info=ToolInstanceInfoRequest(
+                tool_id=tool_id,
+                agent_id=agent_id,
+                params={},
+                enabled=True,
+                version_no=0,
+            ),
+            tenant_id=tenant_id,
             user_id=user_id,
             version_no=0,
         )
-    except Exception as exc:
-        logger.warning(
-            "Failed to backfill NL2AGENT seed defaults for agent_id=%s: %s",
-            agent_id,
-            exc,
-        )
+
+
+def ensure_builder_ready(
+    dependencies: SeedDependencies,
+    agent: Dict[str, Any],
+    user_id: str,
+    tenant_id: str,
+) -> None:
+    """Repair builder fields and required bindings, failing on partial repair."""
+    agent_id = agent.get("agent_id")
+    if not isinstance(agent_id, int) or agent_id <= 0:
+        raise RuntimeError("NL2AGENT builder has no valid agent_id.")
+    tool_ids = dependencies.seed_builtin_tools(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    ensure_seed_defaults(dependencies, agent, user_id, tenant_id)
+    _bind_builtin_tools(
+        dependencies,
+        agent_id=agent_id,
+        tool_ids=tool_ids,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 def seed_default_agent(
@@ -226,7 +269,22 @@ def seed_default_agent(
     for agent in all_agents:
         if (agent.get("name") or "") == dependencies.agent_name:
             existing_id = agent.get("agent_id")
-            ensure_seed_defaults(dependencies, agent, user_id, tenant_id)
+            try:
+                ensure_seed_defaults(dependencies, agent, user_id, tenant_id)
+                _bind_builtin_tools(
+                    dependencies,
+                    agent_id=existing_id,
+                    tool_ids=tool_ids,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to repair NL2AGENT default agent %s: %s",
+                    existing_id,
+                    exc,
+                )
+                return None
             logger.info("NL2AGENT default agent already exists (agent_id=%s)", existing_id)
             return existing_id
 
@@ -241,24 +299,21 @@ def seed_default_agent(
     if not agent_id:
         logger.error("NL2AGENT default agent creation returned no agent_id.")
         return None
-    for tool_id in tool_ids:
-        try:
-            dependencies.bind_tool(
-                tool_info=ToolInstanceInfoRequest(
-                    tool_id=tool_id,
-                    agent_id=agent_id,
-                    params={},
-                    enabled=True,
-                    version_no=0,
-                ),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-            )
-        except Exception as exc:
-            logger.error(
-                "Failed to bind builtin tool %s to NL2AGENT agent: %s", tool_id, exc
-            )
+    try:
+        _bind_builtin_tools(
+            dependencies,
+            agent_id=agent_id,
+            tool_ids=tool_ids,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to bind all builtin tools to NL2AGENT agent %s: %s",
+            agent_id,
+            exc,
+        )
+        return None
     logger.info(
         "Seeded NL2AGENT default agent (agent_id=%s) with %s builtin tools for tenant %s",
         agent_id,
