@@ -790,6 +790,46 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_select_models_accepts_legacy_chat_model_type(monkeypatch):
+    _confirm_requirements()
+    _mock_database_transaction(monkeypatch)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(
+            return_value=[
+                {
+                    "model_id": 8,
+                    "model_type": "chat",
+                    "connect_status": "available",
+                    "display_name": "Legacy Chat Model",
+                }
+            ]
+        ),
+    )
+    update_agent = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+
+    result = await nl2agent_service.select_models(
+        agent_id=202,
+        primary_model_id=8,
+        fallback_model_ids=[],
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["models"] == [
+        {"model_id": 8, "display_name": "Legacy Chat Model"}
+    ]
+    assert update_agent.call_args.kwargs["agent_info"].model_ids == [8]
+
+
+@pytest.mark.asyncio
 async def test_select_models_rolls_back_database_when_redis_write_fails(
     monkeypatch,
 ):
@@ -1181,6 +1221,54 @@ async def test_finalize_revalidates_persisted_model_availability(monkeypatch):
             user_id="user_1",
             tenant_id="tenant_1",
         )
+
+
+@pytest.mark.asyncio
+async def test_finalize_rejects_output_tokens_above_primary_model_capacity(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            return_value={
+                "agent_id": 202,
+                "name": "draft_test",
+                "business_logic_model_id": 7,
+                "model_ids": [7],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(
+            return_value=[
+                {
+                    "model_id": 7,
+                    "model_type": "llm",
+                    "connect_status": "available",
+                    "display_name": "Primary LLM",
+                    "max_output_tokens": 1024,
+                }
+            ]
+        ),
+    )
+    update_agent = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="requested_output_tokens cannot exceed.*1024",
+    ):
+        await nl2agent_service.finalize_agent(
+            agent_id=202,
+            user_id="user_1",
+            tenant_id="tenant_1",
+            requested_output_tokens=1025,
+        )
+
+    update_agent.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2679,6 +2767,7 @@ async def test_finalize_uses_persisted_resources(monkeypatch):
                     "model_type": "llm",
                     "connect_status": "available",
                     "display_name": "Primary LLM",
+                    "max_output_tokens": 1024,
                 }
             ]
         ),
@@ -2738,12 +2827,14 @@ async def test_finalize_uses_persisted_resources(monkeypatch):
         business_description="Build document presentations",
         duty_prompt="Create presentations from documents.",
         greeting_message="Upload a document to begin.",
+        requested_output_tokens=1024,
     )
 
     assert result["name"] == "old_title"
     assert result["display_name"] == "Old title"
     assert result["tool_ids"] == [42]
     assert result["skill_ids"] == [7]
+    assert update.call_args.kwargs["agent_info"].requested_output_tokens == 1024
     bind_tool.assert_not_called()
     bind_skill.assert_not_called()
 
@@ -3221,7 +3312,7 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
                 },
                 {
                     "model_id": 8,
-                    "model_type": "llm",
+                    "model_type": "chat",
                     "connect_status": "available",
                     "model_name": "Fallback LLM",
                 },

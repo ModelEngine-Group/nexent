@@ -11,6 +11,21 @@ from consts.model import AgentInfoRequest
 logger = logging.getLogger(__name__)
 
 
+def _validate_requested_output_tokens(
+    requested_output_tokens: Optional[int],
+    primary_model: Dict[str, Any],
+) -> None:
+    """Keep publication output-token validation aligned with normal Agent saves."""
+    if requested_output_tokens is None:
+        return
+    max_output_tokens = primary_model.get("max_output_tokens")
+    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+        raise AgentRunException(
+            "requested_output_tokens cannot exceed the selected model "
+            f"max_output_tokens ({max_output_tokens})"
+        )
+
+
 @dataclass(frozen=True)
 class PublicationDependencies:
     """Persistence and workflow operations required to publish a draft."""
@@ -58,10 +73,14 @@ async def publish_agent(
     stored_model_ids = dependencies.normalize_model_ids(current_draft.get("model_ids"))
     if not stored_primary_model_id or stored_primary_model_id not in stored_model_ids:
         raise AgentRunException("Select a primary LLM before finalizing the agent.")
-    dependencies.validate_available_llm_ids(
+    validated_models = dependencies.validate_available_llm_ids(
         tenant_id,
         stored_model_ids,
         finalizing=True,
+    )
+    _validate_requested_output_tokens(
+        requested_output_tokens,
+        validated_models[int(stored_primary_model_id)],
     )
 
     workflow_checks = (

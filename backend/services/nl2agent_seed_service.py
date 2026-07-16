@@ -9,6 +9,9 @@ from consts.model import AgentInfoRequest, ModelConnectStatusEnum, ToolInstanceI
 logger = logging.getLogger(__name__)
 
 
+LLM_MODEL_TYPES = frozenset({"llm", "chat"})
+
+
 NL2AGENT_VERIFICATION_CONFIG = {
     "enabled": True,
     "step_verification_enabled": True,
@@ -87,6 +90,11 @@ def normalize_model_ids(value: Any) -> List[int]:
     return normalized
 
 
+def is_llm_model_type(value: Any) -> bool:
+    """Return whether a persisted model type represents a platform LLM."""
+    return str(value or "").strip().lower() in LLM_MODEL_TYPES
+
+
 def _load_seed_fields(dependencies: SeedDependencies) -> Dict[str, str]:
     seed_fields = {
         "name": dependencies.agent_name,
@@ -117,7 +125,7 @@ def _available_llm_model_ids(
         return []
     model_ids: List[int] = []
     for record in records:
-        if record.get("model_type") not in {"llm", "chat"}:
+        if not is_llm_model_type(record.get("model_type")):
             continue
         if (
             ModelConnectStatusEnum.get_value(record.get("connect_status"))

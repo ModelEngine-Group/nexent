@@ -129,6 +129,7 @@ from services.nl2agent_seed_service import (
     NL2AGENT_VERIFICATION_CONFIG,
     SeedDependencies,
     ensure_seed_defaults,
+    is_llm_model_type,
     normalize_model_ids,
     seed_default_agent,
 )
@@ -330,7 +331,7 @@ async def select_models(
             "Select one primary model and up to four distinct fallbacks."
         )
 
-    display_names = _validate_available_llm_ids(tenant_id, ordered_ids)
+    validated_models = _validate_available_llm_ids(tenant_id, ordered_ids)
 
     previous_confirmation = bool(workflow_state.get("model_selection_confirmed"))
     redis_write_attempted = False
@@ -369,7 +370,10 @@ async def select_models(
         "primary_model_id": ordered_ids[0],
         "fallback_model_ids": ordered_ids[1:],
         "models": [
-            {"model_id": model_id, "display_name": display_names[model_id]}
+            {
+                "model_id": model_id,
+                "display_name": validated_models[model_id]["display_name"],
+            }
             for model_id in ordered_ids
         ],
         "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
@@ -381,16 +385,16 @@ def _validate_available_llm_ids(
     model_ids: List[int],
     *,
     finalizing: bool = False,
-) -> Dict[int, str]:
+) -> Dict[int, Dict[str, Any]]:
     """Validate IDs against the tenant's platform LLM inventory."""
     records = get_model_records(None, tenant_id) or []
     records_by_id = {int(record["model_id"]): record for record in records}
-    display_names: Dict[int, str] = {}
+    validated_models: Dict[int, Dict[str, Any]] = {}
     for model_id in model_ids:
         record = records_by_id.get(int(model_id))
         if record is None:
             reason = f"Model {model_id} does not exist in this tenant."
-        elif str(record.get("model_type") or "").lower() != "llm":
+        elif not is_llm_model_type(record.get("model_type")):
             reason = f"Model {model_id} is not an LLM."
         elif (
             ModelConnectStatusEnum.get_value(record.get("connect_status"))
@@ -402,13 +406,16 @@ def _validate_available_llm_ids(
                 record.get("display_name") or record.get("model_name") or ""
             ).strip()
             if display_name:
-                display_names[int(model_id)] = display_name
+                validated_models[int(model_id)] = {
+                    **record,
+                    "display_name": display_name,
+                }
                 continue
             reason = f"Model {model_id} has no display name."
         if finalizing:
             reason += " Reopen the model-selection card and choose an available LLM."
         raise AgentRunException(reason)
-    return display_names
+    return validated_models
 
 
 def _resolve_model_summaries(
@@ -440,7 +447,7 @@ def _resolve_model_summaries(
                 ).strip()
                 or None
             )
-            if str(record.get("model_type") or "").lower() != "llm":
+            if not is_llm_model_type(record.get("model_type")):
                 reason = "not_llm"
             elif (
                 ModelConnectStatusEnum.get_value(record.get("connect_status"))
