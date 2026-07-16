@@ -54,7 +54,6 @@ from consts.exceptions import (
     AgentRunException,
     Nl2AgentCatalogUnavailableError as Nl2AgentCatalogUnavailableError,
     Nl2AgentDraftNotFoundError,
-    Nl2AgentStaleCardError,
 )
 from consts.model import (
     AgentInfoRequest,
@@ -113,6 +112,17 @@ from services.nl2agent_resource_service import (
     apply_local_resources,
     register_local_recommendations,
     skip_local_recommendations,
+)
+from services.nl2agent_workflow_service import (
+    WorkflowDependencies,
+    confirm_online_resource_configuration as confirm_online_configuration_workflow,
+    confirm_requirements_review as confirm_requirements_review_workflow,
+    get_session_state as get_workflow_session_state,
+    process_requirements_revision_text as process_requirements_revision_workflow,
+    register_online_resource_recommendations as register_online_recommendations_workflow,
+    register_requirements_review as register_requirements_review_workflow,
+    report_card_delivery as report_card_delivery_workflow,
+    save_agent_identity as save_agent_identity_workflow,
 )
 from services.remote_mcp_service import (
     add_container_mcp_service,
@@ -1356,6 +1366,36 @@ async def skip_local_resource_recommendations(
     )
 
 
+def _workflow_dependencies() -> WorkflowDependencies:
+    """Build workflow dependencies from facade-level operations."""
+    return WorkflowDependencies(
+        get_owned_draft=_get_owned_draft,
+        register_online_batch=register_online_recommendation_batch,
+        get_session_state=get_nl2agent_session_state,
+        get_workflow_summary=get_workflow_summary,
+        get_message=get_message,
+        get_latest_assistant_message_id=get_latest_assistant_message_id,
+        record_card_delivery=record_card_delivery,
+        complete_online_configuration=complete_online_configuration_state,
+        register_requirements_summary=register_requirements_summary,
+        confirm_requirements_summary=confirm_requirements_summary,
+        apply_requirements_revision_text=apply_requirements_revision_text,
+        search_agent_info_by_agent_id=search_agent_info_by_agent_id,
+        query_enabled_tool_instances=query_all_enabled_tool_instances,
+        query_enabled_skill_instances=query_enabled_skill_instances,
+        resolve_model_summaries=_resolve_model_summaries,
+        resolve_resource_summaries=_resolve_resource_summaries,
+        query_tools_by_ids=query_tools_by_ids,
+        normalize_model_ids=_normalize_model_ids,
+        generate_internal_agent_name=_generate_internal_agent_name,
+        update_agent=update_agent,
+        confirm_agent_identity=confirm_agent_identity,
+        runner_agent_name=NL2AGENT_AGENT_NAME,
+        continuation_text=NL2AGENT_CHAT_INJECTION_TEXT,
+        card_retry_text=NL2AGENT_CARD_RETRY_INJECTION_TEXT,
+    )
+
+
 async def register_online_resource_recommendations(
     agent_id: int,
     recommendation_batch_id: str,
@@ -1363,16 +1403,15 @@ async def register_online_resource_recommendations(
     item_keys: List[str],
     tenant_id: str,
 ) -> Dict[str, Any]:
-    """Record one MCP or web-Skill result batch rendered by the frontend."""
-    _get_owned_draft(agent_id, tenant_id)
-    batch = register_online_recommendation_batch(
-        tenant_id,
-        agent_id,
-        recommendation_batch_id,
-        resource_type,
-        item_keys,
+    """Delegate online recommendation registration to the workflow service."""
+    return await register_online_recommendations_workflow(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        recommendation_batch_id=recommendation_batch_id,
+        resource_type=resource_type,
+        item_keys=item_keys,
+        tenant_id=tenant_id,
     )
-    return {"recommendation_batch_id": recommendation_batch_id, **batch}
 
 
 async def report_card_delivery(
@@ -1385,78 +1424,41 @@ async def report_card_delivery(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Record a receipt only for the latest persisted assistant message."""
-    _get_owned_draft(agent_id, tenant_id)
-    state = get_nl2agent_session_state(tenant_id, agent_id)
-    conversation_id = int(state["conversation_id"])
-    message = get_message(message_id, user_id=user_id)
-    latest_message_id = get_latest_assistant_message_id(
-        conversation_id, user_id=user_id
+    """Delegate card-delivery validation to the workflow service."""
+    return await report_card_delivery_workflow(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        message_id=message_id,
+        card_type=card_type,
+        status=status,
+        card_key=card_key,
+        reason=reason,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
-    if (
-        not message
-        or int(message.get("conversation_id") or 0) != conversation_id
-        or message.get("message_role") != "assistant"
-        or message.get("status") != "completed"
-        or latest_message_id != message_id
-    ):
-        raise Nl2AgentStaleCardError()
-    summary = get_workflow_summary(tenant_id, agent_id)
-    if card_type not in summary["expected_card_types"]:
-        existing = state.get("card_delivery", {}).get(card_type) or {}
-        if not (
-            existing.get("message_id") == message_id
-            and existing.get("status") == status
-            and existing.get("card_key") == card_key
-        ):
-            raise Nl2AgentStaleCardError()
-    delivery = record_card_delivery(
-        tenant_id,
-        agent_id,
-        message_id,
-        card_type,
-        status,
-        card_key,
-        reason,
-    )
-    retry_count = int(delivery.get("retry_count", 0))
-    response = {
-        "agent_id": agent_id,
-        **delivery,
-        "auto_retry_allowed": status == "failed" and retry_count <= 2,
-    }
-    if status == "failed":
-        response["chat_injection_text"] = NL2AGENT_CARD_RETRY_INJECTION_TEXT
-    return response
 
 
 async def confirm_online_resource_configuration(
     agent_id: int, tenant_id: str
 ) -> Dict[str, Any]:
-    """Persist the user's global decision to finish online configuration."""
-    _get_owned_draft(agent_id, tenant_id)
-    completed_batch_ids = complete_online_configuration_state(tenant_id, agent_id)
-    return {
-        "agent_id": agent_id,
-        "online_configuration_confirmed": True,
-        "completed_batch_ids": completed_batch_ids,
-        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
-    }
+    """Delegate online configuration completion to the workflow service."""
+    return await confirm_online_configuration_workflow(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+    )
 
 
 async def register_requirements_review(
     agent_id: int, summary: Dict[str, Any], tenant_id: str
 ) -> Dict[str, Any]:
-    """Register the rendered five-field requirements summary for one draft."""
-    _get_owned_draft(agent_id, tenant_id)
-    review = register_requirements_summary(tenant_id, agent_id, summary)
-    return {
-        "agent_id": agent_id,
-        "status": review["status"],
-        "summary": review["summary"],
-        "fingerprint": review["fingerprint"],
-        "is_current": review["is_current"],
-    }
+    """Delegate requirements registration to the workflow service."""
+    return await register_requirements_review_workflow(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        summary=summary,
+        tenant_id=tenant_id,
+    )
 
 
 def process_requirements_revision_text(
@@ -1465,80 +1467,35 @@ def process_requirements_revision_text(
     tenant_id: str,
     text: str,
 ) -> Dict[str, Any]:
-    """Process textual requirement revisions only for the seeded NL2AGENT runner."""
-    runner = search_agent_info_by_agent_id(
-        agent_id=runner_agent_id, tenant_id=tenant_id
+    """Delegate textual revision handling to the workflow service."""
+    return process_requirements_revision_workflow(
+        _workflow_dependencies(),
+        runner_agent_id=runner_agent_id,
+        draft_agent_id=draft_agent_id,
+        tenant_id=tenant_id,
+        text=text,
     )
-    if not runner or runner.get("name") != NL2AGENT_AGENT_NAME:
-        return {"intent": "not_applicable"}
-    _get_owned_draft(draft_agent_id, tenant_id)
-    return apply_requirements_revision_text(tenant_id, draft_agent_id, text)
 
 
 async def confirm_requirements_review(
     agent_id: int, fingerprint: str, tenant_id: str
 ) -> Dict[str, Any]:
-    """Confirm the current registered requirements revision."""
-    _get_owned_draft(agent_id, tenant_id)
-    review = confirm_requirements_summary(tenant_id, agent_id, fingerprint)
-    return {
-        "agent_id": agent_id,
-        "status": review["status"],
-        "fingerprint": review["fingerprint"],
-        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
-    }
+    """Delegate requirements confirmation to the workflow service."""
+    return await confirm_requirements_review_workflow(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        fingerprint=fingerprint,
+        tenant_id=tenant_id,
+    )
 
 
 async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
-    """Return authoritative draft models, resource bindings, and review state."""
-    draft = _get_owned_draft(agent_id, tenant_id)
-    tool_instances = (
-        query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
+    """Delegate authoritative session-state projection to the workflow service."""
+    return await get_workflow_session_state(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        tenant_id=tenant_id,
     )
-    skill_instances = (
-        query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
-    )
-    models, invalid_model_references = _resolve_model_summaries(draft, tenant_id)
-    tools, skills, invalid_resource_references = _resolve_resource_summaries(
-        tool_instances, skill_instances, tenant_id
-    )
-    workflow_state = get_nl2agent_session_state(tenant_id, agent_id)
-    workflow_summary = get_workflow_summary(tenant_id, agent_id)
-    for workflow in workflow_state.get("mcp_workflows", {}).values():
-        discovered_ids = [
-            int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])
-        ]
-        discovered_rows = query_tools_by_ids(discovered_ids) if discovered_ids else []
-        discovered_by_id = {int(row["tool_id"]): row for row in discovered_rows}
-        workflow["discovered_tools"] = [
-            {
-                "tool_id": tool_id,
-                "name": discovered_by_id.get(tool_id, {}).get("name") or str(tool_id),
-                "description": discovered_by_id.get(tool_id, {}).get("description")
-                or "",
-            }
-            for tool_id in discovered_ids
-        ]
-    return {
-        "agent_id": agent_id,
-        "schema_version": workflow_state["schema_version"],
-        "revision": workflow_state["revision"],
-        "current_stage": workflow_summary["current_stage"],
-        "expected_card_types": workflow_summary["expected_card_types"],
-        "allowed_actions": workflow_summary["allowed_actions"],
-        "display_name": draft.get("display_name"),
-        "internal_name": _generate_internal_agent_name(
-            draft.get("display_name") or "", agent_id, tenant_id
-        ),
-        "business_logic_model_id": draft.get("business_logic_model_id"),
-        "model_ids": _normalize_model_ids(draft.get("model_ids")),
-        "models": models,
-        "tools": tools,
-        "skills": skills,
-        "invalid_references": invalid_model_references + invalid_resource_references,
-        "identity_confirmed": workflow_state.get("identity_confirmed", False),
-        "resource_review": workflow_state,
-    }
 
 
 async def save_agent_identity(
@@ -1547,38 +1504,14 @@ async def save_agent_identity(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Persist an explicitly confirmed display name without publishing the draft."""
-    _get_owned_draft(agent_id, tenant_id)
-    normalized_display_name = display_name.strip()
-    if not normalized_display_name:
-        raise AgentRunException("Agent display name cannot be empty.")
-    try:
-        update_agent(
-            agent_id=agent_id,
-            agent_info=AgentInfoRequest(display_name=normalized_display_name),
-            user_id=user_id,
-            version_no=0,
-        )
-        confirm_agent_identity(tenant_id, agent_id)
-    except AgentRunException:
-        raise
-    except Exception as exc:
-        logger.error(
-            "Failed to save NL2AGENT identity: tenant_id=%s draft_agent_id=%s",
-            tenant_id,
-            agent_id,
-            exc_info=True,
-        )
-        raise AgentRunException("Failed to save the agent display name.") from exc
-    return {
-        "agent_id": agent_id,
-        "display_name": normalized_display_name,
-        "internal_name": _generate_internal_agent_name(
-            normalized_display_name, agent_id, tenant_id
-        ),
-        "identity_confirmed": True,
-        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
-    }
+    """Delegate identity persistence to the workflow service."""
+    return await save_agent_identity_workflow(
+        _workflow_dependencies(),
+        agent_id=agent_id,
+        display_name=display_name,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 def _refresh_official_skill_catalog_after_install(
