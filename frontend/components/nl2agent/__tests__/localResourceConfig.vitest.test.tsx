@@ -54,6 +54,8 @@ describe("local Tool configuration", () => {
       status: "recommendations_ready",
       tool_ids: [42],
       skill_ids: [],
+      applied_tool_ids: [],
+      applied_skill_ids: [],
       tool_parameter_schemas: {},
     });
     vi.mocked(applyLocalResources).mockReset();
@@ -70,6 +72,8 @@ describe("local Tool configuration", () => {
       status: "recommendations_ready",
       tool_ids: [42],
       skill_ids: [],
+      applied_tool_ids: [],
+      applied_skill_ids: [],
       tool_parameter_schemas: {
         "42": [
           {
@@ -109,6 +113,8 @@ describe("local Tool configuration", () => {
       status: "recommendations_ready",
       tool_ids: [42],
       skill_ids: [],
+      applied_tool_ids: [],
+      applied_skill_ids: [],
       tool_parameter_schemas: {
         "42": [{ name: "endpoint", type: "string", optional: false }],
       },

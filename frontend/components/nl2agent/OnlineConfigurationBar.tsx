@@ -12,7 +12,12 @@ import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export const getOnlineConfigurationBlockers = (
-  review?: Nl2AgentSessionState["resource_review"]
+  review?: Pick<
+    Nl2AgentSessionState["resource_review"],
+    | "online_recommendation_batches"
+    | "online_configuration_confirmed"
+    | "mcp_workflows"
+  >
 ) => {
   const batches = Object.values(review?.online_recommendation_batches ?? {});
   const mcpBatchCount = batches.filter(
@@ -105,7 +110,7 @@ export const OnlineConfigurationBar: React.FC<{
             message.success("Online resource configuration completed.");
           },
           notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text,
+          continuationText: (result) => result.chat_injection_text ?? undefined,
         }
       );
     } catch (error) {

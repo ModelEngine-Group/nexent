@@ -125,7 +125,10 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
             workflow.status || ""
           )
         ) {
-          const tools = workflow.discovered_tools ?? [];
+          const tools = (workflow.discovered_tools ?? []).map((tool) => ({
+            ...tool,
+            description: tool.description ?? undefined,
+          }));
           setInstalled({ mcp_id: workflow.mcp_id, tools });
           setSelectedTools(
             workflow.status === "tools_bound"
@@ -208,7 +211,13 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
           }),
         {
           onSuccess: (result) => {
-            setInstalled(result);
+            setInstalled({
+              mcp_id: result.mcp_id,
+              tools: result.tools.map((tool) => ({
+                ...tool,
+                description: tool.description ?? undefined,
+              })),
+            });
             setSelectedTools(
               result.tools.map((tool: { tool_id: number }) => tool.tool_id)
             );

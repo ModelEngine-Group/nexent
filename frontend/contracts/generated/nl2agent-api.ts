@@ -376,6 +376,37 @@ export interface components {
        */
       strictness?: "lenient" | "balanced" | "strict";
     };
+    /** CardDelivery */
+    CardDelivery: {
+      /** Card Key */
+      card_key?: string | null;
+      /**
+       * Card Type
+       * @enum {string}
+       */
+      card_type:
+        | "requirements_summary"
+        | "model_selection"
+        | "local_resources"
+        | "web_mcp"
+        | "web_skill"
+        | "agent_identity"
+        | "final_review";
+      /** Message Id */
+      message_id: number;
+      /** Reason */
+      reason?: string | null;
+      /**
+       * Retry Count
+       * @default 0
+       */
+      retry_count?: number;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "rendered" | "failed";
+    };
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -398,6 +429,26 @@ export interface components {
       };
       /** Tool Ids */
       tool_ids?: number[];
+    };
+    /** Nl2AgentApplyLocalResourcesResponse */
+    Nl2AgentApplyLocalResourcesResponse: {
+      /** Bound Skill Count */
+      bound_skill_count: number;
+      /** Bound Tool Count */
+      bound_tool_count: number;
+      /** Chat Injection Text */
+      chat_injection_text: string;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /** Skill Ids */
+      skill_ids: number[];
+      /**
+       * Status
+       * @constant
+       */
+      status: "applied";
+      /** Tool Ids */
+      tool_ids: number[];
     };
     /**
      * Nl2AgentCardDeliveryRequest
@@ -435,6 +486,52 @@ export interface components {
        */
       status: "rendered" | "failed";
     };
+    /** Nl2AgentCardDeliveryResponse */
+    Nl2AgentCardDeliveryResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Auto Retry Allowed */
+      auto_retry_allowed: boolean;
+      /** Card Key */
+      card_key?: string | null;
+      /**
+       * Card Type
+       * @enum {string}
+       */
+      card_type:
+        | "requirements_summary"
+        | "model_selection"
+        | "local_resources"
+        | "web_mcp"
+        | "web_skill"
+        | "agent_identity"
+        | "final_review";
+      /** Chat Injection Text */
+      chat_injection_text?: string | null;
+      /** Message Id */
+      message_id: number;
+      /** Reason */
+      reason?: string | null;
+      /**
+       * Retry Count
+       * @default 0
+       */
+      retry_count?: number;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "rendered" | "failed";
+    };
+    /** Nl2AgentDiscoveredTool */
+    Nl2AgentDiscoveredTool: {
+      /** Description */
+      description?: string | null;
+      /** Name */
+      name: string;
+      /** Tool Id */
+      tool_id: number;
+    };
     /**
      * Nl2AgentFinalizeRequest
      * @description Unsaved descriptive, prompt, and runtime fields for draft publication.
@@ -471,6 +568,24 @@ export interface components {
       verification_config?:
         components["schemas"]["AgentVerificationConfig"] | null;
     };
+    /** Nl2AgentFinalizeResponse */
+    Nl2AgentFinalizeResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Display Name */
+      display_name: string;
+      /** Name */
+      name: string;
+      /** Skill Ids */
+      skill_ids: number[];
+      /**
+       * Status
+       * @constant
+       */
+      status: "draft_ready";
+      /** Tool Ids */
+      tool_ids: number[];
+    };
     /**
      * Nl2AgentIdentityRequest
      * @description Persist the user-confirmed display name for an NL2AGENT draft.
@@ -478,6 +593,19 @@ export interface components {
     Nl2AgentIdentityRequest: {
       /** Display Name */
       display_name: string;
+    };
+    /** Nl2AgentIdentityResponse */
+    Nl2AgentIdentityResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Chat Injection Text */
+      chat_injection_text?: string | null;
+      /** Display Name */
+      display_name: string;
+      /** Identity Confirmed */
+      identity_confirmed: boolean;
+      /** Internal Name */
+      internal_name: string;
     };
     /**
      * Nl2AgentInstallWebSkillRequest
@@ -489,6 +617,68 @@ export interface components {
       /** Skill Name */
       skill_name?: string | null;
     };
+    /** Nl2AgentInvalidReference */
+    Nl2AgentInvalidReference: {
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason:
+        | "not_found"
+        | "not_llm"
+        | "unavailable"
+        | "name_missing"
+        | "primary_not_in_runtime_models";
+      /** Reference Id */
+      reference_id: number;
+      /**
+       * Reference Type
+       * @enum {string}
+       */
+      reference_type: "model" | "tool" | "skill";
+    };
+    /** Nl2AgentLocalRecommendationResponse */
+    Nl2AgentLocalRecommendationResponse: {
+      /** Applied Skill Ids */
+      applied_skill_ids: number[];
+      /** Applied Tool Ids */
+      applied_tool_ids: number[];
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /** Skill Ids */
+      skill_ids: number[];
+      /**
+       * Status
+       * @constant
+       */
+      status: "recommendations_ready";
+      /** Tool Ids */
+      tool_ids: number[];
+      /** Tool Parameter Schemas */
+      tool_parameter_schemas: {
+        [key: string]: components["schemas"]["Nl2AgentToolParameterSchema"][];
+      };
+    };
+    /** Nl2AgentLocalSkipResponse */
+    Nl2AgentLocalSkipResponse: {
+      /** Applied Skill Ids */
+      applied_skill_ids: number[];
+      /** Applied Tool Ids */
+      applied_tool_ids: number[];
+      /** Chat Injection Text */
+      chat_injection_text: string;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /** Skill Ids */
+      skill_ids: number[];
+      /**
+       * Status
+       * @constant
+       */
+      status: "skipped";
+      /** Tool Ids */
+      tool_ids: number[];
+    };
     /**
      * Nl2AgentMcpBindToolsRequest
      * @description Bind selected tools from an installed MCP to an NL2AGENT draft.
@@ -496,6 +686,15 @@ export interface components {
     Nl2AgentMcpBindToolsRequest: {
       /** Tool Ids */
       tool_ids?: number[];
+    };
+    /** Nl2AgentMcpBindToolsResponse */
+    Nl2AgentMcpBindToolsResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Bound Tool Ids */
+      bound_tool_ids: number[];
+      /** Mcp Id */
+      mcp_id: number;
     };
     /**
      * Nl2AgentMcpInstallRequest
@@ -514,6 +713,62 @@ export interface components {
       /** Recommendation Id */
       recommendation_id: string;
     };
+    /** Nl2AgentMcpInstallResponse */
+    Nl2AgentMcpInstallResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Mcp Id */
+      mcp_id: number;
+      /**
+       * Status
+       * @constant
+       */
+      status: "connected";
+      /** Tools */
+      tools: components["schemas"]["Nl2AgentDiscoveredTool"][];
+    };
+    /** Nl2AgentMcpSkipToolsResponse */
+    Nl2AgentMcpSkipToolsResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Mcp Id */
+      mcp_id: number;
+      /**
+       * Status
+       * @constant
+       */
+      status: "binding_skipped";
+    };
+    /** Nl2AgentMcpWorkflowResponse */
+    Nl2AgentMcpWorkflowResponse: {
+      /** Bound Tool Ids */
+      bound_tool_ids?: number[];
+      /** Discovered Tool Ids */
+      discovered_tool_ids?: number[];
+      /** Discovered Tools */
+      discovered_tools?: components["schemas"]["Nl2AgentDiscoveredTool"][];
+      /** Error */
+      error?: string | null;
+      /** Installation Key */
+      installation_key?: string | null;
+      /** Mcp Id */
+      mcp_id?: number | null;
+      /** Option Id */
+      option_id?: string | null;
+      /** Recommendation Id */
+      recommendation_id: string;
+      /** Status */
+      status?:
+        | (
+            | "configuration_required"
+            | "installing"
+            | "connected"
+            | "tools_bound"
+            | "binding_skipped"
+            | "failed"
+          )
+        | null;
+    };
     /**
      * Nl2AgentModelSelectionRequest
      * @description Persist the ordered LLM selection for an NL2AGENT draft.
@@ -523,6 +778,37 @@ export interface components {
       fallback_model_ids?: number[];
       /** Primary Model Id */
       primary_model_id: number;
+    };
+    /** Nl2AgentModelSelectionResponse */
+    Nl2AgentModelSelectionResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Chat Injection Text */
+      chat_injection_text?: string | null;
+      /** Fallback Model Ids */
+      fallback_model_ids: number[];
+      /** Models */
+      models: components["schemas"]["Nl2AgentModelSummary"][];
+      /** Primary Model Id */
+      primary_model_id: number;
+    };
+    /** Nl2AgentModelSummary */
+    Nl2AgentModelSummary: {
+      /** Display Name */
+      display_name: string;
+      /** Model Id */
+      model_id: number;
+    };
+    /** Nl2AgentOnlineConfigurationResponse */
+    Nl2AgentOnlineConfigurationResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Chat Injection Text */
+      chat_injection_text?: string | null;
+      /** Completed Batch Ids */
+      completed_batch_ids: string[];
+      /** Online Configuration Confirmed */
+      online_configuration_confirmed: boolean;
     };
     /**
      * Nl2AgentOnlineRecommendationBatchRequest
@@ -538,6 +824,37 @@ export interface components {
        * @enum {string}
        */
       resource_type: "mcp" | "skill";
+    };
+    /** Nl2AgentOnlineRecommendationResponse */
+    Nl2AgentOnlineRecommendationResponse: {
+      /** Item Keys */
+      item_keys: string[];
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /**
+       * Resource Type
+       * @enum {string}
+       */
+      resource_type: "mcp" | "skill";
+      /**
+       * Status
+       * @constant
+       */
+      status: "recommendations_ready";
+    };
+    /** Nl2AgentPersistedModel */
+    Nl2AgentPersistedModel: {
+      /** Display Name */
+      display_name?: string | null;
+      /** Model Id */
+      model_id: number;
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: "primary" | "fallback";
+      /** Valid */
+      valid: boolean;
     };
     /**
      * Nl2AgentRecommendationBatchRequest
@@ -567,6 +884,63 @@ export interface components {
       /** Fingerprint */
       fingerprint: string;
     };
+    /** Nl2AgentRequirementsConfirmationResponse */
+    Nl2AgentRequirementsConfirmationResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Chat Injection Text */
+      chat_injection_text?: string | null;
+      /** Fingerprint */
+      fingerprint: string;
+      /**
+       * Status
+       * @constant
+       */
+      status: "confirmed";
+    };
+    /** Nl2AgentRequirementsData */
+    Nl2AgentRequirementsData: {
+      /** Audience Or Scenario */
+      audience_or_scenario: string;
+      /** Expected Output */
+      expected_output: string;
+      /** Goal */
+      goal: string;
+      /** Key Constraints */
+      key_constraints: string;
+      /** Primary Input */
+      primary_input: string;
+    };
+    /** Nl2AgentRequirementsRegistrationResponse */
+    Nl2AgentRequirementsRegistrationResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Fingerprint */
+      fingerprint: string;
+      /** Is Current */
+      is_current: boolean;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "collecting" | "awaiting_confirmation" | "confirmed";
+      summary: components["schemas"]["Nl2AgentRequirementsData"];
+    };
+    /** Nl2AgentRequirementsReviewResponse */
+    Nl2AgentRequirementsReviewResponse: {
+      /**
+       * Fingerprint
+       * @default
+       */
+      fingerprint?: string;
+      /**
+       * Status
+       * @default collecting
+       * @enum {string}
+       */
+      status?: "collecting" | "awaiting_confirmation" | "confirmed";
+      summary?: components["schemas"]["Nl2AgentRequirementsData"] | null;
+    };
     /**
      * Nl2AgentRequirementsSummaryRequest
      * @description Register the read-only requirements summary rendered by NL2AGENT.
@@ -582,6 +956,246 @@ export interface components {
       key_constraints: string;
       /** Primary Input */
       primary_input: string;
+    };
+    /** Nl2AgentSessionStartResponse */
+    Nl2AgentSessionStartResponse: {
+      /** Conversation Id */
+      conversation_id: number;
+      /** Draft Agent Id */
+      draft_agent_id: number;
+      /** Draft Name */
+      draft_name: string;
+      /** Nl2Agent Agent Id */
+      nl2agent_agent_id: number;
+    };
+    /** Nl2AgentSessionStateResponse */
+    Nl2AgentSessionStateResponse: {
+      /** Agent Id */
+      agent_id: number;
+      /** Allowed Actions */
+      allowed_actions: string[];
+      /** Business Logic Model Id */
+      business_logic_model_id?: number | null;
+      /**
+       * Current Stage
+       * @enum {string}
+       */
+      current_stage:
+        | "requirements_collecting"
+        | "requirements_confirmation"
+        | "model_selection"
+        | "local_resource_search"
+        | "local_resource_review"
+        | "online_resource_search"
+        | "online_resource_review"
+        | "agent_identity"
+        | "final_review";
+      /** Display Name */
+      display_name?: string | null;
+      /** Expected Card Types */
+      expected_card_types: (
+        | "requirements_summary"
+        | "model_selection"
+        | "local_resources"
+        | "web_mcp"
+        | "web_skill"
+        | "agent_identity"
+        | "final_review"
+      )[];
+      /** Identity Confirmed */
+      identity_confirmed: boolean;
+      /** Internal Name */
+      internal_name: string;
+      /** Invalid References */
+      invalid_references: components["schemas"]["Nl2AgentInvalidReference"][];
+      /** Model Ids */
+      model_ids: number[];
+      /** Models */
+      models: components["schemas"]["Nl2AgentPersistedModel"][];
+      resource_review: components["schemas"]["Nl2AgentWorkflowStateResponse"];
+      /** Revision */
+      revision: number;
+      /**
+       * Schema Version
+       * @constant
+       */
+      schema_version: 2;
+      /** Skills */
+      skills: components["schemas"]["Nl2AgentSkillSummary"][];
+      /** Tools */
+      tools: components["schemas"]["Nl2AgentToolSummary"][];
+    };
+    /** Nl2AgentSkillSummary */
+    Nl2AgentSkillSummary: {
+      /** Name */
+      name: string;
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: "local" | "online";
+      /** Skill Id */
+      skill_id: number;
+      /** Source */
+      source: string;
+    } & {
+      [key: string]: unknown;
+    };
+    /** Nl2AgentToolParameterSchema */
+    Nl2AgentToolParameterSchema: {
+      /** Choices */
+      choices?: unknown[] | null;
+      /** Default */
+      default?: unknown | null;
+      /** Description */
+      description?: string | null;
+      /** Issecret */
+      isSecret?: boolean | null;
+      /** Is Secret */
+      is_secret?: boolean | null;
+      /** Name */
+      name: string;
+      /** Optional */
+      optional?: boolean | null;
+      /** Required */
+      required?: boolean | null;
+      /** Type */
+      type?: string | null;
+    } & {
+      [key: string]: unknown;
+    };
+    /** Nl2AgentToolSummary */
+    Nl2AgentToolSummary: {
+      /** Name */
+      name: string;
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: "local" | "online";
+      /** Source */
+      source: string;
+      /** Tool Id */
+      tool_id: number;
+    } & {
+      [key: string]: unknown;
+    };
+    /** Nl2AgentWebSkillInstallResponse */
+    Nl2AgentWebSkillInstallResponse: {
+      /** Bound */
+      bound: boolean;
+      /** Installed */
+      installed: boolean;
+      /** Installed Ids */
+      installed_ids: number[];
+      /** Installed Names */
+      installed_names?: string[] | null;
+      /** Skill Id */
+      skill_id: number;
+      /** Skill Name */
+      skill_name?: string | null;
+    };
+    /** Nl2AgentWorkflowStateResponse */
+    Nl2AgentWorkflowStateResponse: {
+      /** Card Delivery */
+      card_delivery?: {
+        [key: string]: components["schemas"]["CardDelivery"];
+      };
+      /** Conversation Id */
+      conversation_id: number;
+      /**
+       * Identity Confirmed
+       * @default false
+       */
+      identity_confirmed?: boolean;
+      /** Mcp Workflows */
+      mcp_workflows: {
+        [key: string]: components["schemas"]["Nl2AgentMcpWorkflowResponse"];
+      };
+      /**
+       * Model Selection Confirmed
+       * @default false
+       */
+      model_selection_confirmed?: boolean;
+      /**
+       * Online Configuration Confirmed
+       * @default false
+       */
+      online_configuration_confirmed?: boolean;
+      /** Online Recommendation Batches */
+      online_recommendation_batches?: {
+        [key: string]: components["schemas"]["OnlineRecommendationBatch"];
+      };
+      /** Recommendation Batches */
+      recommendation_batches?: {
+        [key: string]: components["schemas"]["RecommendationBatch"];
+      };
+      requirements_review: components["schemas"]["Nl2AgentRequirementsReviewResponse"];
+      /**
+       * Revision
+       * @default 0
+       */
+      revision?: number;
+      /**
+       * Schema Version
+       * @default 2
+       * @constant
+       */
+      schema_version?: 2;
+      /** Trusted Search Batches */
+      trusted_search_batches?: {
+        [key: string]: components["schemas"]["TrustedSearchBatch"];
+      };
+    };
+    /** OnlineRecommendationBatch */
+    OnlineRecommendationBatch: {
+      /** Item Keys */
+      item_keys?: string[];
+      /**
+       * Resource Type
+       * @enum {string}
+       */
+      resource_type: "mcp" | "skill";
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "recommendations_ready" | "completed";
+    };
+    /** RecommendationBatch */
+    RecommendationBatch: {
+      /** Applied Skill Ids */
+      applied_skill_ids?: number[];
+      /** Applied Tool Ids */
+      applied_tool_ids?: number[];
+      /** Skill Ids */
+      skill_ids?: number[];
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "recommendations_ready" | "applied" | "skipped";
+      /** Tool Ids */
+      tool_ids?: number[];
+    } & {
+      [key: string]: unknown;
+    };
+    /**
+     * TrustedSearchBatch
+     * @description Backend-recorded proof that an SDK search produced one result batch.
+     */
+    TrustedSearchBatch: {
+      /** Item Keys */
+      item_keys?: string[];
+      /**
+       * Resource Type
+       * @enum {string}
+       */
+      resource_type: "local" | "mcp" | "skill";
+      /** Skill Ids */
+      skill_ids?: number[];
+      /** Tool Ids */
+      tool_ids?: number[];
     };
     /** ValidationError */
     ValidationError: {
@@ -622,7 +1236,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentSessionStartResponse"];
         };
       };
       /** @description Validation Error */
@@ -659,7 +1273,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentApplyLocalResourcesResponse"];
         };
       };
       /** @description Validation Error */
@@ -696,7 +1310,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentCardDeliveryResponse"];
         };
       };
       /** @description Validation Error */
@@ -733,7 +1347,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentFinalizeResponse"];
         };
       };
       /** @description Validation Error */
@@ -770,7 +1384,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentIdentityResponse"];
         };
       };
       /** @description Validation Error */
@@ -807,7 +1421,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentWebSkillInstallResponse"];
         };
       };
       /** @description Validation Error */
@@ -844,7 +1458,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentLocalRecommendationResponse"];
         };
       };
       /** @description Validation Error */
@@ -881,7 +1495,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentLocalSkipResponse"];
         };
       };
       /** @description Validation Error */
@@ -918,7 +1532,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentMcpInstallResponse"];
         };
       };
       /** @description Validation Error */
@@ -956,7 +1570,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentMcpBindToolsResponse"];
         };
       };
       /** @description Validation Error */
@@ -990,7 +1604,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentMcpSkipToolsResponse"];
         };
       };
       /** @description Validation Error */
@@ -1027,7 +1641,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentModelSelectionResponse"];
         };
       };
       /** @description Validation Error */
@@ -1060,7 +1674,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentOnlineConfigurationResponse"];
         };
       };
       /** @description Validation Error */
@@ -1097,7 +1711,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentOnlineRecommendationResponse"];
         };
       };
       /** @description Validation Error */
@@ -1134,7 +1748,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentRequirementsConfirmationResponse"];
         };
       };
       /** @description Validation Error */
@@ -1171,7 +1785,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentRequirementsRegistrationResponse"];
         };
       };
       /** @description Validation Error */
@@ -1204,7 +1818,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["Nl2AgentSessionStateResponse"];
         };
       };
       /** @description Validation Error */

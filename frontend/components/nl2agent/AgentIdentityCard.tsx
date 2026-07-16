@@ -57,7 +57,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
           setSaved(true);
           message.success("Agent identity saved.");
         },
-        continuationText: (result) => result.chat_injection_text,
+        continuationText: (result) => result.chat_injection_text ?? undefined,
       });
     } catch (error) {
       message.error(

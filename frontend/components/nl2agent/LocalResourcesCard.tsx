@@ -377,7 +377,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                               ? ""
                               : JSON.stringify(value)
                         }
-                        placeholder={field.description}
+                        placeholder={field.description ?? undefined}
                         onChange={(event) => {
                           const raw = event.target.value;
                           try {
@@ -394,7 +394,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                         size="small"
                         type={secret ? "password" : "text"}
                         value={typeof value === "string" ? value : ""}
-                        placeholder={field.description}
+                        placeholder={field.description ?? undefined}
                         onChange={(event) => setValue(event.target.value)}
                         disabled={applied}
                       />

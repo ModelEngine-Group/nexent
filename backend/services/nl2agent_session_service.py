@@ -153,5 +153,4 @@ async def start_session(
         "draft_agent_id": draft_agent_id,
         "conversation_id": conversation_id,
         "draft_name": draft_name,
-        **session_catalogs,
     }

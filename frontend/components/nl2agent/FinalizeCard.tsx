@@ -125,7 +125,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
 
 const FieldLine: React.FC<{
   label: string;
-  value?: string | number | boolean;
+  value?: string | number | boolean | null;
 }> = ({ label, value }) => {
   if (value === undefined || value === null || value === "") return null;
   return (

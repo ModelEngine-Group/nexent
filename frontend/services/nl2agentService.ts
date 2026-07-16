@@ -11,10 +11,6 @@ import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
 import type { components as Nl2AgentApiComponents } from "@/contracts/generated/nl2agent-api";
-import type {
-  Nl2AgentCardFailureReason,
-  Nl2AgentCardType,
-} from "@/components/nl2agent/cardValidation";
 
 type Nl2AgentApiSchemas = Nl2AgentApiComponents["schemas"];
 
@@ -43,14 +39,8 @@ export const getAvailablePlatformLlms = async (): Promise<
     );
 };
 
-export interface Nl2AgentSessionStartResponse {
-  nl2agent_agent_id: number;
-  draft_agent_id: number;
-  conversation_id: number;
-  draft_name: string;
-  /** Backward-compatible alias if older deployments still return it. */
-  agent_id?: number;
-}
+export type Nl2AgentSessionStartResponse =
+  Nl2AgentApiSchemas["Nl2AgentSessionStartResponse"];
 
 export type Nl2AgentApplyLocalResourcesPayload =
   Nl2AgentApiSchemas["Nl2AgentApplyLocalResourcesRequest"] & {
@@ -58,25 +48,11 @@ export type Nl2AgentApplyLocalResourcesPayload =
     skill_ids: number[];
   };
 
-export interface Nl2AgentLocalResourceRegistrationResponse {
-  recommendation_batch_id: string;
-  status: string;
-  tool_ids: number[];
-  skill_ids: number[];
-  tool_parameter_schemas: Record<string, LocalToolParameterSchema[]>;
-}
+export type Nl2AgentLocalResourceRegistrationResponse =
+  Nl2AgentApiSchemas["Nl2AgentLocalRecommendationResponse"];
 
-export interface LocalToolParameterSchema {
-  name: string;
-  type?: string;
-  description?: string;
-  default?: unknown;
-  required?: boolean;
-  optional?: boolean;
-  isSecret?: boolean;
-  is_secret?: boolean;
-  choices?: unknown[];
-}
+export type LocalToolParameterSchema =
+  Nl2AgentApiSchemas["Nl2AgentToolParameterSchema"];
 
 export type Nl2AgentRequirementsSummary =
   Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"];
@@ -84,13 +60,7 @@ export type Nl2AgentRequirementsSummary =
 export const registerRequirementsSummary = async (
   agentId: number,
   summary: Nl2AgentRequirementsSummary
-): Promise<{
-  agent_id: number;
-  status: "collecting" | "awaiting_confirmation" | "confirmed";
-  summary: Nl2AgentRequirementsSummary;
-  fingerprint: string;
-  is_current: boolean;
-}> => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentRequirementsRegistrationResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.registerRequirements(agentId),
     { method: "POST", body: JSON.stringify(summary) }
@@ -102,12 +72,7 @@ export const registerRequirementsSummary = async (
 export const confirmRequirementsSummary = async (
   agentId: number,
   fingerprint: string
-): Promise<{
-  agent_id: number;
-  status: "confirmed";
-  fingerprint: string;
-  chat_injection_text?: string;
-}> => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentRequirementsConfirmationResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.confirmRequirements(agentId),
     { method: "POST", body: JSON.stringify({ fingerprint }) }
@@ -116,16 +81,8 @@ export const confirmRequirementsSummary = async (
   return response.json();
 };
 
-export interface Nl2AgentCardDeliveryResponse {
-  agent_id: number;
-  card_type: Nl2AgentCardType;
-  status: "rendered" | "failed";
-  card_key?: string;
-  reason?: Nl2AgentCardFailureReason;
-  retry_count: number;
-  auto_retry_allowed: boolean;
-  chat_injection_text?: string;
-}
+export type Nl2AgentCardDeliveryResponse =
+  Nl2AgentApiSchemas["Nl2AgentCardDeliveryResponse"];
 
 export const reportNl2AgentCardDelivery = async (
   agentId: number,
@@ -154,7 +111,7 @@ export const registerLocalResourceRecommendations = async (
 export const skipLocalResourceRecommendations = async (
   agentId: number,
   recommendationBatchId: string
-) => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentLocalSkipResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.skipLocalResources(agentId),
     {
@@ -169,7 +126,7 @@ export const skipLocalResourceRecommendations = async (
 export const registerOnlineResourceRecommendations = async (
   agentId: number,
   payload: Nl2AgentApiSchemas["Nl2AgentOnlineRecommendationBatchRequest"]
-) => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentOnlineRecommendationResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.registerOnlineRecommendations(agentId),
     { method: "POST", body: JSON.stringify(payload) }
@@ -180,12 +137,7 @@ export const registerOnlineResourceRecommendations = async (
 
 export const completeOnlineResourceConfiguration = async (
   agentId: number
-): Promise<{
-  agent_id: number;
-  online_configuration_confirmed: boolean;
-  completed_batch_ids: string[];
-  chat_injection_text: string;
-}> => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentOnlineConfigurationResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.completeOnlineConfiguration(agentId),
     { method: "POST" }
@@ -194,109 +146,8 @@ export const completeOnlineResourceConfiguration = async (
   return response.json();
 };
 
-export interface Nl2AgentSessionState {
-  agent_id: number;
-  schema_version: 2;
-  revision: number;
-  current_stage:
-    | "requirements_collecting"
-    | "requirements_confirmation"
-    | "model_selection"
-    | "local_resource_search"
-    | "local_resource_review"
-    | "online_resource_search"
-    | "online_resource_review"
-    | "agent_identity"
-    | "final_review";
-  expected_card_types: Nl2AgentCardType[];
-  allowed_actions: string[];
-  display_name?: string;
-  internal_name: string;
-  identity_confirmed: boolean;
-  business_logic_model_id?: number;
-  model_ids: number[];
-  models: Array<{
-    model_id: number;
-    display_name?: string;
-    role: "primary" | "fallback";
-    valid: boolean;
-  }>;
-  tools: Array<{
-    tool_id: number;
-    name: string;
-    source: string;
-    origin: "local" | "online";
-    [key: string]: unknown;
-  }>;
-  skills: Array<{
-    skill_id: number;
-    name: string;
-    source: string;
-    origin: "local" | "online";
-    [key: string]: unknown;
-  }>;
-  invalid_references: Array<{
-    reference_type: "model" | "tool" | "skill";
-    reference_id: number;
-    reason:
-      | "not_found"
-      | "not_llm"
-      | "unavailable"
-      | "name_missing"
-      | "primary_not_in_runtime_models";
-  }>;
-  resource_review: {
-    requirements_review: {
-      status: "collecting" | "awaiting_confirmation" | "confirmed";
-      summary: Nl2AgentRequirementsSummary | null;
-      fingerprint: string;
-    };
-    identity_confirmed: boolean;
-    recommendation_batches: Record<string, unknown>;
-    online_recommendation_batches: Record<
-      string,
-      {
-        resource_type: "mcp" | "skill";
-        item_keys: string[];
-        status: "recommendations_ready" | "completed";
-      }
-    >;
-    online_configuration_confirmed: boolean;
-    card_delivery?: Record<
-      string,
-      {
-        message_id: number;
-        status: "rendered" | "failed";
-        card_key?: string;
-        reason?: string;
-        retry_count: number;
-      }
-    >;
-    mcp_workflows: Record<
-      string,
-      {
-        recommendation_id: string;
-        option_id?: string;
-        status?:
-          | "configuration_required"
-          | "installing"
-          | "connected"
-          | "tools_bound"
-          | "binding_skipped"
-          | "failed";
-        mcp_id?: number;
-        discovered_tool_ids?: number[];
-        bound_tool_ids?: number[];
-        discovered_tools?: Array<{
-          tool_id: number;
-          name: string;
-          description?: string;
-        }>;
-        error?: string;
-      }
-    >;
-  };
-}
+export type Nl2AgentSessionState =
+  Nl2AgentApiSchemas["Nl2AgentSessionStateResponse"];
 
 export const getNl2AgentSessionState = async (
   agentId: number
@@ -311,13 +162,7 @@ export const getNl2AgentSessionState = async (
 export const saveNl2AgentIdentity = async (
   agentId: number,
   displayName: string
-): Promise<{
-  agent_id: number;
-  display_name: string;
-  internal_name: string;
-  identity_confirmed: boolean;
-  chat_injection_text?: string;
-}> => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentIdentityResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.saveIdentity(agentId),
     {
@@ -329,19 +174,14 @@ export const saveNl2AgentIdentity = async (
   return response.json();
 };
 
-export interface Nl2AgentApplyLocalResourcesResponse {
-  bound_tool_count: number;
-  bound_skill_count: number;
-  tool_ids: number[];
-  skill_ids: number[];
-  chat_injection_text?: string;
-}
+export type Nl2AgentApplyLocalResourcesResponse =
+  Nl2AgentApiSchemas["Nl2AgentApplyLocalResourcesResponse"];
 
 export const selectNl2AgentModels = async (
   agentId: number,
   primaryModelId: number,
   fallbackModelIds: number[]
-) => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentModelSelectionResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.selectModels(agentId),
     {
@@ -359,7 +199,7 @@ export const selectNl2AgentModels = async (
 export const installNl2AgentMcp = async (
   agentId: number,
   payload: Nl2AgentApiSchemas["Nl2AgentMcpInstallRequest"]
-) => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentMcpInstallResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.installMcp(agentId),
     {
@@ -375,7 +215,7 @@ export const bindNl2AgentMcpTools = async (
   agentId: number,
   mcpId: number,
   toolIds: number[]
-) => {
+): Promise<Nl2AgentApiSchemas["Nl2AgentMcpBindToolsResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.bindMcpTools(agentId, mcpId),
     { method: "POST", body: JSON.stringify({ tool_ids: toolIds }) }
@@ -384,7 +224,10 @@ export const bindNl2AgentMcpTools = async (
   return response.json();
 };
 
-export const skipNl2AgentMcpTools = async (agentId: number, mcpId: number) => {
+export const skipNl2AgentMcpTools = async (
+  agentId: number,
+  mcpId: number
+): Promise<Nl2AgentApiSchemas["Nl2AgentMcpSkipToolsResponse"]> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.skipMcpTools(agentId, mcpId),
     { method: "POST" }
@@ -393,14 +236,8 @@ export const skipNl2AgentMcpTools = async (agentId: number, mcpId: number) => {
   return response.json();
 };
 
-export interface Nl2AgentInstallWebSkillResponse {
-  skill_id: number;
-  skill_name?: string;
-  installed: boolean;
-  bound: boolean;
-  installed_ids: number[];
-  installed_names?: string[];
-}
+export type Nl2AgentInstallWebSkillResponse =
+  Nl2AgentApiSchemas["Nl2AgentWebSkillInstallResponse"];
 
 export type Nl2AgentInstallWebSkillPayload =
   Nl2AgentApiSchemas["Nl2AgentInstallWebSkillRequest"];
@@ -408,10 +245,8 @@ export type Nl2AgentInstallWebSkillPayload =
 export type Nl2AgentFinalizePayload =
   Nl2AgentApiSchemas["Nl2AgentFinalizeRequest"];
 
-export interface Nl2AgentFinalizeResponse {
-  agent_id: number;
-  status: string;
-}
+export type Nl2AgentFinalizeResponse =
+  Nl2AgentApiSchemas["Nl2AgentFinalizeResponse"];
 
 /**
  * Start a new NL2AGENT session. Creates a draft agent and a conversation.

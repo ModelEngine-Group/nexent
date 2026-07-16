@@ -1,0 +1,272 @@
+"""Typed HTTP responses for the NL2AGENT workflow API."""
+
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents.nl2agent_workflow import (
+    CardType,
+    Nl2AgentWorkflowState,
+    RequirementsReview,
+)
+
+
+class Nl2AgentResponse(BaseModel):
+    """Strict base model for public NL2AGENT response contracts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Nl2AgentContinuationResponse(Nl2AgentResponse):
+    agent_id: int
+    chat_injection_text: Optional[str] = None
+
+
+class Nl2AgentSessionStartResponse(Nl2AgentResponse):
+    nl2agent_agent_id: int
+    draft_agent_id: int
+    conversation_id: int
+    draft_name: str
+
+
+class Nl2AgentModelSummary(Nl2AgentResponse):
+    model_id: int
+    display_name: str
+
+
+class Nl2AgentModelSelectionResponse(Nl2AgentContinuationResponse):
+    primary_model_id: int
+    fallback_model_ids: List[int]
+    models: List[Nl2AgentModelSummary]
+
+
+class Nl2AgentDiscoveredTool(Nl2AgentResponse):
+    tool_id: int
+    name: str
+    description: Optional[str] = None
+
+
+class Nl2AgentMcpInstallResponse(Nl2AgentResponse):
+    agent_id: int
+    mcp_id: int
+    status: Literal["connected"]
+    tools: List[Nl2AgentDiscoveredTool]
+
+
+class Nl2AgentMcpBindToolsResponse(Nl2AgentResponse):
+    agent_id: int
+    mcp_id: int
+    bound_tool_ids: List[int]
+
+
+class Nl2AgentMcpSkipToolsResponse(Nl2AgentResponse):
+    agent_id: int
+    mcp_id: int
+    status: Literal["binding_skipped"]
+
+
+class Nl2AgentApplyLocalResourcesResponse(Nl2AgentResponse):
+    recommendation_batch_id: str
+    status: Literal["applied"]
+    bound_tool_count: int
+    bound_skill_count: int
+    tool_ids: List[int]
+    skill_ids: List[int]
+    chat_injection_text: str
+
+
+class Nl2AgentToolParameterSchema(Nl2AgentResponse):
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    type: Optional[str] = None
+    description: Optional[str] = None
+    default: Optional[Any] = None
+    required: Optional[bool] = None
+    optional: Optional[bool] = None
+    isSecret: Optional[bool] = None
+    is_secret: Optional[bool] = None
+    choices: Optional[List[Any]] = None
+
+
+class Nl2AgentLocalRecommendationResponse(Nl2AgentResponse):
+    recommendation_batch_id: str
+    status: Literal["recommendations_ready"]
+    tool_ids: List[int]
+    skill_ids: List[int]
+    applied_tool_ids: List[int]
+    applied_skill_ids: List[int]
+    tool_parameter_schemas: Dict[str, List[Nl2AgentToolParameterSchema]]
+
+
+class Nl2AgentLocalSkipResponse(Nl2AgentResponse):
+    recommendation_batch_id: str
+    status: Literal["skipped"]
+    tool_ids: List[int]
+    skill_ids: List[int]
+    applied_tool_ids: List[int]
+    applied_skill_ids: List[int]
+    chat_injection_text: str
+
+
+class Nl2AgentOnlineRecommendationResponse(Nl2AgentResponse):
+    recommendation_batch_id: str
+    resource_type: Literal["mcp", "skill"]
+    item_keys: List[str]
+    status: Literal["recommendations_ready"]
+
+
+class Nl2AgentRequirementsData(Nl2AgentResponse):
+    goal: str
+    audience_or_scenario: str
+    primary_input: str
+    expected_output: str
+    key_constraints: str
+
+
+class Nl2AgentRequirementsRegistrationResponse(Nl2AgentResponse):
+    agent_id: int
+    status: Literal["collecting", "awaiting_confirmation", "confirmed"]
+    summary: Nl2AgentRequirementsData
+    fingerprint: str
+    is_current: bool
+
+
+class Nl2AgentRequirementsConfirmationResponse(Nl2AgentContinuationResponse):
+    status: Literal["confirmed"]
+    fingerprint: str
+
+
+class Nl2AgentCardDeliveryResponse(Nl2AgentContinuationResponse):
+    message_id: int
+    card_type: CardType
+    status: Literal["rendered", "failed"]
+    card_key: Optional[str] = None
+    reason: Optional[str] = None
+    retry_count: int = 0
+    auto_retry_allowed: bool
+
+
+class Nl2AgentOnlineConfigurationResponse(Nl2AgentContinuationResponse):
+    online_configuration_confirmed: bool
+    completed_batch_ids: List[str]
+
+
+class Nl2AgentRequirementsReviewResponse(RequirementsReview):
+    summary: Optional[Nl2AgentRequirementsData] = None
+
+
+class Nl2AgentMcpWorkflowResponse(Nl2AgentResponse):
+    recommendation_id: str
+    option_id: Optional[str] = None
+    installation_key: Optional[str] = None
+    status: Optional[
+        Literal[
+            "configuration_required",
+            "installing",
+            "connected",
+            "tools_bound",
+            "binding_skipped",
+            "failed",
+        ]
+    ] = None
+    mcp_id: Optional[int] = None
+    discovered_tool_ids: List[int] = Field(default_factory=list)
+    bound_tool_ids: List[int] = Field(default_factory=list)
+    discovered_tools: List[Nl2AgentDiscoveredTool] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class Nl2AgentWorkflowStateResponse(Nl2AgentWorkflowState):
+    requirements_review: Nl2AgentRequirementsReviewResponse
+    mcp_workflows: Dict[str, Nl2AgentMcpWorkflowResponse]
+
+
+class Nl2AgentPersistedModel(Nl2AgentResponse):
+    model_id: int
+    display_name: Optional[str] = None
+    role: Literal["primary", "fallback"]
+    valid: bool
+
+
+class Nl2AgentToolSummary(Nl2AgentResponse):
+    model_config = ConfigDict(extra="allow")
+
+    tool_id: int
+    name: str
+    source: str
+    origin: Literal["local", "online"]
+
+
+class Nl2AgentSkillSummary(Nl2AgentResponse):
+    model_config = ConfigDict(extra="allow")
+
+    skill_id: int
+    name: str
+    source: str
+    origin: Literal["local", "online"]
+
+
+class Nl2AgentInvalidReference(Nl2AgentResponse):
+    reference_type: Literal["model", "tool", "skill"]
+    reference_id: int
+    reason: Literal[
+        "not_found",
+        "not_llm",
+        "unavailable",
+        "name_missing",
+        "primary_not_in_runtime_models",
+    ]
+
+
+class Nl2AgentSessionStateResponse(Nl2AgentResponse):
+    agent_id: int
+    schema_version: Literal[2]
+    revision: int
+    current_stage: Literal[
+        "requirements_collecting",
+        "requirements_confirmation",
+        "model_selection",
+        "local_resource_search",
+        "local_resource_review",
+        "online_resource_search",
+        "online_resource_review",
+        "agent_identity",
+        "final_review",
+    ]
+    expected_card_types: List[CardType]
+    allowed_actions: List[str]
+    display_name: Optional[str] = None
+    internal_name: str
+    identity_confirmed: bool
+    business_logic_model_id: Optional[int] = None
+    model_ids: List[int]
+    models: List[Nl2AgentPersistedModel]
+    tools: List[Nl2AgentToolSummary]
+    skills: List[Nl2AgentSkillSummary]
+    invalid_references: List[Nl2AgentInvalidReference]
+    resource_review: Nl2AgentWorkflowStateResponse
+
+
+class Nl2AgentIdentityResponse(Nl2AgentContinuationResponse):
+    display_name: str
+    internal_name: str
+    identity_confirmed: bool
+
+
+class Nl2AgentWebSkillInstallResponse(Nl2AgentResponse):
+    skill_id: int
+    skill_name: Optional[str] = None
+    installed: bool
+    bound: bool
+    installed_ids: List[int]
+    installed_names: Optional[List[str]] = None
+
+
+class Nl2AgentFinalizeResponse(Nl2AgentResponse):
+    agent_id: int
+    status: Literal["draft_ready"]
+    name: str
+    display_name: str
+    tool_ids: List[int]
+    skill_ids: List[int]

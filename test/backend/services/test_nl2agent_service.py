@@ -15,6 +15,15 @@ from agents.nl2agent_session_catalog import (
 )
 from consts.exceptions import Nl2AgentStaleCardError
 from consts.model import Nl2AgentFinalizeRequest
+from consts.nl2agent_response import (
+    Nl2AgentApplyLocalResourcesResponse,
+    Nl2AgentFinalizeResponse,
+    Nl2AgentLocalRecommendationResponse,
+    Nl2AgentModelSelectionResponse,
+    Nl2AgentSessionStartResponse,
+    Nl2AgentSessionStateResponse,
+    Nl2AgentWebSkillInstallResponse,
+)
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
@@ -555,13 +564,13 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
     monkeypatch.setattr(nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid()))
 
     result = await nl2agent_service.start_session(user_id="user_1", tenant_id="tenant_1", language="en")
+    Nl2AgentSessionStartResponse.model_validate(result)
 
     assert result == {
         "nl2agent_agent_id": 101,
         "draft_agent_id": 202,
         "conversation_id": 303,
         "draft_name": "draft_abcdef12",
-        **_EXPECTED_SESSION_CATALOGS,
     }
     assert get_nl2agent_session_catalogs("tenant_1", 202) == _EXPECTED_SESSION_CATALOGS
     assert result["draft_agent_id"] != result["nl2agent_agent_id"]
@@ -621,9 +630,12 @@ async def test_start_session_keeps_only_installable_official_skills(monkeypatch,
     monkeypatch.setattr(nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid()))
 
     with caplog.at_level("WARNING"):
-        result = await nl2agent_service.start_session(user_id="user_1", tenant_id="tenant_1", language="en")
+        await nl2agent_service.start_session(
+            user_id="user_1",
+            tenant_id="tenant_1",
+            language="en",
+        )
 
-    assert result["official_skills"] == [official_skills[0]]
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [official_skills[0]]
     assert "tenant_id=tenant_1" in caplog.text
     assert "draft_agent_id=202" in caplog.text
@@ -779,6 +791,7 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
         tenant_id="tenant_1",
         user_id="user_1",
     )
+    Nl2AgentModelSelectionResponse.model_validate(result)
 
     request = update_agent.call_args.kwargs["agent_info"]
     assert request.business_logic_model_id == 7
@@ -2031,6 +2044,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         user_id="user_1",
         locale="en",
     )
+    Nl2AgentWebSkillInstallResponse.model_validate(result)
 
     install_from_zip.assert_called_once_with(
         skill_names=["search-web-tavily"],
@@ -2321,6 +2335,7 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
         tenant_id="tenant_1",
         user_id="user_1",
     )
+    Nl2AgentApplyLocalResourcesResponse.model_validate(result)
 
     assert result == {
         "recommendation_batch_id": "batch_1",
@@ -2427,6 +2442,7 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
         skill_ids=[7],
         tenant_id="tenant_1",
     )
+    Nl2AgentLocalRecommendationResponse.model_validate(result)
 
     assert result == {
         "recommendation_batch_id": "trusted_batch",
@@ -2911,6 +2927,7 @@ async def test_finalize_uses_persisted_resources(monkeypatch):
         greeting_message="Upload a document to begin.",
         requested_output_tokens=1024,
     )
+    Nl2AgentFinalizeResponse.model_validate(result)
 
     assert result["name"] == "old_title"
     assert result["display_name"] == "Old title"
@@ -3385,6 +3402,7 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     )
 
     result = await nl2agent_service.get_session_state(202, "tenant_1")
+    Nl2AgentSessionStateResponse.model_validate(result)
 
     assert result["agent_id"] == 202
     assert result["internal_name"] == "customer_support"

@@ -472,13 +472,6 @@ describe("tryRenderNl2AgentCard", () => {
 describe("online configuration blockers", () => {
   it("requires both online catalogs before completion", () => {
     const blockers = getOnlineConfigurationBlockers({
-      requirements_review: {
-        status: "collecting",
-        summary: null,
-        fingerprint: "",
-      },
-      identity_confirmed: false,
-      recommendation_batches: {},
       online_recommendation_batches: {
         online_mcp: {
           resource_type: "mcp",
@@ -496,13 +489,6 @@ describe("online configuration blockers", () => {
 
   it("blocks connected MCP workflows after both catalogs render", () => {
     const blockers = getOnlineConfigurationBlockers({
-      requirements_review: {
-        status: "confirmed",
-        summary: null,
-        fingerprint: "fingerprint",
-      },
-      identity_confirmed: false,
-      recommendation_batches: {},
       online_recommendation_batches: {
         online_mcp: {
           resource_type: "mcp",

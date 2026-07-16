@@ -11,7 +11,6 @@ from http import HTTPStatus
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from starlette.responses import JSONResponse
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, AgentRunException, UnauthorizedError
@@ -29,6 +28,25 @@ from consts.model import (
     Nl2AgentRecommendationSkipRequest,
     Nl2AgentRequirementsConfirmRequest,
     Nl2AgentRequirementsSummaryRequest,
+)
+from consts.nl2agent_response import (
+    Nl2AgentApplyLocalResourcesResponse,
+    Nl2AgentCardDeliveryResponse,
+    Nl2AgentFinalizeResponse,
+    Nl2AgentIdentityResponse,
+    Nl2AgentLocalRecommendationResponse,
+    Nl2AgentLocalSkipResponse,
+    Nl2AgentMcpBindToolsResponse,
+    Nl2AgentMcpInstallResponse,
+    Nl2AgentMcpSkipToolsResponse,
+    Nl2AgentModelSelectionResponse,
+    Nl2AgentOnlineConfigurationResponse,
+    Nl2AgentOnlineRecommendationResponse,
+    Nl2AgentRequirementsConfirmationResponse,
+    Nl2AgentRequirementsRegistrationResponse,
+    Nl2AgentSessionStartResponse,
+    Nl2AgentSessionStateResponse,
+    Nl2AgentWebSkillInstallResponse,
 )
 from services.nl2agent_service import (
     apply_local_resources_batch,
@@ -75,7 +93,11 @@ def _session_http_error(exc: Exception) -> Exception:
     )
 
 
-@router.put("/session/{agent_id}/models")
+@router.put(
+    "/session/{agent_id}/models",
+    response_model=Nl2AgentModelSelectionResponse,
+    response_model_exclude_none=True,
+)
 async def select_models_api(
     agent_id: int,
     payload: Nl2AgentModelSelectionRequest,
@@ -95,7 +117,11 @@ async def select_models_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/mcp/install")
+@router.post(
+    "/session/{agent_id}/mcp/install",
+    response_model=Nl2AgentMcpInstallResponse,
+    response_model_exclude_none=True,
+)
 async def install_recommended_mcp_api(
     agent_id: int,
     payload: Nl2AgentMcpInstallRequest,
@@ -116,7 +142,10 @@ async def install_recommended_mcp_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/mcp/{mcp_id}/bind-tools")
+@router.post(
+    "/session/{agent_id}/mcp/{mcp_id}/bind-tools",
+    response_model=Nl2AgentMcpBindToolsResponse,
+)
 async def bind_mcp_tools_api(
     agent_id: int,
     mcp_id: int,
@@ -137,7 +166,10 @@ async def bind_mcp_tools_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/mcp/{mcp_id}/skip-tools")
+@router.post(
+    "/session/{agent_id}/mcp/{mcp_id}/skip-tools",
+    response_model=Nl2AgentMcpSkipToolsResponse,
+)
 async def skip_mcp_tools_api(
     agent_id: int,
     mcp_id: int,
@@ -151,7 +183,7 @@ async def skip_mcp_tools_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/start")
+@router.post("/session/start", response_model=Nl2AgentSessionStartResponse)
 async def start_session_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
@@ -168,13 +200,19 @@ async def start_session_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
-        result = await start_session(user_id=user_id, tenant_id=tenant_id, language=language)
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+        return await start_session(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/apply-local-resources")
+@router.post(
+    "/session/{agent_id}/apply-local-resources",
+    response_model=Nl2AgentApplyLocalResourcesResponse,
+)
 async def apply_local_resources_api(
     agent_id: int,
     payload: Nl2AgentApplyLocalResourcesRequest,
@@ -188,7 +226,7 @@ async def apply_local_resources_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
-        result = await apply_local_resources_batch(
+        return await apply_local_resources_batch(
             agent_id=agent_id,
             recommendation_batch_id=payload.recommendation_batch_id,
             tool_ids=payload.tool_ids,
@@ -197,12 +235,14 @@ async def apply_local_resources_api(
             tenant_id=tenant_id,
             user_id=user_id,
         )
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/local-resources/register")
+@router.post(
+    "/session/{agent_id}/local-resources/register",
+    response_model=Nl2AgentLocalRecommendationResponse,
+)
 async def register_local_resources_api(
     agent_id: int,
     payload: Nl2AgentRecommendationBatchRequest,
@@ -222,7 +262,10 @@ async def register_local_resources_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/local-resources/skip")
+@router.post(
+    "/session/{agent_id}/local-resources/skip",
+    response_model=Nl2AgentLocalSkipResponse,
+)
 async def skip_local_resources_api(
     agent_id: int,
     payload: Nl2AgentRecommendationSkipRequest,
@@ -238,7 +281,10 @@ async def skip_local_resources_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/online-recommendations/register")
+@router.post(
+    "/session/{agent_id}/online-recommendations/register",
+    response_model=Nl2AgentOnlineRecommendationResponse,
+)
 async def register_online_recommendations_api(
     agent_id: int,
     payload: Nl2AgentOnlineRecommendationBatchRequest,
@@ -258,7 +304,10 @@ async def register_online_recommendations_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/requirements/register")
+@router.post(
+    "/session/{agent_id}/requirements/register",
+    response_model=Nl2AgentRequirementsRegistrationResponse,
+)
 async def register_requirements_api(
     agent_id: int,
     payload: Nl2AgentRequirementsSummaryRequest,
@@ -276,7 +325,11 @@ async def register_requirements_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/card-delivery")
+@router.post(
+    "/session/{agent_id}/card-delivery",
+    response_model=Nl2AgentCardDeliveryResponse,
+    response_model_exclude_none=True,
+)
 async def report_card_delivery_api(
     agent_id: int,
     payload: Nl2AgentCardDeliveryRequest,
@@ -299,7 +352,10 @@ async def report_card_delivery_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/requirements/confirm")
+@router.post(
+    "/session/{agent_id}/requirements/confirm",
+    response_model=Nl2AgentRequirementsConfirmationResponse,
+)
 async def confirm_requirements_api(
     agent_id: int,
     payload: Nl2AgentRequirementsConfirmRequest,
@@ -313,7 +369,10 @@ async def confirm_requirements_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/online-configuration/complete")
+@router.post(
+    "/session/{agent_id}/online-configuration/complete",
+    response_model=Nl2AgentOnlineConfigurationResponse,
+)
 async def complete_online_configuration_api(
     agent_id: int,
     http_request: Request,
@@ -326,7 +385,11 @@ async def complete_online_configuration_api(
         raise _session_http_error(exc) from exc
 
 
-@router.get("/session/{agent_id}/state")
+@router.get(
+    "/session/{agent_id}/state",
+    response_model=Nl2AgentSessionStateResponse,
+    response_model_exclude_none=True,
+)
 async def get_session_state_api(
     agent_id: int,
     http_request: Request,
@@ -339,7 +402,11 @@ async def get_session_state_api(
         raise _session_http_error(exc) from exc
 
 
-@router.put("/session/{agent_id}/identity")
+@router.put(
+    "/session/{agent_id}/identity",
+    response_model=Nl2AgentIdentityResponse,
+    response_model_exclude_none=True,
+)
 async def save_agent_identity_api(
     agent_id: int,
     payload: Nl2AgentIdentityRequest,
@@ -353,7 +420,10 @@ async def save_agent_identity_api(
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/install-web-skill")
+@router.post(
+    "/session/{agent_id}/install-web-skill",
+    response_model=Nl2AgentWebSkillInstallResponse,
+)
 async def install_web_skill_api(
     agent_id: int,
     payload: Nl2AgentInstallWebSkillRequest,
@@ -367,7 +437,7 @@ async def install_web_skill_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
-        result = await install_web_skill(
+        return await install_web_skill(
             agent_id=agent_id,
             skill_id=payload.skill_id,
             skill_name=payload.skill_name,
@@ -375,12 +445,14 @@ async def install_web_skill_api(
             user_id=user_id,
             locale=language,
         )
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
 
-@router.post("/session/{agent_id}/finalize")
+@router.post(
+    "/session/{agent_id}/finalize",
+    response_model=Nl2AgentFinalizeResponse,
+)
 async def finalize_agent_api(
     agent_id: int,
     payload: Nl2AgentFinalizeRequest,
@@ -394,7 +466,7 @@ async def finalize_agent_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
-        result = await finalize_agent(
+        return await finalize_agent(
             agent_id=agent_id,
             user_id=user_id,
             tenant_id=tenant_id,
@@ -415,6 +487,5 @@ async def finalize_agent_api(
             ),
             enable_context_manager=payload.enable_context_manager,
         )
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except Exception as exc:
         raise _session_http_error(exc) from exc

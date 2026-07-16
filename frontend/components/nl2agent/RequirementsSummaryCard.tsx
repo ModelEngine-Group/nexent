@@ -150,7 +150,7 @@ export const RequirementsSummaryCard: React.FC<
             );
           },
           notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text,
+          continuationText: (result) => result.chat_injection_text ?? undefined,
         }
       );
     } catch (confirmationFailure) {

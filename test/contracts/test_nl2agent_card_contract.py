@@ -14,6 +14,11 @@ SCHEMA = json.loads(
         encoding="utf-8"
     )
 )
+OPENAPI = json.loads(
+    (PROJECT_ROOT / "contracts" / "nl2agent-openapi.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 def _validator(card_type: str) -> Draft7Validator:
@@ -25,6 +30,19 @@ def _validator(card_type: str) -> Draft7Validator:
 
 def test_canonical_schema_is_valid() -> None:
     Draft7Validator.check_schema(SCHEMA)
+
+
+def test_every_nl2agent_endpoint_declares_a_typed_success_response() -> None:
+    for path, path_item in OPENAPI["paths"].items():
+        for method, operation in path_item.items():
+            if method not in {"get", "post", "put", "delete", "patch"}:
+                continue
+            schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+            assert schema["$ref"].startswith("#/components/schemas/Nl2Agent"), (
+                path,
+                method,
+                schema,
+            )
 
 
 def test_all_seven_nl2agent_card_payloads_validate() -> None:

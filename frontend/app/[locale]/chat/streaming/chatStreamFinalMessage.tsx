@@ -230,7 +230,7 @@ function ChatStreamFinalMessageInner({
         if (result.auto_retry_allowed && result.chat_injection_text) {
           await workflow.continueWithText(result.chat_injection_text);
         } else {
-          setManualCardRetryText(result.chat_injection_text);
+          setManualCardRetryText(result.chat_injection_text ?? undefined);
         }
       } catch (error) {
         setCardDeliveryError(

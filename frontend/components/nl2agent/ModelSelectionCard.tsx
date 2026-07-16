@@ -63,7 +63,7 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
             setSaved(true);
             message.success("LLM selection saved.");
           },
-          continuationText: (result) => result.chat_injection_text,
+          continuationText: (result) => result.chat_injection_text ?? undefined,
         }
       );
     } catch (error) {
