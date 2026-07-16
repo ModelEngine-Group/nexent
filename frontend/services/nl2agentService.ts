@@ -10,10 +10,13 @@
 import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
+import type { components as Nl2AgentApiComponents } from "@/contracts/generated/nl2agent-api";
 import type {
   Nl2AgentCardFailureReason,
   Nl2AgentCardType,
 } from "@/components/nl2agent/cardValidation";
+
+type Nl2AgentApiSchemas = Nl2AgentApiComponents["schemas"];
 
 export const getAvailablePlatformLlms = async (): Promise<
   Array<{ id: number; displayName: string }>
@@ -23,11 +26,17 @@ export const getAvailablePlatformLlms = async (): Promise<
   if (!response.ok || !Array.isArray(result.data)) {
     throw new Error("Failed to load available platform LLMs.");
   }
-  return result.data
-    .filter((model: any) => model.connect_status === "available")
-    .map((model: any) => ({
+  return (result.data as unknown[])
+    .filter(
+      (model: unknown): model is Record<string, unknown> =>
+        Boolean(model) &&
+        typeof model === "object" &&
+        !Array.isArray(model) &&
+        (model as Record<string, unknown>).connect_status === "available"
+    )
+    .map((model) => ({
       id: Number(model.model_id),
-      displayName: model.display_name || model.model_name,
+      displayName: String(model.display_name || model.model_name || ""),
     }))
     .filter(
       (model: { id: number }) => Number.isInteger(model.id) && model.id > 0
@@ -43,19 +52,14 @@ export interface Nl2AgentSessionStartResponse {
   agent_id?: number;
 }
 
-export interface Nl2AgentApplyLocalResourcesPayload {
-  recommendation_batch_id: string;
-  tool_ids: number[];
-  skill_ids: number[];
-}
+export type Nl2AgentApplyLocalResourcesPayload =
+  Nl2AgentApiSchemas["Nl2AgentApplyLocalResourcesRequest"] & {
+    tool_ids: number[];
+    skill_ids: number[];
+  };
 
-export interface Nl2AgentRequirementsSummary {
-  goal: string;
-  audience_or_scenario: string;
-  primary_input: string;
-  expected_output: string;
-  key_constraints: string;
-}
+export type Nl2AgentRequirementsSummary =
+  Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"];
 
 export const registerRequirementsSummary = async (
   agentId: number,
@@ -105,13 +109,7 @@ export interface Nl2AgentCardDeliveryResponse {
 
 export const reportNl2AgentCardDelivery = async (
   agentId: number,
-  payload: {
-    message_id: number;
-    card_type: Nl2AgentCardType;
-    status: "rendered" | "failed";
-    card_key?: string;
-    reason?: Nl2AgentCardFailureReason;
-  }
+  payload: Nl2AgentApiSchemas["Nl2AgentCardDeliveryRequest"]
 ): Promise<Nl2AgentCardDeliveryResponse> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.cardDelivery(agentId),
@@ -150,11 +148,7 @@ export const skipLocalResourceRecommendations = async (
 
 export const registerOnlineResourceRecommendations = async (
   agentId: number,
-  payload: {
-    recommendation_batch_id: string;
-    resource_type: "mcp" | "skill";
-    item_keys: string[];
-  }
+  payload: Nl2AgentApiSchemas["Nl2AgentOnlineRecommendationBatchRequest"]
 ) => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.registerOnlineRecommendations(agentId),
@@ -344,11 +338,7 @@ export const selectNl2AgentModels = async (
 
 export const installNl2AgentMcp = async (
   agentId: number,
-  payload: {
-    recommendation_id: string;
-    option_id: string;
-    config_values: Record<string, unknown>;
-  }
+  payload: Nl2AgentApiSchemas["Nl2AgentMcpInstallRequest"]
 ) => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.installMcp(agentId),
@@ -391,32 +381,15 @@ export interface Nl2AgentInstallWebSkillResponse {
   installed_names?: string[];
 }
 
-export interface Nl2AgentInstallWebSkillPayload {
-  skill_id?: number;
-  skill_name?: string;
-}
+export type Nl2AgentInstallWebSkillPayload =
+  Nl2AgentApiSchemas["Nl2AgentInstallWebSkillRequest"];
 
-export interface Nl2AgentFinalizePayload {
-  description?: string;
-
-  // Task & template
-  business_description: string;
-  prompt_template_id?: number;
-  duty_prompt: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
-
-  // UI
-  greeting_message: string;
-  example_questions?: string[];
-
-  // Runtime
-  max_steps?: number;
-  requested_output_tokens?: number;
-  provide_run_summary?: boolean;
+export type Nl2AgentFinalizePayload = Omit<
+  Nl2AgentApiSchemas["Nl2AgentFinalizeRequest"],
+  "verification_config"
+> & {
   verification_config?: { enabled: boolean; mode?: string };
-  enable_context_manager?: boolean;
-}
+};
 
 export interface Nl2AgentFinalizeResponse {
   agent_id: number;

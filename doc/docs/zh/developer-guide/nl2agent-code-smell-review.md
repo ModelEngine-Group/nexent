@@ -29,7 +29,7 @@
 | 3.5 Finalize 失效参数 | 已解决 | 请求体只保留 proposal、Prompt 和受支持 runtime 字段，额外旧字段直接拒绝。 |
 | 4.1 SDK 全局搜索缓存 | 已解决 | 删除 `_search_cache`；每次 Agent Run 使用 Backend 注入的不可变 Catalog 重新计算。 |
 | 4.2 SDK 误导状态 | 已解决 | 删除 applied/config/searched 等实例状态。 |
-| 5.1/5.2 多套 Schema 与重复解析 | 已解决 | 增加 canonical JSON Schema；Frontend 用 Ajv 一次解析生成 typed card AST。 |
+| 5.1/5.2 多套 Schema 与重复解析 | 已解决 | 增加 canonical Card JSON Schema；从 FastAPI OpenAPI 生成 NL2AGENT API 请求类型；Frontend 用 Ajv 一次解析生成 typed card AST。 |
 | 5.3 卡片副作用重复 | 已解决 | 模型、需求、本地资源、MCP、Skill、身份与联网完成统一使用 conversation/draft/card scoped `useNl2AgentCardLifecycle`。 |
 | 5.4 前端真实交互测试 | 部分解决 | 已加入 Vitest、jsdom、React Testing Library，并覆盖统一生命周期的 busy、continuation、失败重试和输入阻塞；仍需补齐完整 API 与会话切换用例。 |
 

@@ -1041,6 +1041,8 @@ Frontend 使用 conversation/draft/message 作用域记录 `pending/succeeded/fa
 
 Frontend 通过 `contracts:generate` 同步 Schema，并由 `contracts:check` 检查漂移。Ajv 负责一次解析和 schema 校验，生成的 card AST 同时提供 payload、可信 conversation draft ID、card type、card key 和注册要求；renderer 不再二次 `JSON.parse`。
 
+同一命令还会从 Runtime FastAPI 的 OpenAPI 中提取 `/nl2agent` 路径及其传递依赖 schema，写入 `contracts/nl2agent-openapi.json`，再通过 `openapi-typescript` 生成 `frontend/contracts/generated/nl2agent-api.ts`。Frontend Service 的需求摘要、模型/MCP、资源、Skill 与 Finalize 请求类型引用该生成文件；`contracts:check` 会同时检查 FastAPI snapshot、Card Schema 和 TypeScript 类型漂移。
+
 ### 14.4 当前服务拆分
 
 - `nl2agent_publication_service.py`：发布前权威模型/资源/身份校验及 draft 更新。
