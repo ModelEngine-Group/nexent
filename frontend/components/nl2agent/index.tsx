@@ -59,11 +59,11 @@ export const OnlineRecommendationGroup: React.FC<{
           }),
         {
           onSuccess: async () => {
-            setRegistered(true);
             await onRegistered?.(
               resourceType === "mcp" ? "web_mcp" : "web_skill",
               recommendationBatchId
             );
+            setRegistered(true);
           },
           notifyStateChanged: true,
           blockInput: true,

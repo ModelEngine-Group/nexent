@@ -95,8 +95,8 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           }),
         {
           onSuccess: async () => {
-            setRegistered(true);
             await onRegistered?.("local_resources", recommendationBatchId);
+            setRegistered(true);
           },
           notifyStateChanged: true,
           blockInput: true,

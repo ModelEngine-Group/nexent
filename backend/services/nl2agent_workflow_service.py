@@ -10,6 +10,17 @@ from consts.model import AgentInfoRequest
 logger = logging.getLogger(__name__)
 
 
+def _matches_registered_online_card(
+    state: Dict[str, Any], card_type: str, card_key: Optional[str]
+) -> bool:
+    """Allow either card from one dual-card message to acknowledge after registration."""
+    if card_type not in {"web_mcp", "web_skill"} or not card_key:
+        return False
+    batch = state.get("online_recommendation_batches", {}).get(card_key) or {}
+    expected_resource_type = "mcp" if card_type == "web_mcp" else "skill"
+    return batch.get("resource_type") == expected_resource_type
+
+
 @dataclass(frozen=True)
 class WorkflowDependencies:
     """Persistence and evaluator operations consumed by workflow actions."""
@@ -109,10 +120,13 @@ async def report_card_delivery(
     summary = dependencies.get_workflow_summary(tenant_id, agent_id)
     if card_type not in summary["expected_card_types"]:
         existing = state.get("card_delivery", {}).get(card_type) or {}
-        if not (
+        is_idempotent_receipt = (
             existing.get("message_id") == message_id
             and existing.get("status") == status
             and existing.get("card_key") == card_key
+        )
+        if not is_idempotent_receipt and not _matches_registered_online_card(
+            state, card_type, card_key
         ):
             raise Nl2AgentStaleCardError()
 

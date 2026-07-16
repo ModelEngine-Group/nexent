@@ -303,6 +303,86 @@ async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
     assert "model_selection" not in state["card_delivery"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_resource_type", ["mcp", "skill"])
+async def test_dual_online_cards_accept_registration_and_receipts_in_either_order(
+    monkeypatch,
+    first_resource_type,
+):
+    _confirm_requirements()
+    nl2agent_session_catalog.set_model_selection_confirmed("tenant_1", 202, True)
+    _register_local_batch("local_empty", [], [])
+    nl2agent_session_catalog.resolve_recommendation_batch(
+        "tenant_1", 202, "local_empty", "skipped"
+    )
+    batches = {
+        "mcp": ("online_mcp", "web_mcp"),
+        "skill": ("online_skill", "web_skill"),
+    }
+    for resource_type, (batch_id, _card_type) in batches.items():
+        nl2agent_session_catalog.record_trusted_search_batch(
+            "tenant_1",
+            202,
+            recommendation_batch_id=batch_id,
+            resource_type=resource_type,
+            item_keys=[],
+        )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 20,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": (
+                    "```nl2agent-web-mcps\n"
+                    '{"agent_id":202,"recommendation_batch_id":"online_mcp","items":[]}\n'
+                    "```\n"
+                    "```nl2agent-web-skills\n"
+                    '{"agent_id":202,"recommendation_batch_id":"online_skill","items":[]}\n'
+                    "```"
+                ),
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=20),
+    )
+
+    ordered_types = [
+        first_resource_type,
+        "skill" if first_resource_type == "mcp" else "mcp",
+    ]
+    for resource_type in ordered_types:
+        batch_id, card_type = batches[resource_type]
+        await nl2agent_service.register_online_resource_recommendations(
+            202, batch_id, resource_type, [], "tenant_1"
+        )
+        await nl2agent_service.report_card_delivery(
+            agent_id=202,
+            message_id=20,
+            card_type=card_type,
+            status="rendered",
+            card_key=batch_id,
+            reason=None,
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["card_delivery"]["web_mcp"]["status"] == "rendered"
+    assert state["card_delivery"]["web_skill"]["status"] == "rendered"
+
+
 @pytest.fixture(autouse=True)
 def mock_nl2agent_seed_defaults(monkeypatch):
     fake_redis = fakeredis.FakeRedis(decode_responses=True)
