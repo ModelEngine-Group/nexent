@@ -4993,8 +4993,66 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
         raising=False,
     )
     monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        MagicMock(return_value=42),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
         "backend.services.agent_service._cleanup_channel_later",
         AsyncMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.register_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.get_agent_run_info",
+        MagicMock(return_value=MagicMock(query="hello")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.complete_channel",
+        AsyncMock(),
+        raising=False,
+    )
+    
+    mock_channel = MagicMock()
+    mock_channel.publish = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.get_or_create_channel",
+        AsyncMock(return_value=mock_channel),
+        raising=False,
+    )
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *a, **kw: _FakeFuture(),
         raising=False,
     )
 
