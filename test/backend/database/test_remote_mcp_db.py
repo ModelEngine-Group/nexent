@@ -132,16 +132,24 @@ def mock_session():
 def test_create_mcp_record_success(monkeypatch, mock_session):
     session, _ = mock_session
     session.add = MagicMock()
+    session.flush = MagicMock()
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.remote_mcp_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.remote_mcp_db.McpRecord", lambda **kwargs: MagicMock())
+    record = MagicMock(mcp_id=12)
+    monkeypatch.setattr("backend.database.remote_mcp_db.McpRecord", lambda **kwargs: record)
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.as_dict",
+        lambda value: {"mcp_id": value.mcp_id},
+    )
 
     mcp_data = {"mcp_name": "test_mcp", "mcp_server": "http://test.server.com", "status": True}
-    create_mcp_record(mcp_data, "tenant1", "user1")
+    result = create_mcp_record(mcp_data, "tenant1", "user1")
     session.add.assert_called_once()
+    session.flush.assert_called_once()
+    assert result == {"mcp_id": 12}
 
 
 def test_create_mcp_record_with_custom_headers(monkeypatch, mock_session):

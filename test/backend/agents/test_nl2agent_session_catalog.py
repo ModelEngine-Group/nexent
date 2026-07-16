@@ -463,3 +463,33 @@ def test_missing_or_old_workflow_state_is_rejected(fake_redis):
     )
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Malformed"):
         catalog_module.get_nl2agent_session_state("tenant_1", 303)
+
+
+def test_mcp_installation_lock_is_owned_and_recoverable(fake_redis):
+    token = catalog_module.acquire_mcp_installation_lock(
+        "tenant_1", 202, "stable-key"
+    )
+    assert token
+    assert (
+        catalog_module.acquire_mcp_installation_lock(
+            "tenant_1", 202, "stable-key"
+        )
+        is None
+    )
+
+    catalog_module.release_mcp_installation_lock(
+        "tenant_1", 202, "stable-key", "wrong-owner"
+    )
+    assert (
+        catalog_module.acquire_mcp_installation_lock(
+            "tenant_1", 202, "stable-key"
+        )
+        is None
+    )
+
+    catalog_module.release_mcp_installation_lock(
+        "tenant_1", 202, "stable-key", token
+    )
+    assert catalog_module.acquire_mcp_installation_lock(
+        "tenant_1", 202, "stable-key"
+    )

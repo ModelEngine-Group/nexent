@@ -298,9 +298,10 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         """Test add_mcp_service with enabled=True and custom_headers."""
         mock_check_name.return_value = False
         mock_health.return_value = True
+        mock_create.return_value = {"mcp_id": 91}
 
         custom_headers = {"X-Custom-Auth": "header-value"}
-        await add_mcp_service(
+        mcp_id = await add_mcp_service(
             tenant_id='tid', user_id='uid', name='test-svc',
             description='desc', source='local', server_url='http://srv/mcp',
             tags=['tag1'], authorization_token='tok',
@@ -319,6 +320,7 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         call_data = mock_create.call_args[1]['mcp_data']
         self.assertEqual(call_data['custom_headers'], custom_headers)
         self.assertTrue(call_data['status'])
+        self.assertEqual(mcp_id, 91)
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
@@ -860,8 +862,9 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
             "container_name": "test-svc-xyz",
         })
         mock_mgr_cls.return_value = mock_mgr
+        mock_add.return_value = 92
 
-        await add_container_mcp_service(
+        result = await add_container_mcp_service(
             tenant_id='tid', user_id='uid', name='test-svc',
             description='desc', source='local', tags=[],
             authorization_token='tok', registry_json=None,
@@ -874,6 +877,37 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
         # add_container_mcp_service doesn't pass custom_headers to add_mcp_service
         # but the mcp_data structure would include it if it were supported
         self.assertIsNone(add_call_kwargs.get('custom_headers', None))
+        self.assertEqual(result["mcp_id"], 92)
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_add_container_stops_container_when_database_write_fails(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_add.side_effect = RuntimeError("database failed")
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "cid",
+            "mcp_url": "http://localhost:8080/mcp",
+            "host_port": 8080,
+            "container_name": "test-svc-xyz",
+        })
+        mock_mgr.stop_mcp_container = AsyncMock(return_value=True)
+        mock_mgr_cls.return_value = mock_mgr
+
+        with self.assertRaisesRegex(RuntimeError, "database failed"):
+            await add_container_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', tags=[],
+                authorization_token=None, registry_json=None,
+                port=8080, mcp_config=self._make_mcp_config(),
+            )
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("cid")
 
 
 # ============================================================================

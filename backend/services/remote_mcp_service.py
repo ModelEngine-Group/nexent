@@ -10,7 +10,6 @@ from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_RE
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
-    MCPContainerError,
     McpNotFoundError,
     McpValidationError,
     McpNameConflictError,
@@ -22,7 +21,6 @@ from database.remote_mcp_db import (
     delete_mcp_record_by_container_id,
     get_mcp_records_by_tenant,
     check_mcp_name_exists,
-    check_enabled_mcp_name_exists,
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
     update_mcp_record_manage_fields_by_id,
@@ -236,7 +234,7 @@ async def add_mcp_service(
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
-) -> None:
+) -> int:
     """Add an MCP service record.
 
     Args:
@@ -270,7 +268,7 @@ async def add_mcp_service(
 
         status = True
 
-    create_mcp_record(
+    record = create_mcp_record(
         mcp_data={
             "mcp_name": name,
             "mcp_server": server_url,
@@ -289,6 +287,7 @@ async def add_mcp_service(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    return int(record["mcp_id"])
 
 
 async def add_container_mcp_service(
@@ -374,7 +373,7 @@ async def add_container_mcp_service(
 
         container_config = mcp_config.model_dump(exclude_none=True)
 
-        await add_mcp_service(
+        mcp_id = await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
             name=service_name,
@@ -390,6 +389,15 @@ async def add_container_mcp_service(
             container_port=container_info.get("host_port"),
         )
     except Exception as exc:
+        container_id = container_info.get("container_id") if "container_info" in locals() else None
+        if container_id:
+            try:
+                await container_manager.stop_mcp_container(container_id)
+            except Exception:
+                logger.exception(
+                    "Failed to compensate MCP container after persistence failure: container_id=%s",
+                    container_id,
+                )
         logger.warning(f"Failed to start container MCP service: {exc}")
         raise
 
@@ -399,6 +407,7 @@ async def add_container_mcp_service(
         "container_id": container_info.get("container_id"),
         "container_name": container_info.get("container_name"),
         "host_port": container_info.get("host_port"),
+        "mcp_id": mcp_id,
     }
 
 

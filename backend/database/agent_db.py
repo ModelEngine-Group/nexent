@@ -188,7 +188,7 @@ def mark_agents_as_new(agent_ids: list[int], tenant_id: str, user_id: str, versi
         )
 
 
-def create_agent(agent_info, tenant_id: str, user_id: str):
+def create_agent(agent_info, tenant_id: str, user_id: str, db_session=None):
     """
     Create a new agent in the database (draft version, version_no=0).
     :param agent_info: Dictionary containing agent information
@@ -206,7 +206,8 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "updated_by": user_id,
         "is_new": True,  # Mark new agents as new
     })
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)

@@ -52,7 +52,11 @@ class ConversationHistory(TypedDict):
     image_records: List[ImageRecord]
 
 
-def create_conversation(conversation_title: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+def create_conversation(
+    conversation_title: str,
+    user_id: Optional[str] = None,
+    db_session=None,
+) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -63,7 +67,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
     """
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": 'N'}
         if user_id:

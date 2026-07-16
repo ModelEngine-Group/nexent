@@ -13,6 +13,7 @@ After the SDK decoupling refactor:
   draft agent row and upserts tool/skill instances with per-agent config overrides.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -25,6 +26,7 @@ from urllib.parse import urlparse
 from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
 
 from agents.nl2agent_session_catalog import (
+    acquire_mcp_installation_lock,
     apply_requirements_revision_text,
     assert_requirements_confirmed,
     assert_identity_confirmed,
@@ -34,6 +36,7 @@ from agents.nl2agent_session_catalog import (
     complete_online_configuration as complete_online_configuration_state,
     confirm_requirements_summary,
     confirm_agent_identity,
+    delete_nl2agent_session_catalogs,
     find_mcp_workflow_by_id,
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
@@ -44,6 +47,7 @@ from agents.nl2agent_session_catalog import (
     register_online_recommendation_batch,
     register_requirements_summary,
     record_card_delivery,
+    release_mcp_installation_lock,
     resolve_recommendation_batch,
     set_nl2agent_session_catalogs,
     set_model_selection_confirmed,
@@ -322,6 +326,82 @@ def _ensure_nl2agent_seed_defaults(agent: Dict[str, Any], user_id: str, tenant_i
         logger.warning(f"Failed to backfill NL2AGENT seed defaults for agent_id={agent_id}: {exc}")
 
 
+async def _load_session_catalogs(
+    tenant_id: str,
+) -> tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
+    """Load every required catalog, distinguishing valid emptiness from failures."""
+    try:
+        all_tools = list_all_tools(tenant_id=tenant_id, labels=None) or []
+        tool_catalog = [
+            {
+                "tool_id": tool.get("tool_id"),
+                "name": tool.get("name") or tool.get("origin_name") or "",
+                "description": (tool.get("description") or "")[:400],
+                "labels": tool.get("labels") or [],
+                "source": str(tool.get("source") or "").lower(),
+                "category": tool.get("category") or "",
+                "usage": tool.get("usage") or "",
+                "params": tool.get("params") or [],
+            }
+            for tool in all_tools
+            if str(tool.get("source") or "").lower()
+            in {"local", "mcp", "langchain"}
+        ]
+    except Exception as exc:
+        raise AgentRunException("NL2AGENT local Tool catalog is unavailable.") from exc
+
+    try:
+        tenant_skills = list_tenant_skills(tenant_id=tenant_id) or []
+        skill_catalog = [
+            {
+                "skill_id": skill.get("skill_id"),
+                "name": skill.get("name") or skill.get("skill_name") or "",
+                "description": (skill.get("description") or "")[:400],
+                "tags": skill.get("tags") or [],
+                "config_schema": skill.get("config_schema") or {},
+            }
+            for skill in tenant_skills
+        ]
+    except Exception as exc:
+        raise AgentRunException("NL2AGENT local Skill catalog is unavailable.") from exc
+
+    try:
+        registry_data = await list_registry_mcp_services(search=None, limit=30)
+        registry_results = _redact_mcp_marketplace_metadata(
+            registry_data.get("servers", registry_data) or []
+        ) if isinstance(registry_data, dict) else []
+    except Exception as exc:
+        raise AgentRunException("NL2AGENT Registry MCP catalog is unavailable.") from exc
+
+    try:
+        community_data = list_community_mcp_services(search=None, limit=30)
+        community_results = _redact_mcp_marketplace_metadata(
+            community_data.get("items", community_data) or []
+        ) if isinstance(community_data, dict) else []
+    except Exception as exc:
+        raise AgentRunException("NL2AGENT community MCP catalog is unavailable.") from exc
+
+    try:
+        official_skill_catalog = get_official_skills_with_status(tenant_id=tenant_id) or []
+    except Exception as exc:
+        raise AgentRunException("NL2AGENT official Skill catalog is unavailable.") from exc
+    resource_missing_names = [
+        str(item.get("skill_name") or item.get("name") or "")
+        for item in official_skill_catalog
+        if item.get("status") == "resource_missing"
+    ]
+    official_skills = [
+        item for item in official_skill_catalog if item.get("status") == "installable"
+    ]
+    return {
+        "tool_catalog": tool_catalog,
+        "skill_catalog": skill_catalog,
+        "registry_results": registry_results,
+        "community_results": community_results,
+        "official_skills": official_skills,
+    }, resource_missing_names
+
+
 async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str, Any]:
     """Create a draft agent and a conversation for a new NL2AGENT session.
 
@@ -364,7 +444,6 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
 
     draft_name = f"{DRAFT_AGENT_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
     draft_display_name = "Draft Agent (NL2AGENT)"
-
     agent_payload = {
         "name": draft_name,
         "display_name": draft_display_name,
@@ -373,111 +452,63 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
         "enabled": True,
         "is_new": False,
     }
-
+    session_catalogs, resource_missing_names = await _load_session_catalogs(tenant_id)
+    draft_agent_id: Optional[int] = None
+    conversation_id: Optional[int] = None
     try:
-        created = create_agent(agent_payload, tenant_id=tenant_id, user_id=user_id)
-    except Exception as exc:
-        logger.error(f"Failed to create draft agent for NL2AGENT session: {exc}")
-        raise AgentRunException("Failed to create draft agent.") from exc
-
-    draft_agent_id = created.get("agent_id")
-    if not draft_agent_id:
-        raise AgentRunException("Draft agent creation returned no agent_id.")
-
-    conversation_title = f"NL2AGENT - {draft_name}"
-    try:
-        conversation = create_conversation(conversation_title=conversation_title, user_id=user_id)
-    except Exception as exc:
-        logger.error(f"Failed to create conversation for NL2AGENT session: {exc}")
-        raise AgentRunException("Failed to create conversation.") from exc
-
-    # Pre-fetch catalogs for the 3 pure-SDK search tools.
-    tool_catalog: List[Dict[str, Any]] = []
-    try:
-        all_tools = list_all_tools(tenant_id=tenant_id, labels=None) or []
-        for t in all_tools:
-            src = str(t.get("source") or "").lower()
-            if src not in ("local", "mcp", "langchain"):
-                continue
-            tool_catalog.append(
-                {
-                    "tool_id": t.get("tool_id"),
-                    "name": t.get("name") or t.get("origin_name") or "",
-                    "description": (t.get("description") or "")[:400],
-                    "labels": t.get("labels") or [],
-                    "source": src,
-                    "category": t.get("category") or "",
-                    "usage": t.get("usage") or "",
-                    "params": t.get("params") or [],
-                }
+        with get_db_session() as db_session:
+            created = create_agent(
+                agent_payload,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                db_session=db_session,
             )
-    except Exception as exc:
-        logger.warning(f"Failed to pre-fetch tool catalog for NL2AGENT session: {exc}")
+            draft_agent_id = created.get("agent_id")
+            if not isinstance(draft_agent_id, int) or draft_agent_id <= 0:
+                raise AgentRunException("Draft agent creation returned no agent_id.")
 
-    skill_catalog: List[Dict[str, Any]] = []
-    try:
-        tenant_skills = list_tenant_skills(tenant_id=tenant_id) or []
-        for s in tenant_skills:
-            skill_catalog.append(
-                {
-                    "skill_id": s.get("skill_id"),
-                    "name": s.get("name") or s.get("skill_name") or "",
-                    "description": (s.get("description") or "")[:400],
-                    "tags": s.get("tags") or [],
-                    "config_schema": s.get("config_schema") or {},
-                }
+            conversation = create_conversation(
+                conversation_title=f"NL2AGENT - {draft_name}",
+                user_id=user_id,
+                db_session=db_session,
             )
-    except Exception as exc:
-        logger.warning(f"Failed to pre-fetch skill catalog for NL2AGENT session: {exc}")
+            conversation_id = conversation.get("conversation_id")
+            if not isinstance(conversation_id, int) or conversation_id <= 0:
+                raise AgentRunException("Conversation creation returned no conversation_id.")
 
-    registry_results: List[Dict[str, Any]] = []
-    try:
-        registry_data = await list_registry_mcp_services(search=None, limit=30)
-        if isinstance(registry_data, dict):
-            registry_results = _redact_mcp_marketplace_metadata(registry_data.get("servers", registry_data) or [])
-    except Exception as exc:
-        logger.warning(f"Failed to pre-fetch registry MCP results: {exc}")
-
-    community_results: List[Dict[str, Any]] = []
-    try:
-        community_data = list_community_mcp_services(search=None, limit=30)
-        if isinstance(community_data, dict):
-            community_results = _redact_mcp_marketplace_metadata(community_data.get("items", community_data) or [])
-    except Exception as exc:
-        logger.warning(f"Failed to pre-fetch community MCP results: {exc}")
-
-    official_skills: List[Dict[str, Any]] = []
-    try:
-        official_skill_catalog = get_official_skills_with_status(tenant_id=tenant_id) or []
-        resource_missing_names = [
-            str(item.get("skill_name") or item.get("name") or "")
-            for item in official_skill_catalog
-            if item.get("status") == "resource_missing"
-        ]
-        if resource_missing_names:
-            logger.warning(
-                "Excluded resource-missing official Skills from NL2AGENT search: "
-                "tenant_id=%s draft_agent_id=%s skills=%s",
+            initialize_nl2agent_session_state(
                 tenant_id,
                 draft_agent_id,
-                resource_missing_names,
+                conversation_id=conversation_id,
             )
-        official_skills = [item for item in official_skill_catalog if item.get("status") == "installable"]
+            set_nl2agent_session_catalogs(
+                tenant_id,
+                draft_agent_id,
+                session_catalogs,
+            )
     except Exception as exc:
-        logger.warning(f"Failed to pre-fetch official skills: {exc}")
+        if draft_agent_id:
+            try:
+                delete_nl2agent_session_catalogs(tenant_id, draft_agent_id)
+            except Exception:
+                logger.exception(
+                    "Failed to compensate NL2AGENT Redis initialization: tenant_id=%s draft_agent_id=%s",
+                    tenant_id,
+                    draft_agent_id,
+                )
+        if isinstance(exc, AgentRunException):
+            raise
+        logger.exception("Failed to initialize NL2AGENT session for tenant_id=%s", tenant_id)
+        raise AgentRunException("Failed to initialize NL2AGENT session.") from exc
 
-    session_catalogs = {
-        "tool_catalog": tool_catalog,
-        "skill_catalog": skill_catalog,
-        "registry_results": registry_results,
-        "community_results": community_results,
-        "official_skills": official_skills,
-    }
-    conversation_id = conversation.get("conversation_id")
-    if not isinstance(conversation_id, int) or conversation_id <= 0:
-        raise AgentRunException("Conversation creation returned no conversation_id.")
-    initialize_nl2agent_session_state(tenant_id, draft_agent_id, conversation_id=conversation_id)
-    set_nl2agent_session_catalogs(tenant_id, draft_agent_id, session_catalogs)
+    if resource_missing_names:
+        logger.warning(
+            "Excluded resource-missing official Skills from NL2AGENT search: "
+            "tenant_id=%s draft_agent_id=%s skills=%s",
+            tenant_id,
+            draft_agent_id,
+            resource_missing_names,
+        )
 
     return {
         "nl2agent_agent_id": nl2agent_agent_id,
@@ -762,6 +793,26 @@ def _resolve_mcp_recommendation(
     raise AgentRunException("MCP recommendation is not part of this NL2AGENT session.")
 
 
+def _mcp_installation_key(
+    draft_agent_id: int, recommendation_id: str, option_id: str
+) -> str:
+    payload = f"{draft_agent_id}:{recommendation_id}:{option_id}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _mcp_record_installation_key(record: Dict[str, Any]) -> Optional[str]:
+    registry_json = record.get("registry_json")
+    if isinstance(registry_json, str):
+        try:
+            registry_json = json.loads(registry_json)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(registry_json, dict):
+        return None
+    value = registry_json.get("nl2agent_installation_key")
+    return str(value) if value else None
+
+
 async def _install_recommended_mcp(
     agent_id: int,
     recommendation_id: str,
@@ -769,6 +820,45 @@ async def _install_recommended_mcp(
     config_values: Dict[str, Any],
     tenant_id: str,
     user_id: str,
+) -> Dict[str, Any]:
+    """Serialize one stable MCP installation across runtime workers."""
+    installation_key = _mcp_installation_key(
+        agent_id, recommendation_id, option_id
+    )
+    lock_token = acquire_mcp_installation_lock(
+        tenant_id, agent_id, installation_key
+    )
+    if not lock_token:
+        raise AgentRunException(
+            "This MCP installation is already in progress. Retry after it completes."
+        )
+    try:
+        return await _perform_recommended_mcp_install(
+            agent_id,
+            recommendation_id,
+            option_id,
+            config_values,
+            tenant_id,
+            user_id,
+            installation_key,
+        )
+    finally:
+        release_mcp_installation_lock(
+            tenant_id,
+            agent_id,
+            installation_key,
+            lock_token,
+        )
+
+
+async def _perform_recommended_mcp_install(
+    agent_id: int,
+    recommendation_id: str,
+    option_id: str,
+    config_values: Dict[str, Any],
+    tenant_id: str,
+    user_id: str,
+    installation_key: str,
 ) -> Dict[str, Any]:
     """Install a server-side resolved MCP recommendation and discover its tools."""
     _get_owned_draft(agent_id, tenant_id)
@@ -789,6 +879,7 @@ async def _install_recommended_mcp(
         recommendation_id,
         option_id=option_id,
         status="installing",
+        installation_key=installation_key,
     )
 
     registry_json = raw.get("registryJson") or raw.get("registry_json")
@@ -852,6 +943,18 @@ async def _install_recommended_mcp(
             else:
                 custom_headers[str(field.get("name"))] = str(value)
 
+    persisted_registry_json = deepcopy(raw)
+    persisted_registry_json["nl2agent_installation_key"] = installation_key
+    record = next(
+        (
+            item
+            for item in get_mcp_records_by_tenant(tenant_id)
+            if _mcp_record_installation_key(item) == installation_key
+        ),
+        None,
+    )
+    mcp_id = int(record["mcp_id"]) if record else None
+
     if option.get("type") == "remote":
         server_url = option.get("server_url_template")
         if not server_url:
@@ -872,20 +975,21 @@ async def _install_recommended_mcp(
         parsed_url = urlparse(str(server_url))
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
-        await add_mcp_service(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=name,
-            description=description,
-            source=persisted_source,
-            server_url=server_url,
-            tags=raw.get("tags") or [],
-            authorization_token=authorization_token,
-            custom_headers=custom_headers or None,
-            container_config=None,
-            registry_json=raw,
-            enabled=True,
-        )
+        if mcp_id is None:
+            mcp_id = await add_mcp_service(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                name=name,
+                description=description,
+                source=persisted_source,
+                server_url=server_url,
+                tags=raw.get("tags") or [],
+                authorization_token=authorization_token,
+                custom_headers=custom_headers or None,
+                container_config=None,
+                registry_json=persisted_registry_json,
+                enabled=True,
+            )
     else:
         config_json = deepcopy(raw.get("configJson") or raw.get("config_json"))
         if option_id.startswith("package-"):
@@ -957,40 +1061,55 @@ async def _install_recommended_mcp(
             raise AgentRunException("MCP container port must be between 1 and 65535.")
         if not isinstance(config_json, dict):
             raise AgentRunException("This MCP requires container configuration and a port.")
-        await add_container_mcp_service(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=name,
-            description=description,
-            source=persisted_source,
-            tags=raw.get("tags") or [],
-            authorization_token=authorization_token,
-            registry_json=raw,
-            port=port_number,
-            mcp_config=MCPConfigRequest(**config_json),
-        )
+        if mcp_id is None:
+            container_result = await add_container_mcp_service(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                name=name,
+                description=description,
+                source=persisted_source,
+                tags=raw.get("tags") or [],
+                authorization_token=authorization_token,
+                registry_json=persisted_registry_json,
+                port=port_number,
+                mcp_config=MCPConfigRequest(**config_json),
+            )
+            mcp_id = int(container_result["mcp_id"])
 
-    record = next(
-        (r for r in get_mcp_records_by_tenant(tenant_id) if r.get("mcp_name") == name),
-        None,
-    )
+    record = get_mcp_record_by_id_and_tenant(
+        mcp_id=int(mcp_id), tenant_id=tenant_id
+    ) if mcp_id is not None else None
     if not record:
         raise AgentRunException("Installed MCP record could not be resolved.")
     mcp_id = int(record["mcp_id"])
-    discovered = await get_tool_from_remote_mcp_server(
-        mcp_server_name=name,
-        remote_mcp_server=record.get("mcp_server"),
-        tenant_id=tenant_id,
-        authorization_token=authorization_token,
-        custom_headers=custom_headers or None,
-    )
-    tools = upsert_discovered_mcp_tools(tenant_id, user_id, discovered)
+    try:
+        discovered = await get_tool_from_remote_mcp_server(
+            mcp_server_name=name,
+            remote_mcp_server=record.get("mcp_server"),
+            tenant_id=tenant_id,
+            authorization_token=authorization_token,
+            custom_headers=custom_headers or None,
+        )
+        tools = upsert_discovered_mcp_tools(tenant_id, user_id, discovered)
+    except Exception as exc:
+        update_mcp_workflow(
+            tenant_id,
+            agent_id,
+            recommendation_id,
+            option_id=option_id,
+            status="failed",
+            installation_key=installation_key,
+            mcp_id=mcp_id,
+            error="MCP tool discovery failed. Retry to resume discovery.",
+        )
+        raise AgentRunException("MCP tool discovery failed. Retry installation.") from exc
     update_mcp_workflow(
         tenant_id,
         agent_id,
         recommendation_id,
         option_id=option_id,
         status="connected",
+        installation_key=installation_key,
         mcp_id=mcp_id,
         discovered_tool_ids=[int(tool["tool_id"]) for tool in tools],
         bound_tool_ids=[],
@@ -1047,6 +1166,9 @@ async def install_recommended_mcp(
                 recommendation_id,
                 option_id=option_id,
                 status="failed",
+                installation_key=_mcp_installation_key(
+                    agent_id, recommendation_id, option_id
+                ),
                 error="MCP installation failed. Review the option configuration and retry.",
             )
         except Exception:

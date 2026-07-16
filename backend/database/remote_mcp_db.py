@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from database.client import as_dict, filter_property, get_db_session
+from database.client import as_dict, get_db_session
 from database.db_models import McpRecord
 
 logger = logging.getLogger("remote_mcp_db")
@@ -41,6 +41,8 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     with get_db_session() as session:
         new_mcp = McpRecord(**filtered_data)
         session.add(new_mcp)
+        session.flush()
+        return as_dict(new_mcp)
 
 
 def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str):

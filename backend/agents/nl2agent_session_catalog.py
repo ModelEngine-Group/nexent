@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import unicodedata
+import uuid
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
@@ -34,7 +35,9 @@ _CATALOG_KEYS = (
 )
 _CACHE_KEY_PREFIX = "nl2agent:session_catalog"
 _STATE_KEY_PREFIX = "nl2agent:session_state"
+_INSTALLATION_LOCK_KEY_PREFIX = "nl2agent:mcp_installation_lock"
 _CACHE_TTL_SECONDS = 24 * 60 * 60
+_INSTALLATION_LOCK_TTL_SECONDS = 5 * 60
 _CAS_MAX_RETRIES = 5
 _REQUIREMENTS_FIELDS = (
     "goal",
@@ -752,3 +755,59 @@ def clear_nl2agent_session_catalogs() -> None:
     keys.extend(client.scan_iter(match=f"{_STATE_KEY_PREFIX}:*"))
     if keys:
         client.delete(*keys)
+
+
+def delete_nl2agent_session_catalogs(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> None:
+    """Delete one draft's workflow and catalog keys during initialization compensation."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    get_redis_service().client.delete(
+        _cache_key(tenant, draft_id),
+        _state_key(tenant, draft_id),
+    )
+
+
+def acquire_mcp_installation_lock(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+) -> Optional[str]:
+    """Acquire a tenant/draft installation lock and return its ownership token."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    token = uuid.uuid4().hex
+    key = f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:{installation_key}"
+    acquired = get_redis_service().client.set(
+        key,
+        token,
+        nx=True,
+        ex=_INSTALLATION_LOCK_TTL_SECONDS,
+    )
+    return token if acquired else None
+
+
+def release_mcp_installation_lock(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+    token: str,
+) -> None:
+    """Release an installation lock only when the caller still owns it."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    key = f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:{installation_key}"
+    client = get_redis_service().client
+    for _attempt in range(_CAS_MAX_RETRIES):
+        pipe = client.pipeline()
+        try:
+            pipe.watch(key)
+            if pipe.get(key) != token:
+                pipe.unwatch()
+                return
+            pipe.multi()
+            pipe.delete(key)
+            pipe.execute()
+            return
+        except redis.WatchError:
+            continue
+        finally:
+            pipe.reset()
