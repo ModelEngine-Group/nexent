@@ -4987,54 +4987,14 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
         "backend.services.agent_service.agent_run", yield_final_answer, raising=False
     )
 
-    # Mock the new incremental persistence path so this test can focus on
-    # memory and final_answer capture without touching the DB.
     monkeypatch.setattr(
         "backend.services.agent_service.save_message",
         MagicMock(return_value=9001),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message_unit",
-        MagicMock(return_value=42),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service.update_message_content",
-        MagicMock(),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
-        MagicMock(),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
-        MagicMock(),
-        raising=False,
-    )
-
-    class _FakeFuture:
-        def result(self):
-            return 42
-
-    monkeypatch.setattr(
-        "backend.services.agent_service.submit",
-        lambda fn, *a, **kw: _FakeFuture(),
-        raising=False,
-    )
-
-    # Mock streaming_channel_manager to avoid real channel creation
-    mock_channel = MagicMock()
-    mock_channel.publish = AsyncMock()
-    mock_channel.history_size = 0
-    mock_channel_manager = MagicMock()
-    mock_channel_manager.get_or_create_channel = AsyncMock(return_value=mock_channel)
-    mock_channel_manager.complete_channel = AsyncMock()
-    monkeypatch.setattr(
-        "backend.services.agent_service.streaming_channel_manager",
-        mock_channel_manager,
+        "backend.services.agent_service._cleanup_channel_later",
+        AsyncMock(),
         raising=False,
     )
 
@@ -5065,12 +5025,12 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
     memory_ctx.agent_id = 3
 
     # Capture and await scheduled background task
-    task_holder = {"task": None}
+    tasks_created = []
     orig_create_task = asyncio.create_task
 
     def capture_task(coro):
         t = orig_create_task(coro)
-        task_holder["task"] = t
+        tasks_created.append(t)
         return t
 
     monkeypatch.setattr(asyncio, "create_task", capture_task)
@@ -5082,9 +5042,12 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
     ):
         collected.append(out)
 
-    # Ensure background task completed
-    if task_holder["task"] is not None:
-        await task_holder["task"]
+    # Await all captured tasks
+    for task in tasks_created:
+        try:
+            await task
+        except Exception:
+            pass
 
     assert add_calls["called"] is True
     assert add_calls["args"]["messages"] == [
