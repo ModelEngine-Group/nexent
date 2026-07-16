@@ -73,6 +73,7 @@ from database.model_management_db import get_model_records
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
     get_skill_by_id as get_tenant_skill_by_id,
+    get_skill_by_name as get_tenant_skill_by_name,
     list_skills as list_tenant_skills,
     query_enabled_skill_instances,
     query_skills_by_ids,
@@ -1030,6 +1031,8 @@ def _skill_installation_dependencies() -> SkillInstallationDependencies:
         mutate_session_catalogs=mutate_nl2agent_session_catalogs,
         install_by_name=install_skills_from_zip_for_tenant,
         install_by_id=install_skills_for_tenant,
+        get_installed_by_name=get_tenant_skill_by_name,
+        bind_skill=create_or_update_skill_by_skill_info,
     )
 
 

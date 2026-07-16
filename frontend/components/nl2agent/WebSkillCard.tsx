@@ -29,8 +29,8 @@ export interface WebSkillCardProps {
 /**
  * Renders a single official/web skill recommendation with an "Install" button.
  * Clicking Install calls POST /nl2agent/session/{agentId}/install-web-skill
- * which reuses skill_service.install_official_skill. Each web skill installs
- * individually — no batch.
+ * which installs the tenant Skill and binds it to the draft agent. Each web
+ * skill installs individually — no batch.
  *
  * Rendered from a ```nl2agent-web-skill fenced JSON block.
  */

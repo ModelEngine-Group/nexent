@@ -364,7 +364,7 @@ async def install_web_skill_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    """Install a single official/web skill into the tenant."""
+    """Install a single official/web skill and bind it to the draft agent."""
     try:
         user_id, tenant_id, language = get_current_user_info(authorization, http_request)
     except UnauthorizedError as exc:

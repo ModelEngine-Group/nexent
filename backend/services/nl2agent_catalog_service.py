@@ -7,8 +7,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from consts.exceptions import Nl2AgentCatalogUnavailableError
 from consts.exceptions import AgentRunException
+from consts.exceptions import Nl2AgentCatalogUnavailableError
+from consts.model import SkillInstanceInfoRequest
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class SkillInstallationDependencies:
     mutate_session_catalogs: Callable[..., Any]
     install_by_name: Callable[..., List[str]]
     install_by_id: Callable[..., List[int]]
+    get_installed_by_name: Callable[[str, str], Optional[CatalogItem]]
+    bind_skill: Callable[..., Any]
 
 
 def recommendation_id(source: str, item: CatalogItem) -> str:
@@ -264,6 +267,34 @@ def _remove_installed_skill(
     dependencies.mutate_session_catalogs(tenant_id, agent_id, remove)
 
 
+def _bind_installed_skill(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    skill_id: int,
+    tenant_id: str,
+    user_id: str,
+    skill_label: Any,
+) -> None:
+    """Enable one tenant Skill on the draft agent."""
+    try:
+        dependencies.bind_skill(
+            skill_info=SkillInstanceInfoRequest(
+                skill_id=skill_id,
+                agent_id=agent_id,
+                enabled=True,
+                version_no=0,
+            ),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=0,
+        )
+    except Exception as exc:
+        raise AgentRunException(
+            f"Installed skill {skill_label} could not be bound to the draft."
+        ) from exc
+
+
 async def install_web_skill(
     dependencies: SkillInstallationDependencies,
     *,
@@ -294,30 +325,48 @@ async def install_web_skill(
         except Exception as exc:
             logger.error("Failed to install web skill %s: %s", skill_name, exc)
             raise AgentRunException(f"Failed to install skill {skill_name}.") from exc
+        if not installed_names:
+            raise AgentRunException(f"Failed to install skill {skill_name}.")
+        installed_skill = dependencies.get_installed_by_name(
+            installed_names[0], tenant_id
+        )
+        if not installed_skill or not installed_skill.get("skill_id"):
+            raise AgentRunException(
+                f"Installed skill {skill_name} could not be resolved for binding."
+            )
+        bound_skill_id = int(installed_skill["skill_id"])
+        _bind_installed_skill(
+            dependencies,
+            agent_id=agent_id,
+            skill_id=bound_skill_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            skill_label=skill_name,
+        )
         result = {
-            "skill_id": skill_id or 0,
+            "skill_id": bound_skill_id,
             "skill_name": skill_name,
-            "installed": bool(installed_names),
+            "installed": True,
+            "bound": True,
             "installed_ids": [],
             "installed_names": installed_names,
         }
-        if installed_names:
-            try:
-                _remove_installed_skill(
-                    dependencies,
-                    agent_id=agent_id,
-                    tenant_id=tenant_id,
-                    skill_id=skill_id,
-                    skill_name=skill_name,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to refresh NL2AGENT Skill catalog after installation: "
-                    "tenant_id=%s draft_agent_id=%s skill_name=%s",
-                    tenant_id,
-                    agent_id,
-                    skill_name,
-                )
+        try:
+            _remove_installed_skill(
+                dependencies,
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                skill_id=skill_id,
+                skill_name=skill_name,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to refresh NL2AGENT Skill catalog after installation: "
+                "tenant_id=%s draft_agent_id=%s skill_name=%s",
+                tenant_id,
+                agent_id,
+                skill_name,
+            )
         return result
 
     if not skill_id or skill_id <= 0:
@@ -331,27 +380,37 @@ async def install_web_skill(
     except Exception as exc:
         logger.error("Failed to install web skill %s: %s", skill_id, exc)
         raise AgentRunException(f"Failed to install skill {skill_id}.") from exc
-    result = {
-        "skill_id": skill_id,
-        "installed": bool(installed_ids),
+    if not installed_ids:
+        raise AgentRunException(f"Failed to install skill {skill_id}.")
+    installed_skill_id = int(installed_ids[0])
+    _bind_installed_skill(
+        dependencies,
+        agent_id=agent_id,
+        skill_id=installed_skill_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        skill_label=skill_id,
+    )
+    try:
+        _remove_installed_skill(
+            dependencies,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            skill_name=None,
+            installed_ids=installed_ids,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to refresh NL2AGENT Skill catalog after installation: "
+            "tenant_id=%s draft_agent_id=%s skill_id=%s",
+            tenant_id,
+            agent_id,
+            skill_id,
+        )
+    return {
+        "skill_id": installed_skill_id,
+        "installed": True,
+        "bound": True,
         "installed_ids": installed_ids,
     }
-    if installed_ids:
-        try:
-            _remove_installed_skill(
-                dependencies,
-                agent_id=agent_id,
-                tenant_id=tenant_id,
-                skill_id=skill_id,
-                skill_name=None,
-                installed_ids=installed_ids,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to refresh NL2AGENT Skill catalog after installation: "
-                "tenant_id=%s draft_agent_id=%s skill_id=%s",
-                tenant_id,
-                agent_id,
-                skill_id,
-            )
-    return result

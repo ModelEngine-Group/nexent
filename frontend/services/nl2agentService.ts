@@ -377,6 +377,7 @@ export interface Nl2AgentInstallWebSkillResponse {
   skill_id: number;
   skill_name?: string;
   installed: boolean;
+  bound: boolean;
   installed_ids: number[];
   installed_names?: string[];
 }
@@ -442,7 +443,7 @@ export const applyLocalResources = async (
 };
 
 /**
- * Install a single official/web skill into the tenant.
+ * Install a single official/web skill and bind it to the draft agent.
  */
 export const installWebSkill = async (
   agentId: number,
@@ -470,7 +471,11 @@ export const installWebSkill = async (
         `Failed to install web skill: ${response.status} ${text}`
       );
     }
-    return response.json();
+    const result: Nl2AgentInstallWebSkillResponse = await response.json();
+    if (!result.installed || !result.bound) {
+      throw new Error("The skill was not installed and bound to the draft.");
+    }
+    return result;
   } catch (error) {
     log.error("installWebSkill failed", error);
     throw error;
