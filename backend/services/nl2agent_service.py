@@ -8,15 +8,11 @@ focused services. Publication is delegated to ``nl2agent_publication_service``;
 the three SDK search tools consume backend-injected immutable catalogs.
 """
 
-import hashlib
-import json
 import logging
 import re
 import unicodedata
 import uuid
-from copy import deepcopy
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
 
@@ -57,7 +53,6 @@ from consts.exceptions import (
 )
 from consts.model import (
     AgentInfoRequest,
-    MCPConfigRequest,
     ModelConnectStatusEnum,
     ToolInstanceInfoRequest,
 )
@@ -105,7 +100,10 @@ from services.nl2agent_catalog_service import (
 )
 from services.nl2agent_mcp_service import (
     McpBindingDependencies,
+    McpInstallationDependencies,
     bind_mcp_tools as bind_mcp_tools_service,
+    install_recommended_mcp as install_recommended_mcp_service,
+    installation_key as mcp_installation_key,
     skip_mcp_tool_binding as skip_mcp_tool_binding_service,
 )
 from services.nl2agent_publication_service import (
@@ -774,423 +772,31 @@ def _raise_for_invalid_resource_references(
     )
 
 
-def _resolve_mcp_recommendation(
-    catalogs: Dict[str, List[Dict[str, Any]]], recommendation_id: str
-) -> tuple[str, Dict[str, Any]]:
-    for source, key in (
-        ("registry", "registry_results"),
-        ("community", "community_results"),
-    ):
-        for item in catalogs.get(key, []):
-            if _recommendation_id(source, item) == recommendation_id:
-                return source, item
-    raise AgentRunException("MCP recommendation is not part of this NL2AGENT session.")
-
-
 def _mcp_installation_key(
     draft_agent_id: int, recommendation_id: str, option_id: str
 ) -> str:
-    payload = f"{draft_agent_id}:{recommendation_id}:{option_id}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    """Compatibility facade for the MCP installation idempotency key."""
+    return mcp_installation_key(draft_agent_id, recommendation_id, option_id)
 
 
-def _mcp_record_installation_key(record: Dict[str, Any]) -> Optional[str]:
-    registry_json = record.get("registry_json")
-    if isinstance(registry_json, str):
-        try:
-            registry_json = json.loads(registry_json)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(registry_json, dict):
-        return None
-    value = registry_json.get("nl2agent_installation_key")
-    return str(value) if value else None
-
-
-async def _install_recommended_mcp(
-    agent_id: int,
-    recommendation_id: str,
-    option_id: str,
-    config_values: Dict[str, Any],
-    tenant_id: str,
-    user_id: str,
-) -> Dict[str, Any]:
-    """Serialize one stable MCP installation across runtime workers."""
-    installation_key = _mcp_installation_key(agent_id, recommendation_id, option_id)
-    lock_token = acquire_mcp_installation_lock(tenant_id, agent_id, installation_key)
-    if not lock_token:
-        raise AgentRunException(
-            "This MCP installation is already in progress. Retry after it completes."
-        )
-    try:
-        return await _perform_recommended_mcp_install(
-            agent_id,
-            recommendation_id,
-            option_id,
-            config_values,
-            tenant_id,
-            user_id,
-            installation_key,
-        )
-    finally:
-        release_mcp_installation_lock(
-            tenant_id,
-            agent_id,
-            installation_key,
-            lock_token,
-        )
-
-
-async def _perform_recommended_mcp_install(
-    agent_id: int,
-    recommendation_id: str,
-    option_id: str,
-    config_values: Dict[str, Any],
-    tenant_id: str,
-    user_id: str,
-    installation_key: str,
-) -> Dict[str, Any]:
-    """Install a server-side resolved MCP recommendation and discover its tools."""
-    _get_owned_draft(agent_id, tenant_id)
-    catalogs = get_nl2agent_session_catalogs(tenant_id, agent_id)
-    source, raw = _resolve_mcp_recommendation(catalogs, recommendation_id)
-    normalized = normalize_mcp_candidate(source, raw)
-    option = next(
-        (
-            candidate
-            for candidate in normalized.get("install_options", [])
-            if candidate.get("option_id") == option_id
-        ),
-        None,
+def _mcp_installation_dependencies() -> McpInstallationDependencies:
+    """Build MCP installation dependencies from facade-level operations."""
+    return McpInstallationDependencies(
+        get_owned_draft=_get_owned_draft,
+        get_session_catalogs=get_nl2agent_session_catalogs,
+        normalize_candidate=normalize_mcp_candidate,
+        acquire_installation_lock=acquire_mcp_installation_lock,
+        release_installation_lock=release_mcp_installation_lock,
+        update_mcp_workflow=update_mcp_workflow,
+        get_mcp_records=get_mcp_records_by_tenant,
+        add_remote_mcp=add_mcp_service,
+        add_container_mcp=add_container_mcp_service,
+        get_mcp_record=get_mcp_record_by_id_and_tenant,
+        discover_tools=get_tool_from_remote_mcp_server,
+        upsert_discovered_tools=upsert_discovered_mcp_tools,
+        mutate_session_catalogs=mutate_nl2agent_session_catalogs,
+        recommendation_id=_recommendation_id,
     )
-    if not option:
-        raise AgentRunException("Invalid MCP installation option.")
-    if not option.get("supported", True):
-        raise AgentRunException(
-            option.get("unsupported_reason")
-            or "This MCP installation option is unsupported."
-        )
-    update_mcp_workflow(
-        tenant_id,
-        agent_id,
-        recommendation_id,
-        option_id=option_id,
-        status="installing",
-        installation_key=installation_key,
-    )
-
-    registry_json = raw.get("registryJson") or raw.get("registry_json")
-    registry_root = registry_json if isinstance(registry_json, dict) else raw
-    server = (
-        registry_root.get("server")
-        if isinstance(registry_root.get("server"), dict)
-        else registry_root
-    )
-    name = str(server.get("name") or raw.get("name") or "recommended-mcp")[:100]
-    description = str(server.get("description") or raw.get("description") or "")
-    field_values = config_values.get("fields") or {}
-    if not isinstance(field_values, dict):
-        raise AgentRunException("MCP configuration fields must be an object.")
-    resolved_values: Dict[str, Any] = {}
-    for field in option.get("fields", []):
-        value = field_values.get(field.get("key"))
-        if value in (None, ""):
-            value = field.get("default")
-        if field.get("required") and value in (None, ""):
-            raise AgentRunException(
-                f"Missing required MCP configuration: {field.get('label') or field.get('name')}"
-            )
-        if value not in (None, ""):
-            field_type = field.get("type")
-            if field_type == "json" and isinstance(value, str):
-                try:
-                    json.loads(value)
-                except json.JSONDecodeError as exc:
-                    raise AgentRunException(
-                        f"Invalid JSON for MCP configuration: {field.get('label') or field.get('name')}"
-                    ) from exc
-            if field_type == "number":
-                try:
-                    float(value)
-                except (TypeError, ValueError) as exc:
-                    raise AgentRunException(
-                        f"Invalid number for MCP configuration: {field.get('label') or field.get('name')}"
-                    ) from exc
-            if field_type == "url":
-                parsed_field_url = urlparse(str(value))
-                if (
-                    parsed_field_url.scheme not in {"http", "https"}
-                    or not parsed_field_url.netloc
-                    or re.search(r"\{[^{}]+\}", str(value))
-                ):
-                    raise AgentRunException(
-                        f"Invalid URL for MCP configuration: {field.get('label') or field.get('name')}"
-                    )
-            choices = field.get("choices") or []
-            if choices and str(value) not in set(map(str, choices)):
-                raise AgentRunException(
-                    f"Invalid choice for MCP configuration: {field.get('label') or field.get('name')}"
-                )
-            resolved_values[field.get("key")] = value
-
-    authorization_token = None
-    custom_headers: Dict[str, str] = {}
-    persisted_source = "mcp_registry" if source == "registry" else source
-    for field in option.get("fields", []):
-        value = resolved_values.get(field.get("key"))
-        if value in (None, ""):
-            continue
-        if field.get("category") == "header":
-            if str(field.get("name") or "").lower() == "authorization":
-                authorization_token = str(value)
-            else:
-                custom_headers[str(field.get("name"))] = str(value)
-
-    persisted_registry_json = deepcopy(raw)
-    persisted_registry_json["nl2agent_installation_key"] = installation_key
-    record = next(
-        (
-            item
-            for item in get_mcp_records_by_tenant(tenant_id)
-            if _mcp_record_installation_key(item) == installation_key
-        ),
-        None,
-    )
-    mcp_id = int(record["mcp_id"]) if record else None
-
-    if option.get("type") == "remote":
-        server_url = option.get("server_url_template")
-        if not server_url:
-            url_field = next(
-                (
-                    field
-                    for field in option.get("fields", [])
-                    if field.get("name") == "server_url"
-                ),
-                None,
-            )
-            server_url = (
-                resolved_values.get(url_field.get("key")) if url_field else None
-            )
-        for field in option.get("fields", []):
-            if field.get("category") == "variable":
-                value = resolved_values.get(field.get("key"))
-                if value not in (None, ""):
-                    variable_name = str(field.get("name"))
-                    server_url = str(server_url).replace(
-                        "${" + variable_name + "}", str(value)
-                    )
-                    server_url = str(server_url).replace(
-                        "{" + variable_name + "}", str(value)
-                    )
-        if not server_url or re.search(r"\{[^{}]+\}", str(server_url)):
-            raise AgentRunException(
-                "MCP server URL contains unresolved configuration variables."
-            )
-        parsed_url = urlparse(str(server_url))
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
-        if mcp_id is None:
-            mcp_id = await add_mcp_service(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                name=name,
-                description=description,
-                source=persisted_source,
-                server_url=server_url,
-                tags=raw.get("tags") or [],
-                authorization_token=authorization_token,
-                custom_headers=custom_headers or None,
-                container_config=None,
-                registry_json=persisted_registry_json,
-                enabled=True,
-            )
-    else:
-        config_json = deepcopy(raw.get("configJson") or raw.get("config_json"))
-        if option_id.startswith("package-"):
-            identifier = option.get("package_identifier")
-            runtime = str(
-                option.get("runtime_hint") or option.get("registry_type") or "npx"
-            ).lower()
-            command_map = {"npm": "npx", "npx": "npx", "pypi": "uvx", "uvx": "uvx"}
-            command = command_map.get(runtime, runtime)
-            if not identifier or command not in {"npx", "uvx"}:
-                raise AgentRunException("Unsupported MCP package runtime.")
-            env = {}
-            runtime_args = []
-            package_args = []
-            for field in option.get("fields", []):
-                value = resolved_values.get(field.get("key"))
-                if value in (None, ""):
-                    continue
-                category = field.get("category")
-                if category == "environment":
-                    env[str(field.get("name"))] = str(value)
-                elif category in {"runtime_argument", "package_argument"}:
-                    rendered = str(value)
-                    if field.get("argument_type") == "named" and field.get(
-                        "argument_name"
-                    ):
-                        rendered = f"{field.get('argument_name')}={rendered}"
-                    (
-                        runtime_args if category == "runtime_argument" else package_args
-                    ).append(rendered)
-            args = runtime_args
-            args.append(identifier)
-            args.extend(package_args)
-            config_json = {
-                "mcpServers": {name: {"command": command, "args": args, "env": env}}
-            }
-        elif isinstance(config_json, dict):
-            server_configs = config_json.get("mcpServers")
-            target_config = (
-                next(
-                    (
-                        server_config
-                        for server_config in server_configs.values()
-                        if isinstance(server_config, dict)
-                    ),
-                    None,
-                )
-                if isinstance(server_configs, dict)
-                else None
-            )
-            if target_config is not None:
-                environment = target_config.setdefault("env", {})
-                if not isinstance(environment, dict):
-                    raise AgentRunException(
-                        "MCP container environment configuration must be an object."
-                    )
-                for field in option.get("fields", []):
-                    if field.get("category") != "environment":
-                        continue
-                    value = resolved_values.get(field.get("key"))
-                    if value not in (None, ""):
-                        environment[str(field.get("name"))] = str(value)
-        config_field = next(
-            (
-                field
-                for field in option.get("fields", [])
-                if field.get("name") == "config_json"
-            ),
-            None,
-        )
-        if not isinstance(config_json, dict) and config_field:
-            submitted_config = resolved_values.get(config_field.get("key"))
-            try:
-                config_json = (
-                    json.loads(submitted_config)
-                    if isinstance(submitted_config, str)
-                    else submitted_config
-                )
-            except json.JSONDecodeError as exc:
-                raise AgentRunException(
-                    "MCP container configuration must be valid JSON."
-                ) from exc
-        port_field = next(
-            (
-                field
-                for field in option.get("fields", [])
-                if field.get("name") == "port"
-            ),
-            None,
-        )
-        port = resolved_values.get(port_field.get("key")) if port_field else None
-        try:
-            port_number = int(port)
-        except (TypeError, ValueError) as exc:
-            raise AgentRunException("MCP container port must be an integer.") from exc
-        if not 1 <= port_number <= 65535:
-            raise AgentRunException("MCP container port must be between 1 and 65535.")
-        if not isinstance(config_json, dict):
-            raise AgentRunException(
-                "This MCP requires container configuration and a port."
-            )
-        if mcp_id is None:
-            container_result = await add_container_mcp_service(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                name=name,
-                description=description,
-                source=persisted_source,
-                tags=raw.get("tags") or [],
-                authorization_token=authorization_token,
-                registry_json=persisted_registry_json,
-                port=port_number,
-                mcp_config=MCPConfigRequest(**config_json),
-            )
-            mcp_id = int(container_result["mcp_id"])
-
-    record = (
-        get_mcp_record_by_id_and_tenant(mcp_id=int(mcp_id), tenant_id=tenant_id)
-        if mcp_id is not None
-        else None
-    )
-    if not record:
-        raise AgentRunException("Installed MCP record could not be resolved.")
-    mcp_id = int(record["mcp_id"])
-    try:
-        discovered = await get_tool_from_remote_mcp_server(
-            mcp_server_name=name,
-            remote_mcp_server=record.get("mcp_server"),
-            tenant_id=tenant_id,
-            authorization_token=authorization_token,
-            custom_headers=custom_headers or None,
-        )
-        tools = upsert_discovered_mcp_tools(tenant_id, user_id, discovered)
-    except Exception as exc:
-        update_mcp_workflow(
-            tenant_id,
-            agent_id,
-            recommendation_id,
-            option_id=option_id,
-            status="failed",
-            installation_key=installation_key,
-            mcp_id=mcp_id,
-            error="MCP tool discovery failed. Retry to resume discovery.",
-        )
-        raise AgentRunException(
-            "MCP tool discovery failed. Retry installation."
-        ) from exc
-    update_mcp_workflow(
-        tenant_id,
-        agent_id,
-        recommendation_id,
-        option_id=option_id,
-        status="connected",
-        installation_key=installation_key,
-        mcp_id=mcp_id,
-        discovered_tool_ids=[int(tool["tool_id"]) for tool in tools],
-        bound_tool_ids=[],
-        error=None,
-    )
-    catalog_key = "registry_results" if source == "registry" else "community_results"
-
-    def remove_installed_recommendation(
-        current: Dict[str, List[Dict[str, Any]]],
-    ) -> None:
-        current[catalog_key] = [
-            item
-            for item in current.get(catalog_key, [])
-            if _recommendation_id(source, item) != recommendation_id
-        ]
-
-    mutate_nl2agent_session_catalogs(
-        tenant_id, agent_id, remove_installed_recommendation
-    )
-    return {
-        "agent_id": agent_id,
-        "mcp_id": mcp_id,
-        "status": "connected",
-        "tools": [
-            {
-                "tool_id": t["tool_id"],
-                "name": t["name"],
-                "description": t.get("description"),
-            }
-            for t in tools
-        ],
-    }
 
 
 async def install_recommended_mcp(
@@ -1201,36 +807,16 @@ async def install_recommended_mcp(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Install an MCP and persist redacted success or failure state."""
-    try:
-        return await _install_recommended_mcp(
-            agent_id,
-            recommendation_id,
-            option_id,
-            config_values,
-            tenant_id,
-            user_id,
-        )
-    except Exception as exc:
-        try:
-            update_mcp_workflow(
-                tenant_id,
-                agent_id,
-                recommendation_id,
-                option_id=option_id,
-                status="failed",
-                installation_key=_mcp_installation_key(
-                    agent_id, recommendation_id, option_id
-                ),
-                error="MCP installation failed. Review the option configuration and retry.",
-            )
-        except Exception:
-            logger.exception("Failed to persist NL2AGENT MCP failure state")
-        if isinstance(exc, AgentRunException):
-            raise
-        raise AgentRunException(
-            "MCP installation failed during connection or tool discovery."
-        ) from exc
+    """Delegate recoverable installation to the MCP service."""
+    return await install_recommended_mcp_service(
+        _mcp_installation_dependencies(),
+        agent_id=agent_id,
+        recommendation_id=recommendation_id,
+        option_id=option_id,
+        config_values=config_values,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 def _mcp_binding_dependencies() -> McpBindingDependencies:
