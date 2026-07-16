@@ -328,34 +328,43 @@ def _validate_configuration(
             raise AgentRunException(f"Missing required MCP configuration: {label}")
         if value in (None, ""):
             continue
-        field_type = field.get("type")
-        if field_type == "json" and isinstance(value, str):
-            try:
-                json.loads(value)
-            except json.JSONDecodeError as exc:
-                raise AgentRunException(
-                    f"Invalid JSON for MCP configuration: {label}"
-                ) from exc
-        if field_type == "number":
-            try:
-                float(value)
-            except (TypeError, ValueError) as exc:
-                raise AgentRunException(
-                    f"Invalid number for MCP configuration: {label}"
-                ) from exc
-        if field_type == "url":
-            parsed_field_url = urlparse(str(value))
-            if (
-                parsed_field_url.scheme not in {"http", "https"}
-                or not parsed_field_url.netloc
-                or re.search(r"\{[^{}]+\}", str(value))
-            ):
-                raise AgentRunException(f"Invalid URL for MCP configuration: {label}")
-        choices = field.get("choices") or []
-        if choices and str(value) not in set(map(str, choices)):
-            raise AgentRunException(f"Invalid choice for MCP configuration: {label}")
+        _validate_mcp_field_value(field, value, label)
         resolved_values[field.get("key")] = value
     return resolved_values
+
+
+def _validate_mcp_field_value(
+    field: Dict[str, Any],
+    value: Any,
+    label: Any,
+) -> None:
+    field_type = field.get("type")
+    if field_type == "json" and isinstance(value, str):
+        try:
+            json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise AgentRunException(
+                f"Invalid JSON for MCP configuration: {label}"
+            ) from exc
+    elif field_type == "number":
+        try:
+            float(value)
+        except (TypeError, ValueError) as exc:
+            raise AgentRunException(
+                f"Invalid number for MCP configuration: {label}"
+            ) from exc
+    elif field_type == "url":
+        parsed_field_url = urlparse(str(value))
+        if (
+            parsed_field_url.scheme not in {"http", "https"}
+            or not parsed_field_url.netloc
+            or re.search(r"\{[^{}]+\}", str(value))
+        ):
+            raise AgentRunException(f"Invalid URL for MCP configuration: {label}")
+
+    choices = field.get("choices") or []
+    if choices and str(value) not in set(map(str, choices)):
+        raise AgentRunException(f"Invalid choice for MCP configuration: {label}")
 
 
 def _resolve_headers(

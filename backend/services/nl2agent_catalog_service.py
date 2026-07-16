@@ -338,62 +338,87 @@ async def install_web_skill(
         canonical.get("skill_name") or canonical.get("name") or ""
     ).strip()
     if skill_name:
-        if not canonical_name:
-            raise AgentRunException("The requested Skill has no canonical name.")
-        try:
-            installed_names = dependencies.install_by_name(
-                skill_names=[canonical_name],
-                tenant_id=tenant_id,
-                user_id=user_id,
-                locale=locale,
-            )
-        except Exception as exc:
-            logger.error("Failed to install web skill %s: %s", canonical_name, exc)
-            raise AgentRunException(f"Failed to install skill {canonical_name}.") from exc
-        if not installed_names:
-            raise AgentRunException(f"Failed to install skill {canonical_name}.")
-        installed_skill = dependencies.get_installed_by_name(
-            installed_names[0], tenant_id
-        )
-        if not installed_skill or not installed_skill.get("skill_id"):
-            raise AgentRunException(
-                f"Installed skill {canonical_name} could not be resolved for binding."
-            )
-        bound_skill_id = int(installed_skill["skill_id"])
-        _bind_installed_skill(
+        return _install_skill_by_name(
             dependencies,
             agent_id=agent_id,
-            skill_id=bound_skill_id,
+            canonical_id=canonical_id,
+            canonical_name=canonical_name,
             tenant_id=tenant_id,
             user_id=user_id,
-            skill_label=canonical_name,
+            locale=locale,
         )
-        result = {
-            "skill_id": bound_skill_id,
-            "skill_name": canonical_name,
-            "installed": True,
-            "bound": True,
-            "installed_ids": [],
-            "installed_names": installed_names,
-        }
-        try:
-            _remove_installed_skill(
-                dependencies,
-                agent_id=agent_id,
-                tenant_id=tenant_id,
-                skill_id=canonical_id,
-                skill_name=canonical_name,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to refresh NL2AGENT Skill catalog after installation: "
-                "tenant_id=%s draft_agent_id=%s skill_name=%s",
-                tenant_id,
-                agent_id,
-                canonical_name,
-            )
-        return result
+    return _install_skill_by_id(
+        dependencies,
+        agent_id=agent_id,
+        canonical_id=canonical_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
+
+def _install_skill_by_name(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    canonical_id: Optional[int],
+    canonical_name: str,
+    tenant_id: str,
+    user_id: str,
+    locale: Optional[str],
+) -> Dict[str, Any]:
+    if not canonical_name:
+        raise AgentRunException("The requested Skill has no canonical name.")
+    try:
+        installed_names = dependencies.install_by_name(
+            skill_names=[canonical_name],
+            tenant_id=tenant_id,
+            user_id=user_id,
+            locale=locale,
+        )
+    except Exception as exc:
+        logger.error("Failed to install web skill %s: %s", canonical_name, exc)
+        raise AgentRunException(f"Failed to install skill {canonical_name}.") from exc
+    if not installed_names:
+        raise AgentRunException(f"Failed to install skill {canonical_name}.")
+    installed_skill = dependencies.get_installed_by_name(installed_names[0], tenant_id)
+    if not installed_skill or not installed_skill.get("skill_id"):
+        raise AgentRunException(
+            f"Installed skill {canonical_name} could not be resolved for binding."
+        )
+    bound_skill_id = int(installed_skill["skill_id"])
+    _bind_installed_skill(
+        dependencies,
+        agent_id=agent_id,
+        skill_id=bound_skill_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        skill_label=canonical_name,
+    )
+    _refresh_installed_skill_catalog(
+        dependencies,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        skill_id=canonical_id,
+        skill_name=canonical_name,
+    )
+    return {
+        "skill_id": bound_skill_id,
+        "skill_name": canonical_name,
+        "installed": True,
+        "bound": True,
+        "installed_ids": [],
+        "installed_names": installed_names,
+    }
+
+
+def _install_skill_by_id(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    canonical_id: Optional[int],
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
     if canonical_id is None or canonical_id <= 0:
         raise AgentRunException("The requested Skill has no canonical ID.")
     try:
@@ -416,26 +441,44 @@ async def install_web_skill(
         user_id=user_id,
         skill_label=canonical_id,
     )
-    try:
-        _remove_installed_skill(
-            dependencies,
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            skill_id=canonical_id,
-            skill_name=None,
-            installed_ids=installed_ids,
-        )
-    except Exception:
-        logger.exception(
-            "Failed to refresh NL2AGENT Skill catalog after installation: "
-            "tenant_id=%s draft_agent_id=%s skill_id=%s",
-            tenant_id,
-            agent_id,
-            canonical_id,
-        )
+    _refresh_installed_skill_catalog(
+        dependencies,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        skill_id=canonical_id,
+        installed_ids=installed_ids,
+    )
     return {
         "skill_id": installed_skill_id,
         "installed": True,
         "bound": True,
         "installed_ids": installed_ids,
     }
+
+
+def _refresh_installed_skill_catalog(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    tenant_id: str,
+    skill_id: Optional[int],
+    skill_name: Optional[str] = None,
+    installed_ids: Optional[List[int]] = None,
+) -> None:
+    try:
+        _remove_installed_skill(
+            dependencies,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            skill_name=skill_name,
+            installed_ids=installed_ids,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to refresh NL2AGENT Skill catalog after installation: "
+            "tenant_id=%s draft_agent_id=%s skill=%s",
+            tenant_id,
+            agent_id,
+            skill_name or skill_id,
+        )

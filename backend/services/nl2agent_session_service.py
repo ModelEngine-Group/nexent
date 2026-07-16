@@ -40,36 +40,13 @@ async def start_session(
 ) -> Dict[str, Any]:
     """Create a draft and Conversation, then atomically hand off Redis state."""
     del language
-    try:
-        builder_agent_id = dependencies.search_agent_id_by_name(
-            dependencies.builder_agent_name,
-            tenant_id,
-        )
-    except ValueError as exc:
-        if str(exc) != "agent not found":
-            raise
-        raise AgentRunException(
-            "NL2AGENT default agent is not initialized. Restart the config service first."
-        ) from exc
-
-    try:
-        builder_agent = dependencies.search_agent_info_by_id(
-            agent_id=builder_agent_id,
-            tenant_id=tenant_id,
-        )
-        if builder_agent:
-            dependencies.ensure_seed_defaults(
-                builder_agent,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-    except Exception as exc:
-        logger.warning(
-            "Failed to verify NL2AGENT prompt template link for tenant %s: %s",
-            tenant_id,
-            exc,
-        )
-
+    builder_agent_id = _resolve_builder_agent_id(dependencies, tenant_id)
+    _ensure_builder_seed_defaults(
+        dependencies,
+        builder_agent_id=builder_agent_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
     draft_name = f"{dependencies.draft_name_prefix}{dependencies.new_uuid().hex[:8]}"
     agent_payload = {
         "name": draft_name,
@@ -118,19 +95,11 @@ async def start_session(
                 session_catalogs,
             )
     except Exception as exc:
-        if draft_agent_id:
-            try:
-                dependencies.delete_session_catalogs(
-                    tenant_id,
-                    draft_agent_id,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to compensate NL2AGENT Redis initialization: "
-                    "tenant_id=%s draft_agent_id=%s",
-                    tenant_id,
-                    draft_agent_id,
-                )
+        _compensate_session_catalogs(
+            dependencies,
+            tenant_id=tenant_id,
+            draft_agent_id=draft_agent_id,
+        )
         if isinstance(exc, AgentRunException):
             raise
         logger.exception(
@@ -154,3 +123,65 @@ async def start_session(
         "conversation_id": conversation_id,
         "draft_name": draft_name,
     }
+
+
+def _resolve_builder_agent_id(
+    dependencies: SessionInitializationDependencies,
+    tenant_id: str,
+) -> int:
+    try:
+        return dependencies.search_agent_id_by_name(
+            dependencies.builder_agent_name,
+            tenant_id,
+        )
+    except ValueError as exc:
+        if str(exc) != "agent not found":
+            raise
+        raise AgentRunException(
+            "NL2AGENT default agent is not initialized. Restart the config service first."
+        ) from exc
+
+
+def _ensure_builder_seed_defaults(
+    dependencies: SessionInitializationDependencies,
+    *,
+    builder_agent_id: int,
+    user_id: str,
+    tenant_id: str,
+) -> None:
+    try:
+        builder_agent = dependencies.search_agent_info_by_id(
+            agent_id=builder_agent_id,
+            tenant_id=tenant_id,
+        )
+        if builder_agent:
+            dependencies.ensure_seed_defaults(
+                builder_agent,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+    except Exception as exc:
+        logger.warning(
+            "Failed to verify NL2AGENT prompt template link for tenant %s: %s",
+            tenant_id,
+            exc,
+        )
+
+
+def _compensate_session_catalogs(
+    dependencies: SessionInitializationDependencies,
+    *,
+    tenant_id: str,
+    draft_agent_id: Optional[int],
+) -> None:
+    if not draft_agent_id:
+        return
+    try:
+        dependencies.delete_session_catalogs(tenant_id, draft_agent_id)
+    except Exception:
+        logger.exception(
+            "Failed to compensate NL2AGENT Redis initialization: "
+            "tenant_id=%s draft_agent_id=%s",
+            tenant_id,
+            draft_agent_id,
+        )

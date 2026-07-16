@@ -13,6 +13,17 @@ from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
 logger = logging.getLogger(__name__)
 
 
+_TOOL_VALUE_TYPE_CHECKS: Dict[str, Callable[[Any], bool]] = {
+    "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
+    "number": lambda item: isinstance(item, (int, float))
+    and not isinstance(item, bool),
+    "boolean": lambda item: isinstance(item, bool),
+    "string": lambda item: isinstance(item, str),
+    "array": lambda item: isinstance(item, list),
+    "object": lambda item: isinstance(item, dict),
+}
+
+
 def redact_tool_parameter_defaults(params: Any) -> List[Dict[str, Any]]:
     """Remove credential defaults before Tool schemas are sent to the browser."""
     if not isinstance(params, list):
@@ -58,33 +69,38 @@ def _resolve_tool_config_values(
     resolved: Dict[str, Any] = {}
     for name, field in fields.items():
         value = submitted.get(name, field.get("default"))
-        required = field.get("required") is True or field.get("optional") is False
-        if value is None or value == "":
-            if required:
-                raise AgentRunException(
-                    f"Tool {tool_id} requires configuration field: {name}."
-                )
-            continue
-        expected_type = str(field.get("type") or "").lower()
-        type_matches = {
-            "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
-            "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
-            "boolean": lambda item: isinstance(item, bool),
-            "string": lambda item: isinstance(item, str),
-            "array": lambda item: isinstance(item, list),
-            "object": lambda item: isinstance(item, dict),
-        }.get(expected_type)
-        if type_matches and not type_matches(value):
-            raise AgentRunException(
-                f"Tool {tool_id} configuration field {name} must be {expected_type}."
-            )
-        choices = field.get("choices")
-        if isinstance(choices, list) and choices and value not in choices:
-            raise AgentRunException(
-                f"Tool {tool_id} configuration field {name} must use a declared choice."
-            )
-        resolved[name] = value
+        resolved_value = _validate_tool_config_value(tool_id, name, field, value)
+        if resolved_value is not None:
+            resolved[name] = resolved_value
     return resolved
+
+
+def _validate_tool_config_value(
+    tool_id: int,
+    name: str,
+    field: Dict[str, Any],
+    value: Any,
+) -> Any:
+    required = field.get("required") is True or field.get("optional") is False
+    if value is None or value == "":
+        if required:
+            raise AgentRunException(
+                f"Tool {tool_id} requires configuration field: {name}."
+            )
+        return None
+
+    expected_type = str(field.get("type") or "").lower()
+    type_matches = _TOOL_VALUE_TYPE_CHECKS.get(expected_type)
+    if type_matches and not type_matches(value):
+        raise AgentRunException(
+            f"Tool {tool_id} configuration field {name} must be {expected_type}."
+        )
+    choices = field.get("choices")
+    if isinstance(choices, list) and choices and value not in choices:
+        raise AgentRunException(
+            f"Tool {tool_id} configuration field {name} must use a declared choice."
+        )
+    return value
 
 
 @dataclass(frozen=True)
