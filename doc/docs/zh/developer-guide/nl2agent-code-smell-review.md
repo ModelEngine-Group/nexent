@@ -1,352 +1,367 @@
-# NL2AGENT 代码坏味道审查
+## 审查结论
 
-## 1. 审查范围
+相对 `lvnqqsqn`（Git `4e7d9fe1`），当前父 revision `wosmrprl / 604151c6` 共修改 106 个文件，约新增 22,500 行、删除 643 行。NL2AGENT 已经形成较完整的 Backend、SDK、Prompt、Frontend、Redis 状态机与测试体系，但当前版本仍存在明显坏味道，其中至少有：
 
-本文记录当前工作区相对 Jujutsu revision `lvnqqsqn` 的 NL2AGENT 代码审查结果。
+- 1 个严重租户隔离问题
+- 10 余个高优先级状态一致性或功能缺陷
+- 多个中低优先级协议、可维护性和测试盲区
 
-- 对比基线：`lvnqqsqn`（Git commit `4e7d9fe1`）
-- 审查对象：当前工作区中的 Backend、SDK、Frontend、双语 Prompt、测试与文档改动
-- 变更规模：约 74 个文件、1.6 万行新增代码
-- 审查重点：状态一致性、并发安全、事务边界、错误处理、接口契约、前端副作用与测试有效性
+基于静态证据，当前实现还不适合直接视为“重构完成”。
 
-当前版本已经将 NL2AGENT 从简单 Agent 扩展为跨 Backend、SDK、Redis、Prompt 和 Frontend 的完整工作流。主要风险并非单纯来自代码规模，而是工作流状态和副作用分散在多个层级，部分实现已存在明确的数据一致性缺陷。
+## P0：租户隔离
 
-## 1.1 分阶段整改进度（2026-07-15）
+### 1. 可以通过伪造本地推荐批次绑定其他租户的 Tool
 
-| 审查项 | 当前状态 | 已实施行为 |
-|---|---|---|
-| 2.1 Redis 整对象覆盖 | 已解决 | v2 State 增加 `revision`，所有修改统一使用 `WATCH/MULTI` CAS，冲突最多重试 5 次。 |
-| 2.2 Card Delivery 时序 | 已解决 | 回执使用数据库 `message_id`，校验 Conversation、assistant、completed 和最新完成消息。 |
-| 2.3 失败回滚过大 | 已解决 | `failed` 回执只记录失败原因和次数，不再删除业务状态。 |
-| 2.4 前端全局回执集合 | 已解决 | 改为 conversation/draft/message 作用域 coordinator，API 成功后才标记完成。 |
-| 2.5 Apply All 假成功 | 已解决 | Tool/Skill 使用共享 SQLAlchemy Session，全有或全无；Redis 失败可幂等对账。 |
-| 2.6 MCP 幂等与补偿 | 已解决 | 稳定 installation key、Redis 安装锁、直接返回 `mcp_id`，支持发现阶段恢复及容器补偿。 |
-| 2.7 Session 初始化补偿 | 已解决 | 先验证 Catalog，再在一个数据库事务创建 draft/Conversation，Redis 与数据库失败双向补偿。 |
-| 3.1 状态机重复 | 已解决 | Backend Workflow Evaluator 统一输出 `current_stage`、`expected_card_types`、`allowed_actions`；Prompt 只消费摘要。 |
-| 3.2 God Service | 进行中 | Publication、Resource、Catalog/Skill、Workflow、Session 初始化与完整 MCP saga 已拆为专用 Service；兼容 facade 仍保留 seed 和模型投影辅助逻辑。 |
-| 3.3 Catalog 故障伪装为空 | 已解决 | 合法空目录与加载失败分离；加载失败返回带上下文的 503 领域错误。 |
-| 3.4 异常字符串映射 | 已解决 | 使用固定 ErrorCode 的领域异常；App 不再按错误文案匹配状态码。 |
-| 3.5 Finalize 失效参数 | 已解决 | 请求体只保留 proposal、Prompt 和受支持 runtime 字段，额外旧字段直接拒绝。 |
-| 4.1 SDK 全局搜索缓存 | 已解决 | 删除 `_search_cache`；每次 Agent Run 使用 Backend 注入的不可变 Catalog 重新计算。 |
-| 4.2 SDK 误导状态 | 已解决 | 删除 applied/config/searched 等实例状态。 |
-| 5.1/5.2 多套 Schema 与重复解析 | 已解决 | 增加 canonical Card JSON Schema；从 FastAPI OpenAPI 生成 NL2AGENT API 请求类型；Frontend 用 Ajv 一次解析生成 typed card AST。 |
-| 5.3 卡片副作用重复 | 已解决 | 模型、需求、本地资源、MCP、Skill、身份与联网完成统一使用 conversation/draft/card scoped `useNl2AgentCardLifecycle`。 |
-| 5.4 前端真实交互测试 | 部分解决 | 已加入 Vitest、jsdom、React Testing Library，并覆盖统一生命周期的 busy、continuation、失败重试和输入阻塞；仍需补齐完整 API 与会话切换用例。 |
+证据链：
 
-每个已完成阶段均以独立 Jujutsu commit 提交，并通过对应 Backend、SDK 或 Frontend 聚焦测试。
+1. 本地推荐注册接口直接接受前端提交的 `tool_ids`，没有验证这些 ID 是否来自本次搜索或当前租户 Catalog。[nl2agent_session_catalog.py](D:/dev/nexent/backend/agents/nl2agent_session_catalog.py:559)
+2. Apply 时只检查 ID 是否属于这个由前端注册的批次。[nl2agent_resource_service.py](D:/dev/nexent/backend/services/nl2agent_resource_service.py:49)
+3. `query_tools_by_ids()` 只按 `tool_id` 和删除标记查询，没有 `author == tenant_id` 条件。[tool_db.py](D:/dev/nexent/backend/database/tool_db.py:136)
+4. 查询到其他租户的 Tool 后，会用当前租户 ID 创建 ToolInstance。[nl2agent_resource_service.py](D:/dev/nexent/backend/services/nl2agent_resource_service.py:86)
+5. Finalization 的资源解析同样没有重新验证 ToolInfo 的 `author`。[nl2agent_service.py](D:/dev/nexent/backend/services/nl2agent_service.py:599)
 
-## 2. 高风险正确性问题
+因此，知道或猜到其他租户 Tool ID 的用户可以构造自己的推荐批次，再把该 Tool 绑定到自己的 Agent。
 
-### 2.1 Redis Session State 使用非原子整对象覆盖
+建议优先修复：
 
-位置：`backend/agents/nl2agent_session_catalog.py`
+- 所有本地 Tool 查询必须增加 tenant 条件。
+- 注册批次时校验 Tool 属于当前 Session Catalog。
+- 最好由 Backend/Runtime 保存可信搜索结果令牌，前端只提交令牌而不是自行声明结果集合。
+- Publication 再次验证 ToolInfo 租户归属。
 
-大部分 Session State 操作采用以下流程：
+## P1：高优先级问题
 
-1. 从 Redis 读取完整 JSON。
-2. 在进程内修改部分字段。
-3. 使用 `SETEX` 覆盖完整 JSON。
+### 2. Card Delivery 只验证消息元数据，不验证消息里真的存在有效卡片
 
-该模式没有使用 Redis Transaction、`WATCH/MULTI`、Lua、CAS、锁或版本号。模型、MCP、Skill、卡片回执和自动续跑并发发生时，不同请求可能基于同一个旧快照写回，造成后写请求覆盖先写请求。
+回执请求只有 `message_id`、`card_type`、状态和可选 `card_key`。[model.py](D:/dev/nexent/backend/consts/model.py:495)
 
-典型场景是 MCP 与 Skill 卡片几乎同时注册，最终 Session State 可能只保留其中一个在线推荐批次。
+Backend 只检查：
 
-建议：将状态拆分为 Redis Hash，或引入带版本号的 CAS/Lua 原子更新机制，并为并发更新增加冲突重试。
+- 消息属于 Conversation
+- role 是 assistant
+- status 是 completed
+- 是最新 assistant 消息
+- card type 当前被期待
 
-### 2.2 Card Delivery 缺少可靠的时序与过期保护
+但没有读取或验证消息正文。[nl2agent_workflow_service.py](D:/dev/nexent/backend/services/nl2agent_workflow_service.py:69)
 
-位置：
+这意味着错误前端或构造请求可以把一个根本没有卡片、JSON 已截断或 schema 错误的消息标记成 `rendered`。之后 `_card_was_rendered()` 会使状态机停止重新生成卡片，仍可能复现“状态认为卡片完成但用户没有可用卡片”的原始问题。
 
-- `backend/agents/nl2agent_session_catalog.py::record_card_delivery`
-- `backend/services/nl2agent_service.py::report_card_delivery`
+前端 Ajv 校验不能代替服务端权威验收。
 
-当前实现只保存每种卡片最后一条回执。幂等判断仅比较当前保存的 `message_key`、`status` 和 `card_key`，没有保存 Agent Run ID、消息序号或单调版本。
+### 3. Backend 的“必须完成资源搜索”门禁可以被空批次绕过
 
-因此，延迟到达的历史回执仍可能被当成新事件处理：
+在线批次注册只验证草稿归属，然后存储前端提供的 batch ID、类型和 item keys。[nl2agent_workflow_service.py](D:/dev/nexent/backend/services/nl2agent_workflow_service.py:48)
 
-- 旧的 `failed` 回执可能回滚新卡片状态。
-- 旧的 `rendered` 回执可能清零新一轮失败次数。
-- 历史消息可能影响当前未完成阶段。
+完成在线配置只要求：
 
-后端目前只检查卡片类型是否符合当前阶段，无法证明回执属于当前最新 Agent Run。
+- 存在一个 `mcp` 批次
+- 存在一个 `skill` 批次
+- 没有 unresolved MCP
 
-建议：为每轮生成分配稳定的 delivery generation/run ID，并只接受当前 generation 的回执；服务端同时校验消息序号或版本单调递增。
+空的、自行构造的批次也满足条件。[nl2agent_session_catalog.py](D:/dev/nexent/backend/agents/nl2agent_session_catalog.py:521)
 
-### 2.3 卡片失败回滚范围过大
+本地批次同样由前端声明 Tool/Skill ID。[nl2agent_session_catalog.py](D:/dev/nexent/backend/agents/nl2agent_session_catalog.py:559)
 
-位置：`backend/agents/nl2agent_session_catalog.py::_rollback_failed_card`
+因此可以不执行三个搜索工具，直接注册假批次并通过 Finalization 门禁。当前所谓“Backend 强制搜索审查”实际只是“Backend 强制客户端声明已审查”。
 
-该函数接收 `card_key`，但回滚时没有使用它：
+### 4. MCP 与 Skill 同轮渲染存在注册/回执竞态，并可能永久锁住输入框
 
-- 本地资源卡失败会删除全部 `recommendations_ready` 批次。
-- MCP 或 Skill 卡失败会删除对应类型的全部未完成在线批次。
+Prompt 要求 MCP 和 Skill 都缺失时，在一轮中输出两张卡。状态机在只注册其中一类后，会立即只期待另一类。[nl2agent_workflow.py](D:/dev/nexent/backend/agents/nl2agent_workflow.py:182)
 
-这意味着一张截断或无效卡片可能清除同阶段其他已经正确生成的推荐批次。函数参数给出了“精确回滚”的接口表象，但实际行为是范围回滚。
+前端每张在线卡分别执行：
 
-建议：使用 `card_key` 或 `recommendation_batch_id` 精确删除对应批次；无法确认归属时拒绝回滚，而不是扩大清理范围。
+1. 注册批次。
+2. `setRegistered(true)`。
+3. 上报 rendered receipt。
 
-### 2.4 前端回执 API 失败后可能永久无法重试
+[index.tsx](D:/dev/nexent/frontend/components/nl2agent/index.tsx:44)
 
-位置：`frontend/app/[locale]/chat/streaming/chatStreamFinalMessage.tsx`
+如果 MCP 先注册，其回执到达时 Backend 已经只期待 Skill，MCP 回执会被当成 stale card 拒绝。[nl2agent_workflow_service.py](D:/dev/nexent/backend/services/nl2agent_workflow_service.py:99)
 
-前端使用模块级全局集合 `processedCardDeliveryMessages` 记录已经处理的消息，并在回执 API 成功之前就写入集合。
+更严重的是：
 
-如果 API 因网络或服务故障失败：
+- `registered` 已被提前设为 true。
+- “Retry registration”再次调用时会因为 `registered` 为 true 直接返回。
+- `retainInputBlockOnError=true` 会继续阻塞输入。
 
-- 消息已经被标记为已处理。
-- React 重渲染不会再次提交回执。
-- 当前错误状态不一定提供有效的回执重试入口。
-- 全局集合没有容量限制和清理机制，长期运行存在内存增长。
+本地卡片也有“先设 registered，再上报回执”的同类不可重试问题。[LocalResourcesCard.tsx](D:/dev/nexent/frontend/components/nl2agent/LocalResourcesCard.tsx:85)
 
-建议：只在回执成功后标记完成；失败状态应可重试。记录应放入 conversation/draft 级 coordinator，并在会话释放时清理。
+### 5. `[[NL2AGENT_CARD_RETRY]]` 在发送链路中没有被当成自动续跑
 
-### 2.5 Apply All 在资源绑定失败后仍标记批次为 applied
+公共判断函数同时识别两个隐藏前缀。[nl2agentContinuation.ts](D:/dev/nexent/frontend/lib/chat/nl2agentContinuation.ts:1)
 
-位置：`backend/services/nl2agent_service.py::apply_local_resources_batch`
+但真正发送消息时只检查：
 
-Tool 和 Skill 绑定分别使用宽泛异常捕获，单项失败后继续处理。循环结束后，无论成功数量如何，都会调用 `resolve_recommendation_batch(..., "applied", ...)`。
+```ts
+autoContinueText?.startsWith(NL2AGENT_AUTO_CONTINUE_PREFIX)
+```
 
-写入 Redis 的还是请求中的资源 ID，而不是实际成功绑定的资源 ID。因此可能出现：
+[chatInterface.tsx](D:/dev/nexent/frontend/app/[locale]/chat/internal/chatInterface.tsx:425)
 
-- 所有资源绑定均失败。
-- 批次状态仍为 `applied`。
-- 状态机继续进入下一阶段。
-- 最终 Agent 实际没有绑定任何推荐资源。
+所以 Card Retry 会被当成普通发送：
 
-建议：使用数据库事务保证整批原子应用，或者明确支持部分成功，并仅持久化成功资源；完全失败时不得解决该批次。
+- 输入框为空时直接返回，不触发 Agent Run。
+- 输入框非空时可能发送用户输入，而不是 retry text。
+- Conversation/draft 防串线检查也不会执行。
+- 上层可能把这个“什么都没做”的返回当作续跑成功。
 
-### 2.6 MCP 安装缺少幂等与补偿
+现有测试只验证辅助判断函数识别该前缀，没有覆盖 `handleSend` 集成路径。[nl2agentCards.test.tsx](D:/dev/nexent/frontend/components/nl2agent/__tests__/nl2agentCards.test.tsx:616)
 
-位置：`backend/services/nl2agent_service.py::_install_recommended_mcp`
+### 6. Prompt 在需求摘要阶段存在直接矛盾
 
-MCP 安装串联执行创建、健康检查、记录查询、工具发现、工具写入、Redis workflow 更新和推荐移除。中间步骤失败后没有补偿逻辑。
+全局规则要求：
 
-可能结果包括：
+> 只生成 `expected_card_types` 中的卡片。
 
-- MCP 已经创建，但 workflow 被记录为 `failed`。
-- 重试时重复创建 MCP。
-- 通过名称查询 MCP 记录时命中旧记录或同名记录。
-- 工具发现部分成功，Session State 却没有对应状态。
+[nl2agent_system_prompt_zh.yaml](D:/dev/nexent/backend/prompts/nl2agent_system_prompt_zh.yaml:24)
 
-建议：使用 `recommendation_id + option_id + draft_agent_id` 作为幂等键；服务返回新建 MCP 的稳定 ID，避免按名称反查；为外部创建步骤设计补偿或可恢复的 saga 状态。
+但 `requirements_collecting` 又要求五项齐全后输出需求摘要卡。[nl2agent_system_prompt_zh.yaml](D:/dev/nexent/backend/prompts/nl2agent_system_prompt_zh.yaml:29)
 
-### 2.7 Session 创建缺少整体事务或补偿
+与此同时，Evaluator 在 `requirements_collecting` 阶段把 `expected_card_types` 留空。[nl2agent_workflow.py](D:/dev/nexent/backend/agents/nl2agent_workflow.py:160)
 
-位置：`backend/services/nl2agent_service.py::start_session`
+所以需求齐全时，摘要卡同时“必须输出”和“禁止输出”。英文 Prompt 存在同样问题。
 
-Session 创建依次执行 draft Agent 创建、Conversation 创建、Catalog 加载和 Redis 写入。后续失败不会删除前面已经创建的数据，重复重试可能积累孤立 draft 和 Conversation。
+现有 Prompt 测试主要断言关键词存在，不能发现语义矛盾。[test_prompt_template_utils.py](D:/dev/nexent/test/backend/utils/test_prompt_template_utils.py:199)
 
-建议：数据库内操作使用事务；Redis 或远端目录失败时执行明确补偿，或者将 Session 标记为初始化失败并允许幂等恢复。
+### 7. NL2AGENT YAML Prompt 加载失败时会静默退化为普通 Agent Prompt
 
-## 3. 架构与维护性问题
+Prompt 加载捕获所有异常，记录 warning 后返回 `None`。[create_agent_info.py](D:/dev/nexent/backend/agents/create_agent_info.py:190)
 
-### 3.1 状态机在多个层级重复实现
+返回 `None` 后：
 
-同一套 NL2AGENT 阶段判断至少存在于：
+- 不加载 workflow state。
+- 不注入 Current Session。
+- 使用数据库中的普通 `prompt_template["system_prompt"]`。
 
-1. 英文 System Prompt。
-2. 中文 System Prompt。
-3. `backend/agents/create_agent_info.py` 的 Current Session 摘要。
-4. `backend/services/nl2agent_service.py` 的 Card Delivery 阶段校验。
-5. `frontend/app/[locale]/chat/streaming/chatStreamFinalMessage.tsx` 的缺失卡片推断。
+[create_agent_info.py](D:/dev/nexent/backend/agents/create_agent_info.py:821)  
+[create_agent_info.py](D:/dev/nexent/backend/agents/create_agent_info.py:1024)
 
-阶段调整必须同步维护五处实现。当前前端使用“期望卡片集合”，后端使用“唯一当前阶段”，二者语义已经存在漂移风险。
+这会让 NL2AGENT 再次退化为普通聊天助手，却不会产生明确初始化错误。对于强状态机 Agent，应当 fail closed，而不是 fail open。
 
-建议：由 Backend 统一计算 typed workflow summary，包括 `current_stage`、`expected_card_types` 和阶段完成条件。Frontend 只消费结果，Prompt 只根据同一份结构化摘要行动。
+### 8. 模型保存存在数据库与 Redis 分裂
 
-### 3.2 `nl2agent_service.py` 成为 God Service
+模型选择先更新数据库，然后设置 Redis `model_selection_confirmed`。[nl2agent_service.py](D:/dev/nexent/backend/services/nl2agent_service.py:448)
 
-位置：`backend/services/nl2agent_service.py`
+如果 Redis 更新失败：
 
-该文件接近 2000 行，同时承担：
+- 数据库已经保存模型。
+- API 返回失败。
+- Redis 仍表示模型未确认。
+- Runtime 又会根据数据库重新推导 `model_selection_confirmed=true`。[create_agent_info.py](D:/dev/nexent/backend/agents/create_agent_info.py:135)
+- Session State API 的 `current_stage` 却来自 Redis Evaluator。[nl2agent_workflow_service.py](D:/dev/nexent/backend/services/nl2agent_workflow_service.py:252)
 
-- 默认 Agent seed。
-- Session 创建。
-- Catalog 装载和脱敏。
-- 模型验证。
-- MCP 安装和工具发现。
-- 本地资源绑定。
-- 需求、身份和卡片回执。
-- Web Skill 安装。
-- Finalization。
+于是 Runtime、前端和 Redis 会对当前阶段产生不同判断。测试只覆盖正常保存，没有覆盖数据库成功、Redis 失败的窗口。[test_nl2agent_service.py](D:/dev/nexent/test/backend/services/test_nl2agent_service.py:495)
 
-职责过多导致异常策略、事务边界和返回类型难以保持一致，也使单元测试大量依赖内部 mock。
+### 9. MCP 重试会忽略用户修正后的 URL、Header、凭据或容器配置
 
-建议拆分为：
+远程 MCP 在找到已有 `mcp_id` 后直接返回，不更新记录。[nl2agent_mcp_service.py](D:/dev/nexent/backend/services/nl2agent_mcp_service.py:320)
 
-- Session workflow service。
-- Catalog/search service。
-- Resource binding service。
-- MCP installation service。
-- Agent publication service。
+```python
+if existing_mcp_id is not None:
+    return existing_mcp_id
+```
 
-### 3.3 启动 Session 时宽泛捕获异常并伪装为空目录
+容器安装也一样。[nl2agent_mcp_service.py](D:/dev/nexent/backend/services/nl2agent_mcp_service.py:387)
 
-位置：`backend/services/nl2agent_service.py::start_session`
+场景：
 
-Tool、Skill、Registry、Community 和官方 Skill 加载失败后，大多只记录 warning 并继续使用空数组。数据库、网络或解析故障因此会被用户看到成“没有找到资源”，而不是初始化失败。
+1. 第一次配置错误，MCP 记录已创建，但健康检查或发现失败。
+2. 用户在卡片中修正 URL、Token 或容器参数。
+3. Retry 找到旧 `mcp_id`，完全跳过配置更新。
+4. 新 Header 可能只临时用于本次 discovery，数据库仍保留旧配置。
+5. 后续 Runtime 继续使用错误的持久化配置。
 
-此外，默认 NL2AGENT Agent 查询发生任意异常时都可能触发重新 seed，真实数据库故障也可能被误判为 Agent 不存在。
+当前 idempotency key 也不包含配置指纹，因此无法区分真正的配置修订。
 
-建议区分合法空目录、远端目录不可用、数据库/Redis 故障以及默认 Agent 不存在，并使用明确领域异常终止不完整初始化。
+### 10. 多 MCP Tool 绑定不是事务，Skip 后可能仍保留部分 Tool
 
-### 3.4 HTTP 状态码依赖异常字符串
+`bind_mcp_tools()` 逐个调用独立的 ToolInstance 写入，最后才更新 Redis workflow。[nl2agent_mcp_service.py](D:/dev/nexent/backend/services/nl2agent_mcp_service.py:635)
 
-位置：`backend/apps/nl2agent_app.py::_session_http_error`
+若第二个 Tool 失败：
 
-当前代码通过英文错误文本中的关键词判断返回 404 或 409。这种方式容易受文案修改影响，也不符合项目定义的 Service 领域异常到 App HTTP 状态映射规范。
+- 第一个 Tool 已提交。
+- Redis 状态仍然是 `connected`。
+- 用户随后可以点击 Skip。
+- Skip 只写 `binding_skipped` 和空 `bound_tool_ids`，不会删除已经写入的 ToolInstance。[nl2agent_mcp_service.py](D:/dev/nexent/backend/services/nl2agent_mcp_service.py:693)
+- Finalization 会读取该部分绑定的 Tool。
 
-建议增加明确的领域异常类型，例如：
+因此持久化资源与 workflow 状态可能互相矛盾。现有测试只绑定单个 Tool，没有覆盖中途失败。[test_nl2agent_service.py](D:/dev/nexent/test/backend/services/test_nl2agent_service.py:758)
 
-- `Nl2AgentDraftNotFound`
-- `Nl2AgentWorkflowConflict`
-- `Nl2AgentCatalogUnavailable`
-- `Nl2AgentStaleCard`
+### 11. 本地 Tool 的配置参数实际上总被清空
 
-### 3.5 Finalization 接口保留大量失效参数
+`ToolInfo.params` 的定义是 `List`。[model.py](D:/dev/nexent/backend/consts/model.py:760)
 
-位置：
+Catalog 也保存该列表。[nl2agent_catalog_service.py](D:/dev/nexent/backend/services/nl2agent_catalog_service.py:92)
 
-- `backend/consts/model.py::FinalizeAgentRequest`
-- `backend/services/nl2agent_service.py::finalize_agent`
-- `frontend/components/nl2agent/FinalizeCard.tsx`
+但 Apply 时要求它必须是 dict，否则替换成 `{}`。[nl2agent_resource_service.py](D:/dev/nexent/backend/services/nl2agent_resource_service.py:86)
 
-接口仍接受模型 ID、Tool ID、Skill ID、名称和资源配置等参数，但当前实现规定这些字段必须被忽略，发布时以数据库和 Redis 的持久化状态为准。
+所以所有本地 ToolInstance 最终基本都会保存空参数。需要 API Key、模型、知识库或其他配置的 Tool 会被“成功绑定”，但运行时不可用。
 
-注释仍称 proposal 来自 `nl2agent_finalize_proposal` Skill，与当前由模型直接输出 final card 的流程不一致。
+当前本地卡也没有资源配置步骤。Skill 的 `config_schema` 同样只参与 Catalog 传递，没有配置落地流程。
 
-建议删除无效输入字段，或拆分为严格的 proposal 类型，仅允许业务描述、Prompt、Greeting、示例问题和运行参数。
+### 12. 在线 Skill 只安装到租户，没有绑定到草稿 Agent
 
-## 4. SDK 与缓存问题
+Backend 安装流程只执行租户级 Skill 安装并从 Catalog 删除推荐。[nl2agent_catalog_service.py](D:/dev/nexent/backend/services/nl2agent_catalog_service.py:251)
 
-### 4.1 搜索缓存是非线程安全的进程内全局状态
+Frontend 成功后仅把本地状态设为 `installed`。[WebSkillCard.tsx](D:/dev/nexent/frontend/components/nl2agent/WebSkillCard.tsx:47)
 
-位置：`sdk/nexent/core/tools/nl2agent/_context.py`
+没有：
 
-SDK 使用模块级字典 `_search_cache` 保存搜索结果：
+- SkillInstance 绑定接口
+- Bind 按钮
+- 安装后自动绑定
+- Workflow 中的 Skill binding 状态
 
-- 没有锁，并发访问不安全。
-- 不同 runtime worker 的结果不一致。
-- 进程重启即丢失。
-- 删除策略不是可靠 LRU。
-- MCP 和本地搜索缓存缺少 Catalog 指纹。
+而 Publication 只读取草稿中已启用的 SkillInstance。[nl2agent_publication_service.py](D:/dev/nexent/backend/services/nl2agent_publication_service.py:95)
 
-MCP 安装后 Backend 虽然从 Redis Catalog 删除推荐，SDK 仍可能在 TTL 内返回安装前的缓存结果。
+因此用户安装在线 Skill 后，最终生成的 Agent 实际不会使用该 Skill。
 
-建议将 tenant/draft 级搜索缓存迁移到 Redis，并把 Catalog fingerprint 纳入所有搜索缓存键。
+### 13. Backend 没有统一执行 `allowed_actions` 门禁，历史卡仍可修改后续状态
 
-### 4.2 `Nl2AgentContext` 包含未生效或误导性的状态
+例如模型选择接口只要求需求已确认，没有要求当前阶段确实是 `model_selection`。[nl2agent_service.py](D:/dev/nexent/backend/services/nl2agent_service.py:456)
 
-位置：`sdk/nexent/core/tools/nl2agent/_context.py::Nl2AgentContext`
+身份、MCP 安装和 Skill 安装也主要只验证草稿归属及资源 provenance，不验证当前 `allowed_actions`。
 
-`applied_tool_ids`、`applied_skill_ids`、`applied_mcp_names`、Tool/Skill configs 和 `_searched_queries` 没有从 Backend 权威状态可靠恢复，也没有完整参与搜索过滤或 Agent 构建。
+Frontend 对所有完整历史消息继续使用 interactive 卡片模式，只是禁止其重新注册。[chatStreamFinalMessage.tsx](D:/dev/nexent/frontend/app/[locale]/chat/streaming/chatStreamFinalMessage.tsx:518)
 
-由于 Tool instance 会重建，这些字段会给维护者造成“SDK 会记住已应用资源”的错误印象。
+`ModelSelectionCard` 的 `saved` 只是组件本地状态，历史卡重新挂载后又会恢复为可保存状态。[ModelSelectionCard.tsx](D:/dev/nexent/frontend/components/nl2agent/ModelSelectionCard.tsx:11)
 
-建议删除无效状态，所有已应用和已安装信息统一来自 Backend 注入的不可变 Session Catalog。
+多标签页或点击历史卡可以：
 
-## 5. Frontend 质量问题
+- 修改已经完成阶段的模型。
+- 不重置后续本地、联网、身份确认状态。
+- 使最终摘要与早先选择依据不再一致。
 
-### 5.1 卡片协议存在多套手写 Schema
+## P2：中优先级坏味道
 
-同一套卡片协议同时存在于：
+### 14. LLM 生成并控制 `prompt_template_id`
 
-- 双语 Prompt YAML 示例。
-- SDK 搜索 JSON。
-- Backend Pydantic 类型。
-- Frontend TypeScript interface。
-- `frontend/components/nl2agent/cardValidation.ts` 手写运行时校验。
+双语 Prompt 的最终卡示例硬编码 `prompt_template_id: 1`。[nl2agent_system_prompt_zh.yaml](D:/dev/nexent/backend/prompts/nl2agent_system_prompt_zh.yaml:87)
 
-核心实现中仍存在大量 `Dict[str, Any]`、`Record<string, any>` 和手工字段判断，协议变更很容易只更新部分层级。
+Publication 没有查询模板是否存在或是否属于允许范围，直接写入 Agent。[nl2agent_publication_service.py](D:/dev/nexent/backend/services/nl2agent_publication_service.py:133)
 
-建议以 Backend schema/OpenAPI 为源生成 TypeScript 类型，并为卡片建立一套统一、可版本化的 JSON Schema。
+这和“持久化状态是权威来源、模型不得编造 ID”的设计原则冲突。建议从 LLM proposal 删除该字段，或只允许服务端选择/验证模板。
 
-### 5.2 卡片被重复解析和校验
+### 15. MCP 安装锁固定 5 分钟且没有续租
 
-最终消息会先执行整条消息的卡片校验，Markdown Renderer 处理 fenced block 时再次校验，随后又调用 `JSON.parse`。同一 payload 可能被解析两到三次，错误语义也可能在整体校验与单卡渲染间产生差异。
+锁 TTL 为 300 秒。[nl2agent_session_catalog.py](D:/dev/nexent/backend/agents/nl2agent_session_catalog.py:43)
 
-建议共享一次解析结果，以 typed card AST 传递给 renderer 和 delivery coordinator。
+拉取容器镜像、启动容器、健康检查和 Tool discovery 完全可能超过 5 分钟。锁过期后第二个 Worker 可开始相同安装，造成重复容器或重复 MCP 记录。需要 heartbeat/续租或数据库级唯一约束。
 
-### 5.3 卡片组件重复实现异步工作流
+### 16. Official Skill 的 ID/名称验证使用 OR，允许不一致组合
 
-模型、本地资源、MCP、Skill、需求和身份卡分别维护 loading、register、retry、workflow busy、continuation 和 blockers。
+只要 `skill_id` 或 `skill_name` 任一匹配 Catalog 就通过。[nl2agent_catalog_service.py](D:/dev/nexent/backend/services/nl2agent_catalog_service.py:192)
 
-大量分散的 `useEffect` 和 `useState` 容易造成：
+随后如果请求中有 `skill_name`，实际安装的是请求名称，而不是刚刚解析出的可信 Catalog 项。[nl2agent_catalog_service.py](D:/dev/nexent/backend/services/nl2agent_catalog_service.py:270)
 
-- 重复提交。
-- 组件卸载后状态更新。
-- busy 计数不平衡。
-- 跨 conversation/draft 状态污染。
-- 自动续跑多次或完全不触发。
+应该解析出一个 canonical Skill 项，后续只使用该项的 ID/名称；请求同时提供二者时必须一致。
 
-建议建立统一的 card lifecycle reducer 或 mutation hook，并把 conversation/draft/message scope 作为强制 key。
+### 17. 中文“原子关键词拆分”名不副实
 
-状态：已解决。`useNl2AgentCardLifecycle` 统一管理操作互斥、busy 计数、错误与重试、输入 blocker、状态刷新、隐藏续跑和 Card Delivery scope；各卡片只保留自身数据和展示状态。注册失败可按卡片策略保持输入阻塞，成功重试或卸载时统一释放。
+正则把连续中文整体作为一个 token。[`_context.py`](D:/dev/nexent/sdk/nexent/core/tools/nl2agent/_context.py:39)
 
-### 5.4 前端测试没有覆盖真实交互副作用
+例如“读取文档生成演示文稿”不会拆成“读取、文档、生成、演示文稿”，除非模型主动插入空格。当前正确性依赖 Prompt，而不是搜索模块本身。
 
-位置：`frontend/components/nl2agent/__tests__/nl2agentCards.test.tsx`
+另外 MCP normalization 丢弃了 tags，因此虽然通用评分器支持 tags，MCP 实际只按名称和描述搜索。[search_web_mcps_tool.py](D:/dev/nexent/sdk/nexent/core/tools/nl2agent/search_web_mcps_tool.py:245)
 
-现有测试主要检查 React element 和辅助函数，没有完整挂载组件、执行 effect、模拟 API、会话切换和用户点击。Frontend 也没有标准的 `test` script 纳入常规检查链路。
+### 18. 搜索结果向模型和 Redis传递了过多配置结构
 
-因此以下关键路径缺少有效回归保护：
+本地 Tool Catalog 保留完整 `params`，Skill Catalog 保留完整 `config_schema`。[nl2agent_catalog_service.py](D:/dev/nexent/backend/services/nl2agent_catalog_service.py:92)
 
-- 卡片注册竞态。
-- Card Delivery 失败重试。
-- 自动续跑。
-- 历史消息重新挂载。
-- conversation/draft 切换。
-- workflow busy 和 blocker 清理。
+评分器通过 `{**candidate}` 把完整候选返回给 Tool Observation。[`_context.py`](D:/dev/nexent/sdk/nexent/core/tools/nl2agent/_context.py:147)
 
-建议使用 React Testing Library 配合请求 mock，补充 DOM 级交互测试，并纳入 `check-all` 或 CI。
+这些字段当前卡片不使用，Apply 也会重新查询数据库。结果是：
 
-## 6. 其他坏味道
+- 增加 Redis、模型上下文和卡片 JSON 体积。
+- 增大卡片被截断概率。
+- 把 Catalog 内部结构耦合到 Prompt。
+- 形成未来配置值泄漏风险。
 
-### 6.1 Seed 职责重复
+目前没有证据表明这里已经包含真实 secret，所以不应描述成已发生凭据泄漏。
 
-Config Service 启动时执行默认 NL2AGENT seed，Session 启动时又尝试 lazy seed。两条路径会掩盖启动阶段错误，并使 Runtime 承担配置初始化职责。
+### 19. Redis 的幂等操作仍然每次增加 revision 并写回
 
-建议只保留 Config Service seed；Runtime 发现默认 Agent 缺失时返回明确初始化错误。
+统一 mutator 无论状态是否变化都会执行：
 
-### 6.2 本地个人配置混入功能变更
+```python
+state.revision += 1
+```
 
-`.claude/settings.local.json` 包含个人机器的命令权限，与 NL2AGENT 产品功能无关，不应纳入正式功能提交。
+[nl2agent_session_catalog.py](D:/dev/nexent/backend/agents/nl2agent_session_catalog.py:211)
 
-### 6.3 测试大量依赖内部 Mock
+重复注册和重复回执会制造无意义 revision、CAS 冲突、TTL 刷新和前端刷新。应让 mutator 返回 `changed`，真正变化时才写入。
 
-Backend 测试数量较多，但许多测试直接 mock Service 内部函数。重构内部结构时测试会大面积失效，同时仍不能证明 Redis、数据库和跨层状态流的一致性。
+### 20. API 异常映射不一致
 
-建议保留精细单元测试，同时增加少量真实 Redis/数据库边界的集成测试，重点验证并发更新、幂等和失败恢复。
+部分接口通过结构化 `_session_http_error()` 返回 409/404/503；但 Session Start、Apply Local 和 Install Web Skill 仍把所有 `AgentRunException` 映射为 500。[nl2agent_app.py](D:/dev/nexent/backend/apps/nl2agent_app.py:154)
 
-## 7. 建议整改顺序
+本地 register/skip 甚至没有本地异常映射。[nl2agent_app.py](D:/dev/nexent/backend/apps/nl2agent_app.py:216)
 
-### P0：先修复明确正确性缺陷
+这会使前端无法区分：
 
-1. Apply All 假成功。
-2. 历史 Card Delivery 回执覆盖当前状态。
-3. 前端回执失败后不可重试。
-4. 回滚范围没有按 `card_key` 隔离。
-5. MCP 重试导致重复安装。
+- 用户操作冲突
+- stale card
+- Catalog 不可用
+- 真正服务端故障
 
-### P1：建立一致的状态和事务边界
+### 21. “Canonical Schema”仍过于宽松，且存在重复解析
 
-1. 将 Redis Session State 更新改为原子操作。
-2. 后端统一生成 `current_stage` 和 `expected_card_types`。
-3. 为 Session 创建、资源绑定和 MCP 安装建立事务或补偿策略。
-4. 使用领域异常替代异常字符串匹配。
+Card Schema 大量使用 `additionalProperties: true`，MCP option 只强制 `option_id` 和 `type`。[nl2agent-card.schema.json](D:/dev/nexent/contracts/nl2agent-card.schema.json:61)
 
-### P2：降低维护成本
+Frontend 已经通过 Ajv 做一次完整消息校验，但 Markdown Renderer 又对每张卡调用 `parseNl2AgentCard()` 重新解析。[chatStreamFinalMessage.tsx](D:/dev/nexent/frontend/app/[locale]/chat/streaming/chatStreamFinalMessage.tsx:108) [index.tsx](D:/dev/nexent/frontend/components/nl2agent/index.tsx:193)
 
-1. 拆分 `nl2agent_service.py`。
-2. 统一生成卡片和 API 类型。
-3. 删除过时 Finalize 参数和 SDK 死状态。
-4. 将搜索缓存迁移到 Redis 并加入 Catalog fingerprint。
-5. 建立统一前端卡片生命周期管理和真实交互测试。
+因此“单次解析生成 typed AST”的目标尚未真正实现。
 
-## 8. 总结
+### 22. 核心文件仍然过大，测试也集中在单体文件
 
-当前版本最核心的代码坏味道可以概括为：
+当前主要文件规模：
 
-> Redis 被当作可整对象覆盖的 JSON 文档；同一状态机跨多个层级重复实现；Frontend 依赖模块级全局变量协调副作用；跨系统安装和绑定流程缺少可靠的事务、幂等与补偿边界。
+- `backend/services/nl2agent_service.py`：1161 行
+- `test/backend/services/test_nl2agent_service.py`：2391 行
+- `frontend/components/common/markdownRenderer.tsx`：1471 行
+- `frontend/components/nl2agent/WebMcpCard.tsx`：519 行
 
-这些问题已经不只是代码风格或可读性问题，而是会导致状态丢失、阶段误判、重复安装、假成功和流程无法恢复。整改时应先解决数据正确性和并发安全，再进行模块拆分与类型统一。
+虽然已拆出六个服务，但 facade 仍承担大量依赖装配、模型解析、资源展示、seed、兼容入口和错误转换。测试集中在巨型文件中，导致失败场景难以系统组织。
+
+## 现有测试的主要盲区
+
+静态扫描没有发现以下路径的测试：
+
+- 本地 Tool 跨租户绑定。
+- 伪造空 MCP/Skill 批次绕过搜索。
+- Backend 回执与真实消息正文不一致。
+- MCP/Skill 双卡并发注册与回执顺序。
+- `CARD_RETRY` 到 `handleSend` 的完整集成链路。
+- 模型数据库提交成功、Redis 更新失败。
+- MCP 使用修正后的 URL、Token 或容器配置重试。
+- 多 MCP Tool 绑定到一半失败并随后 Skip。
+- 在线 Skill 安装后是否存在 SkillInstance。
+- Prompt 规则之间的语义一致性。
+
+当前 Prompt 测试主要是 substring assertions；Frontend 主测试也有大量直接检查 React element props 的浅层测试，而不是完整挂载后的并发 effect 和网络顺序。
+
+## 已经做得较好的部分
+
+本轮变更也包含一些明确改进：
+
+- Redis workflow state 使用严格 v2 Pydantic 模型和 `WATCH/MULTI` CAS。
+- Session 初始化具备数据库/Redis 补偿。
+- 本地 Apply 的 Tool/Skill 数据库写入已共享事务。
+- MCP recommendation 从可信 Redis Catalog 解析，并对 marketplace secret defaults 做了脱敏。
+- Finalization 主要依赖数据库中的模型与资源，而不是 LLM 提交的 Tool/Skill ID。
+- Frontend 已引入 Ajv、Vitest、RTL 和 jsdom，方向正确。
+
+问题主要集中在“跨存储一致性、服务端可信边界、卡片副作用时序和缺少失败路径测试”。
+
+## 验证边界
+
+本次严格按只读要求执行：
+
+- 没有修改文件。
+- 没有启动或重启服务。
+- 没有执行可能生成缓存、快照或构建产物的测试命令。
+- 最终 `jj status` 为 clean。
+- 结论来自 revision diff、源码调用链、Schema、Prompt 和现有测试的交叉静态分析。
+
+并发竞态和外部 MCP 行为仍建议后续通过定向自动化测试复现，但上述多数问题已经能够从代码路径直接成立。
