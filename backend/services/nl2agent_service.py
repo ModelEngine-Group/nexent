@@ -80,7 +80,7 @@ from database.skill_db import (
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_all_enabled_tool_instances,
-    query_tools_by_ids,
+    query_tools_by_ids_for_tenant,
     seed_nl2agent_builtin_tools,
     upsert_discovered_mcp_tools,
 )
@@ -601,7 +601,9 @@ def _resolve_resource_summaries(
     skill_ids = [int(row["skill_id"]) for row in skill_instances]
     tool_info_by_id = {
         int(row["tool_id"]): row
-        for row in (query_tools_by_ids(tool_ids) if tool_ids else [])
+        for row in (
+            query_tools_by_ids_for_tenant(tool_ids, tenant_id) if tool_ids else []
+        )
     }
     skill_info_by_id = {
         int(row["skill_id"]): row
@@ -729,7 +731,7 @@ def _mcp_binding_dependencies() -> McpBindingDependencies:
     return McpBindingDependencies(
         get_owned_draft=_get_owned_draft,
         get_mcp_record=get_mcp_record_by_id_and_tenant,
-        query_tools_by_ids=query_tools_by_ids,
+        query_tools_by_ids=query_tools_by_ids_for_tenant,
         bind_tool=create_or_update_tool_by_tool_info,
         find_mcp_workflow_by_id=find_mcp_workflow_by_id,
         update_mcp_workflow=update_mcp_workflow,
@@ -773,7 +775,8 @@ def _local_resource_dependencies() -> LocalResourceDependencies:
     return LocalResourceDependencies(
         get_owned_draft=_get_owned_draft,
         get_session_state=get_nl2agent_session_state,
-        query_tools_by_ids=query_tools_by_ids,
+        get_session_catalogs=get_nl2agent_session_catalogs,
+        query_tools_by_ids=query_tools_by_ids_for_tenant,
         get_tenant_skill_by_id=get_tenant_skill_by_id,
         get_db_session=get_db_session,
         bind_tool=create_or_update_tool_by_tool_info,
@@ -855,7 +858,7 @@ def _workflow_dependencies() -> WorkflowDependencies:
         query_enabled_skill_instances=query_enabled_skill_instances,
         resolve_model_summaries=_resolve_model_summaries,
         resolve_resource_summaries=_resolve_resource_summaries,
-        query_tools_by_ids=query_tools_by_ids,
+        query_tools_by_ids=query_tools_by_ids_for_tenant,
         normalize_model_ids=_normalize_model_ids,
         generate_internal_agent_name=_generate_internal_agent_name,
         update_agent=update_agent,

@@ -648,7 +648,7 @@ async def bind_mcp_tools(
     record = dependencies.get_mcp_record(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
         raise AgentRunException("Installed MCP not found.")
-    rows = dependencies.query_tools_by_ids(tool_ids) if tool_ids else []
+    rows = dependencies.query_tools_by_ids(tool_ids, tenant_id) if tool_ids else []
     valid = {
         int(row["tool_id"]): row
         for row in rows

@@ -768,7 +768,7 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "query_tools_by_ids",
+        "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
                 {
@@ -1415,7 +1415,7 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
     bind_skill = MagicMock()
     db_session, transaction = _mock_database_transaction(monkeypatch)
 
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
     monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool)
     monkeypatch.setattr(nl2agent_service, "get_tenant_skill_by_id", get_tenant_skill)
     monkeypatch.setattr(nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill)
@@ -1457,8 +1457,67 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
     assert skill_request.version_no == 0
     assert bind_skill.call_args.kwargs["db_session"] is db_session
     bind_skill.assert_called_once()
+    query_tools.assert_called_once_with([42], "tenant_1")
     transaction.__enter__.assert_called_once()
     transaction.__exit__.assert_called_once_with(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_register_local_resources_rejects_ids_outside_session_catalog(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="outside this session catalog",
+    ):
+        await nl2agent_service.register_local_resource_recommendations(
+            agent_id=202,
+            recommendation_batch_id="forged_batch",
+            tool_ids=[999],
+            skill_ids=[7],
+            tenant_id="tenant_1",
+        )
+
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert "forged_batch" not in state["recommendation_batches"]
+
+
+@pytest.mark.asyncio
+async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
+    )
+
+    result = await nl2agent_service.register_local_resource_recommendations(
+        agent_id=202,
+        recommendation_batch_id="trusted_batch",
+        tool_ids=[1],
+        skill_ids=[7],
+        tenant_id="tenant_1",
+    )
+
+    assert result == {
+        "recommendation_batch_id": "trusted_batch",
+        "status": "recommendations_ready",
+        "tool_ids": [1],
+        "skill_ids": [7],
+        "applied_tool_ids": [],
+        "applied_skill_ids": [],
+    }
 
 
 @pytest.mark.asyncio
@@ -1481,7 +1540,7 @@ async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypa
     bind_tool = MagicMock()
     _mock_database_transaction(monkeypatch)
 
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
     monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool)
     monkeypatch.setattr(nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202}))
     nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [42], [])
@@ -1507,7 +1566,7 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(m
     _, transaction = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
         nl2agent_service,
-        "query_tools_by_ids",
+        "query_tools_by_ids_for_tenant",
         MagicMock(return_value=[{"tool_id": 42, "params": {}}]),
     )
     monkeypatch.setattr(
@@ -1558,7 +1617,7 @@ async def test_apply_local_resources_batch_reconciles_after_redis_failure(monkey
     _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
         nl2agent_service,
-        "query_tools_by_ids",
+        "query_tools_by_ids_for_tenant",
         MagicMock(return_value=[{"tool_id": 42, "params": {}}]),
     )
     monkeypatch.setattr(
@@ -1621,7 +1680,7 @@ async def test_apply_local_resources_batch_reconciles_after_redis_failure(monkey
 @pytest.mark.asyncio
 async def test_apply_local_resources_batch_rejects_invalid_draft_agent_id(monkeypatch):
     query_tools = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
 
     with pytest.raises(nl2agent_service.AgentRunException):
         await nl2agent_service.apply_local_resources_batch(
@@ -1708,7 +1767,7 @@ async def test_finalize_uses_persisted_resources(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "query_tools_by_ids",
+        "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
                 {
@@ -1788,7 +1847,11 @@ async def test_finalize_rejects_dangling_resources_before_updating_draft(monkeyp
         "query_enabled_skill_instances",
         MagicMock(return_value=[]),
     )
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids_for_tenant",
+        MagicMock(return_value=[]),
+    )
     update = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_agent", update)
     nl2agent_session_catalog.register_recommendation_batch("tenant_1", 202, "batch_1", [404], [])
@@ -2199,7 +2262,7 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "query_tools_by_ids",
+        "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
                 {"tool_id": 11, "origin_name": "Local Reader", "source": "local"},
@@ -2266,7 +2329,11 @@ async def test_get_session_state_reports_invalid_persisted_references(monkeypatc
         "query_all_enabled_tool_instances",
         MagicMock(return_value=[{"tool_id": 11}]),
     )
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids_for_tenant",
+        MagicMock(return_value=[]),
+    )
     monkeypatch.setattr(
         nl2agent_service,
         "query_enabled_skill_instances",

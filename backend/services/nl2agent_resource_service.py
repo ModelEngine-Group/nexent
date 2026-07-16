@@ -17,7 +17,8 @@ class LocalResourceDependencies:
 
     get_owned_draft: Callable[[int, str], Dict[str, Any]]
     get_session_state: Callable[[str, int], Dict[str, Any]]
-    query_tools_by_ids: Callable[[List[int]], List[Dict[str, Any]]]
+    get_session_catalogs: Callable[[str, int], Dict[str, List[Dict[str, Any]]]]
+    query_tools_by_ids: Callable[[List[int], str], List[Dict[str, Any]]]
     get_tenant_skill_by_id: Callable[[int, str], Any]
     get_db_session: Callable[[], Any]
     bind_tool: Callable[..., Any]
@@ -58,7 +59,7 @@ async def apply_local_resources(
     selected_tool_ids = list(dict.fromkeys(map(int, tool_ids or [])))
     selected_skill_ids = list(dict.fromkeys(map(int, skill_ids or [])))
     tool_records = (
-        dependencies.query_tools_by_ids(selected_tool_ids)
+        dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
         if selected_tool_ids
         else []
     )
@@ -171,6 +172,23 @@ async def register_local_recommendations(
 ) -> Dict[str, Any]:
     """Register a local-resource card after it is rendered."""
     dependencies.get_owned_draft(agent_id, tenant_id)
+    catalogs = dependencies.get_session_catalogs(tenant_id, agent_id)
+    catalog_tool_ids = {
+        int(item["tool_id"])
+        for item in catalogs["tool_catalog"]
+        if item.get("tool_id") is not None
+    }
+    catalog_skill_ids = {
+        int(item["skill_id"])
+        for item in catalogs["skill_catalog"]
+        if item.get("skill_id") is not None
+    }
+    unknown_tool_ids = sorted(set(map(int, tool_ids)) - catalog_tool_ids)
+    unknown_skill_ids = sorted(set(map(int, skill_ids)) - catalog_skill_ids)
+    if unknown_tool_ids or unknown_skill_ids:
+        raise AgentRunException(
+            "Local recommendations contain resources outside this session catalog."
+        )
     batch = dependencies.register_batch(
         tenant_id,
         agent_id,

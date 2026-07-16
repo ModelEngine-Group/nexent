@@ -122,6 +122,7 @@ from backend.database.tool_db import (
     query_tool_instances_by_id,
     query_tool_instances_by_agent_id,
     query_tools_by_ids,
+    query_tools_by_ids_for_tenant,
     query_all_enabled_tool_instances,
     update_tool_table_from_scan_tool_list,
     add_tool_field,
@@ -416,6 +417,31 @@ def test_query_tools_by_ids(monkeypatch, mock_session):
 
     assert len(result) == 1
     assert result[0]["tool_id"] == 1
+
+
+def test_query_tools_by_ids_for_tenant_enforces_ownership(monkeypatch, mock_session):
+    """Tenant-scoped lookup includes ownership in the database query."""
+    from backend.database import tool_db as tool_db_module
+
+    session, query = mock_session
+    query.filter.return_value.all.return_value = []
+    tool_db_module.ToolInfo.tool_id.in_.reset_mock()
+    tool_db_module.ToolInfo.author.__eq__.reset_mock()
+    tool_db_module.ToolInfo.delete_flag.__ne__.reset_mock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx
+    )
+
+    assert query_tools_by_ids_for_tenant([1, 2], "tenant_1") == []
+
+    assert len(query.filter.call_args.args) == 3
+    tool_db_module.ToolInfo.tool_id.in_.assert_called_once_with([1, 2])
+    tool_db_module.ToolInfo.author.__eq__.assert_called_once_with("tenant_1")
+    tool_db_module.ToolInfo.delete_flag.__ne__.assert_called_once_with("Y")
 
 
 def test_query_all_enabled_tool_instances(monkeypatch, mock_session):

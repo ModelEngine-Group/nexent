@@ -145,6 +145,17 @@ def query_tools_by_ids(tool_id_list: List[int]):
         return [as_dict(tool) for tool in tools]
 
 
+def query_tools_by_ids_for_tenant(tool_id_list: List[int], tenant_id: str):
+    """Query active ToolInfo records by ID within one tenant boundary."""
+    with get_db_session() as session:
+        tools = session.query(ToolInfo).filter(
+            ToolInfo.tool_id.in_(tool_id_list),
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y',
+        ).all()
+        return [as_dict(tool) for tool in tools]
+
+
 def query_tools_by_labels(tenant_id: str, labels: List[str]):
     """
     Query ToolInfo by labels using OR match (tool has ANY of the requested labels).

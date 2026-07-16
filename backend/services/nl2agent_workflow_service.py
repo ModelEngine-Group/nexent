@@ -256,7 +256,9 @@ async def get_session_state(
             int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])
         ]
         discovered_rows = (
-            dependencies.query_tools_by_ids(discovered_ids) if discovered_ids else []
+            dependencies.query_tools_by_ids(discovered_ids, tenant_id)
+            if discovered_ids
+            else []
         )
         discovered_by_id = {int(row["tool_id"]): row for row in discovered_rows}
         workflow["discovered_tools"] = [
