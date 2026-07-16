@@ -9,7 +9,10 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["components/nl2agent/__tests__/*.{test,vitest.test}.{ts,tsx}"],
+    include: [
+      "components/nl2agent/__tests__/*.{test,vitest.test}.{ts,tsx}",
+      "components/common/__tests__/*.vitest.test.ts",
+    ],
     setupFiles: ["./vitest.setup.ts"],
   },
 });

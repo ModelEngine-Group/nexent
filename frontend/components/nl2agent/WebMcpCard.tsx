@@ -2,15 +2,7 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Input,
-  InputNumber,
-  Select,
-  message,
-} from "antd";
+import { Alert, Button, Checkbox, message } from "antd";
 import { Download } from "lucide-react";
 import {
   bindNl2AgentMcpTools,
@@ -19,43 +11,10 @@ import {
   skipNl2AgentMcpTools,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
+import { WebMcpInstallConfiguration } from "./WebMcpInstallConfiguration";
+import type { WebMcpCardItem } from "./webMcpTypes";
 
-export interface WebMcpCardItem {
-  recommendation_id?: string;
-  name: string;
-  description?: string;
-  source?: string;
-  url?: string;
-  transport?: string;
-  score?: number;
-  reason?: string;
-  install_options?: Array<{
-    option_id: string;
-    type: string;
-    transport?: string;
-    server_url_template?: string;
-    requires_configuration?: boolean;
-    label?: string;
-    description?: string;
-    status?: "ready" | "configuration_required" | "unsupported";
-    supported?: boolean;
-    unsupported_reason?: string;
-    fields?: Array<{
-      key: string;
-      name: string;
-      label?: string;
-      description?: string;
-      type?: "text" | "number" | "url" | "json";
-      required?: boolean;
-      secret?: boolean;
-      default?: string | null;
-      placeholder?: string;
-      choices?: string[];
-      category?: string;
-    }>;
-  }>;
-  prefill?: Record<string, string>;
-}
+export type { WebMcpCardItem } from "./webMcpTypes";
 
 export interface WebMcpCardProps {
   /** The draft agent_id (used for the install callback context, though MCP
@@ -361,104 +320,17 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
         )}
       </div>
       {!installed && (
-        <div className="mt-3 space-y-2 border-t border-sky-100 pt-2">
-          {options.length > 1 && (
-            <Select
-              className="w-full"
-              value={optionId}
-              onChange={chooseOption}
-              options={options.map((option) => ({
-                value: option.option_id,
-                label:
-                  option.label || `${option.type} ${option.transport ?? ""}`,
-                disabled: option.supported === false,
-              }))}
-            />
-          )}
-          {selectedOption?.supported === false ? (
-            <Alert
-              type="warning"
-              showIcon
-              message={
-                selectedOption.unsupported_reason || "Unsupported option"
-              }
-            />
-          ) : null}
-          {selectedOption?.description ? (
-            <div className="text-xs text-gray-500">
-              {selectedOption.description}
-            </div>
-          ) : null}
-          {fields.map((field) => {
-            const label = `${field.label || field.name}${field.required ? " *" : ""}`;
-            const update = (value: string) =>
-              setFieldValues((current) => ({ ...current, [field.key]: value }));
-            return (
-              <div key={field.key}>
-                <div className="mb-1 text-xs font-medium text-gray-600">
-                  {label}
-                </div>
-                {field.description ? (
-                  <div className="mb-1 text-[11px] text-gray-400">
-                    {field.description}
-                  </div>
-                ) : null}
-                {field.secret ? (
-                  <Input.Password
-                    placeholder={field.placeholder || label}
-                    value={fieldValues[field.key] ?? ""}
-                    onChange={(event) => update(event.target.value)}
-                  />
-                ) : field.choices?.length ? (
-                  <Select
-                    className="w-full"
-                    value={fieldValues[field.key]}
-                    onChange={update}
-                    options={field.choices.map((choice) => ({
-                      value: choice,
-                      label: choice,
-                    }))}
-                  />
-                ) : field.type === "json" ? (
-                  <Input.TextArea
-                    rows={4}
-                    placeholder={field.placeholder || label}
-                    value={fieldValues[field.key] ?? ""}
-                    onChange={(event) => update(event.target.value)}
-                  />
-                ) : field.type === "number" ? (
-                  <InputNumber
-                    className="w-full"
-                    placeholder={field.placeholder || label}
-                    value={
-                      fieldValues[field.key]
-                        ? Number(fieldValues[field.key])
-                        : null
-                    }
-                    onChange={(value) =>
-                      update(value == null ? "" : String(value))
-                    }
-                  />
-                ) : (
-                  <Input
-                    type={field.type === "url" ? "url" : "text"}
-                    placeholder={field.placeholder || label}
-                    value={fieldValues[field.key] ?? ""}
-                    onChange={(event) => update(event.target.value)}
-                  />
-                )}
-              </div>
-            );
-          })}
-          {installError ? (
-            <Alert
-              type="error"
-              showIcon
-              message="Installation failed"
-              description={installError}
-            />
-          ) : null}
-        </div>
+        <WebMcpInstallConfiguration
+          options={options}
+          optionId={optionId}
+          selectedOption={selectedOption}
+          fieldValues={fieldValues}
+          installError={installError}
+          onOptionChange={chooseOption}
+          onFieldChange={(key, value) =>
+            setFieldValues((current) => ({ ...current, [key]: value }))
+          }
+        />
       )}
       {installed && (
         <div className="mt-3 border-t border-sky-100 pt-2">

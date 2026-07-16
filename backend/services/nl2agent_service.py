@@ -56,7 +56,6 @@ from consts.exceptions import (
 from consts.model import (
     AgentInfoRequest,
     ModelConnectStatusEnum,
-    ToolInstanceInfoRequest,
 )
 from database.agent_db import (
     create_agent,
@@ -126,6 +125,13 @@ from services.nl2agent_session_service import (
     SessionInitializationDependencies,
     start_session as initialize_session,
 )
+from services.nl2agent_seed_service import (
+    NL2AGENT_VERIFICATION_CONFIG,
+    SeedDependencies,
+    ensure_seed_defaults,
+    normalize_model_ids,
+    seed_default_agent,
+)
 from services.nl2agent_workflow_service import (
     WorkflowDependencies,
     confirm_online_resource_configuration as confirm_online_configuration_workflow,
@@ -155,6 +161,9 @@ from utils.prompt_template_utils import get_nl2agent_seed_config
 
 logger = logging.getLogger(__name__)
 
+# Compatibility alias for callers that inspect the historical facade constant.
+_NL2AGENT_VERIFICATION_CONFIG = NL2AGENT_VERIFICATION_CONFIG
+
 
 def _redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
     """Compatibility facade for catalog sanitization."""
@@ -179,53 +188,6 @@ NL2AGENT_CARD_RETRY_INJECTION_TEXT = (
     "Current Session state and generate only the card required by the first "
     "incomplete stage. Do not claim the previous card is still valid."
 )
-
-_NL2AGENT_SEED_PROMPT_FALLBACK = (
-    "You are NL2AGENT, the Agent Builder. Help the user design and build "
-    "a custom agent through multi-turn natural-language dialogue."
-)
-_NL2AGENT_AGENT_INFO_FALLBACK = {
-    "name": NL2AGENT_AGENT_NAME,
-    "display_name": "Agent Builder",
-    "description": (
-        "Conversational assistant that helps you design and build your own "
-        "custom agent through multi-turn natural-language dialogue."
-    ),
-    "business_description": (
-        "Conversational agent generator. Guides users through multi-turn "
-        "dialogue to define a custom agent, recommends local and web "
-        "resources, and finalizes a draft agent."
-    ),
-}
-_NL2AGENT_PROMPT_SEGMENTS_FALLBACK = {
-    "duty_prompt": _NL2AGENT_SEED_PROMPT_FALLBACK,
-    "constraint_prompt": (
-        "Always wait for explicit user confirmation before applying local "
-        "resources or finalizing the agent. Never make up tool or skill names. "
-        "Use the user's language."
-    ),
-    "few_shots_prompt": "",
-}
-
-_NL2AGENT_VERIFICATION_CONFIG = {
-    "enabled": True,
-    "step_verification_enabled": True,
-    "final_verification_enabled": True,
-    "llm_verification_enabled": False,
-    "max_final_rounds": 2,
-    "strictness": "balanced",
-    "fail_policy": "repair_then_controlled_summary",
-    "pass_score": 0.75,
-    "critical_events": [
-        "tool_precheck",
-        "tool_result",
-        "retrieval",
-        "code_execution",
-        "handoff",
-        "final_answer",
-    ],
-}
-
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
@@ -256,137 +218,25 @@ def _generate_internal_agent_name(
     return candidate
 
 
-def _load_nl2agent_seed_fields() -> Dict[str, str]:
-    """Load user-facing NL2AGENT seed fields from the English YAML config."""
-    seed_fields = {
-        **_NL2AGENT_AGENT_INFO_FALLBACK,
-        **_NL2AGENT_PROMPT_SEGMENTS_FALLBACK,
-    }
-    try:
-        seed_config = get_nl2agent_seed_config(LANGUAGE["EN"])
-        seed_fields.update(seed_config.get("agent_info") or {})
-        seed_fields.update(seed_config.get("prompt_segments") or {})
-    except Exception as exc:
-        logger.warning(f"Failed to load NL2AGENT seed config: {exc}")
-
-    seed_fields["name"] = NL2AGENT_AGENT_NAME
-    return seed_fields
-
-
-def _normalize_model_ids(value: Any) -> List[int]:
-    if not value:
-        return []
-    if isinstance(value, (str, int)):
-        value = [value]
-
-    normalized: List[int] = []
-    for item in value:
-        try:
-            model_id = int(item)
-        except (TypeError, ValueError):
-            continue
-        if model_id not in normalized:
-            normalized.append(model_id)
-    return normalized
-
-
-def _get_available_llm_model_ids(tenant_id: str) -> List[int]:
-    """Return all connected LLM-style models the builder agent can offer."""
-    try:
-        records = get_model_records(None, tenant_id) or []
-    except Exception as exc:
-        logger.warning(
-            f"Failed to list models for NL2AGENT seed in tenant {tenant_id}: {exc}"
-        )
-        return []
-
-    model_ids: List[int] = []
-    for record in records:
-        model_type = record.get("model_type")
-        if model_type not in {"llm", "chat"}:
-            continue
-
-        connect_status = ModelConnectStatusEnum.get_value(record.get("connect_status"))
-        if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
-            continue
-
-        try:
-            model_id = int(record["model_id"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if model_id not in model_ids:
-            model_ids.append(model_id)
-
-    return model_ids
-
-
-def _build_nl2agent_seed_defaults(tenant_id: str) -> Dict[str, Any]:
-    model_ids = _get_available_llm_model_ids(tenant_id)
-    defaults: Dict[str, Any] = {
-        **_load_nl2agent_seed_fields(),
-        "prompt_template_id": None,
-        "prompt_template_name": None,
-        "verification_config": _NL2AGENT_VERIFICATION_CONFIG,
-    }
-    if model_ids:
-        defaults["model_ids"] = model_ids
-        defaults["business_logic_model_id"] = model_ids[0]
-    return defaults
+def _seed_dependencies() -> SeedDependencies:
+    """Bind startup seed policy to the facade's infrastructure operations."""
+    return SeedDependencies(
+        get_seed_config=get_nl2agent_seed_config,
+        get_model_records=get_model_records,
+        update_agent=update_agent,
+        seed_builtin_tools=seed_nl2agent_builtin_tools,
+        query_all_agents=query_all_agent_info_by_tenant_id,
+        create_agent=create_agent,
+        bind_tool=create_or_update_tool_by_tool_info,
+        agent_name=NL2AGENT_AGENT_NAME,
+        language=LANGUAGE["EN"],
+    )
 
 
 def _ensure_nl2agent_seed_defaults(
     agent: Dict[str, Any], user_id: str, tenant_id: str
 ) -> None:
-    """Backfill intended prompt/template/model defaults on existing NL2AGENT rows."""
-    agent_id = agent.get("agent_id")
-    if not agent_id:
-        return
-
-    defaults = _build_nl2agent_seed_defaults(tenant_id)
-    update_values: Dict[str, Any] = {}
-
-    for field in (
-        "name",
-        "display_name",
-        "description",
-        "business_description",
-        "prompt_template_id",
-        "prompt_template_name",
-        "duty_prompt",
-        "constraint_prompt",
-        "few_shots_prompt",
-        "verification_config",
-    ):
-        if agent.get(field) != defaults[field]:
-            update_values[field] = defaults[field]
-
-    desired_model_ids = defaults.get("model_ids") or []
-    if (
-        desired_model_ids
-        and _normalize_model_ids(agent.get("model_ids")) != desired_model_ids
-    ):
-        update_values["model_ids"] = desired_model_ids
-
-    if (
-        desired_model_ids
-        and agent.get("business_logic_model_id") not in desired_model_ids
-    ):
-        update_values["business_logic_model_id"] = desired_model_ids[0]
-
-    if not update_values:
-        return
-
-    try:
-        update_agent(
-            agent_id=agent_id,
-            agent_info=AgentInfoRequest(**update_values),
-            user_id=user_id,
-            version_no=0,
-        )
-    except Exception as exc:
-        logger.warning(
-            f"Failed to backfill NL2AGENT seed defaults for agent_id={agent_id}: {exc}"
-        )
+    ensure_seed_defaults(_seed_dependencies(), agent, user_id, tenant_id)
 
 
 async def _load_session_catalogs(
@@ -566,7 +416,7 @@ def _resolve_model_summaries(
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Resolve persisted model IDs into display-ready summaries without raising."""
     primary_model_id = draft.get("business_logic_model_id")
-    model_ids = _normalize_model_ids(draft.get("model_ids"))
+    model_ids = normalize_model_ids(draft.get("model_ids"))
     ordered_ids = list(model_ids)
     if primary_model_id:
         primary_model_id = int(primary_model_id)
@@ -913,7 +763,7 @@ def _workflow_dependencies() -> WorkflowDependencies:
         resolve_model_summaries=_resolve_model_summaries,
         resolve_resource_summaries=_resolve_resource_summaries,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
-        normalize_model_ids=_normalize_model_ids,
+        normalize_model_ids=normalize_model_ids,
         generate_internal_agent_name=_generate_internal_agent_name,
         update_agent=update_agent,
         confirm_agent_identity=confirm_agent_identity,
@@ -1102,7 +952,7 @@ async def finalize_agent(
     dependencies = PublicationDependencies(
         validate_draft_agent_id=_validate_draft_agent_id,
         get_owned_draft=_get_owned_draft,
-        normalize_model_ids=_normalize_model_ids,
+        normalize_model_ids=normalize_model_ids,
         validate_available_llm_ids=_validate_available_llm_ids,
         assert_requirements_confirmed=assert_requirements_confirmed,
         assert_resource_review_complete=assert_resource_review_complete,
@@ -1145,81 +995,6 @@ def seed_nl2agent_default_agent(
     tenant_id: str = DEFAULT_TENANT_ID,
     user_id: str = DEFAULT_USER_ID,
 ) -> Optional[int]:
-    """Seed the NL2AGENT default agent for a tenant if it does not yet exist.
-
-    This is called once on application startup. It:
-    1. Inserts the 3 NL2AGENT builtin tool catalog rows (idempotent).
-    2. Creates the NL2AGENT default agent (name="nl2agent") if absent, with
-       the 3 builtin tools bound as ToolInstances.
-
-    Returns the agent_id of the NL2AGENT default agent, or None on failure.
-    """
-    # 1. Seed the builtin tool catalog rows.
-    try:
-        tool_ids = seed_nl2agent_builtin_tools(tenant_id=tenant_id, user_id=user_id)
-    except Exception as exc:
-        logger.error(f"Failed to seed NL2AGENT builtin tools: {exc}")
-        return None
-
-    # 2. Check if the NL2AGENT default agent already exists for this tenant.
-    try:
-        all_agents = query_all_agent_info_by_tenant_id(tenant_id) or []
-    except Exception as exc:
-        logger.error(f"Failed to query agents for NL2AGENT seeding: {exc}")
-        return None
-
-    for agent in all_agents:
-        if (agent.get("name") or "") == NL2AGENT_AGENT_NAME:
-            existing_id = agent.get("agent_id")
-            _ensure_nl2agent_seed_defaults(agent, user_id=user_id, tenant_id=tenant_id)
-            logger.info(
-                f"NL2AGENT default agent already exists (agent_id={existing_id})"
-            )
-            return existing_id
-
-    # 3. Create the NL2AGENT default agent.
-    agent_payload = {
-        "max_steps": 20,
-        "enabled": True,
-        "is_new": False,
-    }
-    agent_payload.update(_build_nl2agent_seed_defaults(tenant_id))
-
-    try:
-        created = create_agent(agent_payload, tenant_id=tenant_id, user_id=user_id)
-    except Exception as exc:
-        logger.error(f"Failed to create NL2AGENT default agent: {exc}")
-        return None
-
-    agent_id = created.get("agent_id")
-    if not agent_id:
-        logger.error("NL2AGENT default agent creation returned no agent_id.")
-        return None
-
-    # 4. Bind the 3 builtin tools to the NL2AGENT agent as ToolInstances.
-    for tool_id in tool_ids:
-        try:
-            instance_req = ToolInstanceInfoRequest(
-                tool_id=tool_id,
-                agent_id=agent_id,
-                params={},
-                enabled=True,
-                version_no=0,
-            )
-            create_or_update_tool_by_tool_info(
-                tool_info=instance_req,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-            )
-        except Exception as exc:
-            logger.error(
-                f"Failed to bind builtin tool {tool_id} to NL2AGENT agent: {exc}"
-            )
-
-    logger.info(
-        f"Seeded NL2AGENT default agent (agent_id={agent_id}) with "
-        f"{len(tool_ids)} builtin tools for tenant {tenant_id}"
-    )
-    return agent_id
+    """Seed or repair the built-in builder through the focused seed service."""
+    return seed_default_agent(_seed_dependencies(), tenant_id, user_id)
     (find_mcp_workflow_by_id,)

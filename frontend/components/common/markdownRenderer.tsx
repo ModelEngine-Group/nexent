@@ -3,7 +3,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
-import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -27,6 +26,22 @@ import type {
   Nl2AgentCardType,
   ValidatedNl2AgentCard,
 } from "@/components/nl2agent/cardValidation";
+import {
+  extractParsedMarkdownHeadings,
+  flattenTextContent,
+  normalizeMarkdownHeadingText,
+  slugifyHeadingText,
+  type ParsedMarkdownHeading,
+} from "./markdownHeadings";
+
+export { extractMarkdownHeadings } from "./markdownHeadings";
+export type { MarkdownHeading } from "./markdownHeadings";
+
+const s3MediaCache = new Map<string, string>();
+const mediaObjectUrlCache = new Map<string, string>();
+const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
+const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
+const isBrowserEnvironment = typeof window !== "undefined";
 
 interface MarkdownRendererProps {
   content: string;
@@ -53,170 +68,6 @@ interface MarkdownRendererProps {
   /** Parsed once by the final-message boundary and reused during rendering. */
   nl2AgentCards?: readonly ValidatedNl2AgentCard[];
 }
-
-export interface MarkdownHeading {
-  id: string;
-  level: number;
-  text: string;
-}
-
-interface ParsedMarkdownHeading extends MarkdownHeading {
-  offset: number;
-}
-
-// Simple in-memory cache to avoid refetching the same S3 object multiple times
-const s3MediaCache = new Map<string, string>();
-const mediaObjectUrlCache = new Map<string, string>();
-const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
-const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
-
-const isBrowserEnvironment = typeof window !== "undefined";
-
-const flattenTextContent = (value: React.ReactNode): string => {
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value);
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(flattenTextContent).join("");
-  }
-
-  if (React.isValidElement(value)) {
-    return flattenTextContent(value.props?.children);
-  }
-
-  return "";
-};
-
-const normalizeMarkdownHeadingText = (value: string): string => {
-  return value
-    .replaceAll("`", "")
-    .replaceAll("<", "")
-    .replaceAll(">", "")
-    .replaceAll("*", "")
-    .replaceAll("_", "")
-    .replaceAll("~", "")
-    .replaceAll("\\", "")
-    .replaceAll(/\s+/g, " ")
-    .trim();
-};
-
-const slugifyHeadingText = (value: string): string => {
-  const normalized = normalizeMarkdownHeadingText(value)
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9\u4e00-\u9fa5\s-]/g, "")
-    .trim()
-    .replaceAll(/\s+/g, "-");
-
-  return normalized || "section";
-};
-
-const createHeadingIdGenerator = () => {
-  const counts = new Map<string, number>();
-
-  return (text: string): string => {
-    const baseId = slugifyHeadingText(text);
-    const currentCount = counts.get(baseId) ?? 0;
-    counts.set(baseId, currentCount + 1);
-    return currentCount === 0 ? baseId : `${baseId}-${currentCount}`;
-  };
-};
-
-const extractTextFromMarkdownNode = (node: any): string => {
-  if (!node) {
-    return "";
-  }
-
-  if (typeof node.value === "string") {
-    return node.value;
-  }
-
-  if (Array.isArray(node.children)) {
-    return node.children.map(extractTextFromMarkdownNode).join("");
-  }
-
-  return "";
-};
-
-const extractFallbackMarkdownHeadings = (
-  content: string
-): ParsedMarkdownHeading[] => {
-  const createId = createHeadingIdGenerator();
-  const headings: ParsedMarkdownHeading[] = [];
-  const lines = content.split("\n");
-  let offset = 0;
-
-  for (const line of lines) {
-    const trimmedLine = line.trimStart();
-    const leadingSpaces = line.length - trimmedLine.length;
-
-    if (!trimmedLine.startsWith("#")) {
-      offset += line.length + 1;
-      continue;
-    }
-
-    let level = 0;
-    while (level < trimmedLine.length && trimmedLine[level] === "#") {
-      level += 1;
-    }
-
-    const hasValidLevel = level >= 1 && level <= 6;
-    const hasHeadingSpace = trimmedLine[level] === " ";
-    if (!hasValidLevel || !hasHeadingSpace) {
-      offset += line.length + 1;
-      continue;
-    }
-
-    const rawText = normalizeMarkdownHeadingText(trimmedLine.slice(level + 1));
-    if (rawText) {
-      headings.push({
-        offset: offset + leadingSpaces,
-        id: createId(rawText),
-        level,
-        text: rawText,
-      });
-    }
-
-    offset += line.length + 1;
-  }
-
-  return headings;
-};
-
-const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[] => {
-  try {
-    const createId = createHeadingIdGenerator();
-    const headings: ParsedMarkdownHeading[] = [];
-    const { unified } = require("unified") as { unified: () => any };
-    const tree = unified()
-      .use(remarkParse)
-      .use(remarkGfm)
-      .use(remarkMath)
-      .parse(content);
-
-    visit(tree, "heading", (node: any) => {
-      const rawText = normalizeMarkdownHeadingText(extractTextFromMarkdownNode(node));
-      if (!rawText) {
-        return;
-      }
-
-      headings.push({
-        offset: typeof node.position?.start?.offset === "number" ? node.position.start.offset : headings.length,
-        id: createId(rawText),
-        level: typeof node.depth === "number" ? node.depth : 1,
-        text: rawText,
-      });
-    });
-
-    return headings;
-  } catch {
-    return extractFallbackMarkdownHeadings(content);
-  }
-};
-
-export const extractMarkdownHeadings = (content: string): MarkdownHeading[] => {
-  return extractParsedMarkdownHeadings(content).map(({ id, level, text }) => ({ id, level, text }));
-};
 
 const getSessionCachedValue = (key: string): string | null => {
   if (!isBrowserEnvironment) {
