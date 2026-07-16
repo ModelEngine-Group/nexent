@@ -925,6 +925,32 @@ def test_mcp_installation_lock_renews_only_for_its_owner():
     )
 
 
+def test_idempotent_state_mutation_does_not_increment_revision():
+    first = nl2agent_session_catalog.record_card_delivery(
+        "tenant_1",
+        202,
+        message_id=10,
+        card_type="model_selection",
+        status="rendered",
+    )
+    first_revision = nl2agent_session_catalog.get_nl2agent_session_state(
+        "tenant_1", 202
+    )["revision"]
+
+    second = nl2agent_session_catalog.record_card_delivery(
+        "tenant_1",
+        202,
+        message_id=10,
+        card_type="model_selection",
+        status="rendered",
+    )
+
+    assert second == first
+    assert nl2agent_session_catalog.get_nl2agent_session_state(
+        "tenant_1", 202
+    )["revision"] == first_revision
+
+
 @pytest.mark.asyncio
 async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
     async def wait_forever(*args, **kwargs):

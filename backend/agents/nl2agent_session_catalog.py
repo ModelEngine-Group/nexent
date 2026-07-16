@@ -222,7 +222,11 @@ def _mutate_session_state(
         try:
             pipe.watch(key)
             state = _parse_session_state(pipe.get(key), tenant_id, draft_agent_id)
+            original_state = state_to_dict(state)
             result = mutator(state)
+            if state_to_dict(state) == original_state:
+                pipe.unwatch()
+                return deepcopy(result)
             state.revision += 1
             pipe.multi()
             pipe.setex(
@@ -770,7 +774,11 @@ def mutate_nl2agent_session_catalogs(
                     f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
                 )
             catalogs = _validate_catalogs(json.loads(raw))
+            original_catalogs = deepcopy(catalogs)
             result = mutator(catalogs)
+            if catalogs == original_catalogs:
+                pipe.unwatch()
+                return deepcopy(result)
             pipe.multi()
             pipe.setex(
                 key,
