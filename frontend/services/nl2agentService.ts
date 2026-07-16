@@ -141,7 +141,7 @@ export const reportNl2AgentCardDelivery = async (
 
 export const registerLocalResourceRecommendations = async (
   agentId: number,
-  payload: Nl2AgentApplyLocalResourcesPayload
+  payload: Nl2AgentApiSchemas["Nl2AgentRecommendationBatchRequest"]
 ): Promise<Nl2AgentLocalResourceRegistrationResponse> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.registerLocalResources(agentId),

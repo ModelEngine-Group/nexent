@@ -253,6 +253,7 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 6,
             "title": "Example Questions",
             "type": "array"
           },

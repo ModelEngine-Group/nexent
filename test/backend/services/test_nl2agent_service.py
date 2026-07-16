@@ -2819,6 +2819,16 @@ def test_finalize_request_rejects_unknown_verification_fields():
         )
 
 
+def test_finalize_request_rejects_more_than_six_example_questions():
+    with pytest.raises(ValidationError):
+        Nl2AgentFinalizeRequest(
+            business_description="Build document presentations",
+            duty_prompt="Create presentations from documents.",
+            greeting_message="Upload a document to begin.",
+            example_questions=[str(index) for index in range(7)],
+        )
+
+
 @pytest.mark.asyncio
 async def test_finalize_uses_persisted_resources(monkeypatch):
     draft = {

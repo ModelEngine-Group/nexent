@@ -19,7 +19,6 @@ export interface FinalizeCardData {
   agent_id: number;
   description?: string;
   business_description: string;
-  prompt_template_name?: string;
 
   duty_prompt: string;
   constraint_prompt?: string;
@@ -33,8 +32,6 @@ export interface FinalizeCardData {
   provide_run_summary?: boolean;
   verification_config?: FinalizeVerificationConfig;
   enable_context_manager?: boolean;
-
-  author?: string;
 }
 
 export interface FinalizeCardProps {

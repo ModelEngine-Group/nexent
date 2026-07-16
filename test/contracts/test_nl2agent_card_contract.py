@@ -132,6 +132,32 @@ def test_final_review_verification_config_matches_runtime_contract() -> None:
     assert list(_validator("final_review").iter_errors(invalid_payload))
 
 
+def test_card_limits_match_http_request_boundaries() -> None:
+    requirements = {
+        "goal": "x" * 501,
+        "audience_or_scenario": "Office users",
+        "primary_input": "DOCX files",
+        "expected_output": "Presentation",
+        "key_constraints": "Preserve facts",
+    }
+    local_resources = {
+        "recommendation_batch_id": "x" * 129,
+        "tools": [],
+        "skills": [],
+    }
+    final_review = {
+        "business_description": "Build an agent.",
+        "duty_prompt": "Help the user.",
+        "greeting_message": "Hello.",
+        "max_steps": 31,
+        "example_questions": [str(index) for index in range(7)],
+    }
+
+    assert list(_validator("requirements_summary").iter_errors(requirements))
+    assert list(_validator("local_resources").iter_errors(local_resources))
+    assert list(_validator("final_review").iter_errors(final_review))
+
+
 def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:
     language_to_type = {
         "nl2agent-requirements-summary": "requirements_summary",

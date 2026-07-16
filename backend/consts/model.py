@@ -569,7 +569,7 @@ class Nl2AgentFinalizeRequest(BaseModel):
 
     # UI
     greeting_message: str = Field(..., min_length=1, max_length=500)
-    example_questions: List[str] = Field(default_factory=list)
+    example_questions: List[str] = Field(default_factory=list, max_length=6)
 
     # Runtime
     max_steps: Optional[int] = Field(default=None, ge=1, le=30)
