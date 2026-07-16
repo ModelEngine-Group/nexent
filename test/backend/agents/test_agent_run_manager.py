@@ -154,11 +154,15 @@ class TestAgentRunManager:
 
     def test_stop_agent_run_nonexistent(self):
         """Test stopping a non-existent agent run"""
-        result = self.manager.stop_agent_run(999, "nonexistent_user")
-        assert result is False
+        from unittest.mock import patch
+        with patch('backend.agents.agent_run_manager.runtime_state_service') as mock_runtime:
+            mock_runtime.set_cancel_signal.return_value = False
+            result = self.manager.stop_agent_run(999, "nonexistent_user")
+            assert result is False
 
     def test_stop_agent_run_wrong_user(self):
         """Test stopping an agent run with wrong user_id"""
+        from unittest.mock import patch
         conversation_id = 123
         user1_id = "user1"
         user2_id = "user2"
@@ -168,8 +172,10 @@ class TestAgentRunManager:
         self.manager.register_agent_run(conversation_id, mock_run_info, user1_id)
         
         # Try to stop run for user2 (should return False)
-        result = self.manager.stop_agent_run(conversation_id, user2_id)
-        assert result is False
+        with patch('backend.agents.agent_run_manager.runtime_state_service') as mock_runtime:
+            mock_runtime.set_cancel_signal.return_value = False
+            result = self.manager.stop_agent_run(conversation_id, user2_id)
+            assert result is False
 
     def test_thread_safety(self):
         """Test thread safety of the manager"""

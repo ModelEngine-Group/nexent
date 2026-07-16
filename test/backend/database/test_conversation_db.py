@@ -101,6 +101,7 @@ db_models_mod = types.ModuleType("database.db_models")
 class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
+    agent_id = MagicMock(name="ConversationRecord.agent_id")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
