@@ -410,7 +410,6 @@ async def finalize_agent_api(
             tenant_id=tenant_id,
             description=payload.description,
             business_description=payload.business_description,
-            prompt_template_id=payload.prompt_template_id,
             duty_prompt=payload.duty_prompt,
             constraint_prompt=payload.constraint_prompt,
             few_shots_prompt=payload.few_shots_prompt,

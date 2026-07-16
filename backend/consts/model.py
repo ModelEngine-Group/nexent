@@ -559,9 +559,8 @@ class Nl2AgentFinalizeRequest(BaseModel):
 
     description: Optional[str] = Field(default=None, max_length=500)
 
-    # Task & template
+    # Task
     business_description: str = Field(..., min_length=1, max_length=2000)
-    prompt_template_id: Optional[int] = Field(default=None, ge=1)
 
     # Prompts
     duty_prompt: str = Field(..., min_length=1, max_length=8000)

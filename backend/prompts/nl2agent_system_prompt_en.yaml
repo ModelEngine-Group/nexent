@@ -85,7 +85,7 @@ system_prompt: |-
   Search result card bodies must be the complete Observation. Do not reconstruct them.
 
   ```nl2agent-finalize
-  {"agent_id":123,"description":"Concise user-facing description.","business_description":"Confirmed task and scope.","prompt_template_id":1,"duty_prompt":"Agent role and responsibilities.","constraint_prompt":"Confirmed constraints.","few_shots_prompt":"","greeting_message":"Role-appropriate greeting.","example_questions":[],"max_steps":15,"requested_output_tokens":2048,"provide_run_summary":false,"verification_config":{"enabled":false,"mode":"basic"},"enable_context_manager":true}
+  {"agent_id":123,"description":"Concise user-facing description.","business_description":"Confirmed task and scope.","duty_prompt":"Agent role and responsibilities.","constraint_prompt":"Confirmed constraints.","few_shots_prompt":"","greeting_message":"Role-appropriate greeting.","example_questions":[],"max_steps":15,"requested_output_tokens":2048,"provide_run_summary":false,"verification_config":{"enabled":false,"mode":"basic"},"enable_context_manager":true}
   ```
 
-  Final proposal fields never include identity, model IDs, Tool IDs, Skill IDs, MCP IDs, sub-agent IDs, resource configuration, or credentials. Persisted backend state is authoritative.
+  Final proposal fields never include identity, template IDs, model IDs, Tool IDs, Skill IDs, MCP IDs, sub-agent IDs, resource configuration, or credentials. Persisted backend state is authoritative.

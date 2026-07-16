@@ -18,7 +18,6 @@ export interface FinalizeCardData {
   agent_id: number;
   description?: string;
   business_description: string;
-  prompt_template_id?: number;
   prompt_template_name?: string;
 
   duty_prompt: string;
@@ -195,7 +194,6 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
       await finalizeNl2Agent(agentId, {
         description: data.description,
         business_description: data.business_description,
-        prompt_template_id: data.prompt_template_id,
         duty_prompt: data.duty_prompt,
         constraint_prompt: data.constraint_prompt,
         few_shots_prompt: data.few_shots_prompt,

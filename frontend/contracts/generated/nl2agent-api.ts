@@ -108,7 +108,7 @@ export interface paths {
     put?: never;
     /**
      * Install Web Skill Api
-     * @description Install a single official/web skill into the tenant.
+     * @description Install a single official/web skill and bind it to the draft agent.
      */
     post: operations["install_web_skill_api_nl2agent_session__agent_id__install_web_skill_post"];
     delete?: never;
@@ -393,8 +393,6 @@ export interface components {
       greeting_message: string;
       /** Max Steps */
       max_steps?: number | null;
-      /** Prompt Template Id */
-      prompt_template_id?: number | null;
       /**
        * Provide Run Summary
        * @default false

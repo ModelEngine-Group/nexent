@@ -202,18 +202,6 @@
             ],
             "title": "Max Steps"
           },
-          "prompt_template_id": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt Template Id"
-          },
           "provide_run_summary": {
             "default": false,
             "title": "Provide Run Summary",
@@ -853,7 +841,7 @@
     },
     "/nl2agent/session/{agent_id}/install-web-skill": {
       "post": {
-        "description": "Install a single official/web skill into the tenant.",
+        "description": "Install a single official/web skill and bind it to the draft agent.",
         "operationId": "install_web_skill_api_nl2agent_session__agent_id__install_web_skill_post",
         "parameters": [
           {

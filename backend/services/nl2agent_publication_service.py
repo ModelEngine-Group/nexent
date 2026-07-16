@@ -40,7 +40,6 @@ async def publish_agent(
     tenant_id: str,
     description: Optional[str] = None,
     business_description: Optional[str] = None,
-    prompt_template_id: Optional[int] = None,
     duty_prompt: Optional[str] = None,
     constraint_prompt: Optional[str] = None,
     few_shots_prompt: Optional[str] = None,
@@ -130,8 +129,6 @@ async def publish_agent(
     for field_name, value, max_length in optional_values:
         if value is not None:
             agent_update[field_name] = str(value)[:max_length]
-    if prompt_template_id is not None:
-        agent_update["prompt_template_id"] = prompt_template_id
     if example_questions is not None:
         agent_update["example_questions"] = example_questions[:6]
     if max_steps is not None:
