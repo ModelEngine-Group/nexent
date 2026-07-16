@@ -50,6 +50,7 @@ class WorkflowDependencies:
     query_tools_by_ids: Callable[..., List[Dict[str, Any]]]
     normalize_model_ids: Callable[[Any], List[int]]
     generate_internal_agent_name: Callable[..., str]
+    get_db_session: Callable[[], Any]
     update_agent: Callable[..., Any]
     confirm_agent_identity: Callable[..., Any]
     runner_agent_name: str
@@ -332,13 +333,15 @@ async def save_agent_identity(
     if not normalized_display_name:
         raise AgentRunException("Agent display name cannot be empty.")
     try:
-        dependencies.update_agent(
-            agent_id=agent_id,
-            agent_info=AgentInfoRequest(display_name=normalized_display_name),
-            user_id=user_id,
-            version_no=0,
-        )
-        dependencies.confirm_agent_identity(tenant_id, agent_id)
+        with dependencies.get_db_session() as db_session:
+            dependencies.update_agent(
+                agent_id=agent_id,
+                agent_info=AgentInfoRequest(display_name=normalized_display_name),
+                user_id=user_id,
+                version_no=0,
+                db_session=db_session,
+            )
+            dependencies.confirm_agent_identity(tenant_id, agent_id)
     except AgentRunException:
         raise
     except Exception as exc:

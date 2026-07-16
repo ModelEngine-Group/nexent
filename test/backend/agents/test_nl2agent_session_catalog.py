@@ -408,6 +408,10 @@ def test_changed_requirements_summary_resets_confirmation(fake_redis):
         ("是 但我还要考虑", "ambiguous"),
         ("确认，但需要修改输出", "modify"),
         ("not correct, change the output", "modify"),
+        ("No change, looks good", "confirmation_requires_button"),
+        ("无需修改，可以继续", "confirmation_requires_button"),
+        ("No change to output; change the audience", "modify"),
+        ("无需修改输出，修改受众", "modify"),
         ("我再考虑一下", "ambiguous"),
     ],
 )
@@ -452,6 +456,34 @@ def test_text_confirmation_requires_button(fake_redis, text):
 
     assert result["intent"] == "confirmation_requires_button"
     assert result["status"] == "awaiting_confirmation"
+
+
+@pytest.mark.parametrize("text", ["No change, looks good", "无需修改，可以继续"])
+def test_negated_modification_keeps_requirements_awaiting_confirmation(
+    fake_redis,
+    text,
+):
+    registered = catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+
+    result = catalog_module.apply_requirements_revision_text(
+        "tenant_1",
+        202,
+        text,
+    )
+
+    assert result["intent"] == "confirmation_requires_button"
+    assert result["status"] == "awaiting_confirmation"
+    assert result["fingerprint"] == registered["fingerprint"]
 
 
 def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake_redis):

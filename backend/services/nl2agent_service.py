@@ -19,6 +19,7 @@ from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candid
 from agents.nl2agent_session_catalog import (
     acquire_mcp_installation_lock,
     apply_requirements_revision_text,
+    assert_trusted_local_search_batch,
     assert_workflow_action_allowed,
     assert_requirements_confirmed,
     assert_identity_confirmed,
@@ -73,7 +74,6 @@ from database.client import get_db_session
 from database.model_management_db import get_model_records
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
-    get_skill_by_id as get_tenant_skill_by_id,
     get_skill_by_name as get_tenant_skill_by_name,
     list_skills as list_tenant_skills,
     query_enabled_skill_instances,
@@ -682,10 +682,11 @@ def _local_resource_dependencies() -> LocalResourceDependencies:
         get_session_state=get_nl2agent_session_state,
         get_session_catalogs=get_nl2agent_session_catalogs,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
-        get_tenant_skill_by_id=get_tenant_skill_by_id,
+        query_skills_by_ids=query_skills_by_ids,
         get_db_session=get_db_session,
         bind_tool=create_or_update_tool_by_tool_info,
         bind_skill=create_or_update_skill_by_skill_info,
+        assert_trusted_batch=assert_trusted_local_search_batch,
         register_batch=register_recommendation_batch,
         resolve_batch=resolve_recommendation_batch,
         continuation_text=NL2AGENT_CHAT_INJECTION_TEXT,
@@ -772,6 +773,7 @@ def _workflow_dependencies() -> WorkflowDependencies:
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         normalize_model_ids=normalize_model_ids,
         generate_internal_agent_name=_generate_internal_agent_name,
+        get_db_session=get_db_session,
         update_agent=update_agent,
         confirm_agent_identity=confirm_agent_identity,
         runner_agent_name=NL2AGENT_AGENT_NAME,

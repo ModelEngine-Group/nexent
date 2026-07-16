@@ -2302,13 +2302,13 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
 ):
     query_tools = MagicMock(return_value=[{"tool_id": 42, "params": {"path": "/tmp"}}])
     bind_tool = MagicMock()
-    get_tenant_skill = MagicMock(return_value={"skill_id": 7, "name": "writer"})
+    query_skills = MagicMock(return_value=[{"skill_id": 7, "name": "writer"}])
     bind_skill = MagicMock()
     db_session, transaction = _mock_database_transaction(monkeypatch)
 
     monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
     monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool)
-    monkeypatch.setattr(nl2agent_service, "get_tenant_skill_by_id", get_tenant_skill)
+    monkeypatch.setattr(nl2agent_service, "query_skills_by_ids", query_skills)
     monkeypatch.setattr(nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill)
     monkeypatch.setattr(nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202}))
     _register_local_batch("batch_1", [42], [7])
@@ -2338,9 +2338,9 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
     assert tool_request.params == {"path": "/tmp"}
     assert tool_request.enabled is True
     assert bind_tool.call_args.kwargs["db_session"] is db_session
+    query_skills.assert_called_once_with([7], "tenant_1")
     bind_tool.assert_called_once()
 
-    get_tenant_skill.assert_called_once_with(7, "tenant_1")
     skill_request = bind_skill.call_args.kwargs["skill_info"]
     assert skill_request.skill_id == 7
     assert skill_request.agent_id == 202
@@ -2403,6 +2403,11 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
             ]
         ),
     )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_skills_by_ids",
+        MagicMock(return_value=[{"skill_id": 7, "name": "brief-writer"}]),
+    )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
@@ -2437,6 +2442,63 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
             ]
         },
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("missing_resource", "error_message"),
+    [
+        ("tool", "tools that no longer exist"),
+        ("skill", "tenant skills that no longer exist"),
+    ],
+)
+async def test_register_local_resources_does_not_advance_state_for_deleted_resources(
+    monkeypatch,
+    missing_resource,
+    error_message,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids_for_tenant",
+        MagicMock(return_value=[] if missing_resource == "tool" else [{"tool_id": 1}]),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_skills_by_ids",
+        MagicMock(
+            return_value=[]
+            if missing_resource == "skill"
+            else [{"skill_id": 7}]
+        ),
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
+    )
+    nl2agent_session_catalog.record_trusted_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="deleted_resource_batch",
+        resource_type="local",
+        tool_ids=[1],
+        skill_ids=[7],
+    )
+
+    with pytest.raises(nl2agent_service.AgentRunException, match=error_message):
+        await nl2agent_service.register_local_resource_recommendations(
+            agent_id=202,
+            recommendation_batch_id="deleted_resource_batch",
+            tool_ids=[1],
+            skill_ids=[7],
+            tenant_id="tenant_1",
+        )
+
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert "deleted_resource_batch" not in state["recommendation_batches"]
 
 
 @pytest.mark.asyncio
@@ -2598,8 +2660,8 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(m
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "get_tenant_skill_by_id",
-        MagicMock(return_value={"skill_id": 7, "name": "writer"}),
+        "query_skills_by_ids",
+        MagicMock(return_value=[{"skill_id": 7, "name": "writer"}]),
     )
     monkeypatch.setattr(
         nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
@@ -3123,6 +3185,7 @@ async def test_save_agent_identity_persists_display_name_and_confirmation(monkey
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
     )
+    db_session, transaction = _mock_database_transaction(monkeypatch)
     update = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_agent", update)
     monkeypatch.setattr(
@@ -3141,7 +3204,45 @@ async def test_save_agent_identity_persists_display_name_and_confirmation(monkey
         "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
     assert update.call_args.kwargs["agent_info"].display_name == "Document Helper"
+    assert update.call_args.kwargs["db_session"] is db_session
+    transaction.__exit__.assert_called_once_with(None, None, None)
     assert nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)["identity_confirmed"]
+
+
+@pytest.mark.asyncio
+async def test_save_agent_identity_rolls_back_database_when_redis_confirmation_fails(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    _, transaction = _mock_database_transaction(monkeypatch)
+    update = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_agent", update)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "confirm_agent_identity",
+        MagicMock(side_effect=RuntimeError("Redis unavailable")),
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="Failed to save the agent display name",
+    ):
+        await nl2agent_service.save_agent_identity(
+            202,
+            "Document Helper",
+            "tenant_1",
+            "user_1",
+        )
+
+    assert update.called
+    transaction.__exit__.assert_called_once()
+    assert transaction.__exit__.call_args.args[0] is RuntimeError
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["identity_confirmed"] is False
 
 
 @pytest.mark.asyncio

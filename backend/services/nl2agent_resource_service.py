@@ -95,10 +95,11 @@ class LocalResourceDependencies:
     get_session_state: Callable[[str, int], Dict[str, Any]]
     get_session_catalogs: Callable[[str, int], Dict[str, List[Dict[str, Any]]]]
     query_tools_by_ids: Callable[[List[int], str], List[Dict[str, Any]]]
-    get_tenant_skill_by_id: Callable[[int, str], Any]
+    query_skills_by_ids: Callable[[List[int], str], List[Dict[str, Any]]]
     get_db_session: Callable[[], Any]
     bind_tool: Callable[..., Any]
     bind_skill: Callable[..., Any]
+    assert_trusted_batch: Callable[..., None]
     register_batch: Callable[..., Dict[str, Any]]
     resolve_batch: Callable[..., Dict[str, Any]]
     continuation_text: str
@@ -157,11 +158,13 @@ async def apply_local_resources(
             + ", ".join(map(str, missing_tool_ids))
         )
 
-    missing_skill_ids = [
-        skill_id
-        for skill_id in selected_skill_ids
-        if not dependencies.get_tenant_skill_by_id(skill_id, tenant_id)
-    ]
+    skill_records = (
+        dependencies.query_skills_by_ids(selected_skill_ids, tenant_id)
+        if selected_skill_ids
+        else []
+    )
+    existing_skill_ids = {int(item["skill_id"]) for item in skill_records}
+    missing_skill_ids = sorted(set(selected_skill_ids) - existing_skill_ids)
     if missing_skill_ids:
         raise AgentRunException(
             "Local resource binding failed because tenant skills no longer exist: "
@@ -275,7 +278,7 @@ async def register_local_recommendations(
         raise AgentRunException(
             "Local recommendations contain resources outside this session catalog."
         )
-    batch = dependencies.register_batch(
+    dependencies.assert_trusted_batch(
         tenant_id,
         agent_id,
         recommendation_batch_id,
@@ -283,6 +286,7 @@ async def register_local_recommendations(
         skill_ids,
     )
     selected_tool_ids = list(dict.fromkeys(map(int, tool_ids)))
+    selected_skill_ids = list(dict.fromkeys(map(int, skill_ids)))
     tool_records = (
         dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
         if selected_tool_ids
@@ -297,6 +301,25 @@ async def register_local_recommendations(
             "Local recommendations contain tools that no longer exist: "
             + ", ".join(map(str, missing_tool_ids))
         )
+    skill_records = (
+        dependencies.query_skills_by_ids(selected_skill_ids, tenant_id)
+        if selected_skill_ids
+        else []
+    )
+    existing_skill_ids = {int(item["skill_id"]) for item in skill_records}
+    missing_skill_ids = sorted(set(selected_skill_ids) - existing_skill_ids)
+    if missing_skill_ids:
+        raise AgentRunException(
+            "Local recommendations contain tenant skills that no longer exist: "
+            + ", ".join(map(str, missing_skill_ids))
+        )
+    batch = dependencies.register_batch(
+        tenant_id,
+        agent_id,
+        recommendation_batch_id,
+        selected_tool_ids,
+        selected_skill_ids,
+    )
     return {
         "recommendation_batch_id": recommendation_batch_id,
         **batch,

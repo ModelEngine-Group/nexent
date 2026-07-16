@@ -102,6 +102,22 @@ _MODIFICATION_MARKERS = {
     "not correct",
     "instead",
 }
+_NO_MODIFICATION_PHRASES = {
+    "no change",
+    "no changes",
+    "nothing to change",
+    "do not change",
+    "don t change",
+    "no modification",
+    "no modifications",
+    "无需修改",
+    "不需要修改",
+    "不用修改",
+    "不必修改",
+    "不要修改",
+    "没有修改",
+    "无修改",
+}
 
 
 class Nl2AgentSessionCatalogError(Nl2AgentWorkflowConflictError):
@@ -322,8 +338,16 @@ def classify_requirements_message_intent(text: str) -> str:
     normalized = re.sub(r"\s+", " ", normalized).strip()
     if not normalized:
         return "ambiguous"
-    if any(marker in normalized for marker in _MODIFICATION_MARKERS):
+    modification_text = normalized
+    contains_no_modification = False
+    for phrase in _NO_MODIFICATION_PHRASES:
+        if phrase in modification_text:
+            contains_no_modification = True
+            modification_text = modification_text.replace(phrase, " ")
+    if any(marker in modification_text for marker in _MODIFICATION_MARKERS):
         return "modify"
+    if contains_no_modification:
+        return "confirmation_requires_button"
     if normalized in _CONFIRMATION_PHRASES:
         return "confirmation_requires_button"
     if any(phrase in normalized for phrase in _CONFIRMATION_PHRASES - _SHORT_CONFIRMATION_PHRASES):
@@ -630,6 +654,27 @@ def register_recommendation_batch(
         return batches[recommendation_batch_id].model_dump(mode="json")
 
     return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def assert_trusted_local_search_batch(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_batch_id: str,
+    tool_ids: List[int],
+    skill_ids: List[int],
+) -> None:
+    """Validate a local card against the immutable server-recorded search result."""
+    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+    trusted = state["trusted_search_batches"].get(recommendation_batch_id)
+    if (
+        trusted is None
+        or trusted.get("resource_type") != "local"
+        or trusted.get("tool_ids") != sorted(set(map(int, tool_ids)))
+        or trusted.get("skill_ids") != sorted(set(map(int, skill_ids)))
+    ):
+        raise Nl2AgentSessionCatalogError(
+            "Recommendation batch does not match a trusted search result."
+        )
 
 
 def record_trusted_search_batch(
