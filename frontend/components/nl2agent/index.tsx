@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Button } from "antd";
-import { resolveNl2AgentCardAgentId } from "@/lib/chat/nl2agentDraftContext";
 import { LocalResourcesCard, LocalResourceItem } from "./LocalResourcesCard";
 import { WebMcpCard, WebMcpCardItem } from "./WebMcpCard";
 import { WebSkillCard, WebSkillCardItem } from "./WebSkillCard";
@@ -12,7 +11,7 @@ import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
 import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import { validateNl2AgentCards, type Nl2AgentCardType } from "./cardValidation";
+import { parseNl2AgentCard, type Nl2AgentCardType } from "./cardValidation";
 
 export const OnlineRecommendationGroup: React.FC<{
   agentId: number;
@@ -40,7 +39,8 @@ export const OnlineRecommendationGroup: React.FC<{
   const [registrationError, setRegistrationError] = useState<string>();
 
   const register = useCallback(async () => {
-    if (!recommendationBatchId || !workflow.active || !registrationEnabled) return;
+    if (!recommendationBatchId || !workflow.active || !registrationEnabled)
+      return;
     workflow.beginAction();
     setRegistrationError(undefined);
     try {
@@ -182,45 +182,36 @@ export const tryRenderNl2AgentCard = (
     return renderInvalidSearchCard();
   }
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
+  const validation = parseNl2AgentCard(
+    normalizedLanguage,
+    content,
+    trustedDraftAgentId
+  );
+  if (validation.failure?.agentIdError === "mismatch") {
+    return renderMismatchedAgentId();
+  }
+  if (validation.failure?.agentIdError === "missing") {
+    return renderInvalidAgentId();
+  }
+  if (validation.failure?.reason === "invalid_json") {
     return (
       <div className="my-2 p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
         Invalid NL2AGENT card JSON: {content.slice(0, 120)}
       </div>
     );
   }
-
-  const { agentId, mismatch } = resolveNl2AgentCardAgentId(
-    parsed.agent_id,
-    Array.isArray(parsed.items)
-      ? parsed.items.map((item: any) => item?.agent_id)
-      : [],
-    trustedDraftAgentId
-  );
-  if (mismatch) {
-    return renderMismatchedAgentId();
-  }
-  if (agentId == null) {
-    return renderInvalidAgentId();
-  }
   if (
+    validation.failure?.reason === "invalid_schema" &&
+    !validation.failure.cardKey &&
     [
       "nl2agent-web-mcp",
       "nl2agent-web-mcps",
       "nl2agent-web-skill",
       "nl2agent-web-skills",
-    ].includes(normalizedLanguage) &&
-    !parsed.recommendation_batch_id
+    ].includes(normalizedLanguage)
   ) {
     return renderMissingOnlineBatch();
   }
-  const validation = validateNl2AgentCards(
-    `\`\`\`${normalizedLanguage}\n${content}\n\`\`\``,
-    trustedDraftAgentId
-  );
   if (validation.failure) {
     return (
       <div className="my-2 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">
@@ -228,6 +219,10 @@ export const tryRenderNl2AgentCard = (
       </div>
     );
   }
+  const card = validation.cards[0];
+  if (!card) return null;
+  const parsed = card.payload;
+  const agentId = card.agentId;
 
   switch (normalizedLanguage) {
     case "nl2agent-requirements-summary":
@@ -282,7 +277,7 @@ export const tryRenderNl2AgentCard = (
     }
     case "nl2agent-web-mcp": {
       if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
-      const item: WebMcpCardItem = parsed;
+      const item = parsed as WebMcpCardItem;
       return (
         <OnlineRecommendationGroup
           agentId={agentId}
@@ -323,7 +318,7 @@ export const tryRenderNl2AgentCard = (
     }
     case "nl2agent-web-skill": {
       if (!parsed.recommendation_batch_id) return renderMissingOnlineBatch();
-      const item: WebSkillCardItem = parsed;
+      const item = parsed as WebSkillCardItem;
       const itemKey = item.skill_id
         ? `skill:${item.skill_id}`
         : `skill-name:${String(item.skill_name || item.name || "")

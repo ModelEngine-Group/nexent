@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import React from "react";
 import {
   resolveNl2AgentCardAgentId,
@@ -235,13 +235,15 @@ describe("tryRenderNl2AgentCard", () => {
   });
 
   it("recovers the draft agent ID from MCP list items", () => {
-    const items = [{
-      agent_id: 202,
-      recommendation_id: "community:browser",
-      name: "Browser MCP",
-      source: "community",
-      install_options: [{ option_id: "remote", type: "remote" }],
-    }];
+    const items = [
+      {
+        agent_id: 202,
+        recommendation_id: "community:browser",
+        name: "Browser MCP",
+        source: "community",
+        install_options: [{ option_id: "remote", type: "remote" }],
+      },
+    ];
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
       JSON.stringify({ recommendation_batch_id: "online_mcp", items })
@@ -259,12 +261,14 @@ describe("tryRenderNl2AgentCard", () => {
       "nl2agent-web-mcps",
       JSON.stringify({
         recommendation_batch_id: "online_mcp",
-        items: [{
-          recommendation_id: "community:browser",
-          name: "Browser MCP",
-          source: "community",
-          install_options: [{ option_id: "remote", type: "remote" }],
-        }],
+        items: [
+          {
+            recommendation_id: "community:browser",
+            name: "Browser MCP",
+            source: "community",
+            install_options: [{ option_id: "remote", type: "remote" }],
+          },
+        ],
       }),
       undefined,
       202
