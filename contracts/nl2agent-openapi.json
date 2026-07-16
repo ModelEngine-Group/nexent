@@ -1,6 +1,91 @@
 {
   "components": {
     "schemas": {
+      "AgentVerificationConfig": {
+        "additionalProperties": false,
+        "description": "Configuration for layered ReAct self-verification.",
+        "properties": {
+          "critical_events": {
+            "description": "Critical ReAct events that should be verified",
+            "items": {
+              "enum": [
+                "tool_precheck",
+                "tool_result",
+                "retrieval",
+                "code_execution",
+                "handoff",
+                "final_answer"
+              ],
+              "type": "string"
+            },
+            "title": "Critical Events",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "description": "Whether self-verification is enabled",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "fail_policy": {
+            "default": "repair_then_controlled_summary",
+            "description": "Policy when final verification still fails after repair attempts",
+            "enum": [
+              "repair_then_controlled_summary",
+              "warn"
+            ],
+            "title": "Fail Policy",
+            "type": "string"
+          },
+          "final_verification_enabled": {
+            "default": true,
+            "description": "Whether to verify final answer candidates before returning them",
+            "title": "Final Verification Enabled",
+            "type": "boolean"
+          },
+          "llm_verification_enabled": {
+            "default": true,
+            "description": "Whether to use the LLM as a final-answer verifier after deterministic checks",
+            "title": "Llm Verification Enabled",
+            "type": "boolean"
+          },
+          "max_final_rounds": {
+            "default": 2,
+            "description": "Maximum number of final-answer verification attempts",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Max Final Rounds",
+            "type": "integer"
+          },
+          "pass_score": {
+            "default": 0.75,
+            "description": "Minimum verifier score for final answers",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pass Score",
+            "type": "number"
+          },
+          "step_verification_enabled": {
+            "default": true,
+            "description": "Whether to verify critical ReAct step events",
+            "title": "Step Verification Enabled",
+            "type": "boolean"
+          },
+          "strictness": {
+            "default": "balanced",
+            "description": "Verification strictness profile",
+            "enum": [
+              "lenient",
+              "balanced",
+              "strict"
+            ],
+            "title": "Strictness",
+            "type": "string"
+          }
+        },
+        "title": "AgentVerificationConfig",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -222,14 +307,12 @@
           "verification_config": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/AgentVerificationConfig"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Verification Config"
+            ]
           }
         },
         "required": [

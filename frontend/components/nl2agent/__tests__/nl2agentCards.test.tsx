@@ -25,6 +25,7 @@ import {
 import {
   FinalizeCard,
   canPublishFinalReview,
+  getVerificationReviewFields,
   groupFinalReviewResources,
 } from "../FinalizeCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
@@ -56,6 +57,26 @@ const readyMcpOption = {
 };
 
 describe("tryRenderNl2AgentCard", () => {
+  it("exposes the effective verification configuration in final review", () => {
+    assert.deepEqual(getVerificationReviewFields({ enabled: false }), [
+      { label: "Verification", value: "Disabled" },
+    ]);
+    assert.deepEqual(
+      getVerificationReviewFields({
+        enabled: true,
+        strictness: "strict",
+        max_final_rounds: 3,
+        fail_policy: "warn",
+      }),
+      [
+        { label: "Verification", value: "Enabled" },
+        { label: "Strictness", value: "strict" },
+        { label: "Max Verification Rounds", value: 3 },
+        { label: "Failure Policy", value: "warn" },
+      ]
+    );
+  });
+
   it("renders a prevalidated card AST without parsing raw JSON again", () => {
     const validation = validateNl2AgentCards(
       "```nl2agent-model-selection\n{}\n```",

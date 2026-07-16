@@ -110,6 +110,28 @@ def test_contract_rejects_unstable_resource_payloads() -> None:
     assert list(_validator("web_mcp").iter_errors(invalid_mcp))
 
 
+def test_final_review_verification_config_matches_runtime_contract() -> None:
+    valid_payload = {
+        "business_description": "Build an agent.",
+        "duty_prompt": "Help the user.",
+        "greeting_message": "Hello.",
+        "verification_config": {
+            "enabled": True,
+            "strictness": "strict",
+            "max_final_rounds": 3,
+            "fail_policy": "warn",
+            "critical_events": ["tool_result", "final_answer"],
+        },
+    }
+    invalid_payload = {
+        **valid_payload,
+        "verification_config": {"enabled": False, "mode": "basic"},
+    }
+
+    assert list(_validator("final_review").iter_errors(valid_payload)) == []
+    assert list(_validator("final_review").iter_errors(invalid_payload))
+
+
 def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:
     language_to_type = {
         "nl2agent-requirements-summary": "requirements_summary",

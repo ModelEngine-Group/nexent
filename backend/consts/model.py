@@ -575,7 +575,7 @@ class Nl2AgentFinalizeRequest(BaseModel):
     max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     requested_output_tokens: Optional[int] = Field(default=None, ge=1)
     provide_run_summary: bool = Field(default=False)
-    verification_config: Optional[Dict[str, Any]] = Field(default=None)
+    verification_config: Optional[AgentVerificationConfig] = Field(default=None)
     enable_context_manager: bool = Field(default=True)
 
 

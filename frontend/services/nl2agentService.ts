@@ -405,12 +405,8 @@ export interface Nl2AgentInstallWebSkillResponse {
 export type Nl2AgentInstallWebSkillPayload =
   Nl2AgentApiSchemas["Nl2AgentInstallWebSkillRequest"];
 
-export type Nl2AgentFinalizePayload = Omit<
-  Nl2AgentApiSchemas["Nl2AgentFinalizeRequest"],
-  "verification_config"
-> & {
-  verification_config?: { enabled: boolean; mode?: string };
-};
+export type Nl2AgentFinalizePayload =
+  Nl2AgentApiSchemas["Nl2AgentFinalizeRequest"];
 
 export interface Nl2AgentFinalizeResponse {
   agent_id: number;

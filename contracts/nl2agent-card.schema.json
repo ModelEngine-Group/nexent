@@ -244,7 +244,41 @@
           "required": ["enabled"],
           "properties": {
             "enabled": { "type": "boolean" },
-            "mode": { "type": "string" }
+            "step_verification_enabled": { "type": "boolean" },
+            "final_verification_enabled": { "type": "boolean" },
+            "llm_verification_enabled": { "type": "boolean" },
+            "max_final_rounds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "strictness": {
+              "type": "string",
+              "enum": ["lenient", "balanced", "strict"]
+            },
+            "fail_policy": {
+              "type": "string",
+              "enum": ["repair_then_controlled_summary", "warn"]
+            },
+            "pass_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "critical_events": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "tool_precheck",
+                  "tool_result",
+                  "retrieval",
+                  "code_execution",
+                  "handoff",
+                  "final_answer"
+                ]
+              }
+            }
           },
           "additionalProperties": false
         },

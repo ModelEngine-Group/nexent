@@ -10,6 +10,7 @@ import { useParams } from "next/navigation";
 import {
   finalizeNl2Agent,
   getNl2AgentSessionState,
+  type Nl2AgentFinalizePayload,
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
 
@@ -30,7 +31,7 @@ export interface FinalizeCardData {
   max_steps?: number;
   requested_output_tokens?: number;
   provide_run_summary?: boolean;
-  verification_config?: { enabled: boolean; mode?: string };
+  verification_config?: FinalizeVerificationConfig;
   enable_context_manager?: boolean;
 
   author?: string;
@@ -84,6 +85,34 @@ export const canPublishFinalReview = (
     !stateLoading &&
     !stateError
   );
+
+export type FinalizeVerificationConfig = NonNullable<
+  Nl2AgentFinalizePayload["verification_config"]
+> & { enabled: boolean };
+
+export const getVerificationReviewFields = (
+  config: FinalizeVerificationConfig
+): Array<{ label: string; value: string | number }> => {
+  if (!config.enabled) {
+    return [{ label: "Verification", value: "Disabled" }];
+  }
+  const fields: Array<{ label: string; value: string | number }> = [
+    { label: "Verification", value: "Enabled" },
+  ];
+  if (config.strictness) {
+    fields.push({ label: "Strictness", value: config.strictness });
+  }
+  if (config.max_final_rounds !== undefined) {
+    fields.push({
+      label: "Max Verification Rounds",
+      value: config.max_final_rounds,
+    });
+  }
+  if (config.fail_policy) {
+    fields.push({ label: "Failure Policy", value: config.fail_policy });
+  }
+  return fields;
+};
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   title,
@@ -476,6 +505,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
           {data.max_steps ||
           data.requested_output_tokens ||
           data.provide_run_summary !== undefined ||
+          data.verification_config !== undefined ||
           data.enable_context_manager !== undefined ? (
             <>
               <Section
@@ -496,6 +526,17 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
                       : undefined
                   }
                 />
+                {data.verification_config
+                  ? getVerificationReviewFields(data.verification_config).map(
+                      (field) => (
+                        <FieldLine
+                          key={field.label}
+                          label={field.label}
+                          value={field.value}
+                        />
+                      )
+                    )
+                  : null}
                 <FieldLine
                   label="Context Manager"
                   value={

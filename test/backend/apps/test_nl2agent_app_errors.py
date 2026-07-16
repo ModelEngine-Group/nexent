@@ -10,7 +10,7 @@ from consts.exceptions import (
     AgentRunException,
     Nl2AgentDraftNotFoundError,
 )
-from consts.model import Nl2AgentRecommendationBatchRequest
+from consts.model import Nl2AgentFinalizeRequest, Nl2AgentRecommendationBatchRequest
 
 from apps import nl2agent_app
 from apps.nl2agent_app import _session_http_error
@@ -83,3 +83,27 @@ async def test_local_registration_api_maps_workflow_conflict(monkeypatch) -> Non
         exc_info.value.error_code
         == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
     )
+
+
+@pytest.mark.asyncio
+async def test_finalize_api_passes_validated_verification_config(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "get_current_user_info",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    finalize = AsyncMock(return_value={"agent_id": 202, "status": "draft_ready"})
+    monkeypatch.setattr(nl2agent_app, "finalize_agent", finalize)
+    payload = Nl2AgentFinalizeRequest(
+        business_description="Build an agent",
+        duty_prompt="Help the user",
+        greeting_message="Hello",
+        verification_config={"enabled": False},
+    )
+
+    await nl2agent_app.finalize_agent_api(202, payload, MagicMock(), None)
+
+    verification_config = finalize.await_args.kwargs["verification_config"]
+    assert verification_config["enabled"] is False
+    assert verification_config["strictness"] == "balanced"
+    assert "mode" not in verification_config

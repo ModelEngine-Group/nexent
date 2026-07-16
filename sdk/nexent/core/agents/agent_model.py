@@ -3,7 +3,15 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from threading import Event
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from ..utils.observer import MessageObserver
+
+
+if TYPE_CHECKING:
+    from .a2a_agent_proxy import A2AAgentInfo
 
 logger = logging.getLogger("context_strategy")
 
@@ -11,15 +19,6 @@ logger = logging.getLogger("context_strategy")
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
-
-from pydantic import BaseModel, Field, model_validator
-
-from ..utils.observer import MessageObserver
-
-# TYPE_CHECKING to avoid circular import
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from .summary_config import ContextManagerConfig
 
 
 class ModelConfig(BaseModel):
@@ -149,6 +148,8 @@ VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
 
 class AgentVerificationConfig(BaseModel):
     """Configuration for layered ReAct self-verification."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(description="Whether self-verification is enabled", default=True)
     step_verification_enabled: bool = Field(

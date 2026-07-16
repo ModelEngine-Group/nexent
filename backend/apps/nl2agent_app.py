@@ -408,7 +408,11 @@ async def finalize_agent_api(
             max_steps=payload.max_steps,
             requested_output_tokens=payload.requested_output_tokens,
             provide_run_summary=payload.provide_run_summary,
-            verification_config=payload.verification_config,
+            verification_config=(
+                payload.verification_config.model_dump()
+                if payload.verification_config is not None
+                else None
+            ),
             enable_context_manager=payload.enable_context_manager,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)

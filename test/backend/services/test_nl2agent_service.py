@@ -2747,6 +2747,16 @@ def test_finalize_request_rejects_fabricated_persisted_fields():
         )
 
 
+def test_finalize_request_rejects_unknown_verification_fields():
+    with pytest.raises(ValidationError):
+        Nl2AgentFinalizeRequest(
+            business_description="Build document presentations",
+            duty_prompt="Create presentations from documents.",
+            greeting_message="Upload a document to begin.",
+            verification_config={"enabled": False, "mode": "basic"},
+        )
+
+
 @pytest.mark.asyncio
 async def test_finalize_uses_persisted_resources(monkeypatch):
     draft = {

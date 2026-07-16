@@ -308,6 +308,74 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * AgentVerificationConfig
+     * @description Configuration for layered ReAct self-verification.
+     */
+    AgentVerificationConfig: {
+      /**
+       * Critical Events
+       * @description Critical ReAct events that should be verified
+       */
+      critical_events?: (
+        | "tool_precheck"
+        | "tool_result"
+        | "retrieval"
+        | "code_execution"
+        | "handoff"
+        | "final_answer"
+      )[];
+      /**
+       * Enabled
+       * @description Whether self-verification is enabled
+       * @default true
+       */
+      enabled?: boolean;
+      /**
+       * Fail Policy
+       * @description Policy when final verification still fails after repair attempts
+       * @default repair_then_controlled_summary
+       * @enum {string}
+       */
+      fail_policy?: "repair_then_controlled_summary" | "warn";
+      /**
+       * Final Verification Enabled
+       * @description Whether to verify final answer candidates before returning them
+       * @default true
+       */
+      final_verification_enabled?: boolean;
+      /**
+       * Llm Verification Enabled
+       * @description Whether to use the LLM as a final-answer verifier after deterministic checks
+       * @default true
+       */
+      llm_verification_enabled?: boolean;
+      /**
+       * Max Final Rounds
+       * @description Maximum number of final-answer verification attempts
+       * @default 2
+       */
+      max_final_rounds?: number;
+      /**
+       * Pass Score
+       * @description Minimum verifier score for final answers
+       * @default 0.75
+       */
+      pass_score?: number;
+      /**
+       * Step Verification Enabled
+       * @description Whether to verify critical ReAct step events
+       * @default true
+       */
+      step_verification_enabled?: boolean;
+      /**
+       * Strictness
+       * @description Verification strictness profile
+       * @default balanced
+       * @enum {string}
+       */
+      strictness?: "lenient" | "balanced" | "strict";
+    };
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -400,10 +468,8 @@ export interface components {
       provide_run_summary?: boolean;
       /** Requested Output Tokens */
       requested_output_tokens?: number | null;
-      /** Verification Config */
-      verification_config?: {
-        [key: string]: unknown;
-      } | null;
+      verification_config?:
+        components["schemas"]["AgentVerificationConfig"] | null;
     };
     /**
      * Nl2AgentIdentityRequest
