@@ -18,9 +18,15 @@ import { resolveS3UrlToDataUrl } from "@/services/storageService";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
-import { tryRenderNl2AgentCard } from "@/components/nl2agent";
+import {
+  renderValidatedNl2AgentCard,
+  tryRenderNl2AgentCard,
+} from "@/components/nl2agent";
 import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
-import type { Nl2AgentCardType } from "@/components/nl2agent/cardValidation";
+import type {
+  Nl2AgentCardType,
+  ValidatedNl2AgentCard,
+} from "@/components/nl2agent/cardValidation";
 
 interface MarkdownRendererProps {
   content: string;
@@ -44,6 +50,8 @@ interface MarkdownRendererProps {
     cardKey?: string
   ) => void | Promise<void>;
   nl2AgentCardRegistrationEnabled?: boolean;
+  /** Parsed once by the final-message boundary and reused during rendering. */
+  nl2AgentCards?: readonly ValidatedNl2AgentCard[];
 }
 
 export interface MarkdownHeading {
@@ -1061,6 +1069,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   nl2AgentCardRenderMode = "placeholder",
   onNl2AgentCardRegistered,
   nl2AgentCardRegistrationEnabled = false,
+  nl2AgentCards,
 }) => {
   const { t } = useTranslation("common");
 
@@ -1392,14 +1401,25 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                           </div>
                         );
                       }
-                      const node = tryRenderNl2AgentCard(
-                        match[1],
-                        codeContent,
-                        onInstallNl2AgentMcp,
-                        nl2AgentDraftAgentId,
-                        onNl2AgentCardRegistered,
-                        nl2AgentCardRegistrationEnabled
+                      const validatedCard = nl2AgentCards?.find(
+                        (card) =>
+                          card.language === match[1].trim().toLowerCase()
                       );
+                      const node = validatedCard
+                        ? renderValidatedNl2AgentCard(
+                            validatedCard,
+                            onInstallNl2AgentMcp,
+                            onNl2AgentCardRegistered,
+                            nl2AgentCardRegistrationEnabled
+                          )
+                        : tryRenderNl2AgentCard(
+                            match[1],
+                            codeContent,
+                            onInstallNl2AgentMcp,
+                            nl2AgentDraftAgentId,
+                            onNl2AgentCardRegistered,
+                            nl2AgentCardRegistrationEnabled
+                          );
                       if (node) {
                         return nl2AgentCardRenderMode === "readonly" ? (
                           <div

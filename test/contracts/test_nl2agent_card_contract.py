@@ -52,7 +52,15 @@ def test_all_seven_nl2agent_card_payloads_validate() -> None:
                     "recommendation_id": "registry:document",
                     "name": "Document MCP",
                     "install_options": [
-                        {"option_id": "remote", "type": "remote"}
+                        {
+                            "option_id": "remote",
+                            "type": "remote",
+                            "label": "Remote endpoint",
+                            "requires_configuration": False,
+                            "fields": [],
+                            "supported": True,
+                            "status": "ready",
+                        },
                     ],
                 }
             ],

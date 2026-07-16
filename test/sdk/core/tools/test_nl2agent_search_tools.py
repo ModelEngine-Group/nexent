@@ -548,6 +548,7 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
                 "description": "Review pull requests and source changes.",
                 "tags": ["code", "review"],
                 "status": "installable",
+                "config_schema": {"api_key": {"default": "secret"}},
             },
             {
                 "skill_id": 13,
@@ -564,6 +565,7 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
 
     assert payload["agent_id"] == 202
     assert payload["items"][0]["skill_id"] == 12
+    assert "config_schema" not in payload["items"][0]
     assert len(payload["items"]) == 1
 
 

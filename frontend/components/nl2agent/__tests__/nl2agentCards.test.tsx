@@ -10,7 +10,11 @@ import {
   nl2AgentContinuationScopeKey,
 } from "@/lib/chat/nl2agentContinuation";
 
-import { OnlineRecommendationGroup, tryRenderNl2AgentCard } from "..";
+import {
+  OnlineRecommendationGroup,
+  renderValidatedNl2AgentCard,
+  tryRenderNl2AgentCard,
+} from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
 import { ModelSelectionCard } from "../ModelSelectionCard";
 import { AgentIdentityCard } from "../AgentIdentityCard";
@@ -41,7 +45,30 @@ function onlineChildren(node: React.ReactNode): React.ReactNode[] {
   return React.Children.toArray(node.props.children);
 }
 
+const readyMcpOption = {
+  option_id: "remote",
+  type: "remote" as const,
+  label: "Remote endpoint",
+  requires_configuration: false,
+  fields: [],
+  supported: true,
+  status: "ready" as const,
+};
+
 describe("tryRenderNl2AgentCard", () => {
+  it("renders a prevalidated card AST without parsing raw JSON again", () => {
+    const validation = validateNl2AgentCards(
+      "```nl2agent-model-selection\n{}\n```",
+      202
+    );
+
+    const node = renderValidatedNl2AgentCard(validation.cards[0]);
+
+    assertElement(node);
+    assert.equal(node.type, ModelSelectionCard);
+    assert.equal(node.props.agentId, 202);
+  });
+
   it("rejects invented search request cards before parsing their payload", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-search-web-mcps",
@@ -170,9 +197,8 @@ describe("tryRenderNl2AgentCard", () => {
       name: "GitHub MCP",
       description: "Repository automation",
       source: "community",
-      url: "https://example.com/mcp",
       transport: "sse",
-      install_options: [{ option_id: "remote", type: "remote" }],
+      install_options: [readyMcpOption],
     };
     let installedItem: WebMcpCardItem | null = null;
 
@@ -204,13 +230,13 @@ describe("tryRenderNl2AgentCard", () => {
         recommendation_id: "community:browser",
         name: "Browser MCP",
         source: "community",
-        install_options: [{ option_id: "remote", type: "remote" }],
+        install_options: [readyMcpOption],
       },
       {
         recommendation_id: "registry:github",
         name: "GitHub MCP",
         source: "registry",
-        install_options: [{ option_id: "remote", type: "remote" }],
+        install_options: [readyMcpOption],
       },
     ];
 
@@ -241,7 +267,7 @@ describe("tryRenderNl2AgentCard", () => {
         recommendation_id: "community:browser",
         name: "Browser MCP",
         source: "community",
-        install_options: [{ option_id: "remote", type: "remote" }],
+        install_options: [readyMcpOption],
       },
     ];
     const node = tryRenderNl2AgentCard(
@@ -266,7 +292,7 @@ describe("tryRenderNl2AgentCard", () => {
             recommendation_id: "community:browser",
             name: "Browser MCP",
             source: "community",
-            install_options: [{ option_id: "remote", type: "remote" }],
+            install_options: [readyMcpOption],
           },
         ],
       }),

@@ -12,7 +12,11 @@ import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
 import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
-import { parseNl2AgentCard, type Nl2AgentCardType } from "./cardValidation";
+import {
+  parseNl2AgentCard,
+  type Nl2AgentCardType,
+  type ValidatedNl2AgentCard,
+} from "./cardValidation";
 
 export const OnlineRecommendationGroup: React.FC<{
   agentId: number;
@@ -229,6 +233,25 @@ export const tryRenderNl2AgentCard = (
   }
   const card = validation.cards[0];
   if (!card) return null;
+  return renderValidatedNl2AgentCard(
+    card,
+    onInstallMcp,
+    onRegistered,
+    registrationEnabled
+  );
+};
+
+/** Render an already parsed and schema-validated card AST node. */
+export const renderValidatedNl2AgentCard = (
+  card: ValidatedNl2AgentCard,
+  onInstallMcp?: (item: WebMcpCardItem) => void,
+  onRegistered?: (
+    cardType: Nl2AgentCardType,
+    cardKey?: string
+  ) => void | Promise<void>,
+  registrationEnabled = false
+): React.ReactNode => {
+  const normalizedLanguage = card.language;
   const parsed = card.payload;
   const agentId = card.agentId;
 

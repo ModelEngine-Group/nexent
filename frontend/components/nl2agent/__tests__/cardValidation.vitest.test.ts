@@ -39,10 +39,20 @@ describe("canonical NL2AGENT card validation", () => {
           {
             recommendation_id: "registry:broken",
             name: "Broken MCP",
-            install_options: [{ option_id: "remote" }],
+            install_options: [{ option_id: "remote", type: "remote" }],
           },
         ],
       }),
+      202
+    );
+
+    expect(result.failure?.reason).toBe("invalid_schema");
+  });
+
+  it("rejects undeclared card fields", () => {
+    const result = parseNl2AgentCard(
+      "nl2agent-agent-identity",
+      JSON.stringify({ display_name: "Writer", injected: true }),
       202
     );
 

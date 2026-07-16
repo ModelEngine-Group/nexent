@@ -172,9 +172,8 @@ function ChatStreamFinalMessageInner({
       return;
     }
     const messageId = message.message_id;
-    const rawContent = message.finalAnswer || message.content || "";
     if (typeof messageId !== "number") return;
-    const validation = validateNl2AgentCards(rawContent, nl2AgentDraftAgentId);
+    const validation = finalCardValidation;
     const immediatelyRendered = validation.cards.filter(
       (card) => !card.requiresRegistration
     );
@@ -244,8 +243,7 @@ function ChatStreamFinalMessageInner({
   }, [
     isLatestMessage,
     isStreaming,
-    message.content,
-    message.finalAnswer,
+    finalCardValidation,
     message.isComplete,
     message.message_id,
     nl2AgentDraftAgentId,
@@ -523,6 +521,7 @@ function ChatStreamFinalMessageInner({
                 onCitationHover={onCitationHover}
                 onInstallNl2AgentMcp={onInstallNl2AgentMcp}
                 nl2AgentDraftAgentId={nl2AgentDraftAgentId}
+                nl2AgentCards={finalCardValidation.cards}
                 nl2AgentCardRenderMode={
                   message.isComplete && !finalCardValidation.failure
                     ? isLatestMessage

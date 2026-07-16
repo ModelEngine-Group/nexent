@@ -52,7 +52,23 @@ def _rank_web_skills(candidates: List[Dict[str, Any]], query: str) -> List[Dict[
             seen_names.add(normalized_name)
         if is_duplicate:
             continue
-        result.append(item)
+        result.append(
+            {
+                key: item[key]
+                for key in (
+                    "skill_id",
+                    "skill_name",
+                    "name",
+                    "description",
+                    "tags",
+                    "source",
+                    "status",
+                    "score",
+                    "reason",
+                )
+                if key in item
+            }
+        )
         if len(result) == 5:
             break
     return result

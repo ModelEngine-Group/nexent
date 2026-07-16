@@ -5,6 +5,8 @@
   "$defs": {
     "positiveInteger": { "type": "integer", "minimum": 1 },
     "nonEmptyString": { "type": "string", "minLength": 1 },
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
     "requirements_summary": {
       "type": "object",
       "required": [
@@ -22,30 +24,41 @@
         "expected_output": { "$ref": "#/$defs/nonEmptyString" },
         "key_constraints": { "$ref": "#/$defs/nonEmptyString" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "model_selection": {
       "type": "object",
       "properties": { "agent_id": { "$ref": "#/$defs/positiveInteger" } },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "localTool": {
       "type": "object",
       "required": ["tool_id", "name"],
       "properties": {
         "tool_id": { "$ref": "#/$defs/positiveInteger" },
-        "name": { "$ref": "#/$defs/nonEmptyString" }
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "labels": { "$ref": "#/$defs/stringArray" },
+        "source": { "type": "string" },
+        "category": { "type": "string" },
+        "usage": { "type": "string" },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "localSkill": {
       "type": "object",
       "required": ["skill_id", "name"],
       "properties": {
         "skill_id": { "$ref": "#/$defs/positiveInteger" },
-        "name": { "$ref": "#/$defs/nonEmptyString" }
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/$defs/stringArray" },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "local_resources": {
       "type": "object",
@@ -56,31 +69,81 @@
         "tools": { "type": "array", "items": { "$ref": "#/$defs/localTool" } },
         "skills": { "type": "array", "items": { "$ref": "#/$defs/localSkill" } }
       },
-      "additionalProperties": true
+      "additionalProperties": false
+    },
+    "mcpField": {
+      "type": "object",
+      "required": ["key", "name", "type", "required", "secret"],
+      "properties": {
+        "key": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "enum": ["text", "number", "url", "json"] },
+        "required": { "type": "boolean" },
+        "secret": { "type": "boolean" },
+        "default": { "type": ["string", "number", "boolean", "null"] },
+        "placeholder": { "type": "string" },
+        "choices": { "$ref": "#/$defs/stringArray" },
+        "category": { "type": "string" },
+        "argument_type": { "enum": ["named", "positional"] },
+        "argument_name": { "type": ["string", "null"] },
+        "repeated": { "type": "boolean" }
+      },
+      "additionalProperties": false
     },
     "mcpInstallOption": {
       "type": "object",
-      "required": ["option_id", "type"],
+      "required": [
+        "option_id",
+        "type",
+        "label",
+        "requires_configuration",
+        "fields",
+        "supported",
+        "status"
+      ],
       "properties": {
         "option_id": { "$ref": "#/$defs/nonEmptyString" },
-        "type": { "$ref": "#/$defs/nonEmptyString" }
+        "type": { "enum": ["remote", "container", "unsupported"] },
+        "transport": { "type": ["string", "null"] },
+        "server_url_template": { "type": ["string", "null"] },
+        "requires_configuration": { "type": "boolean" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "status": {
+          "enum": ["ready", "configuration_required", "unsupported"]
+        },
+        "supported": { "type": "boolean" },
+        "unsupported_reason": { "type": "string" },
+        "package_identifier": { "type": ["string", "null"] },
+        "registry_type": { "type": ["string", "null"] },
+        "runtime_hint": { "type": ["string", "null"] },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/mcpField" } }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "mcpItem": {
       "type": "object",
       "required": ["recommendation_id", "name", "install_options"],
       "properties": {
         "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "recommendation_batch_id": { "$ref": "#/$defs/nonEmptyString" },
         "recommendation_id": { "$ref": "#/$defs/nonEmptyString" },
         "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/$defs/stringArray" },
+        "source": { "enum": ["registry", "community"] },
+        "transport": { "type": ["string", "null"] },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" },
         "install_options": {
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/mcpInstallOption" }
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "web_mcp": {
       "oneOf": [
@@ -92,18 +155,12 @@
             "recommendation_batch_id": { "$ref": "#/$defs/nonEmptyString" },
             "items": { "type": "array", "items": { "$ref": "#/$defs/mcpItem" } }
           },
-          "additionalProperties": true
+          "additionalProperties": false
         },
         {
           "allOf": [
             { "$ref": "#/$defs/mcpItem" },
-            {
-              "type": "object",
-              "required": ["recommendation_batch_id"],
-              "properties": {
-                "recommendation_batch_id": { "$ref": "#/$defs/nonEmptyString" }
-              }
-            }
+            { "required": ["recommendation_batch_id"] }
           ]
         }
       ]
@@ -112,14 +169,19 @@
       "type": "object",
       "properties": {
         "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "recommendation_batch_id": { "$ref": "#/$defs/nonEmptyString" },
         "skill_id": { "$ref": "#/$defs/positiveInteger" },
         "skill_name": { "$ref": "#/$defs/nonEmptyString" },
-        "name": { "$ref": "#/$defs/nonEmptyString" }
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/$defs/stringArray" },
+        "source": { "type": "string" },
+        "status": { "type": "string" },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" }
       },
       "allOf": [
-        {
-          "anyOf": [{ "required": ["name"] }, { "required": ["skill_name"] }]
-        },
+        { "anyOf": [{ "required": ["name"] }, { "required": ["skill_name"] }] },
         {
           "anyOf": [
             { "required": ["skill_id"] },
@@ -127,7 +189,7 @@
           ]
         }
       ],
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "web_skill": {
       "oneOf": [
@@ -142,18 +204,12 @@
               "items": { "$ref": "#/$defs/skillItem" }
             }
           },
-          "additionalProperties": true
+          "additionalProperties": false
         },
         {
           "allOf": [
             { "$ref": "#/$defs/skillItem" },
-            {
-              "type": "object",
-              "required": ["recommendation_batch_id"],
-              "properties": {
-                "recommendation_batch_id": { "$ref": "#/$defs/nonEmptyString" }
-              }
-            }
+            { "required": ["recommendation_batch_id"] }
           ]
         }
       ]
@@ -165,18 +221,37 @@
         "agent_id": { "$ref": "#/$defs/positiveInteger" },
         "display_name": { "type": "string", "minLength": 1, "maxLength": 50 }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "final_review": {
       "type": "object",
       "required": ["business_description", "duty_prompt", "greeting_message"],
       "properties": {
         "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "description": { "type": "string" },
         "business_description": { "$ref": "#/$defs/nonEmptyString" },
+        "prompt_template_name": { "type": "string" },
         "duty_prompt": { "$ref": "#/$defs/nonEmptyString" },
-        "greeting_message": { "$ref": "#/$defs/nonEmptyString" }
+        "constraint_prompt": { "type": "string" },
+        "few_shots_prompt": { "type": "string" },
+        "greeting_message": { "$ref": "#/$defs/nonEmptyString" },
+        "example_questions": { "$ref": "#/$defs/stringArray" },
+        "max_steps": { "type": "integer", "minimum": 1 },
+        "requested_output_tokens": { "type": "integer", "minimum": 1 },
+        "provide_run_summary": { "type": "boolean" },
+        "verification_config": {
+          "type": "object",
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "mode": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "enable_context_manager": { "type": "boolean" },
+        "author": { "type": "string" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     }
   }
 }
