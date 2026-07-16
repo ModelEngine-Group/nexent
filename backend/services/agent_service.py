@@ -3130,8 +3130,13 @@ async def run_agent_stream(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id
         )
+        run_state = await runtime_state_service.get_run_state_async(
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id,
+        )
+        is_remote_running = run_state.get("status") == "running"
 
-        if existing_run_info is None:
+        if existing_run_info is None and not is_remote_running:
             # Agent has finished while frontend was disconnected
             # Update message status to completed if it's still streaming
             try:
@@ -3155,8 +3160,82 @@ async def run_agent_stream(
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id
         )
+        last_unit_index = resume_info["resume_from_unit_index"] - 1
+
+        def _resume_status_chunk(replay_chunk_count: int) -> str:
+            payload = {
+                'status': 'resumed',
+                'last_unit_index': last_unit_index,
+                'replay_chunk_count': replay_chunk_count,
+            }
+            return f"data: {json.dumps(payload)}\n\n"
+
+        def _resume_completed_chunk(status: str = "completed") -> str:
+            payload = {
+                'status': status,
+                'last_unit_index': last_unit_index,
+            }
+            return f"data: {json.dumps(payload)}\n\n"
 
         if channel is None:
+            if runtime_state_service.enabled and is_remote_running:
+                async def redis_channel_stream():
+                    replay_events = await runtime_state_service.read_stream_events_async(
+                        user_id=resolved_user_id,
+                        conversation_id=agent_request.conversation_id,
+                    )
+                    replay_chunk_count = len(replay_events)
+
+                    yield STREAM_STATUS_EVENT
+                    yield _resume_status_chunk(replay_chunk_count)
+
+                    last_event_id = "0-0"
+                    for event_id, chunk in replay_events:
+                        last_event_id = event_id
+                        if chunk:
+                            yield chunk
+
+                    while True:
+                        events = await runtime_state_service.wait_for_stream_events_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                            last_id=last_event_id,
+                        )
+                        for event_id, chunk in events:
+                            last_event_id = event_id
+                            if chunk:
+                                yield chunk
+
+                        stream_status = await runtime_state_service.get_stream_status_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                        )
+                        latest_run_state = await runtime_state_service.get_run_state_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                        )
+                        if stream_status.get("status") or latest_run_state.get("status") in {
+                            "completed",
+                            "failed",
+                            "stopped",
+                        }:
+                            break
+
+                    terminal_status = stream_status.get("status") or latest_run_state.get("status") or "completed"
+                    yield STREAM_STATUS_EVENT
+                    yield _resume_completed_chunk(terminal_status)
+
+                return StreamingResponse(
+                    redis_channel_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Stream-Status": "resumed",
+                        "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+                    },
+                )
+
             # No channel exists, agent might be in a different state
             return JSONResponse(
                 status_code=HTTPStatus.OK,
@@ -3173,7 +3252,7 @@ async def run_agent_stream(
 
             # Emit status event first with chunk count for skip tracking
             yield STREAM_STATUS_EVENT
-            yield f'data: {{"status": "resumed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}, "replay_chunk_count": {replay_chunk_count}}}\n\n'
+            yield _resume_status_chunk(replay_chunk_count)
 
             # Use subscribe_with_history(0) to replay ALL chunks from the buffer
             # This ensures no chunks are lost even if frontend disconnected during streaming
@@ -3183,7 +3262,7 @@ async def run_agent_stream(
 
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield f'data: {{"status": "completed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}}}\n\n'
+            yield _resume_completed_chunk()
 
         return StreamingResponse(
             channel_stream(),

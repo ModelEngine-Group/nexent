@@ -59,6 +59,8 @@ sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+sys.modules['nexent.core.agents.context'] = MagicMock()
+sys.modules['nexent.core.agents.context.history_projector'] = MagicMock()
 
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
@@ -4271,6 +4273,7 @@ async def test_prepare_agent_run(
         override_model_id=None,
         requested_output_tokens=4096,
         tool_params=None,
+        conversation_id=123,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
