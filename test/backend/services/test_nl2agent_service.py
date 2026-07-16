@@ -11,6 +11,7 @@ from agents.nl2agent_session_catalog import (
     clear_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
 )
+from consts.exceptions import Nl2AgentStaleCardError
 from consts.model import Nl2AgentFinalizeRequest
 from services import nl2agent_service
 
@@ -165,6 +166,109 @@ async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
     assert [result["retry_count"] for result in results] == [1, 2, 3]
     assert [result["auto_retry_allowed"] for result in results] == [True, True, False]
     assert all(result["chat_injection_text"].startswith("[[NL2AGENT_CARD_RETRY]]") for result in results)
+
+
+@pytest.mark.asyncio
+async def test_card_delivery_accepts_valid_card_in_persisted_message(monkeypatch):
+    _confirm_requirements()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 10,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": (
+                    "```nl2agent-model-selection\n"
+                    '{"agent_id": 202}\n'
+                    "```"
+                ),
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=10),
+    )
+
+    result = await nl2agent_service.report_card_delivery(
+        agent_id=202,
+        message_id=10,
+        card_type="model_selection",
+        status="rendered",
+        card_key=None,
+        reason=None,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["status"] == "rendered"
+    assert result["message_id"] == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message_content",
+    [
+        "The model-selection card is unavailable.",
+        "```nl2agent-model-selection\n{broken json}\n```",
+        "```nl2agent-model-selection\n{\"agent_id\": 999}\n```",
+    ],
+)
+async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
+    monkeypatch,
+    message_content,
+):
+    _confirm_requirements()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 10,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": message_content,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=10),
+    )
+
+    with pytest.raises(
+        Nl2AgentStaleCardError,
+        match="does not contain",
+    ):
+        await nl2agent_service.report_card_delivery(
+            agent_id=202,
+            message_id=10,
+            card_type="model_selection",
+            status="rendered",
+            card_key=None,
+            reason=None,
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert "model_selection" not in state["card_delivery"]
 
 
 @pytest.fixture(autouse=True)

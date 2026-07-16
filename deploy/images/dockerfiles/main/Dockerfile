@@ -58,6 +58,7 @@ COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 
 # Layer 2: copy backend code
 COPY backend /opt/backend
+COPY contracts /opt/contracts
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh

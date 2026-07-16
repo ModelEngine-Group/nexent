@@ -20,6 +20,7 @@ class WorkflowDependencies:
     get_workflow_summary: Callable[..., Dict[str, Any]]
     get_message: Callable[..., Optional[Dict[str, Any]]]
     get_latest_assistant_message_id: Callable[..., Optional[int]]
+    message_contains_valid_card: Callable[..., bool]
     record_card_delivery: Callable[..., Dict[str, Any]]
     complete_online_configuration: Callable[..., List[str]]
     register_requirements_summary: Callable[..., Dict[str, Any]]
@@ -95,6 +96,15 @@ async def report_card_delivery(
         or latest_message_id != message_id
     ):
         raise Nl2AgentStaleCardError()
+    if status == "rendered" and not dependencies.message_contains_valid_card(
+        str(message.get("message_content") or ""),
+        card_type,
+        agent_id,
+        card_key,
+    ):
+        raise Nl2AgentStaleCardError(
+            "The persisted assistant message does not contain the reported valid NL2AGENT card."
+        )
 
     summary = dependencies.get_workflow_summary(tenant_id, agent_id)
     if card_type not in summary["expected_card_types"]:

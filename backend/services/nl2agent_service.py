@@ -133,6 +133,7 @@ from services.nl2agent_workflow_service import (
     report_card_delivery as report_card_delivery_workflow,
     save_agent_identity as save_agent_identity_workflow,
 )
+from utils.nl2agent_card_validation import message_contains_valid_card
 from services.remote_mcp_service import (
     add_container_mcp_service,
     add_mcp_service,
@@ -848,6 +849,7 @@ def _workflow_dependencies() -> WorkflowDependencies:
         get_workflow_summary=get_workflow_summary,
         get_message=get_message,
         get_latest_assistant_message_id=get_latest_assistant_message_id,
+        message_contains_valid_card=message_contains_valid_card,
         record_card_delivery=record_card_delivery,
         complete_online_configuration=complete_online_configuration_state,
         register_requirements_summary=register_requirements_summary,
