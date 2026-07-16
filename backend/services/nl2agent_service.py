@@ -103,6 +103,11 @@ from services.nl2agent_catalog_service import (
     recommendation_id as _recommendation_id,
     redact_mcp_marketplace_metadata,
 )
+from services.nl2agent_mcp_service import (
+    McpBindingDependencies,
+    bind_mcp_tools as bind_mcp_tools_service,
+    skip_mcp_tool_binding as skip_mcp_tool_binding_service,
+)
 from services.nl2agent_publication_service import (
     PublicationDependencies,
     publish_agent,
@@ -1228,6 +1233,18 @@ async def install_recommended_mcp(
         ) from exc
 
 
+def _mcp_binding_dependencies() -> McpBindingDependencies:
+    """Build MCP binding dependencies from facade-level operations."""
+    return McpBindingDependencies(
+        get_owned_draft=_get_owned_draft,
+        get_mcp_record=get_mcp_record_by_id_and_tenant,
+        query_tools_by_ids=query_tools_by_ids,
+        bind_tool=create_or_update_tool_by_tool_info,
+        find_mcp_workflow_by_id=find_mcp_workflow_by_id,
+        update_mcp_workflow=update_mcp_workflow,
+    )
+
+
 async def bind_mcp_tools(
     agent_id: int,
     mcp_id: int,
@@ -1235,45 +1252,15 @@ async def bind_mcp_tools(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Bind user-selected tools belonging to an installed MCP."""
-    _get_owned_draft(agent_id, tenant_id)
-    if not tool_ids:
-        raise AgentRunException("Select at least one discovered MCP tool to bind.")
-    record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
-    if not record:
-        raise AgentRunException("Installed MCP not found.")
-    rows = query_tools_by_ids(tool_ids) if tool_ids else []
-    valid = {
-        int(row["tool_id"]): row
-        for row in rows
-        if row.get("author") == tenant_id
-        and row.get("source") == "mcp"
-        and row.get("usage") == record.get("mcp_name")
-    }
-    if set(map(int, tool_ids)) != set(valid):
-        raise AgentRunException("One or more tools do not belong to the selected MCP.")
-    for tool_id in valid:
-        create_or_update_tool_by_tool_info(
-            ToolInstanceInfoRequest(
-                tool_id=tool_id,
-                agent_id=agent_id,
-                params={},
-                enabled=True,
-                version_no=0,
-            ),
-            tenant_id=tenant_id,
-            user_id=user_id,
-            version_no=0,
-        )
-    recommendation_id, _ = find_mcp_workflow_by_id(tenant_id, agent_id, mcp_id)
-    update_mcp_workflow(
-        tenant_id,
-        agent_id,
-        recommendation_id,
-        status="tools_bound",
-        bound_tool_ids=sorted(valid),
+    """Delegate MCP tool binding to the MCP service."""
+    return await bind_mcp_tools_service(
+        _mcp_binding_dependencies(),
+        agent_id=agent_id,
+        mcp_id=mcp_id,
+        tool_ids=tool_ids,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
-    return {"agent_id": agent_id, "mcp_id": mcp_id, "bound_tool_ids": sorted(valid)}
 
 
 async def skip_mcp_tool_binding(
@@ -1281,21 +1268,13 @@ async def skip_mcp_tool_binding(
     mcp_id: int,
     tenant_id: str,
 ) -> Dict[str, Any]:
-    """Explicitly resolve an installed MCP without binding discovered tools."""
-    _get_owned_draft(agent_id, tenant_id)
-    if not get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id):
-        raise AgentRunException("Installed MCP not found.")
-    recommendation_id, workflow = find_mcp_workflow_by_id(tenant_id, agent_id, mcp_id)
-    if workflow.get("status") != "connected":
-        raise AgentRunException("MCP tool binding is already resolved.")
-    update_mcp_workflow(
-        tenant_id,
-        agent_id,
-        recommendation_id,
-        status="binding_skipped",
-        bound_tool_ids=[],
+    """Delegate explicit MCP binding skip to the MCP service."""
+    return await skip_mcp_tool_binding_service(
+        _mcp_binding_dependencies(),
+        agent_id=agent_id,
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
     )
-    return {"agent_id": agent_id, "mcp_id": mcp_id, "status": "binding_skipped"}
 
 
 def _local_resource_dependencies() -> LocalResourceDependencies:
