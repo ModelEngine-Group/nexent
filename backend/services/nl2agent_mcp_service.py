@@ -43,6 +43,7 @@ class McpInstallationDependencies:
     upsert_discovered_tools: Callable[..., List[Dict[str, Any]]]
     mutate_session_catalogs: Callable[..., Any]
     recommendation_id: Callable[[str, Dict[str, Any]], str]
+    validate_remote_url: Callable[[str], str]
 
 
 def installation_key(
@@ -448,6 +449,7 @@ async def _install_remote(
         raise Nl2AgentValidationError(
             "MCP server URL must be a valid HTTP or HTTPS URL."
         )
+    server_url = dependencies.validate_remote_url(str(server_url))
     if existing_mcp_id is not None:
         dependencies.update_remote_mcp(
             tenant_id=tenant_id,

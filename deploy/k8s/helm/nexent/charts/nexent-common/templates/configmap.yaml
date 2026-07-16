@@ -23,6 +23,7 @@ data:
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
+  NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS: {{ .Values.config.services.allowPrivateMcpNetworks | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
   NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
   

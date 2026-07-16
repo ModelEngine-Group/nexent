@@ -96,6 +96,7 @@ update_env_file() {
   update_env_var "DATA_PROCESS_SERVICE" "http://localhost:5012/api"
   update_env_var "NORTHBOUND_API_SERVER" "http://localhost:5013/api"
   update_env_var "MCP_MANAGEMENT_API" "http://localhost:5015"
+  update_env_var "NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS" "${NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS:-false}"
   update_env_var "MINIO_ENDPOINT" "http://localhost:9010"
   update_env_var "REDIS_URL" "redis://localhost:6379/0"
   update_env_var "REDIS_BACKEND_URL" "redis://localhost:6379/1"

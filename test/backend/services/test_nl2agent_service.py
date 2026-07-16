@@ -606,6 +606,11 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
+        "validate_nl2agent_remote_mcp_url",
+        MagicMock(side_effect=lambda url: url),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
         "list_all_tools",
         AsyncMock(return_value=_RAW_TOOL_ROWS),
     )
@@ -1846,6 +1851,9 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
         "tools": [{"tool_id": 11, "name": "create_issue", "description": "Create issue"}],
     }
     assert "secret-token" not in str(result)
+    nl2agent_service.validate_nl2agent_remote_mcp_url.assert_called_once_with(
+        "https://acme.example/eu/sse"
+    )
     assert add_mcp.call_args.kwargs["server_url"] == "https://acme.example/eu/sse"
     assert add_mcp.call_args.kwargs["authorization_token"] == "secret-token"
     assert get_nl2agent_session_catalogs("tenant_1", 202)["registry_results"] == []

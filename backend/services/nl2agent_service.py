@@ -122,6 +122,9 @@ from services.nl2agent_mcp_service import (
     installation_key as mcp_installation_key,
     skip_mcp_tool_binding as skip_mcp_tool_binding_service,
 )
+from services.nl2agent_mcp_url_security import (
+    validate_remote_mcp_url as validate_nl2agent_remote_mcp_url,
+)
 from services.nl2agent_publication_service import (
     PublicationDependencies,
     publish_agent,
@@ -647,6 +650,7 @@ def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
         upsert_discovered_tools=upsert_discovered_mcp_tools,
         mutate_session_catalogs=mutate_nl2agent_session_catalogs,
         recommendation_id=_recommendation_id,
+        validate_remote_url=validate_nl2agent_remote_mcp_url,
     )
 
 
