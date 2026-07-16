@@ -216,15 +216,18 @@ def _require_installable_skill(
     skill_id: Optional[int],
     skill_name: Optional[str],
 ) -> CatalogItem:
+    if not skill_id and not _normalized_skill_name(skill_name):
+        raise AgentRunException("Either skill_name or a positive skill_id is required.")
     catalogs = dependencies.get_session_catalogs(tenant_id, agent_id)
     normalized_name = _normalized_skill_name(skill_name)
     for item in catalogs.get("official_skills", []):
         item_name = _normalized_skill_name(item.get("skill_name") or item.get("name"))
         try:
-            matches_id = bool(skill_id and int(item.get("skill_id")) == int(skill_id))
+            matches_id = not skill_id or int(item.get("skill_id")) == int(skill_id)
         except (TypeError, ValueError):
             matches_id = False
-        if not matches_id and not (normalized_name and item_name == normalized_name):
+        matches_name = not normalized_name or item_name == normalized_name
+        if not matches_id or not matches_name:
             continue
         if item.get("status") == "installable":
             return item
@@ -307,32 +310,38 @@ async def install_web_skill(
 ) -> Dict[str, Any]:
     """Install one recommendation resolved from the trusted session catalog."""
     dependencies.get_owned_draft(agent_id, tenant_id)
-    _require_installable_skill(
+    canonical = _require_installable_skill(
         dependencies,
         agent_id=agent_id,
         tenant_id=tenant_id,
         skill_id=skill_id,
         skill_name=skill_name,
     )
+    canonical_id = int(canonical["skill_id"]) if canonical.get("skill_id") else None
+    canonical_name = str(
+        canonical.get("skill_name") or canonical.get("name") or ""
+    ).strip()
     if skill_name:
+        if not canonical_name:
+            raise AgentRunException("The requested Skill has no canonical name.")
         try:
             installed_names = dependencies.install_by_name(
-                skill_names=[skill_name],
+                skill_names=[canonical_name],
                 tenant_id=tenant_id,
                 user_id=user_id,
                 locale=locale,
             )
         except Exception as exc:
-            logger.error("Failed to install web skill %s: %s", skill_name, exc)
-            raise AgentRunException(f"Failed to install skill {skill_name}.") from exc
+            logger.error("Failed to install web skill %s: %s", canonical_name, exc)
+            raise AgentRunException(f"Failed to install skill {canonical_name}.") from exc
         if not installed_names:
-            raise AgentRunException(f"Failed to install skill {skill_name}.")
+            raise AgentRunException(f"Failed to install skill {canonical_name}.")
         installed_skill = dependencies.get_installed_by_name(
             installed_names[0], tenant_id
         )
         if not installed_skill or not installed_skill.get("skill_id"):
             raise AgentRunException(
-                f"Installed skill {skill_name} could not be resolved for binding."
+                f"Installed skill {canonical_name} could not be resolved for binding."
             )
         bound_skill_id = int(installed_skill["skill_id"])
         _bind_installed_skill(
@@ -341,11 +350,11 @@ async def install_web_skill(
             skill_id=bound_skill_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            skill_label=skill_name,
+            skill_label=canonical_name,
         )
         result = {
             "skill_id": bound_skill_id,
-            "skill_name": skill_name,
+            "skill_name": canonical_name,
             "installed": True,
             "bound": True,
             "installed_ids": [],
@@ -356,8 +365,8 @@ async def install_web_skill(
                 dependencies,
                 agent_id=agent_id,
                 tenant_id=tenant_id,
-                skill_id=skill_id,
-                skill_name=skill_name,
+                skill_id=canonical_id,
+                skill_name=canonical_name,
             )
         except Exception:
             logger.exception(
@@ -365,23 +374,23 @@ async def install_web_skill(
                 "tenant_id=%s draft_agent_id=%s skill_name=%s",
                 tenant_id,
                 agent_id,
-                skill_name,
+                canonical_name,
             )
         return result
 
-    if not skill_id or skill_id <= 0:
-        raise AgentRunException("Either skill_name or a positive skill_id is required.")
+    if canonical_id is None or canonical_id <= 0:
+        raise AgentRunException("The requested Skill has no canonical ID.")
     try:
         installed_ids = dependencies.install_by_id(
-            skill_ids=[skill_id],
+            skill_ids=[canonical_id],
             tenant_id=tenant_id,
             user_id=user_id,
         )
     except Exception as exc:
-        logger.error("Failed to install web skill %s: %s", skill_id, exc)
-        raise AgentRunException(f"Failed to install skill {skill_id}.") from exc
+        logger.error("Failed to install web skill %s: %s", canonical_id, exc)
+        raise AgentRunException(f"Failed to install skill {canonical_id}.") from exc
     if not installed_ids:
-        raise AgentRunException(f"Failed to install skill {skill_id}.")
+        raise AgentRunException(f"Failed to install skill {canonical_id}.")
     installed_skill_id = int(installed_ids[0])
     _bind_installed_skill(
         dependencies,
@@ -389,14 +398,14 @@ async def install_web_skill(
         skill_id=installed_skill_id,
         tenant_id=tenant_id,
         user_id=user_id,
-        skill_label=skill_id,
+        skill_label=canonical_id,
     )
     try:
         _remove_installed_skill(
             dependencies,
             agent_id=agent_id,
             tenant_id=tenant_id,
-            skill_id=skill_id,
+            skill_id=canonical_id,
             skill_name=None,
             installed_ids=installed_ids,
         )
@@ -406,7 +415,7 @@ async def install_web_skill(
             "tenant_id=%s draft_agent_id=%s skill_id=%s",
             tenant_id,
             agent_id,
-            skill_id,
+            canonical_id,
         )
     return {
         "skill_id": installed_skill_id,

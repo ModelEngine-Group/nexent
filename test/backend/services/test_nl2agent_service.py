@@ -2138,6 +2138,43 @@ async def test_install_web_skill_rejects_resource_missing_catalog_item(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_install_web_skill_rejects_mismatched_id_and_name(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    install_from_zip = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1",
+        202,
+        {
+            **_EXPECTED_SESSION_CATALOGS,
+            "official_skills": [
+                {"skill_id": 12, "skill_name": "skill-a", "status": "installable"},
+                {"skill_id": 13, "skill_name": "skill-b", "status": "installable"},
+            ],
+        },
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException, match="not available for installation"
+    ):
+        await nl2agent_service.install_web_skill(
+            agent_id=202,
+            skill_id=12,
+            skill_name="skill-b",
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    install_from_zip.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomically(
     monkeypatch,
 ):
