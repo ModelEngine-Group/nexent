@@ -1751,14 +1751,7 @@ async def finalize_agent(
     agent_id: int,
     user_id: str,
     tenant_id: str,
-    # Identity
-    name: Optional[str] = None,
-    display_name: Optional[str] = None,
     description: Optional[str] = None,
-    # LLM models
-    business_logic_model_id: Optional[int] = None,
-    model_ids: Optional[List[int]] = None,
-    # Task & template
     business_description: Optional[str] = None,
     prompt_template_id: Optional[int] = None,
     # Prompts (from finalize skill output)
@@ -1774,47 +1767,8 @@ async def finalize_agent(
     provide_run_summary: bool = False,
     verification_config: Optional[Dict[str, Any]] = None,
     enable_context_manager: bool = True,
-    # Resources
-    tool_ids: Optional[List[int]] = None,
-    skill_ids: Optional[List[int]] = None,
-    sub_agent_ids: Optional[List[int]] = None,
-    # Per-agent config overrides (tool_id -> {param: value})
-    tool_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-    # Per-skill config overrides (skill_id -> {config_key: value})
-    skill_configs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Finalize the draft agent with the full spec produced by the nl2agent_finalize_proposal skill.
-
-    Writes all fields from the skill output to the draft agent row and upserts
-    tool/skill instances with per-agent config overrides.
-
-    Args:
-        agent_id: Draft agent ID to finalize.
-        user_id: Acting user ID for audit fields.
-        tenant_id: Tenant scope.
-        name: Programmatic snake_case name (optional; generated if absent).
-        display_name: User-facing name.
-        description: Agent description.
-        business_logic_model_id: LLM model used for generation/routing.
-        model_ids: Runtime LLM models.
-        business_description: Task description from the skill output.
-        prompt_template_id: Prompt template to apply.
-        duty_prompt: Role description prompt section.
-        constraint_prompt: Constraints prompt section.
-        few_shots_prompt: Few-shot examples prompt section.
-        greeting_message: Welcome message.
-        example_questions: Starter questions shown to the user.
-        max_steps: Maximum agent steps.
-        requested_output_tokens: Output token budget.
-        provide_run_summary: Whether to provide a run summary.
-        verification_config: Verification behaviour dict.
-        enable_context_manager: Whether to enable context management.
-        tool_ids: IDs of tools to bind.
-        skill_ids: IDs of skills to bind.
-        sub_agent_ids: IDs of sub-agents to bind.
-        tool_configs: Per-tool param overrides, keyed by tool_id (str or int).
-        skill_configs: Per-skill config overrides, keyed by skill_id (str or int).
-    """
+    """Publish a draft using proposal text and authoritative persisted configuration."""
     _validate_draft_agent_id(agent_id)
 
     # Persisted model selection is authoritative. The LLM-generated proposal

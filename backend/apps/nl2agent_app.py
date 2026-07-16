@@ -430,11 +430,7 @@ async def finalize_agent_api(
             agent_id=agent_id,
             user_id=user_id,
             tenant_id=tenant_id,
-            name=payload.name,
-            display_name=payload.display_name,
             description=payload.description,
-            business_logic_model_id=payload.business_logic_model_id,
-            model_ids=payload.model_ids,
             business_description=payload.business_description,
             prompt_template_id=payload.prompt_template_id,
             duty_prompt=payload.duty_prompt,
@@ -447,11 +443,6 @@ async def finalize_agent_api(
             provide_run_summary=payload.provide_run_summary,
             verification_config=payload.verification_config,
             enable_context_manager=payload.enable_context_manager,
-            tool_ids=payload.tool_ids,
-            skill_ids=payload.skill_ids,
-            sub_agent_ids=payload.sub_agent_ids,
-            tool_configs=payload.tool_configs,
-            skill_configs=payload.skill_configs,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AgentRunException as exc:

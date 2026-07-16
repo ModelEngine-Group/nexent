@@ -13,25 +13,19 @@ import {
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
 
-/** Full agent spec produced by the nl2agent_finalize_proposal skill. */
+/** Unsaved descriptive, prompt, and runtime fields proposed for publication. */
 export interface FinalizeCardData {
   agent_id: number;
-  name?: string;
-  display_name?: string;
   description?: string;
-
-  business_logic_model_id?: number;
-  model_ids?: number[];
-
-  business_description?: string;
+  business_description: string;
   prompt_template_id?: number;
   prompt_template_name?: string;
 
-  duty_prompt?: string;
+  duty_prompt: string;
   constraint_prompt?: string;
   few_shots_prompt?: string;
 
-  greeting_message?: string;
+  greeting_message: string;
   example_questions?: string[];
 
   max_steps?: number;
@@ -39,13 +33,6 @@ export interface FinalizeCardData {
   provide_run_summary?: boolean;
   verification_config?: { enabled: boolean; mode?: string };
   enable_context_manager?: boolean;
-
-  selected_tools?: number[];
-  selected_skills?: number[];
-  sub_agent_ids?: number[];
-
-  tool_configs?: Record<string, Record<string, unknown>>;
-  skill_configs?: Record<string, Record<string, unknown>>;
 
   author?: string;
 }
@@ -154,10 +141,10 @@ const NameList: React.FC<{
 );
 
 /**
- * Renders the full agent spec produced by the nl2agent_finalize_proposal skill.
+ * Renders the proposal together with authoritative persisted draft state.
  * The user reviews the spec and clicks "Review & Publish" to finalize.
  *
- * Rendered from a ```nl2agent-finalize fenced JSON block emitted by the skill.
+ * Rendered from a ```nl2agent-finalize fenced JSON block emitted by NL2AGENT.
  */
 export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const { t } = useTranslation("common");
@@ -219,7 +206,6 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
         provide_run_summary: data.provide_run_summary,
         verification_config: data.verification_config,
         enable_context_manager: data.enable_context_manager,
-        sub_agent_ids: data.sub_agent_ids ?? [],
       });
       message.success(
         t("nl2agent.finalize.published", "Agent published successfully!")

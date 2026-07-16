@@ -4,12 +4,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
 import pytest
+from pydantic import ValidationError
 
 from agents import nl2agent_session_catalog
 from agents.nl2agent_session_catalog import (
     clear_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
 )
+from consts.model import Nl2AgentFinalizeRequest
 from services import nl2agent_service
 
 
@@ -1642,16 +1644,26 @@ async def test_finalize_agent_rejects_invalid_draft_agent_id(monkeypatch):
             user_id="user_1",
             tenant_id="tenant_1",
             business_description="Build a helper agent",
-            tool_ids=[],
-            skill_ids=[],
-            sub_agent_ids=[],
         )
 
     update_agent.assert_not_called()
 
 
+def test_finalize_request_rejects_fabricated_persisted_fields():
+    with pytest.raises(ValidationError):
+        Nl2AgentFinalizeRequest(
+            business_description="Build document presentations",
+            duty_prompt="Create presentations from documents.",
+            greeting_message="Upload a document to begin.",
+            name="invented_name",
+            model_ids=[999],
+            tool_ids=[999],
+            skill_ids=[888],
+        )
+
+
 @pytest.mark.asyncio
-async def test_finalize_uses_persisted_resources_and_ignores_generated_ids(monkeypatch):
+async def test_finalize_uses_persisted_resources(monkeypatch):
     draft = {
         "agent_id": 202,
         "name": "draft_test",
@@ -1726,15 +1738,9 @@ async def test_finalize_uses_persisted_resources_and_ignores_generated_ids(monke
         agent_id=202,
         user_id="user_1",
         tenant_id="tenant_1",
-        name="llm_invented_name",
-        display_name="Document Helper",
         business_description="Build document presentations",
         duty_prompt="Create presentations from documents.",
         greeting_message="Upload a document to begin.",
-        tool_ids=[999],
-        skill_ids=[888],
-        tool_configs={"999": {"fabricated": True}},
-        skill_configs={"888": {"fabricated": True}},
     )
 
     assert result["name"] == "old_title"
