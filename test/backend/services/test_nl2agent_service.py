@@ -438,6 +438,11 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     nl2agent_session_catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     monkeypatch.setattr(
         nl2agent_service,
+        "_require_workflow_action",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
         "get_nl2agent_seed_config",
         MagicMock(
             return_value={
@@ -868,6 +873,30 @@ async def test_select_models_requires_confirmed_requirements(monkeypatch):
             fallback_model_ids=[],
             tenant_id="tenant_1",
             user_id="user_1",
+        )
+
+
+def test_workflow_action_gate_rejects_completed_stage_actions():
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="select_models.*requirements_collecting",
+    ):
+        nl2agent_session_catalog.assert_workflow_action_allowed(
+            "tenant_1", 202, "select_models"
+        )
+
+    _confirm_requirements()
+    assert nl2agent_session_catalog.assert_workflow_action_allowed(
+        "tenant_1", 202, "select_models"
+    )["current_stage"] == "model_selection"
+    nl2agent_session_catalog.set_model_selection_confirmed("tenant_1", 202, True)
+
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="select_models.*local_resource_search",
+    ):
+        nl2agent_session_catalog.assert_workflow_action_allowed(
+            "tenant_1", 202, "select_models"
         )
 
 

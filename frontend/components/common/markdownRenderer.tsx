@@ -38,7 +38,7 @@ interface MarkdownRendererProps {
   onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
   nl2AgentDraftAgentId?: number | null;
   /** Only a completed final assistant message may mount interactive cards. */
-  nl2AgentCardRenderMode?: "placeholder" | "interactive";
+  nl2AgentCardRenderMode?: "placeholder" | "readonly" | "interactive";
   onNl2AgentCardRegistered?: (
     cardType: Nl2AgentCardType,
     cardKey?: string
@@ -1383,7 +1383,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     // of a plain code block when the fenced language tag is an
                     // nl2agent-* tag.
                     if (match[1].startsWith("nl2agent-")) {
-                      if (nl2AgentCardRenderMode !== "interactive") {
+                      if (nl2AgentCardRenderMode === "placeholder") {
                         return (
                           <div className="my-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
                             {t("nl2agent.cardDelivery.generating", {
@@ -1401,7 +1401,17 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                         nl2AgentCardRegistrationEnabled
                       );
                       if (node) {
-                        return <>{node}</>;
+                        return nl2AgentCardRenderMode === "readonly" ? (
+                          <div
+                            aria-disabled="true"
+                            className="pointer-events-none opacity-75"
+                            inert
+                          >
+                            {node}
+                          </div>
+                        ) : (
+                          <>{node}</>
+                        );
                       }
                     }
                     // Check if it's a Mermaid diagram

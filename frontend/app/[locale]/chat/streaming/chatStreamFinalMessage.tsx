@@ -525,7 +525,9 @@ function ChatStreamFinalMessageInner({
                 nl2AgentDraftAgentId={nl2AgentDraftAgentId}
                 nl2AgentCardRenderMode={
                   message.isComplete && !finalCardValidation.failure
-                    ? "interactive"
+                    ? isLatestMessage
+                      ? "interactive"
+                      : "readonly"
                     : "placeholder"
                 }
                 onNl2AgentCardRegistered={handleCardRegistered}

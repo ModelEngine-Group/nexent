@@ -19,6 +19,7 @@ from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candid
 from agents.nl2agent_session_catalog import (
     acquire_mcp_installation_lock,
     apply_requirements_revision_text,
+    assert_workflow_action_allowed,
     assert_requirements_confirmed,
     assert_identity_confirmed,
     assert_mcp_workflows_resolved,
@@ -450,6 +451,14 @@ def _get_owned_draft(agent_id: int, tenant_id: str) -> Dict[str, Any]:
     return agent
 
 
+def _require_workflow_action(agent_id: int, tenant_id: str, action: str) -> None:
+    """Map workflow state errors to the service-layer exception contract."""
+    try:
+        assert_workflow_action_allowed(tenant_id, agent_id, action)
+    except Exception as exc:
+        raise AgentRunException(str(exc)) from exc
+
+
 async def select_models(
     agent_id: int,
     primary_model_id: int,
@@ -459,6 +468,7 @@ async def select_models(
 ) -> Dict[str, Any]:
     """Validate and persist an ordered model selection on a draft agent."""
     _get_owned_draft(agent_id, tenant_id)
+    _require_workflow_action(agent_id, tenant_id, "select_models")
     try:
         workflow_state = assert_requirements_confirmed(tenant_id, agent_id)
     except Exception as exc:
@@ -744,6 +754,7 @@ async def install_recommended_mcp(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate recoverable installation to the MCP service."""
+    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
     return await install_recommended_mcp_service(
         _mcp_installation_dependencies(),
         agent_id=agent_id,
@@ -777,6 +788,7 @@ async def bind_mcp_tools(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate MCP tool binding to the MCP service."""
+    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
     return await bind_mcp_tools_service(
         _mcp_binding_dependencies(),
         agent_id=agent_id,
@@ -794,6 +806,7 @@ async def skip_mcp_tool_binding(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate explicit MCP binding skip to the MCP service."""
+    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
     return await skip_mcp_tool_binding_service(
         _mcp_binding_dependencies(),
         agent_id=agent_id,
@@ -830,6 +843,7 @@ async def apply_local_resources_batch(
     tool_config_values: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Delegate atomic local-resource binding to the resource service."""
+    _require_workflow_action(agent_id, tenant_id, "apply_local_resources")
     return await apply_local_resources(
         _local_resource_dependencies(),
         agent_id=agent_id,
@@ -850,6 +864,7 @@ async def register_local_resource_recommendations(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """Delegate local recommendation registration to the resource service."""
+    _require_workflow_action(agent_id, tenant_id, "search_local_resources")
     return await register_local_recommendations(
         _local_resource_dependencies(),
         agent_id=agent_id,
@@ -866,6 +881,7 @@ async def skip_local_resource_recommendations(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """Delegate local recommendation skipping to the resource service."""
+    _require_workflow_action(agent_id, tenant_id, "skip_local_resources")
     return await skip_local_recommendations(
         _local_resource_dependencies(),
         agent_id=agent_id,
@@ -913,6 +929,7 @@ async def register_online_resource_recommendations(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """Delegate online recommendation registration to the workflow service."""
+    _require_workflow_action(agent_id, tenant_id, "search_online_resources")
     return await register_online_recommendations_workflow(
         _workflow_dependencies(),
         agent_id=agent_id,
@@ -951,6 +968,7 @@ async def confirm_online_resource_configuration(
     agent_id: int, tenant_id: str
 ) -> Dict[str, Any]:
     """Delegate online configuration completion to the workflow service."""
+    _require_workflow_action(agent_id, tenant_id, "complete_online_configuration")
     return await confirm_online_configuration_workflow(
         _workflow_dependencies(),
         agent_id=agent_id,
@@ -962,6 +980,7 @@ async def register_requirements_review(
     agent_id: int, summary: Dict[str, Any], tenant_id: str
 ) -> Dict[str, Any]:
     """Delegate requirements registration to the workflow service."""
+    _require_workflow_action(agent_id, tenant_id, "render_requirements_summary")
     return await register_requirements_review_workflow(
         _workflow_dependencies(),
         agent_id=agent_id,
@@ -990,6 +1009,7 @@ async def confirm_requirements_review(
     agent_id: int, fingerprint: str, tenant_id: str
 ) -> Dict[str, Any]:
     """Delegate requirements confirmation to the workflow service."""
+    _require_workflow_action(agent_id, tenant_id, "confirm_requirements")
     return await confirm_requirements_review_workflow(
         _workflow_dependencies(),
         agent_id=agent_id,
@@ -1014,6 +1034,7 @@ async def save_agent_identity(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate identity persistence to the workflow service."""
+    _require_workflow_action(agent_id, tenant_id, "save_identity")
     return await save_agent_identity_workflow(
         _workflow_dependencies(),
         agent_id=agent_id,
@@ -1045,6 +1066,7 @@ async def install_web_skill(
     locale: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Delegate trusted official Skill installation to the catalog service."""
+    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
     return await install_web_skill_service(
         _skill_installation_dependencies(),
         agent_id=agent_id,
@@ -1075,6 +1097,7 @@ async def finalize_agent(
     enable_context_manager: bool = True,
 ) -> Dict[str, Any]:
     """Delegate draft publication to the dedicated publication service."""
+    _require_workflow_action(agent_id, tenant_id, "publish_agent")
     dependencies = PublicationDependencies(
         validate_draft_agent_id=_validate_draft_agent_id,
         get_owned_draft=_get_owned_draft,

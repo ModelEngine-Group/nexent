@@ -247,6 +247,25 @@ def get_workflow_summary(tenant_id: Optional[str], draft_agent_id: Optional[int]
     return evaluate_workflow(state).model_dump(mode="json")
 
 
+def assert_workflow_action_allowed(
+    tenant_id: Optional[str], draft_agent_id: Optional[int], action: str
+) -> Dict[str, Any]:
+    """Reject state mutations that do not belong to the current workflow stage."""
+    summary = get_workflow_summary(tenant_id, draft_agent_id)
+    idempotent_registration_stages = {
+        "render_requirements_summary": "requirements_confirmation",
+        "search_local_resources": "local_resource_review",
+        "search_online_resources": "online_resource_review",
+    }
+    if action not in summary["allowed_actions"] and summary["current_stage"] != (
+        idempotent_registration_stages.get(action)
+    ):
+        raise Nl2AgentSessionCatalogError(
+            f"Action '{action}' is not allowed during stage '{summary['current_stage']}'."
+        )
+    return summary
+
+
 def _normalize_requirement_text(value: Any) -> str:
     """Normalize one persisted requirement field without changing its meaning."""
     normalized = unicodedata.normalize("NFKC", str(value or "")).strip()

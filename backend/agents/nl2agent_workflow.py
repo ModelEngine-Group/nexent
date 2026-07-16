@@ -198,6 +198,8 @@ def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
         if not skill_registered:
             expected.append("web_skill")
         allowed = ["search_online_resources"]
+        if mcp_registered or skill_registered:
+            allowed.append("configure_online_resources")
     elif not state.online_configuration_confirmed:
         stage = "online_resource_review"
         if not _card_was_rendered(state, "web_mcp"):
