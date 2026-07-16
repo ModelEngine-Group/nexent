@@ -357,11 +357,14 @@ def confirm_requirements_summary(
     return _mutate_session_state(tenant, draft_id, mutate)
 
 
-def assert_requirements_confirmed(tenant_id: str, draft_agent_id: int) -> None:
+def assert_requirements_confirmed(
+    tenant_id: str, draft_agent_id: int
+) -> Dict[str, Any]:
     """Reject protected workflow actions until requirements are confirmed."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     if state["requirements_review"].get("status") != "confirmed":
         raise Nl2AgentSessionCatalogError("Confirm the requirements summary before continuing configuration.")
+    return state
 
 
 def set_model_selection_confirmed(

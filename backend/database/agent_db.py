@@ -249,7 +249,13 @@ def create_agent(agent_info, tenant_id: str, user_id: str, db_session=None):
         return result
 
 
-def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
+def update_agent(
+    agent_id,
+    agent_info,
+    user_id,
+    version_no: int = 0,
+    db_session=None,
+):
     """
     Update an existing agent in the database.
     Default version_no=0 updates the draft version.
@@ -260,10 +266,14 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         tenant_id: Tenant ID
         user_id: Optional user ID
         version_no: Version number to filter. Default 0 = draft/editing state
+        db_session: Optional caller-owned transaction session
     Returns:
         Updated agent object
     """
-    with (get_db_session() as session):
+    session_context = (
+        get_db_session(db_session) if db_session is not None else get_db_session()
+    )
+    with session_context as session:
         # update ag_tenant_agent_t
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,

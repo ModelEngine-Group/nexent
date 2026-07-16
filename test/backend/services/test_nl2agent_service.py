@@ -155,6 +155,34 @@ def _mock_database_transaction(monkeypatch):
     return session, transaction
 
 
+def _mock_selectable_models(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(
+            return_value=[
+                {
+                    "model_id": 7,
+                    "model_type": "llm",
+                    "connect_status": "available",
+                    "display_name": "Primary",
+                },
+                {
+                    "model_id": 8,
+                    "model_type": "llm",
+                    "connect_status": "available",
+                    "display_name": "Fallback",
+                },
+            ]
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
     _confirm_requirements()
@@ -710,31 +738,8 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
 @pytest.mark.asyncio
 async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch):
     _confirm_requirements()
-    monkeypatch.setattr(
-        nl2agent_service,
-        "search_agent_info_by_agent_id",
-        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
-    )
-    monkeypatch.setattr(
-        nl2agent_service,
-        "get_model_records",
-        MagicMock(
-            return_value=[
-                {
-                    "model_id": 7,
-                    "model_type": "llm",
-                    "connect_status": "available",
-                    "display_name": "Primary",
-                },
-                {
-                    "model_id": 8,
-                    "model_type": "llm",
-                    "connect_status": "available",
-                    "display_name": "Fallback",
-                },
-            ]
-        ),
-    )
+    db_session, transaction = _mock_database_transaction(monkeypatch)
+    _mock_selectable_models(monkeypatch)
     update_agent = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
 
@@ -749,8 +754,85 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
     request = update_agent.call_args.kwargs["agent_info"]
     assert request.business_logic_model_id == 7
     assert request.model_ids == [7, 8]
+    assert update_agent.call_args.kwargs["db_session"] is db_session
+    transaction.__exit__.assert_called_once_with(None, None, None)
     assert result["fallback_model_ids"] == [8]
     assert result["chat_injection_text"] == nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT
+
+
+@pytest.mark.asyncio
+async def test_select_models_rolls_back_database_when_redis_write_fails(
+    monkeypatch,
+):
+    _confirm_requirements()
+    db_session, transaction = _mock_database_transaction(monkeypatch)
+    _mock_selectable_models(monkeypatch)
+    update_agent = MagicMock()
+    set_confirmed = MagicMock(
+        side_effect=[RuntimeError("Redis unavailable"), {"model_selection_confirmed": False}]
+    )
+    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "set_model_selection_confirmed",
+        set_confirmed,
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="Failed to save the model selection",
+    ) as exc_info:
+        await nl2agent_service.select_models(
+            agent_id=202,
+            primary_model_id=7,
+            fallback_model_ids=[],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert update_agent.call_args.kwargs["db_session"] is db_session
+    transaction.__exit__.assert_called_once()
+    assert transaction.__exit__.call_args.args[0] is RuntimeError
+    assert [record.args for record in set_confirmed.call_args_list] == [
+        ("tenant_1", 202, True),
+        ("tenant_1", 202, False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_select_models_restores_redis_when_database_commit_fails(
+    monkeypatch,
+):
+    _confirm_requirements()
+    _, transaction = _mock_database_transaction(monkeypatch)
+    transaction.__exit__.side_effect = RuntimeError("database commit failed")
+    _mock_selectable_models(monkeypatch)
+    monkeypatch.setattr(nl2agent_service, "update_agent", MagicMock())
+    set_confirmed = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "set_model_selection_confirmed",
+        set_confirmed,
+    )
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="Failed to save the model selection",
+    ) as exc_info:
+        await nl2agent_service.select_models(
+            agent_id=202,
+            primary_model_id=7,
+            fallback_model_ids=[],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert [record.args for record in set_confirmed.call_args_list] == [
+        ("tenant_1", 202, True),
+        ("tenant_1", 202, False),
+    ]
 
 
 @pytest.mark.asyncio

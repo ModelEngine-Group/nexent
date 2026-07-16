@@ -398,6 +398,34 @@ def test_update_agent_success(monkeypatch, mock_session):
 
     assert mock_agent.updated_by == "user1"
 
+
+def test_update_agent_uses_caller_owned_transaction(monkeypatch, mock_session):
+    """A caller-owned session keeps the update inside its transaction."""
+    session, query = mock_session
+    mock_agent = MockAgent()
+    query.filter.return_value.first.return_value = mock_agent
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    get_db_session = MagicMock(return_value=mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.agent_db.get_db_session",
+        get_db_session,
+    )
+    monkeypatch.setattr(
+        "backend.database.agent_db.filter_property",
+        lambda data, model: data,
+    )
+    agent_info = MagicMock()
+    agent_info.__dict__ = {"name": "updated_agent"}
+
+    update_agent(1, agent_info, "user1", db_session=session)
+
+    get_db_session.assert_called_once_with(session)
+    assert mock_agent.name == "updated_agent"
+    assert mock_agent.updated_by == "user1"
+
 def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
     """update_agent should skip None values and convert group_ids list to string."""
     session, query = mock_session

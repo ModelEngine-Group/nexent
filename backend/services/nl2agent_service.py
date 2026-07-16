@@ -456,7 +456,7 @@ async def select_models(
     """Validate and persist an ordered model selection on a draft agent."""
     _get_owned_draft(agent_id, tenant_id)
     try:
-        assert_requirements_confirmed(tenant_id, agent_id)
+        workflow_state = assert_requirements_confirmed(tenant_id, agent_id)
     except Exception as exc:
         raise AgentRunException(str(exc)) from exc
     ordered_ids = [int(primary_model_id), *[int(x) for x in fallback_model_ids]]
@@ -467,16 +467,38 @@ async def select_models(
 
     display_names = _validate_available_llm_ids(tenant_id, ordered_ids)
 
-    update_agent(
-        agent_id=agent_id,
-        agent_info=AgentInfoRequest(
-            business_logic_model_id=ordered_ids[0],
-            model_ids=ordered_ids,
-        ),
-        user_id=user_id,
-        version_no=0,
-    )
-    set_model_selection_confirmed(tenant_id, agent_id, True)
+    previous_confirmation = bool(workflow_state.get("model_selection_confirmed"))
+    redis_write_attempted = False
+    try:
+        with get_db_session() as db_session:
+            update_agent(
+                agent_id=agent_id,
+                agent_info=AgentInfoRequest(
+                    business_logic_model_id=ordered_ids[0],
+                    model_ids=ordered_ids,
+                ),
+                user_id=user_id,
+                version_no=0,
+                db_session=db_session,
+            )
+            redis_write_attempted = True
+            set_model_selection_confirmed(tenant_id, agent_id, True)
+    except Exception as exc:
+        if redis_write_attempted:
+            try:
+                set_model_selection_confirmed(
+                    tenant_id,
+                    agent_id,
+                    previous_confirmation,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to compensate NL2AGENT model selection state: "
+                    "tenant_id=%s draft_agent_id=%s",
+                    tenant_id,
+                    agent_id,
+                )
+        raise AgentRunException("Failed to save the model selection.") from exc
     return {
         "agent_id": agent_id,
         "primary_model_id": ordered_ids[0],
