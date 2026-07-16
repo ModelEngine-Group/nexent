@@ -894,3 +894,31 @@ def release_mcp_installation_lock(
             continue
         finally:
             pipe.reset()
+
+
+def renew_mcp_installation_lock(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+    token: str,
+) -> bool:
+    """Extend an installation lock only while the caller still owns it."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    key = f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:{installation_key}"
+    client = get_redis_service().client
+    for _attempt in range(_CAS_MAX_RETRIES):
+        pipe = client.pipeline()
+        try:
+            pipe.watch(key)
+            if pipe.get(key) != token:
+                pipe.unwatch()
+                return False
+            pipe.multi()
+            pipe.expire(key, _INSTALLATION_LOCK_TTL_SECONDS)
+            result = pipe.execute()
+            return bool(result and result[0])
+        except redis.WatchError:
+            continue
+        finally:
+            pipe.reset()
+    return False

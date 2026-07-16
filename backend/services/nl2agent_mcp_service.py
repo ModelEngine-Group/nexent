@@ -1,5 +1,6 @@
 """MCP installation and tool-binding operations for NL2AGENT drafts."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -13,6 +14,7 @@ from consts.exceptions import AgentRunException
 from consts.model import MCPConfigRequest, ToolInstanceInfoRequest
 
 logger = logging.getLogger(__name__)
+_LOCK_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,7 @@ class McpInstallationDependencies:
     get_session_catalogs: Callable[..., Dict[str, List[Dict[str, Any]]]]
     normalize_candidate: Callable[..., Dict[str, Any]]
     acquire_installation_lock: Callable[..., Optional[str]]
+    renew_installation_lock: Callable[..., bool]
     release_installation_lock: Callable[..., Any]
     update_mcp_workflow: Callable[..., Any]
     get_mcp_records: Callable[..., List[Dict[str, Any]]]
@@ -97,7 +100,7 @@ async def install_recommended_mcp(
             "This MCP installation is already in progress. Retry after it completes."
         )
     try:
-        return await _perform_recommended_mcp_install(
+        return await _perform_with_lock_heartbeat(
             dependencies,
             agent_id=agent_id,
             recommendation_id=recommendation_id,
@@ -106,6 +109,7 @@ async def install_recommended_mcp(
             tenant_id=tenant_id,
             user_id=user_id,
             stable_key=stable_key,
+            lock_token=lock_token,
         )
     except Exception as exc:
         try:
@@ -135,6 +139,58 @@ async def install_recommended_mcp(
             stable_key,
             lock_token,
         )
+
+
+async def _perform_with_lock_heartbeat(
+    dependencies: McpInstallationDependencies,
+    *,
+    agent_id: int,
+    recommendation_id: str,
+    option_id: str,
+    config_values: Dict[str, Any],
+    tenant_id: str,
+    user_id: str,
+    stable_key: str,
+    lock_token: str,
+) -> Dict[str, Any]:
+    """Run installation while renewing its ownership lease."""
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(_LOCK_HEARTBEAT_INTERVAL_SECONDS)
+            if not dependencies.renew_installation_lock(
+                tenant_id, agent_id, stable_key, lock_token
+            ):
+                raise AgentRunException(
+                    "MCP installation lock ownership was lost. Retry installation."
+                )
+
+    operation = asyncio.create_task(
+        _perform_recommended_mcp_install(
+            dependencies,
+            agent_id=agent_id,
+            recommendation_id=recommendation_id,
+            option_id=option_id,
+            config_values=config_values,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            stable_key=stable_key,
+        )
+    )
+    renewal = asyncio.create_task(heartbeat())
+    try:
+        done, _ = await asyncio.wait(
+            {operation, renewal}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if operation in done:
+            return await operation
+        operation.cancel()
+        await asyncio.gather(operation, return_exceptions=True)
+        await renewal
+        raise AgentRunException("MCP installation lock renewal stopped unexpectedly.")
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
 
 
 async def _perform_recommended_mcp_install(

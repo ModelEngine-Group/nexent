@@ -1,5 +1,6 @@
 """Unit tests for NL2AGENT service orchestration."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,7 +18,7 @@ from consts.model import Nl2AgentFinalizeRequest
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
-from services import nl2agent_service
+from services import nl2agent_mcp_service, nl2agent_service
 from services.nl2agent_catalog_service import redact_tool_parameter_defaults
 from services.nl2agent_resource_service import _resolve_tool_config_values
 
@@ -907,6 +908,48 @@ def test_finalize_request_rejects_model_supplied_prompt_template_id():
             duty_prompt="Write the brief.",
             greeting_message="What should I summarize?",
             prompt_template_id=1,
+        )
+
+
+def test_mcp_installation_lock_renews_only_for_its_owner():
+    token = nl2agent_session_catalog.acquire_mcp_installation_lock(
+        "tenant_1", 202, "install-key"
+    )
+
+    assert token
+    assert nl2agent_session_catalog.renew_mcp_installation_lock(
+        "tenant_1", 202, "install-key", token
+    )
+    assert not nl2agent_session_catalog.renew_mcp_installation_lock(
+        "tenant_1", 202, "install-key", "wrong-token"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
+    async def wait_forever(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    dependencies = MagicMock()
+    dependencies.renew_installation_lock.return_value = False
+    monkeypatch.setattr(nl2agent_mcp_service, "_LOCK_HEARTBEAT_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(
+        nl2agent_mcp_service,
+        "_perform_recommended_mcp_install",
+        wait_forever,
+    )
+
+    with pytest.raises(nl2agent_service.AgentRunException, match="ownership was lost"):
+        await nl2agent_mcp_service._perform_with_lock_heartbeat(
+            dependencies,
+            agent_id=202,
+            recommendation_id="registry:github",
+            option_id="remote",
+            config_values={},
+            tenant_id="tenant_1",
+            user_id="user_1",
+            stable_key="install-key",
+            lock_token="token",
         )
 
 
