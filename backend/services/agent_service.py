@@ -2948,6 +2948,18 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
+    draft_agent_id = getattr(agent_request, "draft_agent_id", None)
+    if isinstance(draft_agent_id, int):
+        from services.nl2agent_service import validate_nl2agent_run_context
+
+        validate_nl2agent_run_context(
+            runner_agent_id=agent_request.agent_id,
+            draft_agent_id=draft_agent_id,
+            conversation_id=agent_request.conversation_id,
+            tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
+        )
+
     # Resume mode: check for existing streaming message
     if resume:
         resume_info = _detect_resume_position(
@@ -3037,7 +3049,6 @@ async def run_agent_stream(
         )
 
     # Normal mode: start new stream
-    draft_agent_id = getattr(agent_request, "draft_agent_id", None)
     if isinstance(draft_agent_id, int) and draft_agent_id > 0:
         from services.nl2agent_service import process_requirements_revision_text
 
@@ -3045,6 +3056,7 @@ async def run_agent_stream(
             runner_agent_id=agent_request.agent_id,
             draft_agent_id=draft_agent_id,
             tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
             text=agent_request.query,
         )
 

@@ -9,6 +9,7 @@ import os
 import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
+from pydantic import BaseModel, ConfigDict
 
 # =============================================================================
 # STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
@@ -25,9 +26,16 @@ class MockToolConfig:
         """Return a dict representation of the ToolConfig."""
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
+
+class MockAgentVerificationConfig(BaseModel):
+    """Minimal Pydantic-compatible verification config used by request models."""
+
+    model_config = ConfigDict(extra="allow")
+
 # Mock nexent module hierarchy
 nexent_agent_model_mock = MagicMock()
 nexent_agent_model_mock.ToolConfig = MockToolConfig
+nexent_agent_model_mock.AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
@@ -3923,6 +3931,7 @@ async def test_prepare_agent_run(
         override_model_id=None,
         requested_output_tokens=4096,
         tool_params=None,
+        draft_agent_id=None,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
@@ -4038,7 +4047,11 @@ async def test_run_agent_stream_processes_requirement_revisions_before_generatio
     mock_process_requirements = MagicMock(
         side_effect=lambda **kwargs: events.append("requirements")
     )
+    mock_validate_context = MagicMock(
+        side_effect=lambda **kwargs: events.append("authorization")
+    )
     nl2agent_service_module = types.ModuleType("services.nl2agent_service")
+    nl2agent_service_module.validate_nl2agent_run_context = mock_validate_context
     nl2agent_service_module.process_requirements_revision_text = (
         mock_process_requirements
     )
@@ -4061,13 +4074,21 @@ async def test_run_agent_stream_processes_requirement_revisions_before_generatio
 
     await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
 
+    mock_validate_context.assert_called_once_with(
+        runner_agent_id=1,
+        draft_agent_id=202,
+        conversation_id=123,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
     mock_process_requirements.assert_called_once_with(
         runner_agent_id=1,
         draft_agent_id=202,
         tenant_id="tenant_1",
+        user_id="user_1",
         text="change the expected output",
     )
-    assert events[:2] == ["requirements", "generation"]
+    assert events[:3] == ["authorization", "requirements", "generation"]
 
 
 @pytest.mark.asyncio

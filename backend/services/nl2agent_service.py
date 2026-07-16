@@ -12,6 +12,7 @@ import logging
 import re
 import unicodedata
 import uuid
+from functools import partial
 from typing import Any, Dict, List, Optional
 
 from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
@@ -70,6 +71,7 @@ from database.agent_db import (
 )
 from database.conversation_db import (
     create_conversation,
+    get_conversation,
     get_latest_assistant_message_id,
     get_message,
 )
@@ -293,7 +295,14 @@ def _validate_draft_agent_id(agent_id: int) -> None:
         raise Nl2AgentValidationError("Invalid NL2AGENT draft agent_id.")
 
 
-def _get_owned_draft(agent_id: int, tenant_id: str) -> Dict[str, Any]:
+def _get_owned_draft(
+    agent_id: int,
+    tenant_id: str,
+    *,
+    user_id: str,
+    conversation_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Resolve one user-owned NL2AGENT draft and optionally bind its Conversation."""
     _validate_draft_agent_id(agent_id)
     try:
         agent = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
@@ -301,13 +310,38 @@ def _get_owned_draft(agent_id: int, tenant_id: str) -> Dict[str, Any]:
         if str(exc) != "agent not found":
             raise
         raise Nl2AgentDraftNotFoundError() from exc
-    if not agent or not _is_draft_agent_name(agent.get("name") or ""):
+    if (
+        not agent
+        or not _is_draft_agent_name(agent.get("name") or "")
+        or str(agent.get("created_by") or "") != str(user_id)
+    ):
         raise Nl2AgentDraftNotFoundError()
+    if conversation_id is not None:
+        if not isinstance(conversation_id, int) or conversation_id <= 0:
+            raise Nl2AgentValidationError(
+                "A positive conversation_id is required for an NL2AGENT run."
+            )
+        state = get_nl2agent_session_state(tenant_id, agent_id)
+        if int(state.get("conversation_id") or 0) != conversation_id:
+            raise Nl2AgentDraftNotFoundError()
+        if not get_conversation(conversation_id, user_id=user_id):
+            raise Nl2AgentDraftNotFoundError()
     return agent
 
 
-def _require_workflow_action(agent_id: int, tenant_id: str, action: str) -> None:
+def _owned_draft_reader(user_id: str):
+    """Bind request-scoped user authority into focused service dependencies."""
+    return partial(_get_owned_draft, user_id=user_id)
+
+
+def _require_workflow_action(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    action: str,
+) -> None:
     """Map workflow state errors to the service-layer exception contract."""
+    _get_owned_draft(agent_id, tenant_id, user_id=user_id)
     try:
         assert_workflow_action_allowed(tenant_id, agent_id, action)
     except AppException:
@@ -324,8 +358,7 @@ async def select_models(
     user_id: str,
 ) -> Dict[str, Any]:
     """Validate and persist an ordered model selection on a draft agent."""
-    _get_owned_draft(agent_id, tenant_id)
-    _require_workflow_action(agent_id, tenant_id, "select_models")
+    _require_workflow_action(agent_id, tenant_id, user_id, "select_models")
     try:
         workflow_state = assert_requirements_confirmed(tenant_id, agent_id)
     except AppException:
@@ -588,10 +621,10 @@ def _mcp_installation_key(
     return mcp_installation_key(draft_agent_id, recommendation_id, option_id)
 
 
-def _mcp_installation_dependencies() -> McpInstallationDependencies:
+def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
     """Build MCP installation dependencies from facade-level operations."""
     return McpInstallationDependencies(
-        get_owned_draft=_get_owned_draft,
+        get_owned_draft=_owned_draft_reader(user_id),
         get_session_catalogs=get_nl2agent_session_catalogs,
         normalize_candidate=normalize_mcp_candidate,
         acquire_installation_lock=acquire_mcp_installation_lock,
@@ -620,9 +653,9 @@ async def install_recommended_mcp(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate recoverable installation to the MCP service."""
-    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await install_recommended_mcp_service(
-        _mcp_installation_dependencies(),
+        _mcp_installation_dependencies(user_id),
         agent_id=agent_id,
         recommendation_id=recommendation_id,
         option_id=option_id,
@@ -632,10 +665,10 @@ async def install_recommended_mcp(
     )
 
 
-def _mcp_binding_dependencies() -> McpBindingDependencies:
+def _mcp_binding_dependencies(user_id: str) -> McpBindingDependencies:
     """Build MCP binding dependencies from facade-level operations."""
     return McpBindingDependencies(
-        get_owned_draft=_get_owned_draft,
+        get_owned_draft=_owned_draft_reader(user_id),
         get_mcp_record=get_mcp_record_by_id_and_tenant,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         bind_tool=create_or_update_tool_by_tool_info,
@@ -654,9 +687,9 @@ async def bind_mcp_tools(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate MCP tool binding to the MCP service."""
-    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await bind_mcp_tools_service(
-        _mcp_binding_dependencies(),
+        _mcp_binding_dependencies(user_id),
         agent_id=agent_id,
         mcp_id=mcp_id,
         tool_ids=tool_ids,
@@ -672,9 +705,9 @@ async def skip_mcp_tool_binding(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate explicit MCP binding skip to the MCP service."""
-    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await skip_mcp_tool_binding_service(
-        _mcp_binding_dependencies(),
+        _mcp_binding_dependencies(user_id),
         agent_id=agent_id,
         mcp_id=mcp_id,
         tenant_id=tenant_id,
@@ -682,10 +715,10 @@ async def skip_mcp_tool_binding(
     )
 
 
-def _local_resource_dependencies() -> LocalResourceDependencies:
+def _local_resource_dependencies(user_id: str) -> LocalResourceDependencies:
     """Build local-resource dependencies from facade-level operations."""
     return LocalResourceDependencies(
-        get_owned_draft=_get_owned_draft,
+        get_owned_draft=_owned_draft_reader(user_id),
         get_session_state=get_nl2agent_session_state,
         get_session_catalogs=get_nl2agent_session_catalogs,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
@@ -710,9 +743,9 @@ async def apply_local_resources_batch(
     tool_config_values: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Delegate atomic local-resource binding to the resource service."""
-    _require_workflow_action(agent_id, tenant_id, "apply_local_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "apply_local_resources")
     return await apply_local_resources(
-        _local_resource_dependencies(),
+        _local_resource_dependencies(user_id),
         agent_id=agent_id,
         recommendation_batch_id=recommendation_batch_id,
         tool_ids=tool_ids,
@@ -729,11 +762,12 @@ async def register_local_resource_recommendations(
     tool_ids: List[int],
     skill_ids: List[int],
     tenant_id: str,
+    user_id: str,
 ) -> Dict[str, Any]:
     """Delegate local recommendation registration to the resource service."""
-    _require_workflow_action(agent_id, tenant_id, "search_local_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "search_local_resources")
     return await register_local_recommendations(
-        _local_resource_dependencies(),
+        _local_resource_dependencies(user_id),
         agent_id=agent_id,
         recommendation_batch_id=recommendation_batch_id,
         tool_ids=tool_ids,
@@ -746,21 +780,22 @@ async def skip_local_resource_recommendations(
     agent_id: int,
     recommendation_batch_id: str,
     tenant_id: str,
+    user_id: str,
 ) -> Dict[str, Any]:
     """Delegate local recommendation skipping to the resource service."""
-    _require_workflow_action(agent_id, tenant_id, "skip_local_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "skip_local_resources")
     return await skip_local_recommendations(
-        _local_resource_dependencies(),
+        _local_resource_dependencies(user_id),
         agent_id=agent_id,
         recommendation_batch_id=recommendation_batch_id,
         tenant_id=tenant_id,
     )
 
 
-def _workflow_dependencies() -> WorkflowDependencies:
+def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
     """Build workflow dependencies from facade-level operations."""
     return WorkflowDependencies(
-        get_owned_draft=_get_owned_draft,
+        get_owned_draft=_owned_draft_reader(user_id),
         register_online_batch=register_online_recommendation_batch,
         get_session_state=get_nl2agent_session_state,
         get_workflow_summary=get_workflow_summary,
@@ -795,11 +830,12 @@ async def register_online_resource_recommendations(
     resource_type: str,
     item_keys: List[str],
     tenant_id: str,
+    user_id: str,
 ) -> Dict[str, Any]:
     """Delegate online recommendation registration to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, "search_online_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "search_online_resources")
     return await register_online_recommendations_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         recommendation_batch_id=recommendation_batch_id,
         resource_type=resource_type,
@@ -820,7 +856,7 @@ async def report_card_delivery(
 ) -> Dict[str, Any]:
     """Delegate card-delivery validation to the workflow service."""
     return await report_card_delivery_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         message_id=message_id,
         card_type=card_type,
@@ -833,24 +869,28 @@ async def report_card_delivery(
 
 
 async def confirm_online_resource_configuration(
-    agent_id: int, tenant_id: str
+    agent_id: int, tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
     """Delegate online configuration completion to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, "complete_online_configuration")
+    _require_workflow_action(
+        agent_id, tenant_id, user_id, "complete_online_configuration"
+    )
     return await confirm_online_configuration_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         tenant_id=tenant_id,
     )
 
 
 async def register_requirements_review(
-    agent_id: int, summary: Dict[str, Any], tenant_id: str
+    agent_id: int, summary: Dict[str, Any], tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
     """Delegate requirements registration to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, "render_requirements_summary")
+    _require_workflow_action(
+        agent_id, tenant_id, user_id, "render_requirements_summary"
+    )
     return await register_requirements_review_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         summary=summary,
         tenant_id=tenant_id,
@@ -861,11 +901,12 @@ def process_requirements_revision_text(
     runner_agent_id: Optional[int],
     draft_agent_id: int,
     tenant_id: str,
+    user_id: str,
     text: str,
 ) -> Dict[str, Any]:
     """Delegate textual revision handling to the workflow service."""
     return process_requirements_revision_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         runner_agent_id=runner_agent_id,
         draft_agent_id=draft_agent_id,
         tenant_id=tenant_id,
@@ -873,23 +914,55 @@ def process_requirements_revision_text(
     )
 
 
+def validate_nl2agent_run_context(
+    *,
+    runner_agent_id: Optional[int],
+    draft_agent_id: int,
+    conversation_id: Optional[int],
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Authorize the runner, draft owner, and Conversation before any run effect."""
+    try:
+        runner = search_agent_info_by_agent_id(
+            agent_id=runner_agent_id,
+            tenant_id=tenant_id,
+        )
+    except ValueError as exc:
+        if str(exc) != "agent not found":
+            raise
+        runner = None
+    if not runner or runner.get("name") != NL2AGENT_AGENT_NAME:
+        raise Nl2AgentValidationError(
+            "draft_agent_id is only valid when running the NL2AGENT builder."
+        )
+    _get_owned_draft(
+        draft_agent_id,
+        tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+
 async def confirm_requirements_review(
-    agent_id: int, fingerprint: str, tenant_id: str
+    agent_id: int, fingerprint: str, tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
     """Delegate requirements confirmation to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, "confirm_requirements")
+    _require_workflow_action(agent_id, tenant_id, user_id, "confirm_requirements")
     return await confirm_requirements_review_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         fingerprint=fingerprint,
         tenant_id=tenant_id,
     )
 
 
-async def get_session_state(agent_id: int, tenant_id: str) -> Dict[str, Any]:
+async def get_session_state(
+    agent_id: int, tenant_id: str, user_id: str
+) -> Dict[str, Any]:
     """Delegate authoritative session-state projection to the workflow service."""
     return await get_workflow_session_state(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         tenant_id=tenant_id,
     )
@@ -902,9 +975,9 @@ async def save_agent_identity(
     user_id: str,
 ) -> Dict[str, Any]:
     """Delegate identity persistence to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, "save_identity")
+    _require_workflow_action(agent_id, tenant_id, user_id, "save_identity")
     return await save_agent_identity_workflow(
-        _workflow_dependencies(),
+        _workflow_dependencies(user_id),
         agent_id=agent_id,
         display_name=display_name,
         tenant_id=tenant_id,
@@ -912,10 +985,10 @@ async def save_agent_identity(
     )
 
 
-def _skill_installation_dependencies() -> SkillInstallationDependencies:
+def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependencies:
     """Build trusted Skill installation dependencies from facade operations."""
     return SkillInstallationDependencies(
-        get_owned_draft=_get_owned_draft,
+        get_owned_draft=_owned_draft_reader(user_id),
         get_session_catalogs=get_nl2agent_session_catalogs,
         mutate_session_catalogs=mutate_nl2agent_session_catalogs,
         install_by_name=install_skills_from_zip_for_tenant,
@@ -934,9 +1007,9 @@ async def install_web_skill(
     locale: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Delegate trusted official Skill installation to the catalog service."""
-    _require_workflow_action(agent_id, tenant_id, "configure_online_resources")
+    _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await install_web_skill_service(
-        _skill_installation_dependencies(),
+        _skill_installation_dependencies(user_id),
         agent_id=agent_id,
         skill_id=skill_id,
         tenant_id=tenant_id,
@@ -964,10 +1037,10 @@ async def finalize_agent(
     enable_context_manager: bool = True,
 ) -> Dict[str, Any]:
     """Delegate draft publication to the dedicated publication service."""
-    _require_workflow_action(agent_id, tenant_id, "publish_agent")
+    _require_workflow_action(agent_id, tenant_id, user_id, "publish_agent")
     dependencies = PublicationDependencies(
         validate_draft_agent_id=_validate_draft_agent_id,
-        get_owned_draft=_get_owned_draft,
+        get_owned_draft=_owned_draft_reader(user_id),
         normalize_model_ids=normalize_model_ids,
         validate_available_llm_ids=_validate_available_llm_ids,
         assert_requirements_confirmed=assert_requirements_confirmed,

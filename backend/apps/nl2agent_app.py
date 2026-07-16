@@ -271,7 +271,7 @@ async def register_local_resources_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return await register_local_resource_recommendations(
             agent_id,
@@ -279,6 +279,7 @@ async def register_local_resources_api(
             payload.tool_ids,
             payload.skill_ids,
             tenant_id,
+            user_id,
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc
@@ -294,10 +295,10 @@ async def skip_local_resources_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return await skip_local_resource_recommendations(
-            agent_id, payload.recommendation_batch_id, tenant_id
+            agent_id, payload.recommendation_batch_id, tenant_id, user_id
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc
@@ -313,7 +314,7 @@ async def register_online_recommendations_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return await register_online_resource_recommendations(
             agent_id,
@@ -321,6 +322,7 @@ async def register_online_recommendations_api(
             payload.resource_type,
             payload.item_keys,
             tenant_id,
+            user_id,
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc
@@ -336,12 +338,13 @@ async def register_requirements_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return await register_requirements_review(
             agent_id,
             payload.model_dump(),
             tenant_id,
+            user_id,
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc
@@ -384,9 +387,11 @@ async def confirm_requirements_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await confirm_requirements_review(agent_id, payload.fingerprint, tenant_id)
+        return await confirm_requirements_review(
+            agent_id, payload.fingerprint, tenant_id, user_id
+        )
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
@@ -400,9 +405,9 @@ async def complete_online_configuration_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await confirm_online_resource_configuration(agent_id, tenant_id)
+        return await confirm_online_resource_configuration(agent_id, tenant_id, user_id)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 
@@ -417,9 +422,9 @@ async def get_session_state_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await get_session_state(agent_id, tenant_id)
+        return await get_session_state(agent_id, tenant_id, user_id)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 

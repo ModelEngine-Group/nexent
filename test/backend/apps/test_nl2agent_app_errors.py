@@ -100,10 +100,11 @@ async def test_local_registration_api_maps_workflow_conflict(monkeypatch) -> Non
         "_current_user",
         MagicMock(return_value=("user", "tenant", "en")),
     )
+    register_local = AsyncMock(side_effect=AgentRunException("stale card"))
     monkeypatch.setattr(
         nl2agent_app,
         "register_local_resource_recommendations",
-        AsyncMock(side_effect=AgentRunException("stale card")),
+        register_local,
     )
 
     with pytest.raises(AppException) as exc_info:
@@ -117,6 +118,14 @@ async def test_local_registration_api_maps_workflow_conflict(monkeypatch) -> Non
     assert (
         exc_info.value.error_code
         == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
+    )
+    register_local.assert_awaited_once_with(
+        202,
+        "batch",
+        [],
+        [],
+        "tenant",
+        "user",
     )
 
 
