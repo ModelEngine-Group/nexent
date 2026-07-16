@@ -441,12 +441,20 @@ def test_registry_mcp_normalization_preserves_declared_configuration_without_sec
                     {"name": "region", "isRequired": True, "value": "us"},
                     {"name": "tenant", "isRequired": True},
                 ],
-                "headers": [{
-                    "name": "Authorization",
-                    "isRequired": True,
-                    "isSecret": True,
-                    "value": "stored-secret",
-                }],
+                "headers": [
+                    {
+                        "name": "Authorization",
+                        "isRequired": True,
+                        "isSecret": True,
+                        "value": "stored-secret",
+                    },
+                    {
+                        "name": "X-Credential",
+                        "isRequired": True,
+                        "is_secret": True,
+                        "default": "snake-case-secret",
+                    },
+                ],
             }],
             "packages": [{
                 "registryType": "npm",
@@ -470,6 +478,11 @@ def test_registry_mcp_normalization_preserves_declared_configuration_without_sec
     assert remote["transport"] == "streamable-http"
     assert next(field for field in remote["fields"] if field["name"] == "region")["default"] == "us"
     assert next(field for field in remote["fields"] if field["name"] == "Authorization")["default"] is None
+    snake_secret = next(
+        field for field in remote["fields"] if field["name"] == "X-Credential"
+    )
+    assert snake_secret["secret"] is True
+    assert snake_secret["default"] is None
 
     package = item["install_options"][1]
     assert package["package_identifier"] == "@example/github-mcp"

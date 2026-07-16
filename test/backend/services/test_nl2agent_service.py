@@ -99,6 +99,59 @@ async def test_marketplace_loader_reads_every_cursor_page(
     )
 
 
+@pytest.mark.asyncio
+async def test_marketplace_loader_rejects_unbounded_unique_cursors():
+    provider = AsyncMock(
+        side_effect=[
+            {"items": [{"name": "first"}], "nextCursor": "page-2"},
+            {"items": [{"name": "second"}], "nextCursor": "page-3"},
+        ]
+    )
+
+    with pytest.raises(Nl2AgentExternalServiceError, match="page budget"):
+        await nl2agent_catalog_service._load_marketplace_pages(
+            provider,
+            items_key="items",
+            max_pages=2,
+        )
+
+    assert provider.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_marketplace_loader_rejects_item_and_byte_budget_overflow():
+    provider = AsyncMock(
+        return_value={"items": [{"name": "first"}, {"name": "second"}]}
+    )
+    with pytest.raises(Nl2AgentExternalServiceError, match="item budget"):
+        await nl2agent_catalog_service._load_marketplace_pages(
+            provider,
+            items_key="items",
+            max_items=1,
+        )
+
+    provider = AsyncMock(return_value={"items": [{"description": "large"}]})
+    with pytest.raises(Nl2AgentExternalServiceError, match="byte budget"):
+        await nl2agent_catalog_service._load_marketplace_pages(
+            provider,
+            items_key="items",
+            max_bytes=5,
+        )
+
+
+@pytest.mark.asyncio
+async def test_marketplace_loader_enforces_total_time_budget():
+    async def stalled_provider(**_kwargs):
+        await asyncio.Event().wait()
+
+    with pytest.raises(Nl2AgentExternalServiceError, match="time budget"):
+        await nl2agent_catalog_service._load_marketplace_pages(
+            stalled_provider,
+            items_key="items",
+            timeout_seconds=0.01,
+        )
+
+
 _RAW_TOOL_ROWS = [
     {
         "tool_id": 1,
@@ -605,7 +658,12 @@ def test_marketplace_metadata_redaction_removes_declared_and_container_secrets()
                     "name": "Authorization",
                     "isSecret": True,
                     "value": "registry-secret",
-                }
+                },
+                {
+                    "name": "X-Credential",
+                    "is_secret": True,
+                    "default": "snake-case-secret",
+                },
             ],
             "configJson": {
                 "mcpServers": {
@@ -619,6 +677,7 @@ def test_marketplace_metadata_redaction_removes_declared_and_container_secrets()
     )
 
     assert sanitized["headers"][0]["value"] is None
+    assert sanitized["headers"][1]["default"] is None
     environment = sanitized["configJson"]["mcpServers"]["example"]["env"]
     assert environment == {"API_TOKEN": None, "REGION": "eu"}
 

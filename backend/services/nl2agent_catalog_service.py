@@ -1,6 +1,7 @@
 """Catalog loading and sanitization for NL2AGENT sessions."""
 
 import asyncio
+import json
 import logging
 import re
 import unicodedata
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 CatalogItem = Dict[str, Any]
 SessionCatalogs = Dict[str, List[CatalogItem]]
 _MARKETPLACE_PAGE_SIZE = 100
+_MARKETPLACE_MAX_PAGES = 20
+_MARKETPLACE_MAX_ITEMS = 2_000
+_MARKETPLACE_MAX_BYTES = 5 * 1024 * 1024
+_MARKETPLACE_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -54,32 +59,72 @@ async def _load_marketplace_pages(
     *,
     items_key: str,
     nested_cursor_key: Optional[str] = None,
+    max_pages: int = _MARKETPLACE_MAX_PAGES,
+    max_items: int = _MARKETPLACE_MAX_ITEMS,
+    max_bytes: int = _MARKETPLACE_MAX_BYTES,
+    timeout_seconds: float = _MARKETPLACE_TIMEOUT_SECONDS,
 ) -> List[CatalogItem]:
-    """Load every cursor page while stopping safely on a repeated cursor."""
+    """Load bounded cursor pages while rejecting oversized provider responses."""
     items: List[CatalogItem] = []
     cursor: Optional[str] = None
     seen_cursors: set[str] = set()
-    while True:
-        data = await provider(
-            search=None,
-            cursor=cursor,
-            limit=_MARKETPLACE_PAGE_SIZE,
-        )
-        if not isinstance(data, dict):
-            break
-        page_items = data.get(items_key, [])
-        if isinstance(page_items, list):
-            items.extend(item for item in page_items if isinstance(item, dict))
-        cursor_source = data.get(nested_cursor_key, {}) if nested_cursor_key else data
-        next_cursor = (
-            cursor_source.get("nextCursor")
-            if isinstance(cursor_source, dict)
-            else None
-        )
-        if not next_cursor or next_cursor in seen_cursors:
-            break
-        seen_cursors.add(str(next_cursor))
-        cursor = str(next_cursor)
+    total_bytes = 0
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            for page_number in range(1, max_pages + 1):
+                data = await provider(
+                    search=None,
+                    cursor=cursor,
+                    limit=_MARKETPLACE_PAGE_SIZE,
+                )
+                if not isinstance(data, dict):
+                    break
+                page_items = data.get(items_key, [])
+                valid_items = (
+                    [item for item in page_items if isinstance(item, dict)]
+                    if isinstance(page_items, list)
+                    else []
+                )
+                if len(items) + len(valid_items) > max_items:
+                    raise Nl2AgentExternalServiceError(
+                        "Marketplace catalog exceeded the item budget."
+                    )
+                total_bytes += sum(
+                    len(
+                        json.dumps(
+                            item,
+                            ensure_ascii=False,
+                            default=str,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    for item in valid_items
+                )
+                if total_bytes > max_bytes:
+                    raise Nl2AgentExternalServiceError(
+                        "Marketplace catalog exceeded the byte budget."
+                    )
+                items.extend(valid_items)
+                cursor_source = (
+                    data.get(nested_cursor_key, {}) if nested_cursor_key else data
+                )
+                next_cursor = (
+                    cursor_source.get("nextCursor")
+                    if isinstance(cursor_source, dict)
+                    else None
+                )
+                if not next_cursor or str(next_cursor) in seen_cursors:
+                    break
+                if page_number == max_pages:
+                    raise Nl2AgentExternalServiceError(
+                        "Marketplace catalog exceeded the page budget."
+                    )
+                seen_cursors.add(str(next_cursor))
+                cursor = str(next_cursor)
+    except TimeoutError as exc:
+        raise Nl2AgentExternalServiceError(
+            "Marketplace catalog exceeded the time budget."
+        ) from exc
     return items
 
 
@@ -102,7 +147,7 @@ def redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
     if not isinstance(value, dict):
         return deepcopy(value)
 
-    declared_secret = bool(value.get("isSecret"))
+    declared_secret = bool(value.get("isSecret") or value.get("is_secret"))
     sanitized: Dict[str, Any] = {}
     for key, item in value.items():
         key_text = str(key)

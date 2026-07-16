@@ -44,7 +44,7 @@ def _normalize_fields(value: Any, category: str) -> List[Dict[str, Any]]:
         entries = []
     fields = []
     for index, (name, spec) in enumerate(entries):
-        secret = bool(spec.get("isSecret")) or (
+        secret = bool(spec.get("isSecret") or spec.get("is_secret")) or (
             category in {"header", "environment"}
             and bool(re.search(r"token|secret|password|api[_-]?key|authorization", name, re.I))
         )
