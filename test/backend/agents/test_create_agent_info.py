@@ -74,6 +74,12 @@ consts_exceptions_module.ValidationError = ValidationError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
+consts_exceptions_module.Nl2AgentStateConflictError = type(
+    "Nl2AgentStateConflictError", (Exception,), {}
+)
+consts_exceptions_module.Nl2AgentWorkflowConflictError = type(
+    "Nl2AgentWorkflowConflictError", (Exception,), {}
+)
 sys.modules["consts.exceptions"] = consts_exceptions_module
 
 # Also add model and exceptions to consts module attributes
@@ -469,7 +475,7 @@ def test_is_nl2agent_model_selection_confirmed(draft, expected):
     ("workflow_state", "expected"),
     [
         (
-            {},
+            {"conversation_id": 300},
             {
                 "local_review_status": "missing",
                 "mcp_batch_registered": False,
@@ -481,6 +487,7 @@ def test_is_nl2agent_model_selection_confirmed(draft, expected):
         ),
         (
             {
+                "conversation_id": 300,
                 "recommendation_batches": {
                     "local_1": {"status": "recommendations_ready"}
                 }
@@ -496,11 +503,20 @@ def test_is_nl2agent_model_selection_confirmed(draft, expected):
         ),
         (
             {
+                "conversation_id": 300,
                 "recommendation_batches": {"local_1": {"status": "applied"}},
                 "online_recommendation_batches": {
-                    "mcp_1": {"resource_type": "mcp"}
+                    "mcp_1": {
+                        "resource_type": "mcp",
+                        "status": "recommendations_ready",
+                    }
                 },
-                "mcp_workflows": {"registry:test": {"status": "connected"}},
+                "mcp_workflows": {
+                    "registry:test": {
+                        "recommendation_id": "registry:test",
+                        "status": "connected",
+                    }
+                },
             },
             {
                 "local_review_status": "complete",
@@ -513,14 +529,26 @@ def test_is_nl2agent_model_selection_confirmed(draft, expected):
         ),
         (
             {
+                "conversation_id": 300,
                 "recommendation_batches": {"local_1": {"status": "skipped"}},
                 "online_recommendation_batches": {
-                    "mcp_1": {"resource_type": "mcp"},
-                    "skill_1": {"resource_type": "skill"},
+                    "mcp_1": {
+                        "resource_type": "mcp",
+                        "status": "completed",
+                    },
+                    "skill_1": {
+                        "resource_type": "skill",
+                        "status": "completed",
+                    },
                 },
                 "online_configuration_confirmed": True,
                 "identity_confirmed": True,
-                "mcp_workflows": {"registry:test": {"status": "tools_bound"}},
+                "mcp_workflows": {
+                    "registry:test": {
+                        "recommendation_id": "registry:test",
+                        "status": "tools_bound",
+                    }
+                },
             },
             {
                 "local_review_status": "complete",
@@ -567,6 +595,7 @@ def test_build_nl2agent_current_session_includes_authoritative_requirements():
         202,
         False,
         {
+            "conversation_id": 300,
             "requirements_review": {
                 "status": "confirmed",
                 "summary": requirements,
@@ -2151,6 +2180,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_nl2agent_session_catalogs', return_value=session_catalogs) as mock_get_catalogs, \
                 patch('backend.agents.create_agent_info.get_nl2agent_session_state', return_value={
+                    "conversation_id": 300,
                     "requirements_review": {"status": "confirmed", "summary": {}},
                     "recommendation_batches": {},
                 }), \
