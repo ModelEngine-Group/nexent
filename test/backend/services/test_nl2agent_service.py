@@ -3585,22 +3585,96 @@ async def test_save_agent_identity_persists_display_name_and_confirmation(monkey
 
 
 @pytest.mark.asyncio
-async def test_save_agent_identity_rolls_back_database_when_redis_confirmation_fails(
+async def test_save_agent_identity_retries_confirmation_after_redis_failure(
     monkeypatch,
 ):
     monkeypatch.setattr(
         nl2agent_service,
         "_get_owned_draft",
-        MagicMock(return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}),
+        MagicMock(
+            side_effect=[
+                {"agent_id": 202, "name": "draft_test", "created_by": "user_1"},
+                {
+                    "agent_id": 202,
+                    "name": "draft_test",
+                    "display_name": "Document Helper",
+                    "created_by": "user_1",
+                },
+            ]
+        ),
     )
-    _, transaction = _mock_database_transaction(monkeypatch)
+    _mock_database_transaction(monkeypatch)
     update = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_agent", update)
     monkeypatch.setattr(
         nl2agent_service,
-        "confirm_agent_identity",
-        MagicMock(side_effect=RuntimeError("Redis unavailable")),
+        "search_agent_id_by_agent_name",
+        MagicMock(side_effect=ValueError("agent not found")),
     )
+    real_confirm = nl2agent_service.confirm_agent_identity
+    attempts = 0
+
+    def flaky_confirm(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("Redis unavailable")
+        return real_confirm(*args, **kwargs)
+
+    monkeypatch.setattr(
+        nl2agent_service,
+        "confirm_agent_identity",
+        flaky_confirm,
+    )
+
+    with pytest.raises(
+        Nl2AgentOperationError,
+        match="display name was saved.*Retry saving",
+    ):
+        await nl2agent_service.save_agent_identity(
+            202,
+            "Document Helper",
+            "tenant_1",
+            "user_1",
+        )
+
+    assert update.called
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["identity_confirmed"] is False
+
+    result = await nl2agent_service.save_agent_identity(
+        202,
+        "Document Helper",
+        "tenant_1",
+        "user_1",
+    )
+
+    assert result["identity_confirmed"] is True
+    assert update.call_count == 1
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["identity_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_agent_identity_does_not_confirm_when_database_commit_fails(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(
+            return_value={
+                "agent_id": 202,
+                "name": "draft_test",
+                "created_by": "user_1",
+            }
+        ),
+    )
+    _, transaction = _mock_database_transaction(monkeypatch)
+    transaction.__exit__.side_effect = RuntimeError("commit failed")
+    confirm = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_agent", MagicMock())
+    monkeypatch.setattr(nl2agent_service, "confirm_agent_identity", confirm)
 
     with pytest.raises(
         Nl2AgentOperationError,
@@ -3613,9 +3687,7 @@ async def test_save_agent_identity_rolls_back_database_when_redis_confirmation_f
             "user_1",
         )
 
-    assert update.called
-    transaction.__exit__.assert_called_once()
-    assert transaction.__exit__.call_args.args[0] is RuntimeError
+    confirm.assert_not_called()
     state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
     assert state["identity_confirmed"] is False
 

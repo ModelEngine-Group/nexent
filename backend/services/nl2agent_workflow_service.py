@@ -344,31 +344,45 @@ async def save_agent_identity(
     user_id: str,
 ) -> Dict[str, Any]:
     """Persist a confirmed display name without publishing the draft."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
+    draft = dependencies.get_owned_draft(agent_id, tenant_id)
     normalized_display_name = display_name.strip()
     if not normalized_display_name:
         raise Nl2AgentValidationError("Agent display name cannot be empty.")
-    try:
-        with dependencies.get_db_session() as db_session:
-            dependencies.update_agent(
-                agent_id=agent_id,
-                agent_info=AgentInfoRequest(display_name=normalized_display_name),
-                user_id=user_id,
-                version_no=0,
-                db_session=db_session,
+    if draft.get("display_name") != normalized_display_name:
+        try:
+            with dependencies.get_db_session() as db_session:
+                dependencies.update_agent(
+                    agent_id=agent_id,
+                    agent_info=AgentInfoRequest(display_name=normalized_display_name),
+                    user_id=user_id,
+                    version_no=0,
+                    db_session=db_session,
+                )
+        except AgentRunException:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Failed to save NL2AGENT identity: tenant_id=%s draft_agent_id=%s",
+                tenant_id,
+                agent_id,
+                exc_info=True,
             )
-            dependencies.confirm_agent_identity(tenant_id, agent_id)
-    except AgentRunException:
-        raise
+            raise Nl2AgentOperationError(
+                "Failed to save the agent display name."
+            ) from exc
+    try:
+        dependencies.confirm_agent_identity(tenant_id, agent_id)
     except Exception as exc:
         logger.error(
-            "Failed to save NL2AGENT identity: tenant_id=%s draft_agent_id=%s",
+            "NL2AGENT identity was committed but confirmation failed: "
+            "tenant_id=%s draft_agent_id=%s",
             tenant_id,
             agent_id,
             exc_info=True,
         )
         raise Nl2AgentOperationError(
-            "Failed to save the agent display name."
+            "The agent display name was saved, but confirmation could not be "
+            "completed. Retry saving the name."
         ) from exc
     return {
         "agent_id": agent_id,
