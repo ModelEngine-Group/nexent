@@ -8,6 +8,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+import jieba
+
 
 # Alias for type-annotation clarity in this module.
 _StrStrDict = Dict[str, str]
@@ -53,11 +55,14 @@ def normalize_search_keywords(query: str) -> List[str]:
     keywords: List[str] = []
     seen: Set[str] = set()
     for match in _SEARCH_TOKEN_PATTERN.finditer(normalized):
-        keyword = match.group(0)
-        if not keyword or keyword in _SEARCH_STOP_WORDS or keyword in seen:
-            continue
-        seen.add(keyword)
-        keywords.append(keyword)
+        token = match.group(0)
+        parts = jieba.lcut(token) if re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]+", token) else [token]
+        for keyword in parts:
+            keyword = keyword.strip()
+            if not keyword or keyword in _SEARCH_STOP_WORDS or keyword in seen:
+                continue
+            seen.add(keyword)
+            keywords.append(keyword)
     return keywords
 
 
@@ -130,7 +135,8 @@ def _score_candidates(
     for candidate in candidates:
         name = _searchable_text(candidate.get(name_field, ""))
         metadata = " ".join(
-            _searchable_text(candidate.get(field)) for field in ("description", "tags")
+            _searchable_text(candidate.get(field))
+            for field in ("description", "tags", "labels")
         )
         matches: List[Tuple[str, float]] = []
         for keyword in keywords:

@@ -247,6 +247,7 @@ def normalize_mcp_candidate(source: str, raw: Dict[str, Any]) -> Dict[str, Any]:
         "recommendation_id": f"{source}:{identity}",
         "name": server.get("name") or raw.get("name") or "MCP server",
         "description": server.get("description") or raw.get("description") or "",
+        "tags": server.get("tags") or raw.get("tags") or [],
         "source": source,
         "transport": install_options[0].get("transport") if install_options else None,
         "install_options": install_options,

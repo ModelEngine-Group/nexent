@@ -54,10 +54,18 @@ def _loads(raw_result):
 def test_search_keyword_normalization_handles_mixed_text_and_equivalent_order():
     assert normalize_search_keywords("通过 DOCX，大纲生成 + PPT；docx") == [
         "docx",
-        "大纲生成",
+        "大纲",
+        "生成",
         "ppt",
     ]
     assert canonical_search_query("PPT, DOCX") == canonical_search_query(" docx ppt ")
+    assert normalize_search_keywords("读取文档生成演示文稿") == [
+        "读取",
+        "文档",
+        "生成",
+        "演示",
+        "文稿",
+    ]
 
 
 def test_online_batch_ids_are_stable_and_session_scoped():
@@ -90,6 +98,16 @@ def test_candidate_scoring_uses_keyword_or_matching_and_filters_weak_results():
     assert scored[0]["score"] > scored[1]["score"]
     assert scored[0]["reason"] == "Matched keywords: docx, ppt"
     assert _score_candidates(candidates, "quantum", "name") == []
+
+
+def test_candidate_scoring_searches_labels():
+    scored = _score_candidates(
+        [{"name": "Builder", "labels": ["presentation"]}],
+        "presentation",
+        "name",
+    )
+
+    assert scored[0]["name"] == "Builder"
 
 
 @pytest.mark.parametrize(
