@@ -18,6 +18,7 @@ import {
   registerLocalResourceRecommendations,
   skipLocalResourceRecommendations,
 } from "@/services/nl2agentService";
+import type { LocalToolParameterSchema } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import type { Nl2AgentCardType } from "./cardValidation";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
@@ -31,19 +32,6 @@ export interface LocalResourceItem {
   score?: number;
   reason?: string;
   kind: "tool" | "skill";
-  params?: LocalToolParameter[];
-}
-
-interface LocalToolParameter {
-  name: string;
-  type?: string;
-  description?: string;
-  default?: unknown;
-  required?: boolean;
-  optional?: boolean;
-  isSecret?: boolean;
-  is_secret?: boolean;
-  choices?: unknown[];
 }
 
 export interface LocalResourcesCardProps {
@@ -92,6 +80,9 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const [skipped, setSkipped] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registrationError, setRegistrationError] = useState<string>();
+  const [toolParameterSchemas, setToolParameterSchemas] = useState<
+    Record<string, LocalToolParameterSchema[]>
+  >({});
   const [toolConfigValues, setToolConfigValues] = useState<
     Record<number, Record<string, unknown>>
   >({});
@@ -119,7 +110,8 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             ...resourceIds,
           }),
         {
-          onSuccess: async () => {
+          onSuccess: async (result) => {
+            setToolParameterSchemas(result.tool_parameter_schemas ?? {});
             await onRegistered?.("local_resources", recommendationBatchId);
             setRegistered(true);
           },
@@ -189,7 +181,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         (tool) => tool.tool_id != null && selected.has(`t:${tool.tool_id}`)
       )
       .flatMap((tool) =>
-        (tool.params ?? []).flatMap((field) => {
+        (toolParameterSchemas[String(tool.tool_id)] ?? []).flatMap((field) => {
           const value =
             toolConfigValues[tool.tool_id!]?.[field.name] ?? field.default;
           const required = field.required === true || field.optional === false;
@@ -274,7 +266,10 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     const key =
       item.kind === "tool" ? `t:${item.tool_id}` : `s:${item.skill_id}`;
     const toolId = item.tool_id;
-    const configurableFields = item.kind === "tool" ? (item.params ?? []) : [];
+    const configurableFields =
+      item.kind === "tool" && toolId != null
+        ? (toolParameterSchemas[String(toolId)] ?? [])
+        : [];
     return (
       <React.Fragment key={key}>
         <label className="flex items-start gap-2 py-1.5 px-2 rounded hover:bg-gray-50 cursor-pointer">

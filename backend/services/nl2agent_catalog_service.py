@@ -85,22 +85,6 @@ def redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
     return sanitized
 
 
-def redact_tool_parameter_defaults(params: Any) -> Any:
-    """Remove credential defaults before Tool schemas enter session state."""
-    if not isinstance(params, list):
-        return deepcopy(params)
-    sanitized = deepcopy(params)
-    for field in sanitized:
-        if not isinstance(field, dict):
-            continue
-        name = str(field.get("name") or "")
-        if field.get("isSecret") or field.get("is_secret") or re.search(
-            r"password|authorization|api[_-]?key|secret|token", name, re.I
-        ):
-            field["default"] = None
-    return sanitized
-
-
 async def load_session_catalogs(
     tenant_id: str,
     dependencies: CatalogDependencies,
@@ -117,7 +101,6 @@ async def load_session_catalogs(
                 "source": str(tool.get("source") or "").lower(),
                 "category": tool.get("category") or "",
                 "usage": tool.get("usage") or "",
-                "params": redact_tool_parameter_defaults(tool.get("params") or []),
             }
             for tool in all_tools
             if str(tool.get("source") or "").lower() in {"local", "mcp", "langchain"}
@@ -135,7 +118,6 @@ async def load_session_catalogs(
                 "name": skill.get("name") or skill.get("skill_name") or "",
                 "description": (skill.get("description") or "")[:400],
                 "tags": skill.get("tags") or [],
-                "config_schema": skill.get("config_schema") or {},
             }
             for skill in tenant_skills
         ]

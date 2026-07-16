@@ -58,6 +58,26 @@ export type Nl2AgentApplyLocalResourcesPayload =
     skill_ids: number[];
   };
 
+export interface Nl2AgentLocalResourceRegistrationResponse {
+  recommendation_batch_id: string;
+  status: string;
+  tool_ids: number[];
+  skill_ids: number[];
+  tool_parameter_schemas: Record<string, LocalToolParameterSchema[]>;
+}
+
+export interface LocalToolParameterSchema {
+  name: string;
+  type?: string;
+  description?: string;
+  default?: unknown;
+  required?: boolean;
+  optional?: boolean;
+  isSecret?: boolean;
+  is_secret?: boolean;
+  choices?: unknown[];
+}
+
 export type Nl2AgentRequirementsSummary =
   Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"];
 
@@ -122,7 +142,7 @@ export const reportNl2AgentCardDelivery = async (
 export const registerLocalResourceRecommendations = async (
   agentId: number,
   payload: Nl2AgentApplyLocalResourcesPayload
-) => {
+): Promise<Nl2AgentLocalResourceRegistrationResponse> => {
   const response = await fetchWithAuth(
     API_ENDPOINTS.nl2agent.registerLocalResources(agentId),
     { method: "POST", body: JSON.stringify(payload) }

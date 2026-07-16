@@ -19,8 +19,10 @@ from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
 from services import nl2agent_mcp_service, nl2agent_service
-from services.nl2agent_catalog_service import redact_tool_parameter_defaults
-from services.nl2agent_resource_service import _resolve_tool_config_values
+from services.nl2agent_resource_service import (
+    _resolve_tool_config_values,
+    redact_tool_parameter_defaults,
+)
 
 
 class _FixedUuid:
@@ -67,7 +69,6 @@ _EXPECTED_TOOL_CATALOG = [
         "source": "local",
         "category": "retrieval",
         "usage": "local_search",
-        "params": [{"name": "query", "type": "string"}],
     }
 ]
 _RAW_SKILL_ROWS = [
@@ -85,7 +86,6 @@ _EXPECTED_SKILL_CATALOG = [
         "name": "brief-writer",
         "description": "Write short research briefs",
         "tags": ["writing"],
-        "config_schema": {"tone": {"type": "string"}},
     }
 ]
 _REGISTRY_RESULTS = [{"name": "github-mcp", "description": "Repository automation"}]
@@ -2292,6 +2292,21 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids_for_tenant",
+        MagicMock(
+            return_value=[
+                {
+                    "tool_id": 1,
+                    "params": [
+                        {"name": "api_key", "default": "secret-value"},
+                        {"name": "limit", "type": "integer", "default": 5},
+                    ],
+                }
+            ]
+        ),
+    )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
@@ -2319,6 +2334,12 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
         "skill_ids": [7],
         "applied_tool_ids": [],
         "applied_skill_ids": [],
+        "tool_parameter_schemas": {
+            "1": [
+                {"name": "api_key", "default": None},
+                {"name": "limit", "type": "integer", "default": 5},
+            ]
+        },
     }
 
 

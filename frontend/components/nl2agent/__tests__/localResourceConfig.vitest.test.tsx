@@ -21,7 +21,7 @@ vi.mock("@/services/nl2agentService", async (importOriginal) => ({
   registerLocalResourceRecommendations: vi.fn(),
 }));
 
-const renderCard = (params?: Array<Record<string, unknown>>) =>
+const renderCard = () =>
   render(
     <Nl2AgentWorkflowProvider
       enabled
@@ -36,7 +36,6 @@ const renderCard = (params?: Array<Record<string, unknown>>) =>
             tool_id: 42,
             name: "Configured Tool",
             kind: "tool",
-            params: params as never,
           },
         ]}
         skills={[]}
@@ -50,9 +49,13 @@ describe("local Tool configuration", () => {
 
   beforeEach(() => {
     vi.mocked(registerLocalResourceRecommendations).mockReset();
-    vi.mocked(registerLocalResourceRecommendations).mockResolvedValue(
-      {} as never
-    );
+    vi.mocked(registerLocalResourceRecommendations).mockResolvedValue({
+      recommendation_batch_id: "local_tools",
+      status: "recommendations_ready",
+      tool_ids: [42],
+      skill_ids: [],
+      tool_parameter_schemas: {},
+    });
     vi.mocked(applyLocalResources).mockReset();
     vi.mocked(applyLocalResources).mockResolvedValue({
       bound_tool_count: 1,
@@ -62,14 +65,23 @@ describe("local Tool configuration", () => {
   });
 
   it("submits configured instance values for the selected Tool", async () => {
-    renderCard([
-      {
-        name: "top_k",
-        type: "integer",
-        optional: false,
-        description: "Result count",
+    vi.mocked(registerLocalResourceRecommendations).mockResolvedValueOnce({
+      recommendation_batch_id: "local_tools",
+      status: "recommendations_ready",
+      tool_ids: [42],
+      skill_ids: [],
+      tool_parameter_schemas: {
+        "42": [
+          {
+            name: "top_k",
+            type: "integer",
+            optional: false,
+            description: "Result count",
+          },
+        ],
       },
-    ]);
+    });
+    renderCard();
 
     await waitFor(() =>
       expect(registerLocalResourceRecommendations).toHaveBeenCalledOnce()
@@ -92,7 +104,16 @@ describe("local Tool configuration", () => {
   });
 
   it("does not send an incomplete required configuration", async () => {
-    renderCard([{ name: "endpoint", type: "string", optional: false }]);
+    vi.mocked(registerLocalResourceRecommendations).mockResolvedValueOnce({
+      recommendation_batch_id: "local_tools",
+      status: "recommendations_ready",
+      tool_ids: [42],
+      skill_ids: [],
+      tool_parameter_schemas: {
+        "42": [{ name: "endpoint", type: "string", optional: false }],
+      },
+    });
+    renderCard();
     await waitFor(() =>
       expect(registerLocalResourceRecommendations).toHaveBeenCalledOnce()
     );

@@ -1,6 +1,8 @@
 """Local-resource binding operations for NL2AGENT drafts."""
 
 import logging
+import re
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
@@ -9,6 +11,22 @@ from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
 
 
 logger = logging.getLogger(__name__)
+
+
+def redact_tool_parameter_defaults(params: Any) -> List[Dict[str, Any]]:
+    """Remove credential defaults before Tool schemas are sent to the browser."""
+    if not isinstance(params, list):
+        return []
+    sanitized = deepcopy(params)
+    for field in sanitized:
+        if not isinstance(field, dict):
+            continue
+        name = str(field.get("name") or "")
+        if field.get("isSecret") or field.get("is_secret") or re.search(
+            r"password|authorization|api[_-]?key|secret|token", name, re.I
+        ):
+            field["default"] = None
+    return sanitized
 
 
 def _resolve_tool_config_values(
@@ -264,7 +282,31 @@ async def register_local_recommendations(
         tool_ids,
         skill_ids,
     )
-    return {"recommendation_batch_id": recommendation_batch_id, **batch}
+    selected_tool_ids = list(dict.fromkeys(map(int, tool_ids)))
+    tool_records = (
+        dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
+        if selected_tool_ids
+        else []
+    )
+    tools_by_id = {int(item["tool_id"]): item for item in tool_records}
+    missing_tool_ids = [
+        tool_id for tool_id in selected_tool_ids if tool_id not in tools_by_id
+    ]
+    if missing_tool_ids:
+        raise AgentRunException(
+            "Local recommendations contain tools that no longer exist: "
+            + ", ".join(map(str, missing_tool_ids))
+        )
+    return {
+        "recommendation_batch_id": recommendation_batch_id,
+        **batch,
+        "tool_parameter_schemas": {
+            str(tool_id): redact_tool_parameter_defaults(
+                tools_by_id[tool_id].get("params") or []
+            )
+            for tool_id in selected_tool_ids
+        },
+    }
 
 
 async def skip_local_recommendations(
