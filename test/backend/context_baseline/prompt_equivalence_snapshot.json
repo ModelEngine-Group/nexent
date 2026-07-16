@@ -1,0 +1,314 @@
+{
+  "zh_empty": {
+    "legacy": {
+      "chars": 2355,
+      "sha256": "84d60986962a35d18bf2389af1b53b4172d22a1040175f7fa7431b89ff540891"
+    },
+    "managed": {
+      "components": [
+        "system_prompt",
+        "system_prompt",
+        "system_prompt",
+        "system_prompt",
+        "skills",
+        "system_prompt",
+        "system_prompt",
+        "system_prompt"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "chars": 30,
+          "sha256": "23e51d094e4294b85a13d954d7e6f28860e677a36788c375d0e0c4e8a3b13ed3"
+        },
+        {
+          "role": "system",
+          "chars": 194,
+          "sha256": "0c48bc143ebae59d8d4970123f878038bcb21bf8030e6b96ed8580f4980ab9e7"
+        },
+        {
+          "role": "system",
+          "chars": 1398,
+          "sha256": "b78cc33e03428fd00051ec0fea784481d09d6897721c8113b55b635a26d76c00"
+        },
+        {
+          "role": "system",
+          "chars": 8,
+          "sha256": "fc084fa251663c59f82483ccc7ecfcda81f274d7c5b249a0b781cfd757e1eb06"
+        },
+        {
+          "role": "system",
+          "chars": 17,
+          "sha256": "5bdb350e187c81a7ccbbc94453380006ac33812acf1a9a2bd7a3574f39e692d3"
+        },
+        {
+          "role": "system",
+          "chars": 25,
+          "sha256": "96a808a0ea37f24a3408bfc4df3a85dbc572bb1533d63a03189fecdaae1f9bf4"
+        },
+        {
+          "role": "system",
+          "chars": 592,
+          "sha256": "ea8cfe87467e761b0c2e23c6be80cb569e1e51da7c76de83e91622a435de6ac9"
+        },
+        {
+          "role": "system",
+          "chars": 62,
+          "sha256": "729c5a521c646c1cc9a29dbaf987f9c85e4a35711f9b26ca0771f02f971c8757"
+        }
+      ]
+    }
+  },
+  "zh_full": {
+    "legacy": {
+      "chars": 6856,
+      "sha256": "4327e64877089afee4432d9e2be5002c599ee9c213289490d66083968547b8ee"
+    },
+    "managed": {
+      "components": [
+        "system_prompt",
+        "memory",
+        "system_prompt",
+        "skills",
+        "system_prompt",
+        "system_prompt",
+        "tools",
+        "knowledge_base",
+        "managed_agents",
+        "external_a2a_agents",
+        "skills",
+        "system_prompt",
+        "system_prompt",
+        "system_prompt"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "chars": 30,
+          "sha256": "23e51d094e4294b85a13d954d7e6f28860e677a36788c375d0e0c4e8a3b13ed3"
+        },
+        {
+          "role": "user",
+          "chars": 544,
+          "sha256": "5d4511550baf4d6cab3eb2c788cd2a79511c0ea00bbeaa570e0fd32eaea2bf0c"
+        },
+        {
+          "role": "system",
+          "chars": 198,
+          "sha256": "76ec24802341088ac7e18e1b1c7bdb5ec7c99277d47dd60d7a2a4fccfb503925"
+        },
+        {
+          "role": "system",
+          "chars": 2463,
+          "sha256": "bb6847e449dd75b5afff2eda0762ed9dad272805e30aa8bdfc939f8a0a06b8ba"
+        },
+        {
+          "role": "system",
+          "chars": 1392,
+          "sha256": "914a30e1073992d116c207ba7312a6a343917be42d553fd56cb281450edddfdd"
+        },
+        {
+          "role": "system",
+          "chars": 33,
+          "sha256": "4cb1a3d2001265527ab3382326e88d4f1684a251d0fb4b2d6f32b2421905f00a"
+        },
+        {
+          "role": "system",
+          "chars": 531,
+          "sha256": "a3bb7123c0848b02dfa4e535126cc0a6716b59561efa05b95d6a3514654ecf74"
+        },
+        {
+          "role": "user",
+          "chars": 88,
+          "sha256": "b8655d442ce90bc68c60e465aa1a3dc8518268b6ea6df4a47d8896575ded95ae"
+        },
+        {
+          "role": "system",
+          "chars": 458,
+          "sha256": "3b26751d90be8be61de545f3af082f44c6a056c24ad5231b2243bbd7c7a0c942"
+        },
+        {
+          "role": "system",
+          "chars": 206,
+          "sha256": "f1d1fb9d14fc5ad1024cc1645959d2e2821f6d038c7e03f2928aca3e4aa7f07f"
+        },
+        {
+          "role": "system",
+          "chars": 839,
+          "sha256": "eb72f36c8dd78b06c33a7138de905a34bba19174da0dd64a2f19f2673cb157a7"
+        },
+        {
+          "role": "system",
+          "chars": 25,
+          "sha256": "96a808a0ea37f24a3408bfc4df3a85dbc572bb1533d63a03189fecdaae1f9bf4"
+        },
+        {
+          "role": "system",
+          "chars": 642,
+          "sha256": "bb6cb21988325ee56deac360581b21550b07a719920c509be89f5e33fcc3f239"
+        },
+        {
+          "role": "system",
+          "chars": 62,
+          "sha256": "729c5a521c646c1cc9a29dbaf987f9c85e4a35711f9b26ca0771f02f971c8757"
+        }
+      ]
+    }
+  },
+  "en_empty": {
+    "legacy": {
+      "chars": 6296,
+      "sha256": "dd62c63eed158a52598a9541957f8fffdd05683f074c4306d382c13e48269bc5"
+    },
+    "managed": {
+      "components": [
+        "system_prompt",
+        "system_prompt",
+        "system_prompt",
+        "system_prompt",
+        "skills",
+        "system_prompt",
+        "system_prompt",
+        "system_prompt"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "chars": 50,
+          "sha256": "14fbe96ec66f3c0803a59c501086d0810dd68ff99f6761dcfb489df314e1c0a7"
+        },
+        {
+          "role": "system",
+          "chars": 710,
+          "sha256": "8d80ed6ad24312323e245c441bd089a32fa38e7533748099a94b130d03458084"
+        },
+        {
+          "role": "system",
+          "chars": 3779,
+          "sha256": "a8ce8d5217170aa55af534bda46103aa3a4bc5cd86f2d10614c8b1b727d942de"
+        },
+        {
+          "role": "system",
+          "chars": 23,
+          "sha256": "e5046300af7fca8c714832ffff218e160b5b0f235b2ed4dca8fcdcbef26f8704"
+        },
+        {
+          "role": "system",
+          "chars": 45,
+          "sha256": "661b8fd9c0cf0ca687982c3fe14fc3246684da3dc1f5ad6ec380340b6ad8df4f"
+        },
+        {
+          "role": "system",
+          "chars": 46,
+          "sha256": "134b6f109f7cfa75f11d104200a6c42f2232bfadca0eb53f0266be10f1797b2e"
+        },
+        {
+          "role": "system",
+          "chars": 1518,
+          "sha256": "03c819145eab1c20c04e46dfa25d6540b66b15fe739be71ca9c508513f409959"
+        },
+        {
+          "role": "system",
+          "chars": 137,
+          "sha256": "ca0c6e859049f6d8cbb6e034be76ac9b863fd3340011a439e527829ae059cdbb"
+        }
+      ]
+    }
+  },
+  "en_full": {
+    "legacy": {
+      "chars": 14833,
+      "sha256": "49b94c52ef7284436a04f97fd9092a5deb4598b5e6701aa83b674053e3ab9933"
+    },
+    "managed": {
+      "components": [
+        "system_prompt",
+        "memory",
+        "system_prompt",
+        "skills",
+        "system_prompt",
+        "system_prompt",
+        "tools",
+        "knowledge_base",
+        "managed_agents",
+        "external_a2a_agents",
+        "skills",
+        "system_prompt",
+        "system_prompt",
+        "system_prompt"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "chars": 50,
+          "sha256": "14fbe96ec66f3c0803a59c501086d0810dd68ff99f6761dcfb489df314e1c0a7"
+        },
+        {
+          "role": "user",
+          "chars": 1332,
+          "sha256": "db11e7720569f56dad5936dabd76253a1b1bacf3d8d6c7c6b8616ff5a9f8a574"
+        },
+        {
+          "role": "system",
+          "chars": 710,
+          "sha256": "8d80ed6ad24312323e245c441bd089a32fa38e7533748099a94b130d03458084"
+        },
+        {
+          "role": "system",
+          "chars": 4149,
+          "sha256": "e1284982b11b5dfc00c069775e741c6bf32ad4394cb53fafec45596a4845b942"
+        },
+        {
+          "role": "system",
+          "chars": 3692,
+          "sha256": "80e136c4c3373482a9b1b181d40db1fd1cf6879ef3b17c1bda725be061f9720a"
+        },
+        {
+          "role": "system",
+          "chars": 108,
+          "sha256": "408d6cf91329b0569ec09bed74f0dac6f40f1b96b186479e2c41a3c2f499c9a1"
+        },
+        {
+          "role": "system",
+          "chars": 860,
+          "sha256": "b2669e290ffcb2d677e79c3c7c1b7da0f456e77ca156514858b84fe938cc20c4"
+        },
+        {
+          "role": "user",
+          "chars": 201,
+          "sha256": "bdb5f3957f794cd5d8e20bd13e26e0e6bfcb3b6c5b21c82987be84302df7adf6"
+        },
+        {
+          "role": "system",
+          "chars": 1070,
+          "sha256": "d8e95e23514ff03a8bfc310e62df00ad344906f027bfc2fab68a4b0f83d50c79"
+        },
+        {
+          "role": "system",
+          "chars": 447,
+          "sha256": "88d2c787cc8695b9783f2e84470a282ec4bda338f46ddf72de670818a05dfd1a"
+        },
+        {
+          "role": "system",
+          "chars": 1931,
+          "sha256": "65315279266bdedb79bc792f1ef900e7e13eaeb17ca7f906229958f561cdf66c"
+        },
+        {
+          "role": "system",
+          "chars": 46,
+          "sha256": "134b6f109f7cfa75f11d104200a6c42f2232bfadca0eb53f0266be10f1797b2e"
+        },
+        {
+          "role": "system",
+          "chars": 1605,
+          "sha256": "a3a411fec12b8f35b4ba272c9421b79929e681ad9b926197b864426eb6e20ea7"
+        },
+        {
+          "role": "system",
+          "chars": 137,
+          "sha256": "ca0c6e859049f6d8cbb6e034be76ac9b863fd3340011a439e527829ae059cdbb"
+        }
+      ]
+    }
+  }
+}
