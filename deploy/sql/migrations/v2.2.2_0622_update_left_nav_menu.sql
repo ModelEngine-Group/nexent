@@ -25,7 +25,8 @@ ADD COLUMN IF NOT EXISTS parent_key VARCHAR(50);
 -- SU Menus (root level)
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
 (1001, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(1002, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage');
+(1002, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage'),
+(1003, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/owner-manage');
 
 -- ADMIN Menus (root level)
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
@@ -86,13 +87,12 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1411, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
 (1412, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
--- ASSET_OWNER Menus (root level)
+-- ASSET_OWNER Menus (root level; /owner-manage is SU-only, see v2.3.0_0713_move_owner_manage_to_su.sql)
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
 (1501, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
 (1502, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
 (1503, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
-(1504, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
-(1505, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/owner-manage');
+(1504, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space');
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1506, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
 (1507, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),

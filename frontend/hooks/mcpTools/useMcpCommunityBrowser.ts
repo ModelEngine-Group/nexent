@@ -132,6 +132,7 @@ export function useMcpCommunityBrowser(enabled: boolean) {
       hasNextPage,
       nextPage,
       prevPage,
+      refetch: query.refetch,
     }),
     [
       services,
@@ -144,6 +145,7 @@ export function useMcpCommunityBrowser(enabled: boolean) {
       hasNextPage,
       nextPage,
       prevPage,
+      query.refetch,
     ]
   );
 }

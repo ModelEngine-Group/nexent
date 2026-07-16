@@ -5,6 +5,7 @@ import sys
 import os
 import io
 import json
+import base64
 import types
 
 # Add backend path for imports
@@ -162,7 +163,8 @@ sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer_mock
 # Set up consts mocks
 consts_mock = types.ModuleType('consts')
 consts_const_mock = types.ModuleType('consts.const')
-consts_const_mock.CONTAINER_SKILLS_PATH = "/tmp/skills"
+TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp", "skills"))
+consts_const_mock.CONTAINER_SKILLS_PATH = TEST_LOCAL_SKILLS_DIR
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
@@ -170,6 +172,7 @@ consts_exceptions_mock = types.ModuleType('consts.exceptions')
 class SkillException(Exception):
     pass
 consts_exceptions_mock.SkillException = SkillException
+consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -283,6 +286,9 @@ def mock_get_tool_names_by_ids(session, tool_ids):
 def mock_get_skill_with_tool_names(skill_name):
     return None
 
+def mock_update_skill_by_id(skill_id, skill_data, tenant_id=None, updated_by=None):
+    return {"skill_id": skill_id, "name": skill_data.get("name", "updated")}
+
 database_skill_db_mock.list_skills = mock_list_skills
 database_skill_db_mock.get_skill_by_name = mock_get_skill_by_name
 database_skill_db_mock.get_skill_by_id = mock_get_skill_by_id
@@ -293,6 +299,7 @@ database_skill_db_mock.get_tool_ids_by_names = mock_get_tool_ids_by_names
 database_skill_db_mock.get_tool_names_by_skill_name = mock_get_tool_names_by_skill_name
 database_skill_db_mock.get_tool_names_by_ids = mock_get_tool_names_by_ids
 database_skill_db_mock.get_skill_with_tool_names = mock_get_skill_with_tool_names
+database_skill_db_mock.update_skill_by_id = mock_update_skill_by_id
 
 database_skill_db_mock.create_or_update_skill_by_skill_info = mock_create_or_update_skill_by_skill_info
 database_skill_db_mock.query_skill_instances_by_agent_id = mock_query_skill_instances_by_agent_id
@@ -345,12 +352,13 @@ from backend.services.skill_service import (
 )
 
 # Create a mock get_skill_manager to avoid calling the real function
-_mock_skill_manager_instance = MockSkillManager(local_skills_dir="/tmp/skills")
+_mock_skill_manager_instance = MockSkillManager(local_skills_dir=TEST_LOCAL_SKILLS_DIR)
 skill_service.get_skill_manager = lambda tenant_id=None: _mock_skill_manager_instance
 
 
 def create_test_service(tenant_id="test-tenant"):
     """Create a SkillService instance with a tenant_id for testing."""
+    _mock_skill_manager_instance.local_skills_dir = TEST_LOCAL_SKILLS_DIR
     service = SkillService(tenant_id=tenant_id)
     service._overlay_params_from_local_config_yaml = lambda x: x
     return service
@@ -427,15 +435,63 @@ class TestParamsDictToStorable:
 class TestLocalSkillConfigYamlPath:
     """Test _local_skill_config_yaml_path function."""
 
-    def test_basic_path(self):
+    def test_basic_path(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "/skills",
+        )
         result = _local_skill_config_yaml_path("my_skill", "/skills")
-        result_normalized = result.replace("\\", "/")
-        assert result_normalized == "/skills/my_skill/config/config.yaml"
+        assert result == os.path.realpath(
+            os.path.join("/skills", "my_skill", "config", "config.yaml")
+        )
 
-    def test_with_subdir(self):
+    def test_with_subdir(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "/var/lib/skills",
+        )
         result = _local_skill_config_yaml_path("test-skill", "/var/lib/skills")
-        result_normalized = result.replace("\\", "/")
-        assert result_normalized == "/var/lib/skills/test-skill/config/config.yaml"
+        assert result == os.path.realpath(
+            os.path.join(
+                "/var/lib/skills",
+                "test-skill",
+                "config",
+                "config.yaml",
+            )
+        )
+
+    @pytest.mark.parametrize(
+        "unsafe_name",
+        [
+            "../outside",
+            r"..\outside",
+            f"{os.sep}outside",
+            f"C:{os.sep}outside",
+        ],
+    )
+    def test_rejects_unsafe_skill_name(self, mocker, unsafe_name):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "/skills",
+        )
+
+        with pytest.raises(SkillException, match="Invalid skill name"):
+            _local_skill_config_yaml_path(unsafe_name, "/skills")
+
+    def test_rejects_local_directory_outside_configured_root(
+        self,
+        mocker,
+        tmp_path,
+    ):
+        allowed_root = tmp_path / "allowed"
+        outside_root = tmp_path / "outside"
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(allowed_root),
+        )
+
+        with pytest.raises(SkillException, match="Unsafe local skills directory"):
+            _local_skill_config_yaml_path("skill", str(outside_root))
 
 
 # ===== SkillService Tests =====
@@ -606,11 +662,11 @@ class TestSkillServiceCreateSkill:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.exists', return_value=False):
             result = service.create_skill({
@@ -630,6 +686,7 @@ class TestSkillServiceCreateSkillFromFile:
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "md_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -652,6 +709,7 @@ description: A MD skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "str_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -674,6 +732,7 @@ description: A string skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "bio_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -696,6 +755,7 @@ description: A BytesIO skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "explicit_md"}
 
         mock_manager = MagicMock()
+        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -796,7 +856,7 @@ class TestSkillServiceDeleteSkill:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -821,7 +881,7 @@ class TestSkillServiceDeleteSkill:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -869,7 +929,7 @@ class TestSkillServiceGetSkillFileContent:
 
     def test_get_file_content_success(self, mocker):
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -882,7 +942,7 @@ class TestSkillServiceGetSkillFileContent:
 
     def test_get_file_content_not_found(self, mocker):
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1150,7 +1210,7 @@ class TestSkillServiceOverlayParams:
 
     def test_overlay_params_local_file_exists(self, mocker):
         service = SkillService()
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         skill_data = {"name": "test_skill"}
 
@@ -1163,7 +1223,7 @@ class TestSkillServiceOverlayParams:
 
     def test_overlay_params_local_file_not_exists(self, mocker):
         service = SkillService()
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.isfile', return_value=False):
             result = service._enrich_configs_from_yaml({"name": "test"})
@@ -1173,7 +1233,7 @@ class TestSkillServiceOverlayParams:
 
     def test_overlay_params_skill_without_name(self, mocker):
         service = SkillService()
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         result = service._enrich_configs_from_yaml({})
 
@@ -1622,7 +1682,7 @@ description: A ZIP skill
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1652,7 +1712,7 @@ description: Explicit ZIP type
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1689,7 +1749,7 @@ allowed-tools:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1711,7 +1771,7 @@ allowed-tools:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1744,7 +1804,7 @@ allowed-tools:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1769,7 +1829,7 @@ name: existing_skill
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1848,7 +1908,7 @@ description: Updated via ZIP
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -2005,12 +2065,12 @@ class TestSkillServiceCreateSkillErrorPaths:
         mock_repo.get_skill_by_name.return_value = None
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.repository = mock_repo
         service.skill_manager = mock_manager
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.exists', return_value=True):
             from consts.exceptions import SkillException
@@ -2035,7 +2095,7 @@ class TestUploadZipFiles:
             zf.writestr("old_name/scripts/run.sh", "#!/bin/bash\necho test")
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2052,7 +2112,7 @@ class TestUploadZipFiles:
             zf.writestr("nested/file2.txt", "content2")
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2069,7 +2129,7 @@ class TestUploadZipFiles:
             zf.writestr("nested/file2.txt", "content2")
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2221,7 +2281,7 @@ class TestSkillServiceUpdateFromZipEdgeCases:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2248,7 +2308,7 @@ class TestSkillServiceUpdateFromZipEdgeCases:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2279,12 +2339,12 @@ class TestUpdateSkillConfigYamlSync:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
-        with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp/skills"):
+        with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR):
             service = SkillService(tenant_id="test-tenant")
             service.skill_manager = mock_manager
-            service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+            service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
             with patch('backend.services.skill_service._remove_local_skill_config_yaml') as mock_remove:
                 service.update_skill("p_skill", {"config_values": None}, tenant_id="test-tenant")
@@ -2481,12 +2541,12 @@ class TestServiceMethodsAdditionalCoverage:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
-        with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp/skills"):
+        with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR):
             service = SkillService(tenant_id="test-tenant")
             service.skill_manager = mock_manager
-            service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+            service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
             with patch('backend.services.skill_service._write_skill_params_to_local_config_yaml'):
                 result = service.update_skill("sync_skill", {"params": {"key": "value"}}, tenant_id="test-tenant")
@@ -2605,7 +2665,7 @@ class TestDeleteSkillFilePathTraversal:
         import os
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
         mock_manager.delete_skill_file = MagicMock(return_value=True)
 
         mocker.patch(
@@ -2624,7 +2684,7 @@ class TestDeleteSkillFilePathTraversal:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp/skills"):
+        with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR):
             with patch('os.path.isdir', return_value=False):
                 result = service.delete_skill("test_skill", tenant_id="test-tenant")
 
@@ -2646,7 +2706,7 @@ class TestDeleteSkillFilePathTraversal:
         assert normalized_normalized == "/etc/passwd"
 
         # Verify the normalized path is not within the base directory
-        base_dir = "/tmp/skills"
+        base_dir = TEST_LOCAL_SKILLS_DIR
         normalized_abs = os.path.abspath(normalized)
         base_abs = os.path.abspath(base_dir)
         normalized_abs_normalized = normalized_abs.replace("\\", "/")
@@ -2667,7 +2727,7 @@ class TestDeleteSkillFilePathTraversal:
         # This path escapes /tmp/skills and reaches /etc
         malicious_path = "/tmp/skills/../../../etc/passwd"
         normalized = os.path.normpath(malicious_path)
-        base_dir = "/tmp/skills"
+        base_dir = TEST_LOCAL_SKILLS_DIR
 
         normalized_abs = os.path.abspath(normalized)
         base_abs = os.path.abspath(base_dir)
@@ -2717,7 +2777,7 @@ class TestSkillServiceDeleteLocalSkillFiles:
     def test_delete_files_no_directory(self, mocker):
         """Test deletion when directory doesn't exist."""
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2728,7 +2788,7 @@ class TestSkillServiceDeleteLocalSkillFiles:
     def test_delete_files_with_content(self, mocker):
         """Test deletion with files and subdirectories."""
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2745,7 +2805,7 @@ class TestSkillServiceDeleteLocalSkillFiles:
     def test_delete_files_with_trailing_slash_item(self, mocker):
         """Test deletion with items ending in slash."""
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2862,7 +2922,7 @@ description: Updated via ZIP
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -2934,7 +2994,7 @@ description: Root level SKILL.md
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2980,7 +3040,7 @@ allowed-tools:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3020,7 +3080,7 @@ description: Updated
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3059,7 +3119,7 @@ description: Renamed skill
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3094,7 +3154,7 @@ class TestSkillServiceUpdateFromZipEmptyContent:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3191,7 +3251,7 @@ description: With user
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3264,7 +3324,7 @@ description: Updated
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3349,7 +3409,7 @@ class TestSkillServiceDeleteWithLocalDir:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -3588,11 +3648,11 @@ class TestSkillServiceCreateSkillWithLocalParamsWriteError:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.exists', return_value=False):
             with patch('backend.services.skill_service._write_skill_params_to_local_config_yaml',
@@ -3790,7 +3850,7 @@ allowed-tools:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3807,7 +3867,7 @@ class TestSkillServiceGetSkillFileContentWithNestedPath:
     def test_get_file_content_nested_path(self, mocker):
         """Test getting file content with nested path."""
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3825,7 +3885,7 @@ class TestSkillServiceGetSkillFileContentError:
     def test_get_file_content_read_error(self, mocker):
         """Test getting file content with read error."""
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -4047,6 +4107,31 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
 class TestUploadZipFilesWithZipError:
     """Test _upload_zip_files error handling."""
 
+    def test_upload_zip_renamed_root_does_not_nest_target_dir(self, tmp_path):
+        """Test ZIP root rename writes files directly under the target skill directory."""
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("old-skill/SKILL.md", "---\nname: old-skill\n---\nbody")
+            zf.writestr("old-skill/references/info.md", "info")
+
+        mock_manager = MagicMock()
+        mock_manager.local_skills_dir = str(tmp_path)
+
+        service = SkillService()
+        service.skill_manager = mock_manager
+
+        service._upload_zip_files(
+            zip_buffer.getvalue(),
+            "new-skill copy",
+            "old-skill",
+        )
+
+        assert (tmp_path / "new-skill copy" / "SKILL.md").is_file()
+        assert (tmp_path / "new-skill copy" / "references" / "info.md").is_file()
+        assert not (tmp_path / "new-skill copy" / "new-skill copy" / "SKILL.md").exists()
+
     def test_upload_zip_extract_error(self, mocker):
         """Test ZIP extraction error handling."""
         import zipfile
@@ -4055,7 +4140,7 @@ class TestUploadZipFilesWithZipError:
             zf.writestr("skill/file.txt", "content")
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -4067,6 +4152,79 @@ class TestUploadZipFilesWithZipError:
                 assert False, "Should have raised"
             except Exception as e:
                 assert "makedirs error" in str(e)
+
+
+class TestSkillServiceExportSkillsByNames:
+    """Test SkillService.export_skills_by_names."""
+
+    def test_export_skips_missing_local_dir_without_db_record(self, tmp_path, mocker):
+        """Test export skips a missing local skill when no DB snapshot exists."""
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+
+        service = SkillService()
+        service.skill_manager = MagicMock(local_skills_dir=str(tmp_path))
+
+        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+
+        assert result == []
+
+    def test_export_rebuilds_missing_local_dir_from_db_snapshot(self, tmp_path, mocker):
+        """Test export can recover when the DB skill exists but local files are missing."""
+        import zipfile
+
+        class FakeSkillManager:
+            local_skills_dir = str(tmp_path)
+
+            def save_skill(self, skill_data):
+                skill_dir = tmp_path / skill_data["name"]
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(skill_data["content"], encoding="utf-8")
+                return skill_data
+
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={
+                "name": "missing-skill",
+                "description": "desc",
+                "content": "# Missing Skill\nbody",
+                "tags": ["tag"],
+            },
+        )
+
+        service = SkillService()
+        service.skill_manager = FakeSkillManager()
+
+        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+
+        assert len(result) == 1
+        zip_bytes = base64.b64decode(result[0]["skill_zip_base64"])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            assert "missing-skill/SKILL.md" in zf.namelist()
+
+    def test_export_skips_when_db_rebuild_does_not_create_local_dir(self, tmp_path, mocker):
+        """Test export skips when rebuilding from DB does not create local files."""
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={
+                "name": "missing-skill",
+                "description": "desc",
+                "content": "# Missing Skill\nbody",
+                "tags": ["tag"],
+            },
+        )
+
+        skill_manager = MagicMock(local_skills_dir=str(tmp_path))
+        skill_manager.save_skill.return_value = None
+        service = SkillService()
+        service.skill_manager = skill_manager
+
+        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+
+        assert result == []
+        skill_manager.save_skill.assert_called_once()
 
 
 class TestParamsDictToStorableWithInvalidData:
@@ -4099,7 +4257,7 @@ class TestSkillServiceOverlayParamsWithReadError:
         )
 
         service = SkillService(tenant_id="test-tenant")
-        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value="/tmp/skills")
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', side_effect=IOError("Read error")):
@@ -4482,7 +4640,7 @@ class TestSkillServiceDeleteSkillRmtreeError:
         )
 
         mock_manager = MagicMock()
-        mock_manager.local_skills_dir = "/tmp/skills"
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -4759,11 +4917,11 @@ class TestUpdateSkillListAsync:
             "description": "A test skill",
             "content": "# Test content"
         }
-        mock_skill_manager.local_skills_dir = "/tmp/skills"
+        mock_skill_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         with patch('nexent.skills.SkillManager', return_value=mock_skill_manager), \
                 patch('backend.services.skill_service.SkillManager', return_value=mock_skill_manager), \
-                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', "/tmp/skills"), \
+                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
                 patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
@@ -4789,11 +4947,11 @@ class TestUpdateSkillListAsync:
             "description": "A simple skill",
             "content": "# Simple content"
         }
-        mock_skill_manager.local_skills_dir = "/tmp/skills"
+        mock_skill_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         with patch('nexent.skills.SkillManager', return_value=mock_skill_manager), \
                 patch('backend.services.skill_service.SkillManager', return_value=mock_skill_manager), \
-                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', "/tmp/skills"), \
+                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
                 patch('os.path.isfile', return_value=False), \
                 patch('os.path.isdir', return_value=False), \
                 patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
@@ -4828,3 +4986,402 @@ class TestInitSkillListForTenantAsync:
             tenant_id="new-tenant",
             user_id="new-user"
         )
+
+
+class TestSkillServiceUpdateById:
+    def test_rejects_non_creator(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "created_by": "other-user",
+            },
+        )
+
+        with pytest.raises(
+            skill_service.ForbiddenError,
+            match="Not authorized to update this skill",
+        ):
+            service.update_skill_by_id(
+                1,
+                {"description": "updated"},
+                user_id="user-1",
+            )
+
+    def test_rename_removes_previous_local_directory(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        (tmp_path / "Skill A").mkdir()
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "description",
+                "content": "content",
+                "tags": [],
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            create=True,
+            return_value={
+                "skill_id": 1,
+                "name": "Skill B",
+                "description": "description",
+                "content": "content",
+                "tags": [],
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=[],
+        )
+        service._enrich_configs_from_yaml = lambda result: result
+
+        service.update_skill_by_id(
+            1,
+            {"name": "Skill B"},
+            user_id="user-1",
+        )
+
+        service.skill_manager.delete_skill.assert_called_once_with("Skill A")
+
+    def test_skill_not_found_raises_skill_exception(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value=None,
+        )
+        with pytest.raises(
+            skill_service.SkillException,
+            match="Skill not found",
+        ):
+            service.update_skill_by_id(
+                999,
+                {"description": "updated"},
+                user_id="user-1",
+            )
+
+    def test_no_tenant_id_raises_skill_exception(self, mocker):
+        service = SkillService(tenant_id=None)
+        with pytest.raises(
+            skill_service.SkillException,
+            match="tenant_id is required",
+        ):
+            service.update_skill_by_id(
+                1,
+                {"description": "updated"},
+                tenant_id=None,
+                user_id="user-1",
+            )
+
+    def test_successful_update_without_local_dir(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "updated desc",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=["tool1"],
+        )
+        service._resolve_local_skills_dir_for_overlay = lambda: None
+        service._enrich_configs_from_yaml = lambda result: result
+
+        result = service.update_skill_by_id(
+            1,
+            {"description": "updated desc"},
+            user_id="user-1",
+        )
+        assert result["description"] == "updated desc"
+
+    def test_successful_update_with_config_values_and_local_dir(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "content": "content",
+                "tags": [],
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "config_values": {"key": "val"},
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=["tool1"],
+        )
+        write_config = mocker.patch(
+            "backend.services.skill_service._write_skill_params_to_local_config_yaml",
+        )
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(tmp_path / "Skill_A"),
+        )
+        mocker.patch("os.path.isdir", return_value=False)
+        service._enrich_configs_from_yaml = lambda result: result
+
+        result = service.update_skill_by_id(
+            1,
+            {"config_values": {"key": "val"}},
+            user_id="user-1",
+        )
+        assert result["config_values"] == {"key": "val"}
+        write_config.assert_called_once_with(
+            "Skill A",
+            {"key": "val"},
+            str(tmp_path),
+        )
+        service.skill_manager.save_skill.assert_called_once()
+
+    def test_update_with_config_values_none_removes_yaml(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "content": "content",
+                "tags": [],
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=["tool1"],
+        )
+        remove_config = mocker.patch(
+            "backend.services.skill_service._remove_local_skill_config_yaml",
+        )
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(tmp_path / "Skill_A"),
+        )
+        mocker.patch("os.path.isdir", return_value=False)
+        service._enrich_configs_from_yaml = lambda result: result
+
+        result = service.update_skill_by_id(
+            1,
+            {"config_values": None},
+            user_id="user-1",
+        )
+        assert result["skill_id"] == 1
+        remove_config.assert_called_once_with("Skill A", str(tmp_path))
+
+    def test_update_config_yaml_sync_failure_logs_warning(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "content": "content",
+                "tags": [],
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "config_values": {"key": "val"},
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=["tool1"],
+        )
+        write_config = mocker.patch(
+            "backend.services.skill_service._write_skill_params_to_local_config_yaml",
+            side_effect=OSError("disk full"),
+        )
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(tmp_path / "Skill_A"),
+        )
+        mocker.patch("os.path.isdir", return_value=False)
+        logger = mocker.patch("backend.services.skill_service.logger")
+        service._enrich_configs_from_yaml = lambda result: result
+
+        result = service.update_skill_by_id(
+            1,
+            {"config_values": {"key": "val"}},
+            user_id="user-1",
+        )
+        assert result["skill_id"] == 1
+        write_config.assert_called_once()
+        logger.warning.assert_called()
+
+    def test_update_skill_md_sync_failure_logs_warning(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+                "content": "content",
+                "tags": [],
+                "created_by": "user-1",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "description": "desc",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            return_value=["tool1"],
+        )
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(tmp_path / "Skill_A"),
+        )
+        mocker.patch("os.path.isdir", return_value=False)
+        service.skill_manager.save_skill.side_effect = OSError("disk error")
+        logger = mocker.patch("backend.services.skill_service.logger")
+        service._enrich_configs_from_yaml = lambda result: result
+
+        result = service.update_skill_by_id(
+            1,
+            {"description": "new desc"},
+            user_id="user-1",
+        )
+        assert result["skill_id"] == 1
+        service.skill_manager.save_skill.assert_called_once()
+        logger.warning.assert_called()
+
+    def test_update_generic_exception_raises_skill_exception(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            side_effect=RuntimeError("unexpected"),
+        )
+        with pytest.raises(skill_service.SkillException, match="Failed to update skill"):
+            service.update_skill_by_id(
+                1,
+                {"description": "updated"},
+                user_id="user-1",
+            )
+
+    def test_create_skill_already_exists_locally(self, mocker, tmp_path):
+        service = SkillService(tenant_id="tenant-1")
+        service.skill_manager = MagicMock()
+        service.skill_manager.local_skills_dir = str(tmp_path)
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(tmp_path / "existing_skill"),
+        )
+        mocker.patch("os.path.exists", return_value=True)
+        with pytest.raises(skill_service.SkillException, match="already exists locally"):
+            service.create_skill(
+                {"name": "existing_skill"},
+                tenant_id="tenant-1",
+                user_id="user-1",
+            )
+
+    def test_resolve_local_skill_path_unsafe_candidate(self, mocker, tmp_path):
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        outside = str(tmp_path.parent / "escaped")
+        mocker.patch(
+            "os.path.realpath",
+            side_effect=lambda p: outside if "escaped" in p else str(tmp_path) if str(tmp_path) in p else p,
+        )
+        with pytest.raises(skill_service.SkillException, match="Unsafe local skill path"):
+            skill_service._resolve_local_skill_path(str(tmp_path), "escaped_skill")
+
+    def test_resolve_local_skill_path_unsafe_local_root(self, mocker, tmp_path):
+        outside_dir = str(tmp_path.parent / "outside_dir")
+        mocker.patch(
+            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "os.path.realpath",
+            side_effect=lambda p: outside_dir if p == outside_dir else str(tmp_path),
+        )
+        with pytest.raises(skill_service.SkillException, match="Unsafe local skills directory"):
+            skill_service._resolve_local_skill_path(outside_dir, "skill1")

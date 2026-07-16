@@ -7,23 +7,26 @@ import {
 } from "@/const/mcpTools";
 import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./registry/AddMcpServiceRegistrySection";
-import AddMcpServiceCommunitySection from "./community/AddMcpServiceCommunitySection";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 
 interface AddMcpServiceModalProps {
   open: boolean;
+  initialTab?: McpSource;
   onClose: () => void;
 }
 
 export default function AddMcpServiceModal({
   open,
+  initialTab = McpSource.LOCAL,
   onClose,
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
-  const [tab, setTab] = useState<McpSource>(McpSource.LOCAL);
+  const [tab, setTab] = useState<McpSource>(initialTab);
+  const { enableUploadImage } = useMcpServerList({ enabled: open });
 
   useEffect(() => {
-    if (!open) setTab(McpSource.LOCAL);
-  }, [open]);
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
 
   if (!open) return null;
 
@@ -70,10 +73,6 @@ export default function AddMcpServiceModal({
                 label: t("mcpTools.addModal.tabRegistry"),
                 value: McpSource.REGISTRY,
               },
-              {
-                label: t("mcpTools.addModal.tabCommunity"),
-                value: McpSource.COMMUNITY,
-              },
             ]}
             className="h-9 rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
           />
@@ -82,14 +81,11 @@ export default function AddMcpServiceModal({
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
           <AddMcpServiceLocalSection
             active={tab === McpSource.LOCAL}
+            enableUploadImage={enableUploadImage}
             onAdded={onClose}
           />
           <AddMcpServiceRegistrySection
             active={tab === McpSource.REGISTRY}
-            onAdded={onClose}
-          />
-          <AddMcpServiceCommunitySection
-            active={tab === McpSource.COMMUNITY}
             onAdded={onClose}
           />
         </div>
