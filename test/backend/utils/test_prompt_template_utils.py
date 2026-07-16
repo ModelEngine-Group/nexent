@@ -274,6 +274,37 @@ class TestPromptTemplateUtils:
             or "不得说出、推荐、比较、排序或编造任何 LLM" in prompt
         )
 
+    @pytest.mark.parametrize(
+        ("language", "collecting_gate", "default_gate", "missing_fact_gate"),
+        [
+            (
+                "en",
+                "during `requirements_collecting`, generate only a `requirements_summary`, and only when "
+                "`render_requirements_summary` is allowed and all five facts are explicitly available",
+                "In every other stage, generate only card types listed in `expected_card_types`",
+                "If any fact is missing, ask one focused question for the first missing fact and do not output a card",
+            ),
+            (
+                "zh",
+                "在 `requirements_collecting` 阶段，只有当 `render_requirements_summary` 被允许且五项事实均已明确提供时，"
+                "才能生成 `requirements_summary`",
+                "其他所有阶段只生成 `expected_card_types` 中列出的卡片",
+                "任一事实缺失时，只询问第一个缺失项，不得输出卡片",
+            ),
+        ],
+    )
+    def test_nl2agent_prompt_has_unambiguous_requirements_card_gate(
+        self, language, collecting_gate, default_gate, missing_fact_gate
+    ):
+        """Requirements collection is the explicit exception to expected card types."""
+        prompt = get_nl2agent_system_prompt(language=language)
+
+        assert collecting_gate in prompt
+        assert default_gate in prompt
+        assert missing_fact_gate in prompt
+        assert "\n3. Generate only card types listed in `expected_card_types`." not in prompt
+        assert "\n3. 只生成 `expected_card_types` 中列出的卡片。" not in prompt
+
     @pytest.mark.parametrize("language", ["en", "zh"])
     def test_nl2agent_prompt_generates_identity_and_direct_final_card(
         self, language
