@@ -1,5 +1,6 @@
 """Catalog loading and sanitization for NL2AGENT sessions."""
 
+import asyncio
 import logging
 import re
 import unicodedata
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 CatalogItem = Dict[str, Any]
 SessionCatalogs = Dict[str, List[CatalogItem]]
+_MARKETPLACE_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,40 @@ class SkillInstallationDependencies:
     install_by_id: Callable[..., List[int]]
     get_installed_by_name: Callable[[str, str], Optional[CatalogItem]]
     bind_skill: Callable[..., Any]
+
+
+async def _load_marketplace_pages(
+    provider: Callable[..., Awaitable[Dict[str, Any]]],
+    *,
+    items_key: str,
+    nested_cursor_key: Optional[str] = None,
+) -> List[CatalogItem]:
+    """Load every cursor page while stopping safely on a repeated cursor."""
+    items: List[CatalogItem] = []
+    cursor: Optional[str] = None
+    seen_cursors: set[str] = set()
+    while True:
+        data = await provider(
+            search=None,
+            cursor=cursor,
+            limit=_MARKETPLACE_PAGE_SIZE,
+        )
+        if not isinstance(data, dict):
+            break
+        page_items = data.get(items_key, [])
+        if isinstance(page_items, list):
+            items.extend(item for item in page_items if isinstance(item, dict))
+        cursor_source = data.get(nested_cursor_key, {}) if nested_cursor_key else data
+        next_cursor = (
+            cursor_source.get("nextCursor")
+            if isinstance(cursor_source, dict)
+            else None
+        )
+        if not next_cursor or next_cursor in seen_cursors:
+            break
+        seen_cursors.add(str(next_cursor))
+        cursor = str(next_cursor)
+    return items
 
 
 def recommendation_id(source: str, item: CatalogItem) -> str:
@@ -129,39 +165,34 @@ async def load_session_catalogs(
             "NL2AGENT local Skill catalog is unavailable."
         ) from exc
 
-    try:
-        registry_data = await dependencies.list_registry_mcp_services(
-            search=None,
-            limit=30,
+    registry_result, community_result = await asyncio.gather(
+        _load_marketplace_pages(
+            dependencies.list_registry_mcp_services,
+            items_key="servers",
+            nested_cursor_key="metadata",
+        ),
+        _load_marketplace_pages(
+            dependencies.list_community_mcp_services,
+            items_key="items",
+        ),
+        return_exceptions=True,
+    )
+    if isinstance(registry_result, BaseException):
+        logger.warning(
+            "NL2AGENT Registry MCP catalog is unavailable: %s",
+            registry_result,
         )
-        registry_results = (
-            redact_mcp_marketplace_metadata(
-                registry_data.get("servers", registry_data) or []
-            )
-            if isinstance(registry_data, dict)
-            else []
+        registry_results = []
+    else:
+        registry_results = redact_mcp_marketplace_metadata(registry_result)
+    if isinstance(community_result, BaseException):
+        logger.warning(
+            "NL2AGENT community MCP catalog is unavailable: %s",
+            community_result,
         )
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT Registry MCP catalog is unavailable."
-        ) from exc
-
-    try:
-        community_data = await dependencies.list_community_mcp_services(
-            search=None,
-            limit=30,
-        )
-        community_results = (
-            redact_mcp_marketplace_metadata(
-                community_data.get("items", community_data) or []
-            )
-            if isinstance(community_data, dict)
-            else []
-        )
-    except Exception as exc:
-        raise Nl2AgentCatalogUnavailableError(
-            "NL2AGENT community MCP catalog is unavailable."
-        ) from exc
+        community_results = []
+    else:
+        community_results = redact_mcp_marketplace_metadata(community_result)
 
     try:
         official_skill_catalog = (

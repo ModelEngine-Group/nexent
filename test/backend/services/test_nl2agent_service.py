@@ -27,7 +27,7 @@ from consts.nl2agent_response import (
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
-from services import nl2agent_mcp_service, nl2agent_service
+from services import nl2agent_catalog_service, nl2agent_mcp_service, nl2agent_service
 from services.nl2agent_resource_service import (
     _resolve_tool_config_values,
     redact_tool_parameter_defaults,
@@ -49,6 +49,48 @@ def test_tool_catalog_redacts_sensitive_parameter_defaults():
         {"name": "limit", "type": "integer", "default": 5},
     ]
     assert params[0]["default"] == "secret-value"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("items_key", "nested_cursor_key", "first_page", "second_page"),
+    [
+        (
+            "servers",
+            "metadata",
+            {"servers": [{"name": "first"}], "metadata": {"nextCursor": "page-2"}},
+            {"servers": [{"name": "second"}], "metadata": {}},
+        ),
+        (
+            "items",
+            None,
+            {"items": [{"name": "first"}], "nextCursor": "page-2"},
+            {"items": [{"name": "second"}], "nextCursor": None},
+        ),
+    ],
+)
+async def test_marketplace_loader_reads_every_cursor_page(
+    items_key,
+    nested_cursor_key,
+    first_page,
+    second_page,
+):
+    provider = AsyncMock(side_effect=[first_page, second_page])
+
+    result = await nl2agent_catalog_service._load_marketplace_pages(
+        provider,
+        items_key=items_key,
+        nested_cursor_key=nested_cursor_key,
+    )
+
+    assert [item["name"] for item in result] == ["first", "second"]
+    assert [call.kwargs["cursor"] for call in provider.await_args_list] == [
+        None,
+        "page-2",
+    ]
+    assert all(
+        call.kwargs["limit"] == 100 for call in provider.await_args_list
+    )
 
 
 _RAW_TOOL_ROWS = [
@@ -583,7 +625,8 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
     )
     nl2agent_service.list_community_mcp_services.assert_awaited_once_with(
         search=None,
-        limit=30,
+        cursor=None,
+        limit=100,
     )
     draft_payload = create_draft.call_args.args[0]
     assert draft_payload["name"] == "draft_abcdef12"
@@ -643,12 +686,12 @@ async def test_start_session_keeps_only_installable_official_skills(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_start_session_fails_before_database_writes_when_catalog_is_unavailable(
+async def test_start_session_degrades_when_registry_catalog_is_unavailable(
     monkeypatch,
 ):
     clear_nl2agent_session_catalogs()
     _, transaction = _mock_database_transaction(monkeypatch)
-    create_draft = MagicMock()
+    create_draft = MagicMock(return_value={"agent_id": 202})
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_id_by_agent_name",
@@ -665,17 +708,20 @@ async def test_start_session_fails_before_database_writes_when_catalog_is_unavai
         AsyncMock(side_effect=RuntimeError("registry unavailable")),
     )
     monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_conversation",
+        MagicMock(return_value={"conversation_id": 303}),
+    )
 
-    with pytest.raises(
-        nl2agent_service.Nl2AgentCatalogUnavailableError,
-        match="Registry MCP catalog is unavailable",
-    ):
-        await nl2agent_service.start_session(
-            user_id="user_1", tenant_id="tenant_1", language="en"
-        )
+    result = await nl2agent_service.start_session(
+        user_id="user_1", tenant_id="tenant_1", language="en"
+    )
 
-    create_draft.assert_not_called()
-    transaction.__enter__.assert_not_called()
+    assert result["draft_agent_id"] == 202
+    assert get_nl2agent_session_catalogs("tenant_1", 202)["registry_results"] == []
+    create_draft.assert_called_once()
+    transaction.__enter__.assert_called_once()
 
 
 @pytest.mark.asyncio
