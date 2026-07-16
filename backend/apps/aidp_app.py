@@ -3,6 +3,7 @@ AIDP App Layer
 FastAPI endpoints for AIDP knowledge base list proxy.
 """
 import logging
+import os
 from http import HTTPStatus
 from typing import Annotated
 
@@ -20,15 +21,20 @@ router = APIRouter(prefix="/aidp")
 logger = logging.getLogger("aidp_app")
 
 
+def _get_aidp_credentials() -> tuple[str, str]:
+    server_url = os.environ.get("AIDP_SERVER_URL", "")
+    api_key = os.environ.get("AIDP_API_KEY", "")
+    return server_url, api_key
+
+
 @router.get("/knowledge-bases")
 async def fetch_aidp_knowledge_bases_api(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
 ) -> JSONResponse:
     """Fetch a single page of knowledge bases from the external AIDP API."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         result = fetch_aidp_knowledge_bases_impl(
             server_url=server_url,
             api_key=api_key,
@@ -48,8 +54,6 @@ async def fetch_aidp_knowledge_bases_api(
 
 @router.get("/knowledge-bases-all")
 async def fetch_all_aidp_knowledge_bases_api(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
 ) -> JSONResponse:
     """Fetch ALL knowledge bases from AIDP (accumulates every page internally).
 
@@ -57,6 +61,7 @@ async def fetch_all_aidp_knowledge_bases_api(
     entirely on the client side.
     """
     try:
+        server_url, api_key = _get_aidp_credentials()
         result = fetch_all_aidp_knowledge_bases_impl(
             server_url=server_url,
             api_key=api_key,

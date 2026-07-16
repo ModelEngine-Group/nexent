@@ -442,14 +442,9 @@ class KnowledgeBaseService {
     }
   }
 
-  async getAidpKnowledgeBasesAll(
-    serverUrl: string,
-    apiKey: string
-  ): Promise<AidpKnowledgeBaseListResponse> {
+  async getAidpKnowledgeBasesAll(): Promise<AidpKnowledgeBaseListResponse> {
     try {
       const url = new URL(API_ENDPOINTS.aidp.knowledgeBasesAll, globalThis.location.origin);
-      url.searchParams.set("server_url", serverUrl);
-      url.searchParams.set("api_key", apiKey);
 
       const response = await fetch(url.toString(), {
         method: "GET",
@@ -478,15 +473,11 @@ class KnowledgeBaseService {
   }
 
   async getAidpKnowledgeBases(
-    serverUrl: string,
-    apiKey: string,
     page: number = 1,
     pageSize: number = 20
   ): Promise<AidpKnowledgeBaseListResponse> {
     try {
       const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
-      url.searchParams.set("server_url", serverUrl);
-      url.searchParams.set("api_key", apiKey);
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", String(pageSize));
 

@@ -137,23 +137,17 @@ export function useKnowledgeBasesForToolConfig(
           kbs = [];
         }
       } else if (toolType === "aidp_search") {
-        if (aidpConfig?.serverUrl && aidpConfig?.apiKey) {
-          try {
-            const result = await knowledgeBaseService.getAidpKnowledgeBases(
-              aidpConfig.serverUrl,
-              aidpConfig.apiKey,
-              1,
-              100
-            );
-            kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
-              result.value || []
-            );
-          } catch (error: any) {
-            log.error("Failed to fetch AIDP knowledge bases:", error);
-            showErrorToUser(error, t);
-            kbs = [];
-          }
-        } else {
+        try {
+          const result = await knowledgeBaseService.getAidpKnowledgeBases(
+            1,
+            100
+          );
+          kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
+            result.value || []
+          );
+        } catch (error: any) {
+          log.error("Failed to fetch AIDP knowledge bases:", error);
+          showErrorToUser(error, t);
           kbs = [];
         }
       } else {
@@ -296,23 +290,17 @@ export function usePrefetchKnowledgeBases() {
               kbs = [];
             }
           } else if (toolType === "aidp_search") {
-            if (difyConfig?.serverUrl && difyConfig?.apiKey) {
-              try {
-                const result = await knowledgeBaseService.getAidpKnowledgeBases(
-                  difyConfig.serverUrl,
-                  difyConfig.apiKey,
-                  1,
-                  100
-                );
-                kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
-                  result.value || []
-                );
-              } catch (error: any) {
-                log.error("Failed to prefetch AIDP knowledge bases:", error);
-                showErrorToUser(error, t);
-                kbs = [];
-              }
-            } else {
+            try {
+              const result = await knowledgeBaseService.getAidpKnowledgeBases(
+                1,
+                100
+              );
+              kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
+                result.value || []
+              );
+            } catch (error: any) {
+              log.error("Failed to prefetch AIDP knowledge bases:", error);
+              showErrorToUser(error, t);
               kbs = [];
             }
           } else {
@@ -391,15 +379,10 @@ export function useSyncKnowledgeBases() {
             }
             break;
           case "aidp_search":
-            // AIDP sync requires server URL and API key
-            if (config?.serverUrl && config?.apiKey) {
-              await knowledgeBaseService.getAidpKnowledgeBases(
-                config.serverUrl,
-                config.apiKey,
-                1,
-                100
-              );
-            }
+            await knowledgeBaseService.getAidpKnowledgeBases(
+              1,
+              100
+            );
             break;
           default:
             // Default sync behavior - sync Nexent only

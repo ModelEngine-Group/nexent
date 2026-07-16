@@ -296,14 +296,6 @@ export default function ToolConfigModal({
     HaotianKnowledgeSet[]
   >([]);
 
-  const [aidpConfig, setAidpConfig] = useState<{
-    serverUrl: string;
-    apiKey: string;
-  }>({
-    serverUrl: "",
-    apiKey: "",
-  });
-
   // Initialize Haotian config from params
   useEffect(() => {
     if (toolKbType !== "haotian_search") return;
@@ -317,17 +309,6 @@ export default function ToolConfigModal({
       currentParams.find((p) => p.name === "authorization")?.value || ""
     );
     setHaotianConfig({ listUrl, retrieveUrl, authorization: extAuth });
-  }, [toolKbType, currentParams]);
-
-  useEffect(() => {
-    if (toolKbType !== "aidp_search") return;
-    const serverUrl = String(
-      currentParams.find((p) => p.name === "server_url")?.value || ""
-    );
-    const apiKey = String(
-      currentParams.find((p) => p.name === "api_key")?.value || ""
-    );
-    setAidpConfig({ serverUrl, apiKey });
   }, [toolKbType, currentParams]);
 
   const {
@@ -490,10 +471,7 @@ export default function ToolConfigModal({
       };
     }
     if (toolKbType === "aidp_search") {
-      return {
-        serverUrl: aidpConfig.serverUrl,
-        apiKey: aidpConfig.apiKey,
-      };
+      return {};
     }
     return undefined;
   };
@@ -555,8 +533,8 @@ export default function ToolConfigModal({
               }
             : toolKbType === "aidp_search"
               ? {
-                  serverUrl: aidpConfig.serverUrl,
-                  apiKey: aidpConfig.apiKey,
+                  serverUrl: "",
+                  apiKey: "",
                 }
               : undefined,
     onConfigChange: handleKbConfigChange,
@@ -1163,11 +1141,8 @@ export default function ToolConfigModal({
       return false;
     }
     if (toolKbType === "aidp_search") {
-      if (aidpConfig.serverUrl && aidpConfig.apiKey) {
-        refetchKnowledgeBases();
-        return true;
-      }
-      return false;
+      refetchKnowledgeBases();
+      return true;
     }
     refetchKnowledgeBases();
     return true;
@@ -1190,7 +1165,6 @@ export default function ToolConfigModal({
     toolKbType,
     difyConfig,
     haotianConfig,
-    aidpConfig,
   ]);
 
   // Show sync message when knowledge base selector modal opens
@@ -1198,11 +1172,6 @@ export default function ToolConfigModal({
   useEffect(() => {
     // Only trigger when KB selector opens and tool requires KB selection
     if (kbSelectorVisible && toolRequiresKbSelection && !hasShownSyncMessageRef.current) {
-      // For AIDP, only sync if credentials are configured to avoid premature "success" message
-      if (toolKbType === "aidp_search" && (!aidpConfig.serverUrl || !aidpConfig.apiKey)) {
-        return;
-      }
-
       // Mark as shown to avoid duplicate messages
       hasShownSyncMessageRef.current = true;
 
@@ -1902,6 +1871,13 @@ export default function ToolConfigModal({
                   if (param.name === "rerank_model_name" && !isRerankEnabled) {
                     return null;
                   }
+                  // Hide server_url / api_key for AIDP search - now read from environment variables
+                  if (
+                    toolKbType === "aidp_search" &&
+                    (param.name === "server_url" || param.name === "api_key")
+                  ) {
+                    return null;
+                  }
                   const fieldName = `param_${index}`;
                   const rules: any[] = [];
 
@@ -2129,8 +2105,6 @@ export default function ToolConfigModal({
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleAidpKbConfirm}
           selectedDatasetIds={selectedKbIds}
-          serverUrl={aidpConfig.serverUrl}
-          apiKey={aidpConfig.apiKey}
         />
       ) : (
         <KnowledgeBaseSelectorModal

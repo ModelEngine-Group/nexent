@@ -46,8 +46,6 @@ const AIDP_CREATE_DEFAULTS = {
 
 interface AidpCreateKbModalProps {
   open: boolean;
-  serverUrl: string;
-  apiKey: string;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
   onSuccess: (newKdsId: string) => void;
@@ -55,8 +53,6 @@ interface AidpCreateKbModalProps {
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   open,
-  serverUrl,
-  apiKey,
   existingKbs,
   onCancel,
   onSuccess,
@@ -136,7 +132,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
 
       // Step 1: Create KB
       // Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload
-      const created = await aidpKnowledgeService.createKb(serverUrl, apiKey, {
+      const created = await aidpKnowledgeService.createKb({
         name: formValues.name.trim(),
         description: formValues.description || "",
         chunk_token_num: String(formValues.chunk_token_num),
@@ -154,8 +150,6 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       // Step 2: Upload files (if any and not skipped)
       if (!skipUpload && fileList.length > 0 && created.kds_id) {
         const result = await aidpKnowledgeService.uploadDocs(
-          serverUrl,
-          apiKey,
           created.kds_id,
           fileList
         );

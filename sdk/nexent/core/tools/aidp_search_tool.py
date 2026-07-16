@@ -6,6 +6,7 @@ Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_
 """
 import json
 import logging
+import os
 from typing import Any, Dict, List
 from urllib.parse import urljoin
 
@@ -137,8 +138,8 @@ class AidpSearchTool(Tool):
 
     def __init__(
         self,
-        server_url: str = Field(description="AIDP API base URL"),
-        api_key: str = Field(description="AIDP API key"),
+        server_url: str = Field(default_factory=lambda: os.environ.get("AIDP_SERVER_URL", ""), exclude=True, description="AIDP API base URL"),
+        api_key: str = Field(default_factory=lambda: os.environ.get("AIDP_API_KEY", ""), exclude=True, description="AIDP API key"),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
         search_method: str = Field(default="hybrid_search", description="Search method"),
         reranking_enable: bool = Field(default=False, description="Enable reranking"),
@@ -152,14 +153,21 @@ class AidpSearchTool(Tool):
     ):
         super().__init__()
 
-        if not server_url or not isinstance(server_url, str):
+        self.kds_list: List[str] = _parse_kds_list(kds_list)
+        # Fall back to environment variables when an empty string is passed
+        # explicitly (e.g. from a persisted DB config that no longer stores
+        # these credentials). This complements the Field default_factory which
+        # only triggers when the argument is omitted entirely.
+        _server_url = server_url or os.environ.get("AIDP_SERVER_URL", "")
+        _api_key = api_key or os.environ.get("AIDP_API_KEY", "")
+        self.base_url = _server_url.rstrip("/")
+        self.api_key = _api_key
+
+        if not self.base_url:
             raise ValueError("server_url is required and must be a non-empty string")
-        if not api_key or not isinstance(api_key, str):
+        if not self.api_key:
             raise ValueError("api_key is required and must be a non-empty string")
 
-        self.kds_list: List[str] = _parse_kds_list(kds_list)
-        self.base_url = server_url.rstrip("/")
-        self.api_key = api_key
         self.search_method = _coerce_choice(
             search_method, _VALID_SEARCH_METHODS, "hybrid_search", "search_method"
         )

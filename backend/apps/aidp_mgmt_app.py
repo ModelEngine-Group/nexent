@@ -3,6 +3,7 @@ AIDP Management App Layer
 FastAPI endpoints for AIDP knowledge base CRUD and document management proxy.
 """
 import logging
+import os
 from http import HTTPStatus
 from typing import Annotated, List, Optional
 
@@ -26,6 +27,12 @@ from services.aidp_service import (
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
+
+
+def _get_aidp_credentials() -> tuple[str, str]:
+    server_url = os.environ.get("AIDP_SERVER_URL", "")
+    api_key = os.environ.get("AIDP_API_KEY", "")
+    return server_url, api_key
 
 
 # ==================== Request Models ====================
@@ -53,13 +60,12 @@ class UpdateKbRequest(BaseModel):
 
 @aidp_mgmt_router.get("/knowledge-bases")
 async def list_knowledge_bases(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
 ) -> JSONResponse:
     """List knowledge bases from AIDP (paginated) with total count."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         result = fetch_aidp_knowledge_bases_impl(
             server_url=server_url,
             api_key=api_key,
@@ -119,12 +125,10 @@ async def list_knowledge_bases(
 
 
 @aidp_mgmt_router.get("/knowledge-bases/count")
-async def count_knowledge_bases(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
-) -> JSONResponse:
+async def count_knowledge_bases() -> JSONResponse:
     """Get total count of knowledge bases from AIDP."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         total = count_aidp_kbs_impl(
             server_url=server_url,
             api_key=api_key,
@@ -142,12 +146,11 @@ async def count_knowledge_bases(
 
 @aidp_mgmt_router.post("/knowledge-bases")
 async def create_knowledge_base(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     body: CreateKbRequest,
 ) -> JSONResponse:
     """Create a new knowledge base via AIDP."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         payload = body.model_dump(exclude_none=True)
         result = create_aidp_kb_impl(
             server_url=server_url,
@@ -167,12 +170,11 @@ async def create_knowledge_base(
 
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}")
 async def get_knowledge_base(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
 ) -> JSONResponse:
     """Get details of a specific knowledge base."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         result = get_aidp_kb_impl(
             server_url=server_url,
             api_key=api_key,
@@ -191,8 +193,6 @@ async def get_knowledge_base(
 
 @aidp_mgmt_router.put("/knowledge-bases/{kds_id}")
 async def update_knowledge_base(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     body: UpdateKbRequest,
 ) -> JSONResponse:
@@ -204,6 +204,7 @@ async def update_knowledge_base(
                 ErrorCode.COMMON_VALIDATION_ERROR,
                 "At least one field (name or description) must be provided for update",
             )
+        server_url, api_key = _get_aidp_credentials()
         result = update_aidp_kb_impl(
             server_url=server_url,
             api_key=api_key,
@@ -223,12 +224,11 @@ async def update_knowledge_base(
 
 @aidp_mgmt_router.delete("/knowledge-bases/{kds_id}")
 async def delete_knowledge_base(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
 ) -> JSONResponse:
     """Delete a knowledge base via AIDP."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         success = delete_aidp_kb_impl(
             server_url=server_url,
             api_key=api_key,
@@ -247,13 +247,12 @@ async def delete_knowledge_base(
 
 @aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents")
 async def upload_documents(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     files: List[UploadFile] = File(..., description="Files to upload"),
 ) -> JSONResponse:
     """Upload documents to a knowledge base via AIDP."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         result = upload_aidp_docs_impl(
             server_url=server_url,
             api_key=api_key,
@@ -273,14 +272,13 @@ async def upload_documents(
 
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}/documents")
 async def list_documents(
-    server_url: Annotated[str, Query(description="AIDP API server URL")],
-    api_key: Annotated[str, Query(description="AIDP API key")],
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
 ) -> JSONResponse:
     """List documents in a knowledge base via AIDP."""
     try:
+        server_url, api_key = _get_aidp_credentials()
         result = list_aidp_docs_impl(
             server_url=server_url,
             api_key=api_key,

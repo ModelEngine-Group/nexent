@@ -27,8 +27,6 @@ interface AidpKnowledgeSelectorModalProps {
   readonly onClose: () => void;
   readonly onConfirm: (selected: { datasetIds: string[]; displayNames: string[] }) => void;
   readonly selectedDatasetIds: string[];
-  readonly serverUrl: string;
-  readonly apiKey: string;
   readonly title?: string;
   readonly maxSelect?: number;
 }
@@ -40,8 +38,6 @@ export default function AidpKnowledgeSelectorModal({
   onClose,
   onConfirm,
   selectedDatasetIds,
-  serverUrl,
-  apiKey,
   title,
   maxSelect = 10,
 }: AidpKnowledgeSelectorModalProps) {
@@ -89,17 +85,9 @@ export default function AidpKnowledgeSelectorModal({
   // ------------------------------------------------------------------
   const loadPage = useCallback(
     async (pageNum: number, nextUrl: string | null = null) => {
-      if (!serverUrl || !apiKey) {
-        setPageItems([]);
-        setNextLink(null);
-        return;
-      }
-
       setLoading(true);
       try {
         const result = await knowledgeBaseService.getAidpKnowledgeBases(
-          serverUrl,
-          apiKey,
           pageNum,
           DEFAULT_PAGE_SIZE
         );
@@ -130,16 +118,16 @@ export default function AidpKnowledgeSelectorModal({
         setLoading(false);
       }
     },
-    [serverUrl, apiKey, t]
+    [t]
   );
 
   // ------------------------------------------------------------------
-  // Load first page when modal opens or credentials change
+  // Load first page when modal opens
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
     loadPage(1);
-  }, [isOpen, serverUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
   // Keyword filter (client-side on current page)
