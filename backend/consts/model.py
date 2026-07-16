@@ -452,6 +452,7 @@ class Nl2AgentApplyLocalResourcesRequest(BaseModel):
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
     tool_ids: List[int] = Field(default_factory=list)
     skill_ids: List[int] = Field(default_factory=list)
+    tool_config_values: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
 
 
 class Nl2AgentRecommendationBatchRequest(BaseModel):

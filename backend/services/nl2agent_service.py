@@ -826,6 +826,7 @@ async def apply_local_resources_batch(
     skill_ids: List[int],
     tenant_id: str,
     user_id: str,
+    tool_config_values: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Delegate atomic local-resource binding to the resource service."""
     return await apply_local_resources(
@@ -834,6 +835,7 @@ async def apply_local_resources_batch(
         recommendation_batch_id=recommendation_batch_id,
         tool_ids=tool_ids,
         skill_ids=skill_ids,
+        tool_config_values=tool_config_values,
         tenant_id=tenant_id,
         user_id=user_id,
     )

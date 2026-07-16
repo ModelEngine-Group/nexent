@@ -77,7 +77,8 @@ def main() -> int:
             )
         return 0
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(rendered, encoding="utf-8")
+    newline = "\r\n" if args.output.exists() and b"\r\n" in args.output.read_bytes() else "\n"
+    args.output.write_bytes(rendered.replace("\n", newline).encode("utf-8"))
     return 0
 
 

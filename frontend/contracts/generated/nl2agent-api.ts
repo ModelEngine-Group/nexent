@@ -322,6 +322,12 @@ export interface components {
       recommendation_batch_id: string;
       /** Skill Ids */
       skill_ids?: number[];
+      /** Tool Config Values */
+      tool_config_values?: {
+        [key: string]: {
+          [key: string]: unknown;
+        };
+      };
       /** Tool Ids */
       tool_ids?: number[];
     };

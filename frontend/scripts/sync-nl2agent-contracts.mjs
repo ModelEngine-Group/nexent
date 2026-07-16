@@ -25,9 +25,10 @@ const apiTypesTargetPath = resolve(
   "contracts/generated/nl2agent-api.ts"
 );
 const backendPythonCandidates = [
+  process.env.NEXENT_BACKEND_PYTHON,
   resolve(repositoryRoot, "backend/.venv/Scripts/python.exe"),
   resolve(repositoryRoot, "backend/.venv/bin/python"),
-];
+].filter(Boolean);
 const backendPython = backendPythonCandidates.find(existsSync);
 if (!backendPython) {
   throw new Error(

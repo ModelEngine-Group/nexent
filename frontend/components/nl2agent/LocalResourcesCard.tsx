@@ -2,7 +2,16 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Checkbox, Button, message as AntMessage } from "antd";
+import {
+  Alert,
+  Checkbox,
+  Button,
+  Input,
+  InputNumber,
+  Select,
+  Switch,
+  message as AntMessage,
+} from "antd";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import {
   applyLocalResources,
@@ -22,6 +31,19 @@ export interface LocalResourceItem {
   score?: number;
   reason?: string;
   kind: "tool" | "skill";
+  params?: LocalToolParameter[];
+}
+
+interface LocalToolParameter {
+  name: string;
+  type?: string;
+  description?: string;
+  default?: unknown;
+  required?: boolean;
+  optional?: boolean;
+  isSecret?: boolean;
+  is_secret?: boolean;
+  choices?: unknown[];
 }
 
 export interface LocalResourcesCardProps {
@@ -70,6 +92,9 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const [skipped, setSkipped] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registrationError, setRegistrationError] = useState<string>();
+  const [toolConfigValues, setToolConfigValues] = useState<
+    Record<number, Record<string, unknown>>
+  >({});
   const resourceIds = useMemo(
     () => ({
       tool_ids: tools.flatMap((item) =>
@@ -159,6 +184,29 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
       );
       return;
     }
+    const missingField = tools
+      .filter(
+        (tool) => tool.tool_id != null && selected.has(`t:${tool.tool_id}`)
+      )
+      .flatMap((tool) =>
+        (tool.params ?? []).flatMap((field) => {
+          const value =
+            toolConfigValues[tool.tool_id!]?.[field.name] ?? field.default;
+          const required = field.required === true || field.optional === false;
+          return required && (value == null || value === "")
+            ? [`${tool.name}: ${field.name}`]
+            : [];
+        })
+      )[0];
+    if (missingField) {
+      AntMessage.warning(
+        t("nl2agent.localResources.missingConfiguration", {
+          defaultValue: "Please configure {{field}}.",
+          field: missingField,
+        })
+      );
+      return;
+    }
     try {
       await execute(
         () =>
@@ -166,6 +214,13 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             recommendation_batch_id: recommendationBatchId,
             tool_ids: selectedToolIds,
             skill_ids: selectedSkillIds,
+            tool_config_values: Object.fromEntries(
+              selectedToolIds.flatMap((toolId) =>
+                toolConfigValues[toolId]
+                  ? [[String(toolId), toolConfigValues[toolId]]]
+                  : []
+              )
+            ),
           }),
         {
           onSuccess: (result) => {
@@ -218,43 +273,143 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const renderRow = (item: LocalResourceItem) => {
     const key =
       item.kind === "tool" ? `t:${item.tool_id}` : `s:${item.skill_id}`;
+    const toolId = item.tool_id;
+    const configurableFields = item.kind === "tool" ? (item.params ?? []) : [];
     return (
-      <label
-        key={key}
-        className="flex items-start gap-2 py-1.5 px-2 rounded hover:bg-gray-50 cursor-pointer"
-      >
-        <Checkbox
-          checked={selected.has(key)}
-          onChange={() => toggle(key)}
-          disabled={applied}
-          className="mt-1"
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm">{item.name}</span>
-            {item.source && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {item.source}
-              </span>
+      <React.Fragment key={key}>
+        <label className="flex items-start gap-2 py-1.5 px-2 rounded hover:bg-gray-50 cursor-pointer">
+          <Checkbox
+            checked={selected.has(key)}
+            onChange={() => toggle(key)}
+            disabled={applied}
+            className="mt-1"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-medium text-sm">{item.name}</span>
+              {item.source && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {item.source}
+                </span>
+              )}
+              {typeof item.score === "number" && (
+                <span className="text-[10px] text-gray-500">
+                  score: {item.score}
+                </span>
+              )}
+            </div>
+            {item.description && (
+              <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">
+                {item.description}
+              </div>
             )}
-            {typeof item.score === "number" && (
-              <span className="text-[10px] text-gray-500">
-                score: {item.score}
-              </span>
+            {item.reason && (
+              <div className="text-xs text-gray-400 mt-0.5 italic">
+                {item.reason}
+              </div>
             )}
           </div>
-          {item.description && (
-            <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">
-              {item.description}
+        </label>
+        {toolId != null &&
+          selected.has(key) &&
+          configurableFields.length > 0 && (
+            <div className="mx-2 mb-2 space-y-2 rounded border border-gray-100 bg-gray-50 p-2">
+              {configurableFields.map((field) => {
+                const value =
+                  toolConfigValues[toolId]?.[field.name] ?? field.default;
+                const setValue = (nextValue: unknown) =>
+                  setToolConfigValues((previous) => ({
+                    ...previous,
+                    [toolId]: {
+                      ...previous[toolId],
+                      [field.name]: nextValue,
+                    },
+                  }));
+                const label = `${field.name}${
+                  field.required === true || field.optional === false
+                    ? " *"
+                    : ""
+                }`;
+                const secret =
+                  field.isSecret === true ||
+                  field.is_secret === true ||
+                  /password|authorization|api[_-]?key|secret|token/i.test(
+                    field.name
+                  );
+                return (
+                  <div key={field.name}>
+                    <div className="mb-1 text-xs text-gray-600">{label}</div>
+                    {Array.isArray(field.choices) &&
+                    field.choices.length > 0 ? (
+                      <Select
+                        aria-label={label}
+                        size="small"
+                        className="w-full"
+                        value={value}
+                        options={field.choices.map((choice) => ({
+                          value: choice as string | number,
+                          label: String(choice),
+                        }))}
+                        onChange={setValue}
+                        disabled={applied}
+                      />
+                    ) : field.type === "boolean" ? (
+                      <Switch
+                        aria-label={label}
+                        size="small"
+                        checked={Boolean(value)}
+                        onChange={setValue}
+                        disabled={applied}
+                      />
+                    ) : field.type === "integer" || field.type === "number" ? (
+                      <InputNumber
+                        aria-label={label}
+                        size="small"
+                        className="w-full"
+                        value={typeof value === "number" ? value : undefined}
+                        precision={field.type === "integer" ? 0 : undefined}
+                        onChange={setValue}
+                        disabled={applied}
+                      />
+                    ) : field.type === "array" || field.type === "object" ? (
+                      <Input.TextArea
+                        aria-label={label}
+                        size="small"
+                        value={
+                          typeof value === "string"
+                            ? value
+                            : value == null
+                              ? ""
+                              : JSON.stringify(value)
+                        }
+                        placeholder={field.description}
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          try {
+                            setValue(JSON.parse(raw));
+                          } catch {
+                            setValue(raw);
+                          }
+                        }}
+                        disabled={applied}
+                      />
+                    ) : (
+                      <Input
+                        aria-label={label}
+                        size="small"
+                        type={secret ? "password" : "text"}
+                        value={typeof value === "string" ? value : ""}
+                        placeholder={field.description}
+                        onChange={(event) => setValue(event.target.value)}
+                        disabled={applied}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
-          {item.reason && (
-            <div className="text-xs text-gray-400 mt-0.5 italic">
-              {item.reason}
-            </div>
-          )}
-        </div>
-      </label>
+      </React.Fragment>
     );
   };
 

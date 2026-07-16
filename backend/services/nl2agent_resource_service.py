@@ -11,6 +11,64 @@ from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
 logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_config_values(
+    tool_id: int,
+    schema: Any,
+    submitted: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Validate submitted ToolInstance values against a ToolInfo parameter schema."""
+    if isinstance(schema, dict):
+        if submitted:
+            raise AgentRunException(f"Tool {tool_id} does not accept user configuration values.")
+        return dict(schema)
+    if not isinstance(schema, list):
+        if submitted:
+            raise AgentRunException(f"Tool {tool_id} does not accept configuration values.")
+        return {}
+
+    fields = {
+        str(field.get("name")): field
+        for field in schema
+        if isinstance(field, dict) and field.get("name")
+    }
+    unknown = sorted(set(submitted) - set(fields))
+    if unknown:
+        raise AgentRunException(
+            f"Tool {tool_id} received unknown configuration fields: {', '.join(unknown)}."
+        )
+
+    resolved: Dict[str, Any] = {}
+    for name, field in fields.items():
+        value = submitted.get(name, field.get("default"))
+        required = field.get("required") is True or field.get("optional") is False
+        if value is None or value == "":
+            if required:
+                raise AgentRunException(
+                    f"Tool {tool_id} requires configuration field: {name}."
+                )
+            continue
+        expected_type = str(field.get("type") or "").lower()
+        type_matches = {
+            "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
+            "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
+            "boolean": lambda item: isinstance(item, bool),
+            "string": lambda item: isinstance(item, str),
+            "array": lambda item: isinstance(item, list),
+            "object": lambda item: isinstance(item, dict),
+        }.get(expected_type)
+        if type_matches and not type_matches(value):
+            raise AgentRunException(
+                f"Tool {tool_id} configuration field {name} must be {expected_type}."
+            )
+        choices = field.get("choices")
+        if isinstance(choices, list) and choices and value not in choices:
+            raise AgentRunException(
+                f"Tool {tool_id} configuration field {name} must use a declared choice."
+            )
+        resolved[name] = value
+    return resolved
+
+
 @dataclass(frozen=True)
 class LocalResourceDependencies:
     """Persistence and workflow operations used by local-resource actions."""
@@ -37,6 +95,7 @@ async def apply_local_resources(
     skill_ids: List[int],
     tenant_id: str,
     user_id: str,
+    tool_config_values: Dict[int, Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     """Atomically bind every selected local resource to a draft."""
     dependencies.get_owned_draft(agent_id, tenant_id)
@@ -58,6 +117,13 @@ async def apply_local_resources(
 
     selected_tool_ids = list(dict.fromkeys(map(int, tool_ids or [])))
     selected_skill_ids = list(dict.fromkeys(map(int, skill_ids or [])))
+    submitted_config = {
+        int(tool_id): values
+        for tool_id, values in (tool_config_values or {}).items()
+    }
+    unexpected_config_ids = sorted(set(submitted_config) - set(selected_tool_ids))
+    if unexpected_config_ids:
+        raise AgentRunException("Tool configuration was submitted for an unselected tool.")
     tool_records = (
         dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
         if selected_tool_ids
@@ -87,9 +153,11 @@ async def apply_local_resources(
     try:
         with dependencies.get_db_session() as db_session:
             for tool_id in selected_tool_ids:
-                params = tools_by_id[tool_id].get("params") or {}
-                if not isinstance(params, dict):
-                    params = {}
+                params = _resolve_tool_config_values(
+                    tool_id,
+                    tools_by_id[tool_id].get("params"),
+                    submitted_config.get(tool_id, {}),
+                )
                 dependencies.bind_tool(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,

@@ -199,6 +199,7 @@ async def apply_local_resources_api(
             recommendation_batch_id=payload.recommendation_batch_id,
             tool_ids=payload.tool_ids,
             skill_ids=payload.skill_ids,
+            tool_config_values=payload.tool_config_values,
             tenant_id=tenant_id,
             user_id=user_id,
         )

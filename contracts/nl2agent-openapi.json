@@ -30,6 +30,14 @@
             "title": "Skill Ids",
             "type": "array"
           },
+          "tool_config_values": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Tool Config Values",
+            "type": "object"
+          },
           "tool_ids": {
             "items": {
               "type": "integer"

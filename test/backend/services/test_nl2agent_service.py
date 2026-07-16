@@ -18,10 +18,25 @@ from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
 from services import nl2agent_service
+from services.nl2agent_catalog_service import redact_tool_parameter_defaults
+from services.nl2agent_resource_service import _resolve_tool_config_values
 
 
 class _FixedUuid:
     hex = "abcdef1234567890"
+
+
+def test_tool_catalog_redacts_sensitive_parameter_defaults():
+    params = [
+        {"name": "api_key", "type": "string", "default": "secret-value"},
+        {"name": "limit", "type": "integer", "default": 5},
+    ]
+
+    assert redact_tool_parameter_defaults(params) == [
+        {"name": "api_key", "type": "string", "default": None},
+        {"name": "limit", "type": "integer", "default": 5},
+    ]
+    assert params[0]["default"] == "secret-value"
 
 
 _RAW_TOOL_ROWS = [
@@ -2118,7 +2133,7 @@ async def test_genuine_empty_local_search_can_register_its_trusted_batch(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypatch):
+async def test_apply_local_resources_batch_uses_catalog_param_defaults(monkeypatch):
     query_tools = MagicMock(
         return_value=[
             {
@@ -2127,7 +2142,7 @@ async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypa
                     {
                         "type": "integer",
                         "name": "top_k",
-                        "default": None,
+                        "default": 5,
                         "optional": True,
                     }
                 ],
@@ -2153,7 +2168,56 @@ async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypa
 
     assert result["bound_tool_count"] == 1
     tool_request = bind_tool.call_args.kwargs["tool_info"]
-    assert tool_request.params == {}
+    assert tool_request.params == {"top_k": 5}
+
+
+@pytest.mark.parametrize(
+    ("submitted", "message"),
+    [
+        ({}, "requires configuration field: endpoint"),
+        ({"endpoint": 42}, "endpoint must be string"),
+        ({"unknown": "value"}, "unknown configuration fields: unknown"),
+    ],
+)
+def test_resolve_tool_config_values_rejects_invalid_values(submitted, message):
+    schema = [
+        {
+            "name": "endpoint",
+            "type": "string",
+            "optional": False,
+        }
+    ]
+
+    with pytest.raises(nl2agent_service.AgentRunException, match=message):
+        _resolve_tool_config_values(42, schema, submitted)
+
+
+def test_resolve_tool_config_values_returns_only_instance_values():
+    schema = [
+        {"name": "endpoint", "type": "string", "optional": False},
+        {"name": "top_k", "type": "integer", "default": 5},
+    ]
+
+    assert _resolve_tool_config_values(
+        42,
+        schema,
+        {"endpoint": "https://example.test", "top_k": 8},
+    ) == {"endpoint": "https://example.test", "top_k": 8}
+
+
+def test_resolve_tool_config_values_validates_structured_values_and_choices():
+    schema = [
+        {"name": "indexes", "type": "array"},
+        {"name": "mode", "type": "string", "choices": ["safe", "fast"]},
+    ]
+
+    assert _resolve_tool_config_values(
+        42, schema, {"indexes": ["docs"], "mode": "safe"}
+    ) == {"indexes": ["docs"], "mode": "safe"}
+    with pytest.raises(nl2agent_service.AgentRunException, match="declared choice"):
+        _resolve_tool_config_values(
+            42, schema, {"indexes": ["docs"], "mode": "invalid"}
+        )
 
 
 @pytest.mark.asyncio
