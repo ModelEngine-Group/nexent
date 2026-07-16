@@ -124,7 +124,11 @@ def build_smolagents_mock() -> ModuleType:
     models_mod = ModuleType("smolagents.models")
     models_mod.ChatMessage = _ChatMessage
     models_mod.MessageRole = _MessageRole
+    models_mod.OpenAIServerModel = MagicMock(name="smolagents.models.OpenAIServerModel")
     setattr(mock_smolagents, "models", models_mod)
+
+    # Top-level Tool class (referenced by some imports)
+    mock_smolagents.Tool = MagicMock(name="smolagents.Tool")
 
     return mock_smolagents
 
