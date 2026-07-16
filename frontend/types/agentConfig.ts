@@ -169,6 +169,10 @@ export interface AidpKnowledgeBaseListResponse {
   total_count?: number;
   next_link?: string | null;
   has_more?: boolean;
+  /** Whether `total_count` comes from the AIDP Count API (true) or is a
+   *  fallback estimate when Count fails (false). When false the frontend
+   *  should treat the total as approximate and avoid displaying "共 N 条". */
+  total_reliable?: boolean;
 }
 
 export interface SkillParam {

@@ -39,6 +39,10 @@ export interface AidpDocumentListResponse {
   value: AidpDocumentItem[];
   total_count?: number;
   has_more?: boolean;
+  /** Whether `total_count` comes from the AIDP Count API (true) or is a
+   *  fallback estimate when Count fails (false). When false the frontend
+   *  should treat the total as approximate and avoid displaying "共 N 条". */
+  total_reliable?: boolean;
 }
 
 export interface AidpCreateKbPayload {
@@ -114,6 +118,10 @@ class AidpKnowledgeService {
         typeof result.next_link === "string" ? result.next_link : null,
       has_more:
         typeof result.has_more === "boolean" ? result.has_more : undefined,
+      total_reliable:
+        typeof result.total_reliable === "boolean"
+          ? result.total_reliable
+          : (typeof result.total_count === "number"),
     };
   }
 
@@ -320,6 +328,10 @@ class AidpKnowledgeService {
         typeof result.total_count === "number" ? result.total_count : undefined,
       has_more:
         typeof result.has_more === "boolean" ? result.has_more : undefined,
+      total_reliable:
+        typeof result.total_reliable === "boolean"
+          ? result.total_reliable
+          : (typeof result.total_count === "number"),
     };
   }
 }

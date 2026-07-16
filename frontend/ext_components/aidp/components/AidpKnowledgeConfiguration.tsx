@@ -38,6 +38,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [loadingKbs, setLoadingKbs] = useState(false);
   const [kbTotal, setKbTotal] = useState(0);
   const [kbHasMore, setKbHasMore] = useState(false);
+  const [kbTotalReliable, setKbTotalReliable] = useState(true);
 
   // ---- Active KB / document state ----
   // activeKbId is stored separately from the paginated `kbs` list, because
@@ -50,6 +51,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [documents, setDocuments] = useState<AidpDocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState(0);
   const [docHasMore, setDocHasMore] = useState(false);
+  const [docTotalReliable, setDocTotalReliable] = useState(true);
   const [loadingDocs, setLoadingDocs] = useState(false);
 
   // ---- Pagination state ----
@@ -88,6 +90,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       setKbs(result.value);
       setKbTotal(result.total_count ?? result.value.length);
       setKbHasMore(result.has_more ?? false);
+      setKbTotalReliable(result.total_reliable !== false);
       setKbPage(page);
     } catch (error) {
       log.error("Failed to fetch AIDP knowledge bases:", error);
@@ -95,6 +98,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       setKbs([]);
       setKbTotal(0);
       setKbHasMore(false);
+      setKbTotalReliable(false);
     } finally {
       setLoadingKbs(false);
     }
@@ -124,6 +128,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         setDocuments(result.value);
         setTotalDocs(count);
         setDocHasMore(result.has_more ?? false);
+        setDocTotalReliable(result.total_reliable !== false);
         setDocPage(page);
       } catch (error) {
         log.error("Failed to fetch AIDP documents:", error);
@@ -131,6 +136,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         setDocuments([]);
         setTotalDocs(0);
         setDocHasMore(false);
+        setDocTotalReliable(false);
       } finally {
         setLoadingDocs(false);
       }
@@ -145,6 +151,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       setSelectedKb(kb);
       setDocPage(1);
       setDocHasMore(false);
+      setDocTotalReliable(true);
       fetchDocs(kb.kds_id, 1);
     },
     [fetchDocs]
@@ -162,7 +169,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       setDocuments([]);
       setTotalDocs(0);
       setDocHasMore(false);
+      setDocTotalReliable(true);
       setKbTotal(0);
+      setKbTotalReliable(true);
       setKbPage(1);
       setDocPage(1);
     },
@@ -181,7 +190,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     setDocuments([]);
     setTotalDocs(0);
     setDocHasMore(false);
+    setDocTotalReliable(true);
     setKbTotal(0);
+    setKbTotalReliable(true);
     setKbPage(1);
     setDocPage(1);
   }, []);
@@ -215,6 +226,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
               setDocuments([]);
               setTotalDocs(0);
               setDocHasMore(false);
+              setDocTotalReliable(true);
               setDocPage(1);
             }
 
@@ -282,6 +294,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             setKbs(result.value);
             setKbTotal(result.total_count ?? result.value.length);
             setKbHasMore(result.has_more ?? false);
+            setKbTotalReliable(result.total_reliable !== false);
             setKbPage(p);
             // Auto-select the new KB
             setActiveKbId(found.kds_id);
@@ -289,6 +302,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             // Load its docs (will be empty or pre-uploaded docs)
             setDocPage(1);
             setDocHasMore(false);
+            setDocTotalReliable(true);
             fetchDocs(found.kds_id, 1);
             return;
           }
@@ -359,6 +373,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
               activeKbId={activeKbId}
               isLoading={loadingKbs}
               total={kbTotal}
+              totalReliable={kbTotalReliable}
               hasMore={kbHasMore}
               currentPage={kbPage}
               pageSize={KB_PAGE_SIZE}
@@ -384,6 +399,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
                 activeKb={activeKbItem}
                 documents={documents}
                 totalDocs={totalDocs}
+                totalReliable={docTotalReliable}
                 hasMore={docHasMore}
                 isLoading={loadingDocs}
                 serverUrl={serverUrl}

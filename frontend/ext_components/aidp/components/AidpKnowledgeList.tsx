@@ -15,6 +15,9 @@ interface AidpKnowledgeListProps {
   activeKbId: string | null;
   isLoading: boolean;
   total: number;
+  /** True when `total` came from AIDP Count API (reliable). When false we
+   *  show a simple prev/next pagination without "共 N 条". */
+  totalReliable: boolean;
   hasMore: boolean;
   currentPage: number;
   pageSize: number;
@@ -31,6 +34,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   activeKbId,
   isLoading,
   total,
+  totalReliable,
   hasMore,
   currentPage,
   pageSize,
@@ -160,23 +164,31 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       </div>
 
       {/* Server-side pagination.
-          When Count API is unavailable total may be unreliable, so we use
-          has_more (derived from page fullness on the backend) as a fallback
-          signal. To make Pagination show at least "one more page" we inflate
-          total to be just beyond the current page when has_more is true but
-          total ≤ currentPage*pageSize. */}
-      {((total > pageSize) || hasMore || kbs.length >= pageSize) && (() => {
-        const effectiveTotal = hasMore && total <= currentPage * pageSize
-          ? currentPage * pageSize + pageSize + 1
-          : total;
+          AIDP exposes a dedicated Count API for KBs which the backend calls
+          alongside the list request. When Count succeeds, `totalReliable`
+          is true and we display the full pagination (page numbers +
+          "共 N 条"). When Count fails (e.g. endpoint unavailable), we fall
+          back to simple prev/next mode using `has_more`. */}
+      {kbs.length > 0 && (() => {
+        const effectiveTotal = totalReliable
+          ? total
+          : (hasMore
+              ? currentPage * pageSize + 1
+              : currentPage * pageSize);
         return (
           <div className="px-4 py-3 border-t border-gray-200 flex justify-center">
             <Pagination
               current={currentPage}
               pageSize={pageSize}
-              total={effectiveTotal}
+              total={effectiveTotal || 1}
               onChange={onPageChange}
               showSizeChanger={false}
+              simple={!totalReliable}
+              showTotal={
+                totalReliable
+                  ? (total) => t("aidpKnowledge.showTotal", { count: total })
+                  : undefined
+              }
               size="small"
             />
           </div>

@@ -54,6 +54,14 @@ _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _KNOWLEDGE_BASES: Dict[str, Dict[str, Any]] = {}
 _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
 
+# =============================================================================
+# Failure injection counters (used to test retry logic end-to-end)
+# =============================================================================
+# _FAIL_NEXT_N: how many upcoming requests should fail with _FAIL_STATUS_CODE
+_FAIL_NEXT_N: int = 0
+_FAIL_STATUS_CODE: int = 503
+_FAIL_TOTAL_TRIGGERED: int = 0  # lifetime counter of how many 5xx/4xx we've sent
+
 
 def _seed_initial_data() -> None:
     """Populate seed knowledge bases and documents for list/get testing.
@@ -157,6 +165,88 @@ def _check_auth(authorization: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
+
+
+class FailNextMiddleware(BaseHTTPMiddleware):
+    """Intercepts real AIDP calls (under /KnowledgeBase/) and returns a
+    configured error status for the next N requests, then lets them through.
+    Use POST /_mock/fail-next?n=2&status=503 to schedule the next 2 requests
+    to fail with 503, then verify the client retries them successfully.
+    """
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        global _FAIL_NEXT_N, _FAIL_TOTAL_TRIGGERED
+        # Only intercept the real AIDP-looking endpoints (not the admin ones)
+        if request.url.path.startswith("/KnowledgeBase"):
+            if _FAIL_NEXT_N > 0:
+                _FAIL_NEXT_N -= 1
+                _FAIL_TOTAL_TRIGGERED += 1
+                logger.info(
+                    "MOCK INJECT  %d failures remaining, returning %d on %s",
+                    _FAIL_NEXT_N, _FAIL_STATUS_CODE, request.url.path,
+                )
+                return JSONResponse(
+                    status_code=_FAIL_STATUS_CODE,
+                    content={
+                        "error": "mock-injected failure for retry testing",
+                        "status": _FAIL_STATUS_CODE,
+                    },
+                )
+        return await call_next(request)
+
+
+app.add_middleware(FailNextMiddleware)
+
+
+# =============================================================================
+# Admin-only endpoints: control failure injection
+# =============================================================================
+@app.post("/_mock/fail-next")
+def schedule_failures(
+    n: int = Query(1, ge=0, description="Number of upcoming AIDP requests to fail"),
+    status: int = Query(503, description="HTTP status code to return on each failure"),
+) -> JSONResponse:
+    """Schedule the next N real AIDP endpoints (GET/POST /KnowledgeBase/...) to
+    fail with the given status code. Returns 200 with the current plan."""
+    global _FAIL_NEXT_N, _FAIL_STATUS_CODE
+    _FAIL_NEXT_N = n
+    _FAIL_STATUS_CODE = status
+    logger.info("MOCK SCHEDULE  next %d requests will return status %d", n, status)
+    return JSONResponse(content={
+        "fail_next": _FAIL_NEXT_N,
+        "status_code": _FAIL_STATUS_CODE,
+        "total_triggered": _FAIL_TOTAL_TRIGGERED,
+    })
+
+
+@app.get("/_mock/fail-status")
+def get_fail_status() -> JSONResponse:
+    """Check the current failure-injection state. Does not mutate counters."""
+    return JSONResponse(content={
+        "fail_next": _FAIL_NEXT_N,
+        "status_code": _FAIL_STATUS_CODE,
+        "total_triggered": _FAIL_TOTAL_TRIGGERED,
+    })
+
+
+@app.post("/_mock/fail-reset")
+def reset_failures() -> JSONResponse:
+    """Reset the failure-injection counters to zero without restarting the server."""
+    global _FAIL_NEXT_N, _FAIL_TOTAL_TRIGGERED, _FAIL_STATUS_CODE
+    _FAIL_NEXT_N = 0
+    _FAIL_STATUS_CODE = 503
+    _FAIL_TOTAL_TRIGGERED = 0
+    logger.info("MOCK RESET  failure injection counters cleared")
+    return JSONResponse(content={
+        "fail_next": _FAIL_NEXT_N,
+        "status_code": _FAIL_STATUS_CODE,
+        "total_triggered": _FAIL_TOTAL_TRIGGERED,
+    })
+
+
 # =============================================================================
 # Knowledge Base CRUD
 # =============================================================================
@@ -182,10 +272,11 @@ def list_knowledge_bases(
     if end < len(all_items):
         next_link = f"{_KB_PREFIX}?page={page + 1}&page_size={page_size}"
 
-    logger.info("LIST  page=%d page_size=%d returned=%d total=%d", page, page_size, len(items), len(all_items))
+    # Real AIDP returns `total_count` = current page count (len(items)), not
+    # the true total. Use the Count endpoint for the true total.
     return JSONResponse(content={
         "value": items,
-        "total_count": len(all_items),
+        "total_count": len(items),
         "next_link": next_link,
     })
 
@@ -199,6 +290,23 @@ def count_knowledge_bases(
     _check_auth(authorization)
     count = len(_KNOWLEDGE_BASES)
     logger.info("COUNT  kds_id=%s count=%d", kds_id, count)
+    return JSONResponse(content={"count": count})
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Count")
+def count_documents(
+    kds_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Count documents in a knowledge base.
+    AIDP uses POST .../KnowledgeBases/{kds_id}/KnowledgeFiles/Count with
+    empty body, returning {"count": <int>}.
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    count = len(_DOCUMENTS_BY_KB.get(kds_id, []))
+    logger.info("COUNT DOCS  kds_id=%s count=%d", kds_id, count)
     return JSONResponse(content={"count": count})
 
 
@@ -358,10 +466,18 @@ def list_documents(
     end = start + page_size
     items = all_docs[start:end]
 
+    # Real AIDP returns `next_link` as the authoritative "more pages exist"
+    # signal. When there are no more docs, next_link is simply absent.
+    # `total_count` is the current page count, not the true total.
+    next_link = None
+    if end < len(all_docs):
+        next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+
     logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
     return JSONResponse(content={
         "value": items,
-        "total_count": len(all_docs),
+        "total_count": len(items),
+        "next_link": next_link,
     })
 
 

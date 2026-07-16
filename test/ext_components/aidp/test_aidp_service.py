@@ -446,3 +446,136 @@ class TestApplyCreateDefaults:
         )
         assert result["chunk_token_num"] == 0
         assert result["vlm_model"] == "my-vlm"
+
+
+# ---------------------------------------------------------------------------
+# _request_with_retry tests
+# ---------------------------------------------------------------------------
+class TestRequestWithRetry:
+    """Tests for _request_with_retry (exponential backoff retry helper)."""
+
+    @pytest.fixture
+    def mod(self, aidp_service_module):
+        return aidp_service_module
+
+    def _mock_response(self, status_code: int, headers: dict = None):
+        mock_resp = MagicMock()
+        mock_resp.status_code = status_code
+        mock_resp.headers = headers or {}
+        return mock_resp
+
+    def test_success_on_first_attempt(self, mod):
+        """200 response on first call — no retry."""
+        resp = self._mock_response(200)
+        request_fn = MagicMock(return_value=resp)
+
+        result = mod._request_with_retry(request_fn, context="test-success")
+
+        assert result is resp
+        assert request_fn.call_count == 1
+
+    def test_retry_then_success(self, mod, monkeypatch):
+        """Non-200 responses followed by 200 — retries happen, returns 200."""
+        resp_503 = self._mock_response(503)
+        resp_200 = self._mock_response(200)
+        request_fn = MagicMock(side_effect=[resp_503, resp_503, resp_200])
+
+        # Skip actual sleep during test
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        result = mod._request_with_retry(request_fn, context="test-retry")
+
+        assert result is resp_200
+        assert request_fn.call_count == 3
+        # Exponential backoff: 0.5s, 1.0s
+        assert sleep_calls == [0.5, 1.0]
+
+    def test_all_retries_exhausted_returns_final_response(self, mod, monkeypatch):
+        """All requests return non-200 — returns the last response for caller to raise_for_status."""
+        resp_503 = self._mock_response(503)
+        request_fn = MagicMock(return_value=resp_503)
+
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        result = mod._request_with_retry(request_fn, context="test-exhausted")
+
+        assert result is resp_503
+        assert request_fn.call_count == 3
+        assert sleep_calls == [0.5, 1.0]
+
+    def test_network_error_retry_then_success(self, mod, monkeypatch):
+        """httpx.RequestError followed by 200 — retries, returns 200."""
+        resp_200 = self._mock_response(200)
+        request_fn = MagicMock(side_effect=[
+            httpx.ConnectError("connection refused"),
+            httpx.TimeoutException("timeout"),
+            resp_200,
+        ])
+
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        result = mod._request_with_retry(request_fn, context="test-net-retry")
+
+        assert result is resp_200
+        assert request_fn.call_count == 3
+        assert sleep_calls == [0.5, 1.0]
+
+    def test_network_error_all_retries_exhausted_raises(self, mod, monkeypatch):
+        """All requests raise httpx.RequestError — final exception propagates."""
+        request_fn = MagicMock(side_effect=httpx.ConnectError("connection refused"))
+
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        with pytest.raises(httpx.ConnectError):
+            mod._request_with_retry(request_fn, context="test-net-fail")
+
+        assert request_fn.call_count == 3
+        assert sleep_calls == [0.5, 1.0]
+
+    def test_retry_after_header_honored(self, mod, monkeypatch):
+        """429 with Retry-After header — waits specified seconds instead of exponential backoff."""
+        resp_429 = self._mock_response(429, headers={"Retry-After": "5"})
+        resp_200 = self._mock_response(200)
+        request_fn = MagicMock(side_effect=[resp_429, resp_200])
+
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        result = mod._request_with_retry(request_fn, context="test-retry-after")
+
+        assert result is resp_200
+        assert request_fn.call_count == 2
+        assert sleep_calls == [5.0]
+
+    def test_mixed_status_codes_trigger_retry(self, mod, monkeypatch):
+        """Any non-200 status triggers retry: 400, 404, 500 all treated equally."""
+        resp_400 = self._mock_response(400)
+        resp_404 = self._mock_response(404)
+        resp_200 = self._mock_response(200)
+        request_fn = MagicMock(side_effect=[resp_400, resp_404, resp_200])
+
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        result = mod._request_with_retry(request_fn, context="test-mixed")
+
+        assert result is resp_200
+        assert request_fn.call_count == 3
+
+    def test_custom_max_attempts(self, mod, monkeypatch):
+        """Passing max_attempts=1 disables retry — returns first response immediately."""
+        resp_503 = self._mock_response(503)
+        request_fn = MagicMock(return_value=resp_503)
+
+        sleep_calls = []
+        monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        result = mod._request_with_retry(request_fn, context="test-no-retry", max_attempts=1)
+
+        assert result is resp_503
+        assert request_fn.call_count == 1
+        assert sleep_calls == []
