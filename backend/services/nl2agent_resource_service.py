@@ -1,0 +1,203 @@
+"""Local-resource binding operations for NL2AGENT drafts."""
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List
+
+from consts.exceptions import AgentRunException
+from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LocalResourceDependencies:
+    """Persistence and workflow operations used by local-resource actions."""
+
+    get_owned_draft: Callable[[int, str], Dict[str, Any]]
+    get_session_state: Callable[[str, int], Dict[str, Any]]
+    query_tools_by_ids: Callable[[List[int]], List[Dict[str, Any]]]
+    get_tenant_skill_by_id: Callable[[int, str], Any]
+    get_db_session: Callable[[], Any]
+    bind_tool: Callable[..., Any]
+    bind_skill: Callable[..., Any]
+    register_batch: Callable[..., Dict[str, Any]]
+    resolve_batch: Callable[..., Dict[str, Any]]
+    continuation_text: str
+
+
+async def apply_local_resources(
+    dependencies: LocalResourceDependencies,
+    *,
+    agent_id: int,
+    recommendation_batch_id: str,
+    tool_ids: List[int],
+    skill_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Atomically bind every selected local resource to a draft."""
+    dependencies.get_owned_draft(agent_id, tenant_id)
+    state = dependencies.get_session_state(tenant_id, agent_id)
+    batch = state["recommendation_batches"].get(recommendation_batch_id)
+    if batch is None:
+        raise AgentRunException(
+            "The local resource recommendation card was not registered."
+        )
+
+    requested_tool_ids = set(map(int, tool_ids or []))
+    requested_skill_ids = set(map(int, skill_ids or []))
+    if not requested_tool_ids.issubset(set(batch.get("tool_ids", []))) or not (
+        requested_skill_ids.issubset(set(batch.get("skill_ids", [])))
+    ):
+        raise AgentRunException(
+            "Selected resources do not belong to this recommendation batch."
+        )
+
+    selected_tool_ids = list(dict.fromkeys(map(int, tool_ids or [])))
+    selected_skill_ids = list(dict.fromkeys(map(int, skill_ids or [])))
+    tool_records = (
+        dependencies.query_tools_by_ids(selected_tool_ids)
+        if selected_tool_ids
+        else []
+    )
+    tools_by_id = {int(item["tool_id"]): item for item in tool_records}
+    missing_tool_ids = [
+        tool_id for tool_id in selected_tool_ids if tool_id not in tools_by_id
+    ]
+    if missing_tool_ids:
+        raise AgentRunException(
+            "Local resource binding failed because tools no longer exist: "
+            + ", ".join(map(str, missing_tool_ids))
+        )
+
+    missing_skill_ids = [
+        skill_id
+        for skill_id in selected_skill_ids
+        if not dependencies.get_tenant_skill_by_id(skill_id, tenant_id)
+    ]
+    if missing_skill_ids:
+        raise AgentRunException(
+            "Local resource binding failed because tenant skills no longer exist: "
+            + ", ".join(map(str, missing_skill_ids))
+        )
+
+    try:
+        with dependencies.get_db_session() as db_session:
+            for tool_id in selected_tool_ids:
+                params = tools_by_id[tool_id].get("params") or {}
+                if not isinstance(params, dict):
+                    params = {}
+                dependencies.bind_tool(
+                    tool_info=ToolInstanceInfoRequest(
+                        tool_id=tool_id,
+                        agent_id=agent_id,
+                        params=params,
+                        enabled=True,
+                        version_no=0,
+                    ),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    version_no=0,
+                    db_session=db_session,
+                )
+            for skill_id in selected_skill_ids:
+                dependencies.bind_skill(
+                    skill_info=SkillInstanceInfoRequest(
+                        skill_id=skill_id,
+                        agent_id=agent_id,
+                        enabled=True,
+                        version_no=0,
+                    ),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    version_no=0,
+                    db_session=db_session,
+                )
+    except Exception as exc:
+        logger.exception(
+            "Failed to atomically bind local resources: "
+            "tenant_id=%s draft_agent_id=%s batch_id=%s",
+            tenant_id,
+            agent_id,
+            recommendation_batch_id,
+        )
+        raise AgentRunException(
+            "Local resource binding failed; no resources were applied."
+        ) from exc
+
+    try:
+        dependencies.resolve_batch(
+            tenant_id,
+            agent_id,
+            recommendation_batch_id,
+            "applied",
+            selected_tool_ids,
+            selected_skill_ids,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Local resources were committed but workflow reconciliation failed: "
+            "tenant_id=%s draft_agent_id=%s batch_id=%s",
+            tenant_id,
+            agent_id,
+            recommendation_batch_id,
+        )
+        raise AgentRunException(
+            "Local resources were saved, but workflow state could not be reconciled. "
+            "Retry Apply All."
+        ) from exc
+
+    return {
+        "recommendation_batch_id": recommendation_batch_id,
+        "status": "applied",
+        "bound_tool_count": len(selected_tool_ids),
+        "bound_skill_count": len(selected_skill_ids),
+        "tool_ids": selected_tool_ids,
+        "skill_ids": selected_skill_ids,
+        "chat_injection_text": dependencies.continuation_text,
+    }
+
+
+async def register_local_recommendations(
+    dependencies: LocalResourceDependencies,
+    *,
+    agent_id: int,
+    recommendation_batch_id: str,
+    tool_ids: List[int],
+    skill_ids: List[int],
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Register a local-resource card after it is rendered."""
+    dependencies.get_owned_draft(agent_id, tenant_id)
+    batch = dependencies.register_batch(
+        tenant_id,
+        agent_id,
+        recommendation_batch_id,
+        tool_ids,
+        skill_ids,
+    )
+    return {"recommendation_batch_id": recommendation_batch_id, **batch}
+
+
+async def skip_local_recommendations(
+    dependencies: LocalResourceDependencies,
+    *,
+    agent_id: int,
+    recommendation_batch_id: str,
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Resolve a rendered local-resource batch without applying it."""
+    dependencies.get_owned_draft(agent_id, tenant_id)
+    batch = dependencies.resolve_batch(
+        tenant_id,
+        agent_id,
+        recommendation_batch_id,
+        "skipped",
+    )
+    return {
+        "recommendation_batch_id": recommendation_batch_id,
+        **batch,
+        "chat_injection_text": dependencies.continuation_text,
+    }

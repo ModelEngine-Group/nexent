@@ -55,7 +55,6 @@ from consts.model import (
     AgentInfoRequest,
     MCPConfigRequest,
     ModelConnectStatusEnum,
-    SkillInstanceInfoRequest,
     ToolInstanceInfoRequest,
 )
 from database.agent_db import (
@@ -97,6 +96,12 @@ from services.mcp_management_service import (
 from services.nl2agent_publication_service import (
     PublicationDependencies,
     publish_agent,
+)
+from services.nl2agent_resource_service import (
+    LocalResourceDependencies,
+    apply_local_resources,
+    register_local_recommendations,
+    skip_local_recommendations,
 )
 from services.remote_mcp_service import (
     add_container_mcp_service,
@@ -1245,6 +1250,22 @@ async def skip_mcp_tool_binding(
     return {"agent_id": agent_id, "mcp_id": mcp_id, "status": "binding_skipped"}
 
 
+def _local_resource_dependencies() -> LocalResourceDependencies:
+    """Build local-resource dependencies from facade-level operations."""
+    return LocalResourceDependencies(
+        get_owned_draft=_get_owned_draft,
+        get_session_state=get_nl2agent_session_state,
+        query_tools_by_ids=query_tools_by_ids,
+        get_tenant_skill_by_id=get_tenant_skill_by_id,
+        get_db_session=get_db_session,
+        bind_tool=create_or_update_tool_by_tool_info,
+        bind_skill=create_or_update_skill_by_skill_info,
+        register_batch=register_recommendation_batch,
+        resolve_batch=resolve_recommendation_batch,
+        continuation_text=NL2AGENT_CHAT_INJECTION_TEXT,
+    )
+
+
 async def apply_local_resources_batch(
     agent_id: int,
     recommendation_batch_id: str,
@@ -1253,119 +1274,16 @@ async def apply_local_resources_batch(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Bulk-bind local tools and skills to the draft agent.
-
-    Tools: creates/updates ToolInstance rows with enabled=True.
-    Skills: binds existing tenant skills as SkillInstances. Official online
-    skills are installed through the separate web-skill workflow.
-
-    Returns counts of bound items.
-    """
-    _get_owned_draft(agent_id, tenant_id)
-
-    # Validate the selection against the card that the frontend actually rendered.
-    session_state = get_nl2agent_session_state(tenant_id, agent_id)
-    batch = session_state["recommendation_batches"].get(recommendation_batch_id)
-    if batch is None:
-        raise AgentRunException("The local resource recommendation card was not registered.")
-    if not set(map(int, tool_ids or [])).issubset(set(batch.get("tool_ids", []))) or not set(
-        map(int, skill_ids or [])
-    ).issubset(set(batch.get("skill_ids", []))):
-        raise AgentRunException("Selected resources do not belong to this recommendation batch.")
-
-    selected_tool_ids = list(dict.fromkeys(map(int, tool_ids or [])))
-    selected_skill_ids = list(dict.fromkeys(map(int, skill_ids or [])))
-
-    tool_records = query_tools_by_ids(selected_tool_ids) if selected_tool_ids else []
-    tools_by_id = {int(item["tool_id"]): item for item in tool_records}
-    missing_tool_ids = [tool_id for tool_id in selected_tool_ids if tool_id not in tools_by_id]
-    if missing_tool_ids:
-        raise AgentRunException(
-            "Local resource binding failed because tools no longer exist: "
-            + ", ".join(map(str, missing_tool_ids))
-        )
-
-    missing_skill_ids = [
-        skill_id
-        for skill_id in selected_skill_ids
-        if not get_tenant_skill_by_id(skill_id, tenant_id)
-    ]
-    if missing_skill_ids:
-        raise AgentRunException(
-            "Local resource binding failed because tenant skills no longer exist: "
-            + ", ".join(map(str, missing_skill_ids))
-        )
-
-    try:
-        with get_db_session() as db_session:
-            for tool_id in selected_tool_ids:
-                params = tools_by_id[tool_id].get("params") or {}
-                if not isinstance(params, dict):
-                    params = {}
-                create_or_update_tool_by_tool_info(
-                    tool_info=ToolInstanceInfoRequest(
-                        tool_id=tool_id,
-                        agent_id=agent_id,
-                        params=params,
-                        enabled=True,
-                        version_no=0,
-                    ),
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    version_no=0,
-                    db_session=db_session,
-                )
-            for skill_id in selected_skill_ids:
-                create_or_update_skill_by_skill_info(
-                    skill_info=SkillInstanceInfoRequest(
-                        skill_id=skill_id,
-                        agent_id=agent_id,
-                        enabled=True,
-                        version_no=0,
-                    ),
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    version_no=0,
-                    db_session=db_session,
-                )
-    except Exception as exc:
-        logger.exception(
-            "Failed to atomically bind local resources: tenant_id=%s draft_agent_id=%s batch_id=%s",
-            tenant_id,
-            agent_id,
-            recommendation_batch_id,
-        )
-        raise AgentRunException("Local resource binding failed; no resources were applied.") from exc
-
-    try:
-        resolve_recommendation_batch(
-            tenant_id,
-            agent_id,
-            recommendation_batch_id,
-            "applied",
-            selected_tool_ids,
-            selected_skill_ids,
-        )
-    except Exception as exc:
-        logger.exception(
-            "Local resources were committed but workflow reconciliation failed: tenant_id=%s "
-            "draft_agent_id=%s batch_id=%s",
-            tenant_id,
-            agent_id,
-            recommendation_batch_id,
-        )
-        raise AgentRunException(
-            "Local resources were saved, but workflow state could not be reconciled. Retry Apply All."
-        ) from exc
-    return {
-        "recommendation_batch_id": recommendation_batch_id,
-        "status": "applied",
-        "bound_tool_count": len(selected_tool_ids),
-        "bound_skill_count": len(selected_skill_ids),
-        "tool_ids": selected_tool_ids,
-        "skill_ids": selected_skill_ids,
-        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
-    }
+    """Delegate atomic local-resource binding to the resource service."""
+    return await apply_local_resources(
+        _local_resource_dependencies(),
+        agent_id=agent_id,
+        recommendation_batch_id=recommendation_batch_id,
+        tool_ids=tool_ids,
+        skill_ids=skill_ids,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 async def register_local_resource_recommendations(
@@ -1375,10 +1293,15 @@ async def register_local_resource_recommendations(
     skill_ids: List[int],
     tenant_id: str,
 ) -> Dict[str, Any]:
-    """Record that the frontend rendered a local-resource card."""
-    _get_owned_draft(agent_id, tenant_id)
-    batch = register_recommendation_batch(tenant_id, agent_id, recommendation_batch_id, tool_ids, skill_ids)
-    return {"recommendation_batch_id": recommendation_batch_id, **batch}
+    """Delegate local recommendation registration to the resource service."""
+    return await register_local_recommendations(
+        _local_resource_dependencies(),
+        agent_id=agent_id,
+        recommendation_batch_id=recommendation_batch_id,
+        tool_ids=tool_ids,
+        skill_ids=skill_ids,
+        tenant_id=tenant_id,
+    )
 
 
 async def skip_local_resource_recommendations(
@@ -1386,14 +1309,13 @@ async def skip_local_resource_recommendations(
     recommendation_batch_id: str,
     tenant_id: str,
 ) -> Dict[str, Any]:
-    """Record the user's explicit decision to continue without a shown batch."""
-    _get_owned_draft(agent_id, tenant_id)
-    batch = resolve_recommendation_batch(tenant_id, agent_id, recommendation_batch_id, "skipped")
-    return {
-        "recommendation_batch_id": recommendation_batch_id,
-        **batch,
-        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
-    }
+    """Delegate local recommendation skipping to the resource service."""
+    return await skip_local_recommendations(
+        _local_resource_dependencies(),
+        agent_id=agent_id,
+        recommendation_batch_id=recommendation_batch_id,
+        tenant_id=tenant_id,
+    )
 
 
 async def register_online_resource_recommendations(
