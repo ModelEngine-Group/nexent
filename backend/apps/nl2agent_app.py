@@ -170,14 +170,8 @@ async def start_session_api(
     try:
         result = await start_session(user_id=user_id, tenant_id=tenant_id, language=language)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except AgentRunException as exc:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
-        logger.exception(f"Failed to start NL2AGENT session: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to start NL2AGENT session.",
-        )
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/apply-local-resources")
@@ -204,14 +198,8 @@ async def apply_local_resources_api(
             user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except AgentRunException as exc:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
-        logger.exception(f"Failed to apply local resources: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to apply local resources.",
-        )
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/local-resources/register")
@@ -222,13 +210,16 @@ async def register_local_resources_api(
     authorization: Optional[str] = Header(None),
 ):
     _, tenant_id, _ = _current_user(authorization, http_request)
-    return await register_local_resource_recommendations(
-        agent_id,
-        payload.recommendation_batch_id,
-        payload.tool_ids,
-        payload.skill_ids,
-        tenant_id,
-    )
+    try:
+        return await register_local_resource_recommendations(
+            agent_id,
+            payload.recommendation_batch_id,
+            payload.tool_ids,
+            payload.skill_ids,
+            tenant_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/local-resources/skip")
@@ -239,7 +230,12 @@ async def skip_local_resources_api(
     authorization: Optional[str] = Header(None),
 ):
     _, tenant_id, _ = _current_user(authorization, http_request)
-    return await skip_local_resource_recommendations(agent_id, payload.recommendation_batch_id, tenant_id)
+    try:
+        return await skip_local_resource_recommendations(
+            agent_id, payload.recommendation_batch_id, tenant_id
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/online-recommendations/register")
@@ -380,14 +376,8 @@ async def install_web_skill_api(
             locale=language,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except AgentRunException as exc:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
-        logger.exception(f"Failed to install web skill: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to install web skill.",
-        )
+        raise _session_http_error(exc) from exc
 
 
 @router.post("/session/{agent_id}/finalize")
@@ -422,8 +412,5 @@ async def finalize_agent_api(
             enable_context_manager=payload.enable_context_manager,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except AgentRunException as exc:
-        raise _session_http_error(exc) from exc
     except Exception as exc:
-        logger.exception(f"Failed to finalize agent {agent_id}: {exc}")
         raise _session_http_error(exc) from exc
