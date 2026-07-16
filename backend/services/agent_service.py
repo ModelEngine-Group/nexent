@@ -23,7 +23,7 @@ from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
-    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
+    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -105,6 +105,7 @@ from services.conversation_management_service import (
     update_unit_status,
 )
 from services.memory_config_service import build_memory_context
+from services.runtime_state_service import runtime_state_service
 from services.streaming_channel import streaming_channel_manager
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
@@ -130,6 +131,34 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     """
     await asyncio.sleep(delay)
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
+
+
+async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
+    """Mirror Redis cancel signal into the local agent stop_event."""
+    while not stop_event.is_set():
+        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
+            stop_event.set()
+            logger.info(
+                "Runtime cancel signal received, user_id=%s, conversation_id=%s",
+                user_id,
+                conversation_id,
+            )
+            return
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+
+async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, task: asyncio.Task) -> None:
+    """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
+    while not task.done():
+        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
+            task.cancel()
+            logger.info(
+                "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
+                user_id,
+                conversation_id,
+            )
+            return
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
 def _extract_json_objects_from_text(text: str) -> list[dict]:
@@ -1241,6 +1270,9 @@ async def _stream_agent_chunks(
     finally:
         # Finalize any in-flight unit and transition the parent message to its
         # terminal status before releasing the agent run slot.
+        was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
+        terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
+
         if streaming_message_id is not None:
             if current_unit is not None:
                 try:
@@ -1263,7 +1295,6 @@ async def _stream_agent_chunks(
                 except Exception:
                     logger.exception("Failed to mark last unit as completed")
 
-            terminal_status = "completed" if stream_completed_normally else "failed"
             try:
                 update_message_status(
                     streaming_message_id,
@@ -1274,7 +1305,7 @@ async def _stream_agent_chunks(
                 logger.exception("Failed to mark assistant message as %s", terminal_status)
 
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id)
+            agent_request.conversation_id, user_id, status=terminal_status)
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
@@ -1444,6 +1475,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     try:
         tool_info = search_tools_for_sub_agent(
             agent_id=agent_id, tenant_id=tenant_id)
+        # Check each tool's selected_model_id for soft-deleted models
+        for tool in tool_info:
+            unavailable_reasons = []
+            params = tool.get("params") or []
+            if isinstance(params, list):
+                for param_def in params:
+                    if not isinstance(param_def, dict):
+                        continue
+                    if param_def.get("name") == "selected_model_id":
+                        selected_model_id = param_def.get("default")
+                        if selected_model_id is not None:
+                            model_record = get_model_by_model_id_ignore_delete(selected_model_id, tenant_id)
+                            if model_record is not None and model_record.get("delete_flag") == "Y":
+                                unavailable_reasons.append(AgentUnavailableReason.MCP_MODEL_UNAVAILABLE)
+                        break
+            tool["unavailable_reasons"] = unavailable_reasons
         agent_info["tools"] = tool_info
     except Exception as e:
         logger.error(f"Failed to get agent tools: {str(e)}")
@@ -1464,7 +1511,11 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             tenant_id=tenant_id,
             version_no=version_no
         )
-        agent_info["skills"] = instances
+        # Keep disabled instances for their saved configuration, but do not
+        # return them as selected skills in the agent configuration.
+        agent_info["skills"] = [
+            instance for instance in instances if instance.get("enabled", True)
+        ]
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
@@ -1480,19 +1531,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["external_sub_agent_id_list"] = []
 
     # Get model names from model_ids array
-    model_ids = agent_info.get("model_ids")
+    # Filter out deleted models (delete_flag='Y' in model_record_t)
+    model_ids = agent_info.get("model_ids") or []
+    valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
+    agent_info["model_ids"] = valid_model_ids
+
     model_names: List[str] = []
-    if model_ids and len(model_ids) > 0:
-        for mid in model_ids:
-            model_info = get_model_by_model_id(mid)
-            if model_info:
-                display_name = model_info.get("display_name")
-                if display_name:
-                    model_names.append(display_name)
+    for mid in valid_model_ids:
+        model_info = get_model_by_model_id(mid)
+        if model_info:
+            display_name = model_info.get("display_name")
+            if display_name:
+                model_names.append(display_name)
     agent_info["model_names"] = model_names
     # Always derive model_name from model_ids so the API contract is consistent.
-    if model_ids and len(model_ids) > 0:
-        first_model_info = get_model_by_model_id(model_ids[0])
+    if valid_model_ids and len(valid_model_ids) > 0:
+        first_model_info = get_model_by_model_id(valid_model_ids[0])
         agent_info["model_name"] = first_model_info.get(
             "display_name", None) if first_model_info is not None else None
     else:
@@ -2476,9 +2530,13 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 dict.fromkeys(entry["unavailable_reasons"]))
 
             # Get model names from model_ids array
-            model_ids = agent.get("model_ids") or []
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent["model_ids"] = valid_model_ids
+
             model_names: List[str] = []
-            for mid in model_ids:
+            for mid in valid_model_ids:
                 if mid not in model_cache:
                     model_cache[mid] = get_model_by_model_id(mid, tenant_id)
                 mid_info = model_cache.get(mid)
@@ -2502,7 +2560,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
                 "author": agent.get("author"),
-                "model_ids": model_ids,
+                "model_ids": valid_model_ids,
                 "model_names": model_names,
                 "model_name": first_model_name,
                 "is_available": len(unavailable_reasons) == 0,
@@ -2646,6 +2704,22 @@ def check_agent_availability(
         tool_statuses = check_tool_is_available(tool_id_list)
         if not all(tool_statuses):
             unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
+
+    # Check if any tool has a selected_model_id pointing to a deleted model
+    for tool in tool_info:
+        params = tool.get("params") or []
+        if isinstance(params, list):
+            for param_def in params:
+                if not isinstance(param_def, dict):
+                    continue
+                if param_def.get("name") == "selected_model_id":
+                    selected_model_id = param_def.get("default")
+                    if selected_model_id is not None:
+                        model_record = get_model_by_model_id_ignore_delete(
+                            selected_model_id, tenant_id)
+                        if model_record is not None and model_record.get("delete_flag") == "Y":
+                            unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
+                    break
 
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
