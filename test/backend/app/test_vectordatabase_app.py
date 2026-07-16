@@ -142,6 +142,15 @@ def auth_data():
         "auth_header": {"Authorization": "Bearer test_token"}
     }
 
+
+@pytest.fixture(autouse=True)
+def mock_knowledge_base_edit_permission():
+    with patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.require_knowledge_base_edit_permission",
+        return_value="EDIT",
+    ):
+        yield
+
 # Test cases using pytest-asyncio
 
 
@@ -356,6 +365,36 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             ANY,  # Use ANY instead of vdb_core_mock to ignore object identity
             auth_data["user_id"]
         )
+
+
+@pytest.mark.asyncio
+async def test_delete_index_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to delete a knowledge base."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "apps.permission_utils.ElasticSearchService.require_knowledge_base_edit_permission",
+                side_effect=PermissionError("No permission to modify this knowledge base"),
+            ) as mock_require_permission, \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base",
+                new_callable=AsyncMock,
+            ) as mock_full_delete:
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}",
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            user_id=auth_data["user_id"],
+            tenant_id=auth_data["tenant_id"],
+        )
+        mock_full_delete.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1262,6 +1301,33 @@ async def test_delete_chunk_success(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
+async def test_delete_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to delete chunks."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "apps.permission_utils.ElasticSearchService.require_knowledge_base_edit_permission",
+                side_effect=PermissionError("No permission to modify this knowledge base"),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_chunk") as mock_delete:
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/chunk/chunk-1",
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            user_id=auth_data["user_id"],
+            tenant_id=auth_data["tenant_id"],
+        )
+        mock_delete.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_delete_chunk_not_found(vdb_core_mock, auth_data):
     """
     Test deleting a chunk that does not exist (ValueError from service).
@@ -1677,6 +1743,32 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
         )
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to delete files from a knowledge base."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.require_knowledge_base_edit_permission",
+                side_effect=PermissionError("No permission to modify this knowledge base"),
+            ), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"path_or_url": "test_document.pdf", "scope": "full"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_delete_by_scope.assert_not_called()
 
 
 @pytest.mark.asyncio

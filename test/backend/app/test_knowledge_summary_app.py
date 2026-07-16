@@ -70,6 +70,10 @@ class MockElasticSearchService:
     def __init__(self, *args, **kwargs):
         pass
 
+    @staticmethod
+    def require_knowledge_base_edit_permission(index_name, user_id, tenant_id=None):
+        return "EDIT"
+
 
 def mock_get_vector_db_core():
     return MagicMock()
@@ -351,6 +355,38 @@ class TestChangeSummary:
             summary_result=test_data["summary_result"],
             user_id=test_data["user_id"][0]
         )
+
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_current_user_id')
+    @patch('apps.permission_utils.ElasticSearchService.require_knowledge_base_edit_permission')
+    def test_change_summary_forbidden_for_read_only(
+        self,
+        mock_require_permission,
+        mock_get_user_id,
+        mock_service_class,
+        test_data,
+    ):
+        """Read-only users must not be able to update knowledge base summary."""
+        mock_get_user_id.return_value = test_data["user_id"]
+        mock_require_permission.side_effect = PermissionError(
+            "No permission to modify this knowledge base"
+        )
+
+        request_data = {"summary_result": test_data["summary_result"]}
+        response = client.post(
+            f"/summary/{test_data['index_name']}/summary",
+            json=request_data,
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            index_name=test_data["index_name"],
+            user_id=test_data["user_id"][0],
+            tenant_id=test_data["user_id"][1],
+        )
+        mock_service_class.return_value.change_summary.assert_not_called()
 
     @patch('apps.knowledge_summary_app.ElasticSearchService')
     @patch('apps.knowledge_summary_app.get_current_user_id')

@@ -12,6 +12,7 @@ from starlette.background import BackgroundTask
 
 from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
 from consts.model import ProcessParams
+from apps.permission_utils import require_knowledge_base_edit_permission
 from services.file_management_service import upload_to_minio, upload_files_impl, \
     get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl, \
     resolve_preview_file, get_preview_stream, check_file_access, check_file_access_batch, \
@@ -102,6 +103,8 @@ async def upload_files(
                                 detail="No files in the request")
 
         user_id, tenant_id = get_current_user_id(authorization)
+        if index_name:
+            require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
             destination, file, folder, index_name, user_id, uploader_tenant_id=tenant_id
         )
@@ -144,6 +147,9 @@ async def process_files(
     index_name: index name in elasticsearch
     destination: 'local' or 'minio'
     """
+    user_id, tenant_id = get_current_user_id(authorization)
+    require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
+
     process_params = ProcessParams(
         chunking_strategy=chunking_strategy,
         source_type=destination,

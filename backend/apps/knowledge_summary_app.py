@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from nexent.vector_database.base import VectorDatabaseCore
 
 from consts.model import ChangeSummaryRequest
+from apps.permission_utils import require_knowledge_base_edit_permission
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.auth_utils import get_current_user_id, get_current_user_info
 from utils.config_utils import tenant_config_manager
@@ -28,8 +29,9 @@ async def auto_summary(
 ):
     """Summary Elasticsearch index_name by model"""
     try:
-        _, tenant_id, language = get_current_user_info(
+        user_id, tenant_id, language = get_current_user_info(
             authorization, http_request)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         service = ElasticSearchService()
 
         # Get model_id from tenant config if not provided
@@ -53,6 +55,8 @@ async def auto_summary(
             language=language,
             model_id=model_id
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             f"Knowledge base summary generation failed: {e}", exc_info=True)
@@ -73,9 +77,12 @@ def change_summary(
 ):
     """Summary Elasticsearch index_name by user"""
     try:
-        user_id = get_current_user_id(authorization)[0]
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         summary_result = change_summary_request.summary_result
         return ElasticSearchService().change_summary(index_name=index_name, summary_result=summary_result, user_id=user_id)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Knowledge base summary update failed: {str(e)}")
