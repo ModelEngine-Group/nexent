@@ -470,7 +470,7 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "list_all_tools",
-        MagicMock(return_value=_RAW_TOOL_ROWS),
+        AsyncMock(return_value=_RAW_TOOL_ROWS),
     )
     monkeypatch.setattr(
         nl2agent_service,
@@ -485,7 +485,7 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "list_community_mcp_services",
-        MagicMock(return_value={"items": _COMMUNITY_RESULTS}),
+        AsyncMock(return_value={"items": _COMMUNITY_RESULTS}),
     )
     monkeypatch.setattr(
         nl2agent_service,
@@ -568,6 +568,14 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
 
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
     search_agent.assert_called_once_with(agent_id=101, tenant_id="tenant_1")
+    nl2agent_service.list_all_tools.assert_awaited_once_with(
+        tenant_id="tenant_1",
+        labels=None,
+    )
+    nl2agent_service.list_community_mcp_services.assert_awaited_once_with(
+        search=None,
+        limit=30,
+    )
     draft_payload = create_draft.call_args.args[0]
     assert draft_payload["name"] == "draft_abcdef12"
     assert draft_payload["name"].startswith("draft_")
@@ -1522,7 +1530,7 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
     )
     add_mcp = AsyncMock()
     monkeypatch.setattr(nl2agent_service, "add_mcp_service", add_mcp)
-    update_mcp = AsyncMock()
+    update_mcp = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_mcp_service", update_mcp)
     monkeypatch.setattr(
         nl2agent_service,
@@ -1551,7 +1559,7 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
 
     assert result["mcp_id"] == 5
     add_mcp.assert_not_called()
-    update_mcp.assert_awaited_once_with(
+    update_mcp.assert_called_once_with(
         tenant_id="tenant_1",
         user_id="user_1",
         mcp_id=5,

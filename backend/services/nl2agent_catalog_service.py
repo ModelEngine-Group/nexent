@@ -22,10 +22,10 @@ SessionCatalogs = Dict[str, List[CatalogItem]]
 class CatalogDependencies:
     """External catalog providers used while initializing a session."""
 
-    list_all_tools: Callable[..., List[CatalogItem]]
+    list_all_tools: Callable[..., Awaitable[List[CatalogItem]]]
     list_tenant_skills: Callable[..., List[CatalogItem]]
     list_registry_mcp_services: Callable[..., Awaitable[Dict[str, Any]]]
-    list_community_mcp_services: Callable[..., Dict[str, Any]]
+    list_community_mcp_services: Callable[..., Awaitable[Dict[str, Any]]]
     get_official_skills_with_status: Callable[..., List[CatalogItem]]
 
 
@@ -91,7 +91,10 @@ async def load_session_catalogs(
 ) -> tuple[SessionCatalogs, List[str]]:
     """Load required catalogs while distinguishing valid emptiness from failures."""
     try:
-        all_tools = dependencies.list_all_tools(tenant_id=tenant_id, labels=None) or []
+        all_tools = await dependencies.list_all_tools(
+            tenant_id=tenant_id,
+            labels=None,
+        ) or []
         tool_catalog = [
             {
                 "tool_id": tool.get("tool_id"),
@@ -144,7 +147,7 @@ async def load_session_catalogs(
         ) from exc
 
     try:
-        community_data = dependencies.list_community_mcp_services(
+        community_data = await dependencies.list_community_mcp_services(
             search=None,
             limit=30,
         )

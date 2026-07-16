@@ -31,7 +31,7 @@ class McpInstallationDependencies:
     get_mcp_records: Callable[..., List[Dict[str, Any]]]
     add_remote_mcp: Callable[..., Awaitable[int]]
     add_container_mcp: Callable[..., Awaitable[Dict[str, Any]]]
-    update_remote_mcp: Callable[..., Awaitable[None]]
+    update_remote_mcp: Callable[..., None]
     reconfigure_container_mcp: Callable[..., Awaitable[None]]
     get_mcp_record: Callable[..., Optional[Dict[str, Any]]]
     discover_tools: Callable[..., Awaitable[List[Any]]]
@@ -425,7 +425,7 @@ async def _install_remote(
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise AgentRunException("MCP server URL must be a valid HTTP or HTTPS URL.")
     if existing_mcp_id is not None:
-        await dependencies.update_remote_mcp(
+        dependencies.update_remote_mcp(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=existing_mcp_id,
