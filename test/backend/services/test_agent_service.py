@@ -5025,6 +5025,19 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
         raising=False,
     )
 
+    # Mock streaming_channel_manager to avoid real channel creation
+    mock_channel = MagicMock()
+    mock_channel.publish = AsyncMock()
+    mock_channel.history_size = 0
+    mock_channel_manager = MagicMock()
+    mock_channel_manager.get_or_create_channel = AsyncMock(return_value=mock_channel)
+    mock_channel_manager.complete_channel = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager",
+        mock_channel_manager,
+        raising=False,
+    )
+
     add_calls = {"args": None, "called": False}
 
     async def fake_add_memory_in_levels(**kwargs):
