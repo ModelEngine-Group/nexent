@@ -13,7 +13,8 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 
-from consts.exceptions import AgentRunException, UnauthorizedError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, AgentRunException, UnauthorizedError
 from consts.model import (
     Nl2AgentApplyLocalResourcesRequest,
     Nl2AgentCardDeliveryRequest,
@@ -58,43 +59,19 @@ def _current_user(authorization, http_request):
     return get_current_user_info(authorization, http_request)
 
 
-def _session_http_error(exc: Exception) -> HTTPException:
-    message = str(exc)
-    if "draft agent not found" in message:
-        return HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=message)
-    if any(
-        marker in message
-        for marker in (
-            "before finalizing",
-            "cannot be empty",
-            "incomplete",
-            "Select a primary LLM",
-            "Reopen the model-selection card",
-            "Apply or skip",
-            "Show the local resource",
-            "Show online resource",
-            "Online recommendation batch contents",
-            "before completing online configuration",
-            "Complete the online resource",
-            "display name is missing",
-            "Requirements summary",
-            "Confirm the requirements summary",
-            "requirements summary is stale",
-            "requirements summary is not awaiting confirmation",
-            "card type",
-            "card delivery status",
-            "card failure reason",
-            "message_key is required",
-            "card delivery receipt is stale",
-        )
-    ):
-        return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
+def _session_http_error(exc: Exception) -> Exception:
+    """Convert legacy service failures without inspecting message text."""
+    if isinstance(exc, AppException):
+        return exc
     if isinstance(exc, AgentRunException):
-        return HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
+        return AppException(
+            ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT,
+            str(exc),
+        )
     logger.exception("NL2AGENT session operation failed")
-    return HTTPException(
-        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-        detail="Failed to load or update NL2AGENT session state.",
+    return AppException(
+        ErrorCode.SYSTEM_INTERNAL_ERROR,
+        "Failed to load or update NL2AGENT session state.",
     )
 
 

@@ -12,6 +12,11 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 import redis
 from pydantic import ValidationError
 
+from consts.exceptions import (
+    Nl2AgentStateConflictError as _Nl2AgentStateConflictError,
+    Nl2AgentWorkflowConflictError,
+)
+
 from agents.nl2agent_workflow import (
     CardDelivery,
     McpWorkflow,
@@ -98,11 +103,11 @@ _MODIFICATION_MARKERS = {
 }
 
 
-class Nl2AgentSessionCatalogError(RuntimeError):
+class Nl2AgentSessionCatalogError(Nl2AgentWorkflowConflictError):
     """Raised when NL2AGENT session catalogs cannot be persisted or loaded."""
 
 
-class Nl2AgentStateConflictError(Nl2AgentSessionCatalogError):
+class Nl2AgentStateConflictError(_Nl2AgentStateConflictError):
     """Raised when concurrent writers exhaust the state CAS retry budget."""
 
 

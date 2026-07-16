@@ -50,7 +50,12 @@ from agents.nl2agent_session_catalog import (
 )
 from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
-from consts.exceptions import AgentRunException
+from consts.exceptions import (
+    AgentRunException,
+    Nl2AgentCatalogUnavailableError,
+    Nl2AgentDraftNotFoundError,
+    Nl2AgentStaleCardError,
+)
 from consts.model import (
     AgentInfoRequest,
     MCPConfigRequest,
@@ -352,7 +357,9 @@ async def _load_session_catalogs(
             in {"local", "mcp", "langchain"}
         ]
     except Exception as exc:
-        raise AgentRunException("NL2AGENT local Tool catalog is unavailable.") from exc
+        raise Nl2AgentCatalogUnavailableError(
+            "NL2AGENT local Tool catalog is unavailable."
+        ) from exc
 
     try:
         tenant_skills = list_tenant_skills(tenant_id=tenant_id) or []
@@ -367,7 +374,9 @@ async def _load_session_catalogs(
             for skill in tenant_skills
         ]
     except Exception as exc:
-        raise AgentRunException("NL2AGENT local Skill catalog is unavailable.") from exc
+        raise Nl2AgentCatalogUnavailableError(
+            "NL2AGENT local Skill catalog is unavailable."
+        ) from exc
 
     try:
         registry_data = await list_registry_mcp_services(search=None, limit=30)
@@ -375,7 +384,9 @@ async def _load_session_catalogs(
             registry_data.get("servers", registry_data) or []
         ) if isinstance(registry_data, dict) else []
     except Exception as exc:
-        raise AgentRunException("NL2AGENT Registry MCP catalog is unavailable.") from exc
+        raise Nl2AgentCatalogUnavailableError(
+            "NL2AGENT Registry MCP catalog is unavailable."
+        ) from exc
 
     try:
         community_data = list_community_mcp_services(search=None, limit=30)
@@ -383,12 +394,16 @@ async def _load_session_catalogs(
             community_data.get("items", community_data) or []
         ) if isinstance(community_data, dict) else []
     except Exception as exc:
-        raise AgentRunException("NL2AGENT community MCP catalog is unavailable.") from exc
+        raise Nl2AgentCatalogUnavailableError(
+            "NL2AGENT community MCP catalog is unavailable."
+        ) from exc
 
     try:
         official_skill_catalog = get_official_skills_with_status(tenant_id=tenant_id) or []
     except Exception as exc:
-        raise AgentRunException("NL2AGENT official Skill catalog is unavailable.") from exc
+        raise Nl2AgentCatalogUnavailableError(
+            "NL2AGENT official Skill catalog is unavailable."
+        ) from exc
     resource_missing_names = [
         str(item.get("skill_name") or item.get("name") or "")
         for item in official_skill_catalog
@@ -536,9 +551,9 @@ def _get_owned_draft(agent_id: int, tenant_id: str) -> Dict[str, Any]:
     except ValueError as exc:
         if str(exc) != "agent not found":
             raise
-        raise AgentRunException("NL2AGENT draft agent not found.") from exc
+        raise Nl2AgentDraftNotFoundError() from exc
     if not agent or not _is_draft_agent_name(agent.get("name") or ""):
-        raise AgentRunException("NL2AGENT draft agent not found.")
+        raise Nl2AgentDraftNotFoundError()
     return agent
 
 
@@ -1360,7 +1375,7 @@ async def report_card_delivery(
         or message.get("status") != "completed"
         or latest_message_id != message_id
     ):
-        raise AgentRunException("The card delivery receipt is stale for the current NL2AGENT workflow stage.")
+        raise Nl2AgentStaleCardError()
     summary = get_workflow_summary(tenant_id, agent_id)
     if card_type not in summary["expected_card_types"]:
         existing = state.get("card_delivery", {}).get(card_type) or {}
@@ -1369,7 +1384,7 @@ async def report_card_delivery(
             and existing.get("status") == status
             and existing.get("card_key") == card_key
         ):
-            raise AgentRunException("The card delivery receipt is stale for the current NL2AGENT workflow stage.")
+            raise Nl2AgentStaleCardError()
     delivery = record_card_delivery(
         tenant_id,
         agent_id,

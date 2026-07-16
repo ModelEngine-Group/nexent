@@ -382,7 +382,7 @@ async def test_start_session_fails_before_database_writes_when_catalog_is_unavai
     monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        nl2agent_service.Nl2AgentCatalogUnavailableError,
         match="Registry MCP catalog is unavailable",
     ):
         await nl2agent_service.start_session(
@@ -1354,7 +1354,10 @@ async def test_install_web_skill_validates_draft_ownership(monkeypatch):
     install_from_zip = MagicMock()
     monkeypatch.setattr(nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip)
 
-    with pytest.raises(nl2agent_service.AgentRunException, match="draft agent not found"):
+    with pytest.raises(
+        nl2agent_service.Nl2AgentDraftNotFoundError,
+        match="draft agent not found",
+    ):
         await nl2agent_service.install_web_skill(
             agent_id=202,
             skill_id=0,
