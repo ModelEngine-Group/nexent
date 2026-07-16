@@ -3,14 +3,9 @@
 Provides the business logic for the NL2AGENT default agent: a conversational agent
 that helps users build custom agents via multi-turn chat.
 
-This service is intentionally thin: it orchestrates existing services
-(tool_configuration_service, skill_service, mcp_management_service)
-rather than reimplementing them.
-
-After the SDK decoupling refactor:
-- The 3 search tools are pure SDK with keyword scoring and backend-injected catalogs.
-- The finalize skill synthesizes the full agent spec; this service writes it to the
-  draft agent row and upserts tool/skill instances with per-agent config overrides.
+This module is a compatibility facade while workflow domains are moved into
+focused services. Publication is delegated to ``nl2agent_publication_service``;
+the three SDK search tools consume backend-injected immutable catalogs.
 """
 
 import hashlib
@@ -98,6 +93,10 @@ from database.remote_mcp_db import (
 from services.mcp_management_service import (
     list_community_mcp_services,
     list_registry_mcp_services,
+)
+from services.nl2agent_publication_service import (
+    PublicationDependencies,
+    publish_agent,
 )
 from services.remote_mcp_service import (
     add_container_mcp_service,
@@ -1754,138 +1753,54 @@ async def finalize_agent(
     description: Optional[str] = None,
     business_description: Optional[str] = None,
     prompt_template_id: Optional[int] = None,
-    # Prompts (from finalize skill output)
     duty_prompt: Optional[str] = None,
     constraint_prompt: Optional[str] = None,
     few_shots_prompt: Optional[str] = None,
-    # UI
     greeting_message: Optional[str] = None,
     example_questions: Optional[List[str]] = None,
-    # Runtime
     max_steps: Optional[int] = None,
     requested_output_tokens: Optional[int] = None,
     provide_run_summary: bool = False,
     verification_config: Optional[Dict[str, Any]] = None,
     enable_context_manager: bool = True,
 ) -> Dict[str, Any]:
-    """Publish a draft using proposal text and authoritative persisted configuration."""
-    _validate_draft_agent_id(agent_id)
-
-    # Persisted model selection is authoritative. The LLM-generated proposal
-    # must never invent or replace model IDs during publication.
-    current_draft = _get_owned_draft(agent_id, tenant_id)
-    stored_primary_model_id = current_draft.get("business_logic_model_id")
-    stored_model_ids = _normalize_model_ids(current_draft.get("model_ids"))
-    if not stored_primary_model_id or stored_primary_model_id not in stored_model_ids:
-        raise AgentRunException("Select a primary LLM before finalizing the agent.")
-    _validate_available_llm_ids(
-        tenant_id,
-        stored_model_ids,
-        finalizing=True,
+    """Delegate draft publication to the dedicated publication service."""
+    dependencies = PublicationDependencies(
+        validate_draft_agent_id=_validate_draft_agent_id,
+        get_owned_draft=_get_owned_draft,
+        normalize_model_ids=_normalize_model_ids,
+        validate_available_llm_ids=_validate_available_llm_ids,
+        assert_requirements_confirmed=assert_requirements_confirmed,
+        assert_resource_review_complete=assert_resource_review_complete,
+        assert_mcp_workflows_resolved=assert_mcp_workflows_resolved,
+        assert_online_configuration_complete=assert_online_configuration_complete,
+        assert_identity_confirmed=assert_identity_confirmed,
+        query_enabled_tools=query_all_enabled_tool_instances,
+        query_enabled_skills=query_enabled_skill_instances,
+        resolve_resource_summaries=_resolve_resource_summaries,
+        raise_for_invalid_references=_raise_for_invalid_resource_references,
+        generate_internal_name=_generate_internal_agent_name,
+        update_agent=update_agent,
     )
-    try:
-        assert_requirements_confirmed(tenant_id, agent_id)
-    except Exception as exc:
-        raise AgentRunException(str(exc)) from exc
-    try:
-        assert_resource_review_complete(tenant_id, agent_id)
-    except Exception as exc:
-        raise AgentRunException(str(exc)) from exc
-    try:
-        assert_mcp_workflows_resolved(tenant_id, agent_id)
-    except Exception as exc:
-        raise AgentRunException(str(exc)) from exc
-    try:
-        assert_online_configuration_complete(tenant_id, agent_id)
-    except Exception as exc:
-        raise AgentRunException(str(exc)) from exc
-    try:
-        assert_identity_confirmed(tenant_id, agent_id)
-    except Exception as exc:
-        raise AgentRunException(str(exc)) from exc
-    business_logic_model_id = int(stored_primary_model_id)
-    model_ids = stored_model_ids
-
-    # Build the agent update payload from whatever the skill provided.
-    agent_update: Dict[str, Any] = {}
-    missing_proposal_fields = [
-        field_name
-        for field_name, field_value in (
-            ("business_description", business_description),
-            ("duty_prompt", duty_prompt),
-            ("greeting_message", greeting_message),
-        )
-        if not isinstance(field_value, str) or not field_value.strip()
-    ]
-    if missing_proposal_fields:
-        raise AgentRunException("The final proposal is incomplete: " + ", ".join(missing_proposal_fields))
-
-    # Resolve persisted resources before mutating the draft so dangling catalog
-    # references cannot leave a partially finalized agent.
-    persisted_tools = query_all_enabled_tool_instances(agent_id, tenant_id, version_no=0) or []
-    persisted_skills = query_enabled_skill_instances(agent_id, tenant_id, version_no=0) or []
-    _, _, invalid_resource_references = _resolve_resource_summaries(persisted_tools, persisted_skills, tenant_id)
-    _raise_for_invalid_resource_references(invalid_resource_references)
-
-    final_display_name = str(current_draft.get("display_name") or "").strip()[:50]
-    if not final_display_name:
-        raise AgentRunException("The persisted agent display name is missing.")
-    agent_update["display_name"] = final_display_name
-    # The LLM is never authoritative for the internal variable identifier.
-    agent_update["name"] = _generate_internal_agent_name(final_display_name, agent_id, tenant_id)
-    if description is not None:
-        agent_update["description"] = str(description)[:500]
-    if business_description is not None:
-        agent_update["business_description"] = str(business_description)[:2000]
-    if business_logic_model_id is not None:
-        agent_update["business_logic_model_id"] = business_logic_model_id
-    if model_ids is not None:
-        agent_update["model_ids"] = model_ids[:5]
-    if prompt_template_id is not None:
-        agent_update["prompt_template_id"] = prompt_template_id
-    if duty_prompt is not None:
-        agent_update["duty_prompt"] = str(duty_prompt)[:8000]
-    if constraint_prompt is not None:
-        agent_update["constraint_prompt"] = str(constraint_prompt)[:4000]
-    if few_shots_prompt is not None:
-        agent_update["few_shots_prompt"] = str(few_shots_prompt)[:8000]
-    if greeting_message is not None:
-        agent_update["greeting_message"] = str(greeting_message)[:500]
-    if example_questions is not None:
-        agent_update["example_questions"] = example_questions[:6]
-    if max_steps is not None:
-        agent_update["max_steps"] = max(1, min(30, int(max_steps)))
-    if requested_output_tokens is not None:
-        agent_update["requested_output_tokens"] = max(1, int(requested_output_tokens))
-    if provide_run_summary is not None:
-        agent_update["provide_run_summary"] = bool(provide_run_summary)
-    if verification_config is not None and isinstance(verification_config, dict):
-        agent_update["verification_config"] = verification_config
-    if enable_context_manager is not None:
-        agent_update["enable_context_manager"] = bool(enable_context_manager)
-
-    # Write agent fields.
-    if agent_update:
-        try:
-            update_agent(
-                agent_id=agent_id,
-                agent_info=AgentInfoRequest(**agent_update),
-                user_id=user_id,
-                version_no=0,
-            )
-        except Exception as exc:
-            logger.error(f"Failed to update draft agent {agent_id}: {exc}")
-            raise AgentRunException("Failed to finalize agent.") from exc
-
-    return {
-        "agent_id": agent_id,
-        "status": "draft_ready",
-        "name": agent_update["name"],
-        "display_name": final_display_name,
-        "tool_ids": [row["tool_id"] for row in persisted_tools],
-        "skill_ids": [row["skill_id"] for row in persisted_skills],
-    }
-
+    return await publish_agent(
+        dependencies,
+        agent_id=agent_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        description=description,
+        business_description=business_description,
+        prompt_template_id=prompt_template_id,
+        duty_prompt=duty_prompt,
+        constraint_prompt=constraint_prompt,
+        few_shots_prompt=few_shots_prompt,
+        greeting_message=greeting_message,
+        example_questions=example_questions,
+        max_steps=max_steps,
+        requested_output_tokens=requested_output_tokens,
+        provide_run_summary=provide_run_summary,
+        verification_config=verification_config,
+        enable_context_manager=enable_context_manager,
+    )
 
 # ---------------------------------------------------------------------------
 # Startup seeding
