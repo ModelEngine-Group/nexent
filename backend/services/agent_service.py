@@ -62,7 +62,7 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
+from database.model_management_db import get_model_by_model_id, get_model_by_model_id_ignore_delete, get_model_id_by_display_name, get_valid_model_ids
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
