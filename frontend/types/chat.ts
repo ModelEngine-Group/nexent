@@ -1,6 +1,5 @@
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
-import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
 
 export type MessageRole = (typeof MESSAGE_ROLES)[keyof typeof MESSAGE_ROLES];
 
@@ -91,8 +90,10 @@ export interface ChatAgentSelectorProps {
   onAgentSelect: (
     agentId: string | null,
     greetingMessage?: string,
-    exampleQuestions?: string[]
-  , modelIds?: number[], modelNames?: string[]) => void;
+    exampleQuestions?: string[],
+    modelIds?: number[],
+    modelNames?: string[]
+  ) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
 }
@@ -244,7 +245,6 @@ export interface ChatStreamMainProps {
     modelNames?: string[]
   ) => void;
   onCitationHover?: () => void;
-  onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
   nl2AgentDraftAgentId?: number | null;
   onScroll?: () => void;
   agentGreeting?: string | null;
@@ -255,7 +255,11 @@ export interface ChatStreamMainProps {
   readOnly?: boolean;
   agentModelIds?: number[];
   agentModelNames?: string[];
-  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  availableModels?: {
+    id: number;
+    displayName: string;
+    connect_status?: string;
+  }[];
   selectedModelId?: number | null;
   onModelSelect?: (modelId: number | null) => void;
 }

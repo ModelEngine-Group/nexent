@@ -17,12 +17,9 @@ import type { WebMcpCardItem } from "./webMcpTypes";
 export type { WebMcpCardItem } from "./webMcpTypes";
 
 export interface WebMcpCardProps {
-  /** The draft agent_id (used for the install callback context, though MCP
-   * install is handled by opening the existing AddMcpServiceModal). */
+  /** The draft agent_id used by the NL2AGENT MCP workflow endpoints. */
   agentId: number;
   item: WebMcpCardItem;
-  /** Optional callback to open the existing AddMcpServiceModal prefilled. */
-  onInstall?: (item: WebMcpCardItem) => void;
 }
 
 const initialFieldValues = (

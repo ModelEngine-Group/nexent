@@ -94,7 +94,6 @@ describe("tryRenderNl2AgentCard", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-search-web-mcps",
       JSON.stringify({ query: "docx parser" }),
-      undefined,
       202
     );
 
@@ -127,7 +126,6 @@ describe("tryRenderNl2AgentCard", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-requirements-summary",
       JSON.stringify(summary),
-      undefined,
       202
     );
 
@@ -212,7 +210,7 @@ describe("tryRenderNl2AgentCard", () => {
     assert.match(String(node.props.children), /missing draft agent_id/);
   });
 
-  it("passes the web MCP install callback into WebMcpCard", () => {
+  it("routes web MCP fenced data to WebMcpCard", () => {
     const item: WebMcpCardItem = {
       recommendation_id: "community:github",
       name: "GitHub MCP",
@@ -221,18 +219,13 @@ describe("tryRenderNl2AgentCard", () => {
       transport: "sse",
       install_options: [readyMcpOption],
     };
-    let installedItem: WebMcpCardItem | null = null;
-
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcp",
       JSON.stringify({
         agent_id: 202,
         recommendation_batch_id: "online_mcp",
         ...item,
-      }),
-      (nextItem) => {
-        installedItem = nextItem;
-      }
+      })
     );
 
     assertElement(node);
@@ -241,8 +234,6 @@ describe("tryRenderNl2AgentCard", () => {
     assert.equal(card.type, WebMcpCard);
     assert.equal(card.props.agentId, 202);
     assert.equal(card.props.item.name, item.name);
-    card.props.onInstall(card.props.item);
-    assert.deepEqual(installedItem, card.props.item);
   });
 
   it("routes web MCP list fenced data to WebMcpCard items", () => {
@@ -317,7 +308,6 @@ describe("tryRenderNl2AgentCard", () => {
           },
         ],
       }),
-      undefined,
       202
     );
 
@@ -332,7 +322,6 @@ describe("tryRenderNl2AgentCard", () => {
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcps",
       JSON.stringify({ recommendation_batch_id: "online_empty", items: [] }),
-      undefined,
       202
     );
 
@@ -362,7 +351,6 @@ describe("tryRenderNl2AgentCard", () => {
         recommendation_batch_id: "online_mcp",
         items: [],
       }),
-      undefined,
       202
     );
 
@@ -421,7 +409,6 @@ describe("tryRenderNl2AgentCard", () => {
       const node = tryRenderNl2AgentCard(
         language,
         JSON.stringify(payload),
-        undefined,
         202
       );
       assertElement(node);

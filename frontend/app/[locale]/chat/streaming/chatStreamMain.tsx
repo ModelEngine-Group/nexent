@@ -53,7 +53,6 @@ export function ChatStreamMain({
   selectedAgentId,
   onAgentSelect,
   onCitationHover,
-  onInstallNl2AgentMcp,
   nl2AgentDraftAgentId,
   onScroll,
   agentGreeting,
@@ -454,7 +453,6 @@ export function ChatStreamMain({
                       index={index}
                       currentConversationId={currentConversationId}
                       onCitationHover={onCitationHover}
-                      onInstallNl2AgentMcp={onInstallNl2AgentMcp}
                       nl2AgentDraftAgentId={nl2AgentDraftAgentId}
                       isLatestMessage={
                         index === processedMessages.finalMessages.length - 1

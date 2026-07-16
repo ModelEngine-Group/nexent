@@ -134,8 +134,6 @@ export const OnlineRecommendationGroup: React.FC<{
 export interface Nl2AgentCardRendererProps {
   language: string;
   content: string;
-  /** Optional handler to open the existing AddMcpServiceModal prefilled. */
-  onInstallMcp?: (item: WebMcpCardItem) => void;
   trustedDraftAgentId?: number | null;
   onRegistered?: (
     cardType: Nl2AgentCardType,
@@ -178,7 +176,6 @@ const renderMissingOnlineBatch = () => (
 export const tryRenderNl2AgentCard = (
   language: string,
   content: string,
-  onInstallMcp?: (item: WebMcpCardItem) => void,
   trustedDraftAgentId?: number | null,
   onRegistered?: (
     cardType: Nl2AgentCardType,
@@ -233,18 +230,12 @@ export const tryRenderNl2AgentCard = (
   }
   const card = validation.cards[0];
   if (!card) return null;
-  return renderValidatedNl2AgentCard(
-    card,
-    onInstallMcp,
-    onRegistered,
-    registrationEnabled
-  );
+  return renderValidatedNl2AgentCard(card, onRegistered, registrationEnabled);
 };
 
 /** Render an already parsed and schema-validated card AST node. */
 export const renderValidatedNl2AgentCard = (
   card: ValidatedNl2AgentCard,
-  onInstallMcp?: (item: WebMcpCardItem) => void,
   onRegistered?: (
     cardType: Nl2AgentCardType,
     cardKey?: string
@@ -320,7 +311,7 @@ export const renderValidatedNl2AgentCard = (
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
-          <WebMcpCard agentId={agentId} item={item} onInstall={onInstallMcp} />
+          <WebMcpCard agentId={agentId} item={item} />
         </OnlineRecommendationGroup>
       );
     }
@@ -339,12 +330,7 @@ export const renderValidatedNl2AgentCard = (
           registrationEnabled={registrationEnabled}
         >
           {items.map((item, i) => (
-            <WebMcpCard
-              key={i}
-              agentId={agentId}
-              item={item}
-              onInstall={onInstallMcp}
-            />
+            <WebMcpCard key={i} agentId={agentId} item={item} />
           ))}
         </OnlineRecommendationGroup>
       );

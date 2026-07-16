@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Copy,
@@ -11,7 +17,6 @@ import {
 } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
-import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
 
 /**
  * Convert custom code tags to standard markdown code fences
@@ -62,7 +67,6 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
-  onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
   nl2AgentDraftAgentId?: number | null;
   isLatestMessage?: boolean;
   isStreaming?: boolean;
@@ -86,7 +90,6 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
-  onInstallNl2AgentMcp,
   nl2AgentDraftAgentId,
   isLatestMessage = false,
   isStreaming = false,
@@ -199,7 +202,9 @@ function ChatStreamFinalMessageInner({
         let failure = validation.failure;
         if (!failure) {
           const state = await getNl2AgentSessionState(nl2AgentDraftAgentId);
-          const emitted = new Set(validation.cards.map((card) => card.cardType));
+          const emitted = new Set(
+            validation.cards.map((card) => card.cardType)
+          );
           const missing = state.expected_card_types.find(
             (cardType) => !emitted.has(cardType)
           );
@@ -519,7 +524,6 @@ function ChatStreamFinalMessageInner({
                 )}
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
-                onInstallNl2AgentMcp={onInstallNl2AgentMcp}
                 nl2AgentDraftAgentId={nl2AgentDraftAgentId}
                 nl2AgentCards={finalCardValidation.cards}
                 nl2AgentCardRenderMode={
