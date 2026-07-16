@@ -74,6 +74,9 @@ consts_exceptions_module.ValidationError = ValidationError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
+consts_exceptions_module.AgentRunException = type(
+    "AgentRunException", (Exception,), {}
+)
 consts_exceptions_module.Nl2AgentStateConflictError = type(
     "Nl2AgentStateConflictError", (Exception,), {}
 )
@@ -434,14 +437,42 @@ from backend.agents.create_agent_info import (
     _resolve_agent_run_model_id,
     _is_nl2agent_model_selection_confirmed,
     _build_nl2agent_current_session,
+    _load_nl2agent_system_prompt,
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
 
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
+AgentRunException = sys.modules["consts.exceptions"].AgentRunException
 
 # Import ValidationError for testing (from mocked consts.exceptions)
+
+
+def test_load_nl2agent_system_prompt_preserves_valid_prompt():
+    with patch(
+        "backend.agents.create_agent_info.get_nl2agent_system_prompt",
+        return_value="authoritative prompt",
+    ):
+        assert _load_nl2agent_system_prompt("en") == "authoritative prompt"
+
+
+@pytest.mark.parametrize(
+    "load_error",
+    [OSError("missing file"), ValueError("invalid YAML")],
+)
+def test_load_nl2agent_system_prompt_fails_closed(load_error):
+    with patch(
+        "backend.agents.create_agent_info.get_nl2agent_system_prompt",
+        side_effect=load_error,
+    ):
+        with pytest.raises(
+            AgentRunException,
+            match="Failed to initialize the NL2AGENT system prompt",
+        ) as exc_info:
+            _load_nl2agent_system_prompt("en")
+
+    assert exc_info.value.__cause__ is load_error
 
 
 def test_resolve_agent_run_model_id_prefers_current_model_fields():
@@ -1937,6 +1968,51 @@ class TestCreateToolConfigList:
 
 class TestCreateAgentConfig:
     """Tests for the create_agent_config function"""
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_does_not_fallback_when_nl2agent_prompt_fails(
+        self,
+    ):
+        initialization_error = AgentRunException(
+            "Failed to initialize the NL2AGENT system prompt."
+        )
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                return_value={"name": "nl2agent"},
+            ),
+            patch(
+                "backend.agents.create_agent_info.query_sub_agent_relations",
+                return_value=[],
+            ),
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "backend.agents.create_agent_info._get_external_a2a_agents",
+                return_value=[],
+            ),
+            patch(
+                "backend.agents.create_agent_info._load_nl2agent_system_prompt",
+                side_effect=initialization_error,
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_generic_prompt,
+        ):
+            with pytest.raises(AgentRunException) as exc_info:
+                await create_agent_config(
+                    "agent_1",
+                    "tenant_1",
+                    "user_1",
+                    "en",
+                    "test query",
+                )
+
+        assert exc_info.value is initialization_error
+        mock_generic_prompt.assert_not_called()
 
     async def _run_context_manager_case(
         self,

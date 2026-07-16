@@ -229,13 +229,13 @@ def get_nl2agent_system_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[
     return get_prompt_template('nl2agent_system_prompt', language)
 
 
-def get_nl2agent_system_prompt(language: str = LANGUAGE["ZH"]) -> Optional[str]:
-    """Return the runtime NL2AGENT system prompt for the requested language."""
+def get_nl2agent_system_prompt(language: str = LANGUAGE["ZH"]) -> str:
+    """Return a non-empty runtime NL2AGENT system prompt."""
     prompt_template = get_nl2agent_system_prompt_template(language)
     system_prompt = prompt_template.get("system_prompt") if prompt_template else None
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt
-    return None
+    raise ValueError("NL2AGENT system prompt YAML has no non-empty system_prompt field.")
 
 
 def get_nl2agent_seed_config(language: str = LANGUAGE["EN"]) -> Dict[str, Any]:

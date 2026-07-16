@@ -194,6 +194,22 @@ class TestPromptTemplateUtils:
 
         assert result == "  runtime builder prompt  "
 
+    @pytest.mark.parametrize(
+        "template",
+        [None, {}, {"system_prompt": None}, {"system_prompt": "   "}],
+    )
+    def test_get_nl2agent_system_prompt_rejects_missing_runtime_prompt(
+        self, mocker, template
+    ):
+        """A broken NL2AGENT template must not degrade to a generic prompt."""
+        mocker.patch(
+            'utils.prompt_template_utils.get_nl2agent_system_prompt_template',
+            return_value=template,
+        )
+
+        with pytest.raises(ValueError, match="no non-empty system_prompt"):
+            get_nl2agent_system_prompt(language='en')
+
     @pytest.mark.parametrize("language", ["en", "zh"])
     def test_nl2agent_prompt_consumes_authoritative_workflow_summary(
         self, language

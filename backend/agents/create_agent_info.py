@@ -76,7 +76,7 @@ from consts.const import (
     MINIO_DEFAULT_BUCKET,
 )
 from consts.model import ToolParamsRequest
-from consts.exceptions import ValidationError
+from consts.exceptions import AgentRunException, ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
@@ -189,16 +189,13 @@ _CAPACITY_WARNING_EMITTED: set = set()
 _CAPACITY_WARNING_LOCK = threading.Lock()
 
 
-def _load_nl2agent_system_prompt(language: str) -> Optional[str]:
-    """Load the YAML-backed NL2AGENT system prompt, returning None on fallback."""
+def _load_nl2agent_system_prompt(language: str) -> str:
+    """Load the required YAML-backed NL2AGENT system prompt or fail closed."""
     try:
-        system_prompt = get_nl2agent_system_prompt(language)
-        if system_prompt:
-            return system_prompt
-        logger.warning("NL2AGENT system prompt YAML has no system_prompt field.")
+        return get_nl2agent_system_prompt(language)
     except Exception as exc:
-        logger.warning(f"Failed to load NL2AGENT system prompt YAML: {exc}")
-    return None
+        logger.exception("Failed to initialize the NL2AGENT system prompt.")
+        raise AgentRunException("Failed to initialize the NL2AGENT system prompt.") from exc
 
 
 # W11 spec line 710: emitted every time _resolve_input_budget resolves a row
