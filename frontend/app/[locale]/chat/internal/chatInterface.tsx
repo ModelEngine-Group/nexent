@@ -48,14 +48,12 @@ import {
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 import { resolveNl2AgentDraftAgentId } from "@/lib/chat/nl2agentDraftContext";
-import {
-  NL2AGENT_AUTO_CONTINUE_PREFIX,
-  Nl2AgentWorkflowProvider,
-} from "@/components/nl2agent/Nl2AgentWorkflowContext";
+import { Nl2AgentWorkflowProvider } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
   isNl2AgentAutoContinueText,
   nl2AgentContinuationScopeKey,
 } from "@/lib/chat/nl2agentContinuation";
+import { resolveNl2AgentSendRequest } from "@/lib/chat/nl2agentSendRequest";
 
 import { Button, Checkbox, Layout, message } from "antd";
 import log from "@/lib/logger";
@@ -427,22 +425,16 @@ export function ChatInterface() {
     expectedConversationId?: number | null,
     expectedDraftAgentId?: number | null
   ) => {
-    const isAutoContinue = Boolean(
-      autoContinueText?.startsWith(NL2AGENT_AUTO_CONTINUE_PREFIX)
-    );
-    if (
-      isAutoContinue &&
-      (activeConversationIdRef.current !== expectedConversationId ||
-        activeNl2AgentDraftIdRef.current !== expectedDraftAgentId)
-    ) {
-      throw new Error(
-        "The active NL2AGENT conversation changed before automatic continuation."
-      );
-    }
-    const outgoingText = isAutoContinue
-      ? autoContinueText!.trim()
-      : input.trim();
-    const outgoingAttachments = isAutoContinue ? [] : attachments;
+    const { isAutoContinue, outgoingText, outgoingAttachments } =
+      resolveNl2AgentSendRequest({
+        autoContinueText,
+        input,
+        attachments,
+        activeConversationId: activeConversationIdRef.current,
+        activeDraftAgentId: activeNl2AgentDraftIdRef.current,
+        expectedConversationId,
+        expectedDraftAgentId,
+      });
     if (!outgoingText && outgoingAttachments.length === 0) return;
     if (isAutoContinue && (isLoading || isCurrentConversationStreaming)) {
       throw new Error("The conversation is already running.");
