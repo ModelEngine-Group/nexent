@@ -7521,6 +7521,23 @@ def test_resolve_knowledge_base_permission_cross_tenant_returns_none(monkeypatch
     )
 
 
+def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant={"user_role": "GUEST", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "guest-user", "tenant-1")
+        is None
+    )
+
+
 @pytest.mark.parametrize(
     "record,user_group_ids,expected",
     [
@@ -7529,6 +7546,7 @@ def test_resolve_knowledge_base_permission_cross_tenant_returns_none(monkeypatch
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "PRIVATE"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
         ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
+        ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
     ],
 )
 def test_resolve_knowledge_base_permission_user_group_rules(

@@ -10,7 +10,7 @@ import types
 import importlib.machinery
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
 from fastapi.testclient import TestClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
@@ -727,6 +727,37 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
+async def test_create_index_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to index documents."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+                side_effect=HTTPException(
+                    status_code=403,
+                    detail="No permission to modify this knowledge base",
+                ),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index:
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/documents",
+            json=[{"id": 1, "text": "test doc"}],
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            auth_data["index_name"],
+            auth_data["user_id"],
+            auth_data["tenant_id"],
+        )
+        mock_index.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_index_documents_uses_multimodal_embedding(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
@@ -1125,6 +1156,37 @@ async def test_create_chunk_success(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
+async def test_create_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to create chunks."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+                side_effect=HTTPException(
+                    status_code=403,
+                    detail="No permission to modify this knowledge base",
+                ),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_chunk") as mock_create:
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/chunk",
+            json={"content": "Hello world", "path_or_url": "doc-1"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            auth_data["index_name"],
+            auth_data["user_id"],
+            auth_data["tenant_id"],
+        )
+        mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_chunk_passes_tenant_id_to_service(vdb_core_mock, auth_data):
     """
     Test that create_chunk endpoint passes tenant_id to the service method.
@@ -1217,6 +1279,37 @@ async def test_update_chunk_success(vdb_core_mock, auth_data):
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_update.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to update chunks."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+                side_effect=HTTPException(
+                    status_code=403,
+                    detail="No permission to modify this knowledge base",
+                ),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_chunk") as mock_update:
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/chunk/chunk-1",
+            json={"content": "Updated content"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            auth_data["index_name"],
+            auth_data["user_id"],
+            auth_data["tenant_id"],
+        )
+        mock_update.assert_not_called()
 
 
 @pytest.mark.asyncio
