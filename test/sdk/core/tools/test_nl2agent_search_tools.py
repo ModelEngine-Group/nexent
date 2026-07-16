@@ -1,3 +1,5 @@
+# ruff: noqa: E402 -- SDK source path must be installed before package imports.
+
 import json
 import sys
 from pathlib import Path

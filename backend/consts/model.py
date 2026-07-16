@@ -446,7 +446,13 @@ class GeneratePromptRequest(BaseModel):
     )
 
 
-class Nl2AgentApplyLocalResourcesRequest(BaseModel):
+class _StrictNl2AgentRequest(BaseModel):
+    """Reject undeclared fields at every NL2AGENT HTTP boundary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Nl2AgentApplyLocalResourcesRequest(_StrictNl2AgentRequest):
     """Request body for bulk-binding local tools and skills to a draft agent."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
@@ -455,7 +461,7 @@ class Nl2AgentApplyLocalResourcesRequest(BaseModel):
     tool_config_values: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
 
 
-class Nl2AgentRecommendationBatchRequest(BaseModel):
+class Nl2AgentRecommendationBatchRequest(_StrictNl2AgentRequest):
     """Register a local-resource recommendation card rendered by the client."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
@@ -463,13 +469,13 @@ class Nl2AgentRecommendationBatchRequest(BaseModel):
     skill_ids: List[int] = Field(default_factory=list)
 
 
-class Nl2AgentRecommendationSkipRequest(BaseModel):
+class Nl2AgentRecommendationSkipRequest(_StrictNl2AgentRequest):
     """Explicitly skip one rendered local-resource recommendation batch."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
 
 
-class Nl2AgentOnlineRecommendationBatchRequest(BaseModel):
+class Nl2AgentOnlineRecommendationBatchRequest(_StrictNl2AgentRequest):
     """Register a rendered MCP or web-Skill recommendation batch."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
@@ -477,7 +483,7 @@ class Nl2AgentOnlineRecommendationBatchRequest(BaseModel):
     item_keys: List[str] = Field(default_factory=list, max_length=100)
 
 
-class Nl2AgentRequirementsSummaryRequest(BaseModel):
+class Nl2AgentRequirementsSummaryRequest(_StrictNl2AgentRequest):
     """Register the read-only requirements summary rendered by NL2AGENT."""
 
     goal: str = Field(..., min_length=1, max_length=500)
@@ -487,13 +493,13 @@ class Nl2AgentRequirementsSummaryRequest(BaseModel):
     key_constraints: str = Field(..., min_length=1, max_length=2000)
 
 
-class Nl2AgentRequirementsConfirmRequest(BaseModel):
+class Nl2AgentRequirementsConfirmRequest(_StrictNl2AgentRequest):
     """Confirm the currently registered NL2AGENT requirements summary."""
 
     fingerprint: str = Field(..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
 
 
-class Nl2AgentCardDeliveryRequest(BaseModel):
+class Nl2AgentCardDeliveryRequest(_StrictNl2AgentRequest):
     """Report final-message rendering success or failure for one NL2AGENT card."""
 
     message_id: int = Field(..., ge=1)
@@ -518,20 +524,20 @@ class Nl2AgentCardDeliveryRequest(BaseModel):
     ] = None
 
 
-class Nl2AgentModelSelectionRequest(BaseModel):
+class Nl2AgentModelSelectionRequest(_StrictNl2AgentRequest):
     """Persist the ordered LLM selection for an NL2AGENT draft."""
 
     primary_model_id: int = Field(..., ge=1)
     fallback_model_ids: List[int] = Field(default_factory=list, max_length=4)
 
 
-class Nl2AgentIdentityRequest(BaseModel):
+class Nl2AgentIdentityRequest(_StrictNl2AgentRequest):
     """Persist the user-confirmed display name for an NL2AGENT draft."""
 
     display_name: str = Field(..., min_length=1, max_length=50)
 
 
-class Nl2AgentMcpInstallRequest(BaseModel):
+class Nl2AgentMcpInstallRequest(_StrictNl2AgentRequest):
     """Install a recommended MCP using user-confirmed configuration."""
 
     recommendation_id: str = Field(..., min_length=1, max_length=300)
@@ -539,23 +545,21 @@ class Nl2AgentMcpInstallRequest(BaseModel):
     config_values: Dict[str, Any] = Field(default_factory=dict)
 
 
-class Nl2AgentMcpBindToolsRequest(BaseModel):
+class Nl2AgentMcpBindToolsRequest(_StrictNl2AgentRequest):
     """Bind selected tools from an installed MCP to an NL2AGENT draft."""
 
     tool_ids: List[int] = Field(default_factory=list, max_length=100)
 
 
-class Nl2AgentInstallWebSkillRequest(BaseModel):
+class Nl2AgentInstallWebSkillRequest(_StrictNl2AgentRequest):
     """Request body for installing a single official/web skill into the tenant."""
 
     skill_id: Optional[int] = None
     skill_name: Optional[str] = None
 
 
-class Nl2AgentFinalizeRequest(BaseModel):
+class Nl2AgentFinalizeRequest(_StrictNl2AgentRequest):
     """Unsaved descriptive, prompt, and runtime fields for draft publication."""
-
-    model_config = ConfigDict(extra="forbid")
 
     description: Optional[str] = Field(default=None, max_length=500)
 

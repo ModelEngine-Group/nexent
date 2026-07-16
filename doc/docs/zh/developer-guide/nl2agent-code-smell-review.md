@@ -1,176 +1,164 @@
-结论：NL2Agent feature 存在明显坏味道，其中 3 个属于真实生产路径故障。当前测试全部通过，但关键依赖被错误类型的 Mock 掩盖，因此“测试通过”不能证明功能可用。
+# NL2AGENT 代码坏味道审查与修复闭环
 
-## P0：阻断真实运行
+> 原始只读审计日期：2026-07-16
+>
+> 修复复核日期：2026-07-16
+>
+> 当前状态：原始审计的 15 项发现均已闭环；本文不绑定易失效的绝对行号或本机路径。
 
-1. 启动会话时漏掉 `await`，真实 `/session/start` 会失败
+## 1. 复核结论
 
-- [`list_all_tools()`](/home/sil/nexent/backend/services/tool_configuration_service.py:492) 是异步函数。
-- 它被注入 NL2Agent catalog 服务：[nl2agent_service.py](/home/sil/nexent/backend/services/nl2agent_service.py:248)。
-- 依赖类型却被声明为同步 `Callable`：[nl2agent_catalog_service.py](/home/sil/nexent/backend/services/nl2agent_catalog_service.py:25)。
-- 调用时没有 `await`，随后直接迭代 coroutine：[nl2agent_catalog_service.py](/home/sil/nexent/backend/services/nl2agent_catalog_service.py:94)。
+原始审计确认了 3 个真实生产路径故障、4 个高风险一致性问题和 8 个协议/可维护性问题。修复按可独立验证的阶段完成，每个阶段均在验证通过后单独提交，未推送。
 
-实际结果是 `TypeError: 'coroutine' object is not iterable`，并被包装成 “NL2AGENT local Tool catalog unavailable”。因此真实 session start 会在写入会话前稳定失败。
+修复遵循以下不变量：
 
-测试未发现它，是因为 fixture 用同步 `MagicMock` 替代了真实异步函数：[test_nl2agent_service.py](/home/sil/nexent/test/backend/services/test_nl2agent_service.py:470)。
+- 用户可见的合法交互流程、按钮语义和自动续跑行为保持不变。
+- 数据库负责 Draft、模型、资源绑定和最终配置；Redis 负责工作流投影、Catalog、批次、安装状态和回执。
+- 所有副作用仍由用户操作 Card 触发，模型不能自行安装、绑定、跳过或发布。
+- Card JSON 先通过 canonical schema 与 trusted Draft ID 校验，再进入强类型渲染。
+- 新测试直接覆盖真实同步/异步签名、错误类别、分页、事务顺序和渲染数据边界，不再用错误类型的 Mock 固化错误行为。
 
-2. Community MCP catalog 同样漏掉 `await`
+## 2. 原始发现逐项闭环
 
-- 真实函数是异步的：[mcp_management_service.py](/home/sil/nexent/backend/services/mcp_management_service.py:33)。
-- 调用处没有 `await`：[nl2agent_catalog_service.py](/home/sil/nexent/backend/services/nl2agent_catalog_service.py:147)。
-- 由于 coroutine 不属于 `dict`，代码会静默把结果转成空列表。
+### P0：阻断真实运行
 
-即使修复第一个启动阻断，Community MCP 也永远不会进入可搜索目录，并伴随未等待 coroutine 警告。相应测试仍使用同步 `MagicMock`：[test_nl2agent_service.py](/home/sil/nexent/test/backend/services/test_nl2agent_service.py:485)。
+1. 启动会话漏掉 `await`
 
-3. MCP 重试路径错误地 `await` 同步数据库函数
+- 状态：已修复。
+- 修复：Catalog 依赖显式声明为异步返回值，`list_all_tools()` 在消费前等待完成；测试 fixture 改用 `AsyncMock` 并断言 await 参数。
+- 提交：`3112a80f` `🐛 Bugfix: Align NL2AGENT async dependencies`。
 
-- `update_mcp_service()` 是同步函数：[remote_mcp_service.py](/home/sil/nexent/backend/services/remote_mcp_service.py:510)。
-- NL2Agent 依赖却被声明为返回 `Awaitable`：[nl2agent_mcp_service.py](/home/sil/nexent/backend/services/nl2agent_mcp_service.py:34)。
-- 实际调用使用了 `await`：[nl2agent_mcp_service.py](/home/sil/nexent/backend/services/nl2agent_mcp_service.py:427)。
+2. Community MCP Catalog 漏掉 `await`
 
-已有 remote MCP 记录的重试/恢复流程会先完成数据库更新，然后执行 `await None` 报错，最终工作流被标记为失败。测试使用 `AsyncMock`，再次把生产签名错误隐藏了：[test_nl2agent_service.py](/home/sil/nexent/test/backend/services/test_nl2agent_service.py:1523)。
+- 状态：已修复。
+- 修复：Community provider 使用异步契约并等待结果；测试覆盖真实异步返回和 Catalog 内容。
+- 提交：`3112a80f`。
 
-这三个问题反映的是同一类系统性坏味道：依赖注入大量依赖 `Callable[..., Any]`，没有在类型层面约束同步/异步边界。
+3. MCP 重试路径错误地等待同步数据库函数
 
-## P1：高风险功能与一致性问题
+- 状态：已修复。
+- 修复：`update_mcp_service()` 依赖恢复为同步签名并同步调用；测试使用 `MagicMock`，覆盖已有 MCP 记录的重试路径。
+- 提交：`3112a80f`。
+
+### P1：高风险功能与一致性问题
 
 4. `chat`/`llm` 模型类型规范不一致
 
-平台模型接口会把旧类型 `chat` 映射成前端看到的 `llm`：[model_management_service.py](/home/sil/nexent/backend/services/model_management_service.py:710)。
+- 状态：已修复。
+- 修复：seed、模型选择和最终发布共同使用 `is_llm_model_type()`；旧 `chat` 与规范化 `llm` 采用同一准入规则。
+- 提交：`2652ee22` `🐛 Bugfix: Validate NL2AGENT model configuration`。
 
-NL2Agent seed 又明确接受 `chat` 和 `llm`：[nl2agent_seed_service.py](/home/sil/nexent/backend/services/nl2agent_seed_service.py:106)，但最终模型选择只接受原始类型 `llm`：[nl2agent_service.py](/home/sil/nexent/backend/services/nl2agent_service.py:379)。
+5. 本地资源推荐先写 Redis、后验证数据库
 
-结果是：旧 `chat` 模型可以出现在可选列表中，却会在选择或发布时被拒绝。测试甚至分别固化了这两个互相冲突的行为：[test_nl2agent_service.py](/home/sil/nexent/test/backend/services/test_nl2agent_service.py:3325)。
+- 状态：已修复。
+- 修复：注册批次前先批量查询并验证 Tool/Skill；验证成功后才推进 Redis 工作流。Skill 查询由逐项读取改为 tenant-scoped 批量查询。
+- 提交：`8c6945ee` `🐛 Bugfix: Preserve NL2AGENT workflow consistency`。
 
-5. 本地资源推荐存在 Redis 先提交、数据库后验证的问题
+6. 发布绕过模型输出 token 上限
 
-[`register_local_resource_recommendations()`](/home/sil/nexent/backend/services/nl2agent_resource_service.py:250) 先把推荐批次写入 Redis、推进工作流，之后才从数据库检查工具是否仍存在。
+- 状态：已修复。
+- 修复：最终发布重新读取并验证主模型记录，在写 Draft 前检查 `requested_output_tokens <= max_output_tokens`；缺失或不可用模型同样阻断发布。
+- 提交：`2652ee22`。
 
-如果工具在搜索后被删除：
+7. Verification 配置协议漂移
 
-- Redis 已经进入 recommendation review 状态；
-- API 返回失败；
-- 前端仍保留 `registered=false`；
-- Apply 和 Skip 均不可用：[LocalResourcesCard.tsx](/home/sil/nexent/frontend/components/nl2agent/LocalResourcesCard.tsx:444)。
+- 状态：已修复。
+- 修复：Card Schema、双语 Prompt、Pydantic request、SDK `AgentVerificationConfig` 和 Final Review UI 对齐真实字段；删除无效 `mode`，Pydantic 禁止额外字段，最终审核展示 verification 决策。
+- 提交：`de2ebfb7` `🐛 Bugfix: Align NL2AGENT verification contract`。
 
-允许重试，但每次都会遇到相同的数据库缺失，当前交互无法继续。这是典型的部分提交和验证顺序倒置。
-
-6. NL2Agent 发布绕过模型输出 token 上限
-
-正常 Agent 保存流程会检查 `requested_output_tokens` 是否超过模型能力：[agent_service.py](/home/sil/nexent/backend/services/agent_service.py:1506)。
-
-NL2Agent publication 直接调用底层 `update_agent`：[nl2agent_service.py](/home/sil/nexent/backend/services/nl2agent_service.py:952)，只校验 token 至少为 1：[nl2agent_publication_service.py](/home/sil/nexent/backend/services/nl2agent_publication_service.py:129)。
-
-因此 LLM 生成的超大值可以成功发布，但运行时容量解析器随后会拒绝它：[capacity_resolver.py](/home/sil/nexent/sdk/nexent/core/models/capacity_resolver.py:287)。这会产生“发布成功、所有运行失败”的 Agent。
-
-7. Verification 配置协议已经漂移
-
-Card Schema 和中英文提示词输出：
-
-```json
-{"enabled": false, "mode": "basic"}
-```
-
-证据：
-
-- [nl2agent-card.schema.json](/home/sil/nexent/contracts/nl2agent-card.schema.json:226)
-- [nl2agent_system_prompt_en.yaml](/home/sil/nexent/backend/prompts/nl2agent_system_prompt_en.yaml:87)
-- [FinalizeCard.tsx](/home/sil/nexent/frontend/components/nl2agent/FinalizeCard.tsx:17)
-
-但真实 `AgentVerificationConfig` 没有 `mode` 字段，而是 `strictness`、`fail_policy` 等：[agent_model.py](/home/sil/nexent/sdk/nexent/core/agents/agent_model.py:150)。
-
-在 `nexent` 环境实测，Pydantic 会静默丢弃 `mode`。同时 FinalizeCard 没有展示 verification 配置，意味着提示词默认关闭验证，却没有让用户明确审阅该决定。
-
-## P2：协议、状态机及可维护性坏味道
+### P2：协议、状态机及可维护性问题
 
 8. Card Schema、HTTP 模型和前端类型存在三份真相
 
-例如 Card Schema 对 requirements、ID 数量、字符串长度和 `max_steps` 的限制，比后端请求模型宽松：
+- 状态：已闭环为可自动验证的契约链。
+- 修复：17 个 endpoint 全部声明成功 `response_model`；OpenAPI 和 TypeScript 由脚本生成，导出器固定读取仓库内 SDK 源码而不受已安装版本漂移影响；前端 service 使用生成的 request/response/Session State 类型；Card 限制与 HTTP Pydantic 限制对齐。
+- 防回归：contract test 比较 requirements、batch ID、final review 的 min/max、数量和 `extra="forbid"` 约束，并验证每个 endpoint 的 200 response 都引用具名 NL2AGENT schema。
+- 提交：`e24ca715`、`ecb39068`。
 
-- [Card Schema](/home/sil/nexent/contracts/nl2agent-card.schema.json:10)
-- [后端请求模型](/home/sil/nexent/backend/consts/model.py:458)
-- [最终发布模型](/home/sil/nexent/backend/consts/model.py:555)
+9. 外部 MCP 只搜索前 30 条快照，单源失败阻断 Session
 
-因此卡片可能通过 Ajv 验证并渲染，自动注册或发布时才收到 422。
+- 状态：已修复。
+- 修复：Registry 与 Community 均以 100 条为页大小沿 cursor 拉取全部页，重复 cursor 安全终止；两者并发加载并分别 fail-soft，单个外部市场失败不再阻断本地资源 Session。
+- 提交：`fe79ce9a` `🐛 Bugfix: Load complete NL2AGENT MCP catalogs`。
 
-NL2Agent endpoints 还普遍没有声明 `response_model`：[nl2agent_app.py](/home/sil/nexent/backend/apps/nl2agent_app.py:78)，导致生成的前端响应类型是 `unknown`，前端不得不在 [nl2agentService.ts](/home/sil/nexent/frontend/services/nl2agentService.ts:21) 手工维护重复接口。
+10. Card AST 依赖 `any`、强制断言和死回调
 
-9. 外部 MCP 搜索只是“前 30 条快照内搜索”
+- 状态：已修复。
+- 修复：删除 `WebMcpCard.onInstall` 从 Chat 到 Card 的整条无效透传和伪测试；建立按九种 fence language 判别的 payload 联合类型；Renderer 通过 switch 自然收窄，不再分散 `as WebMcpCardItem`、`as WebSkillCardItem` 或双重断言。
+- 额外修复：拒绝单数 tag 携带列表 payload、复数 tag 携带单项 payload；`skill_name` 可稳定归一化为显示名和推荐 key。
+- 提交：`bba15b41`、`7455ccd6`。
 
-启动时 Registry 和 Community catalog 都固定 `limit=30`：[nl2agent_catalog_service.py](/home/sil/nexent/backend/services/nl2agent_catalog_service.py:129)。SDK 随后只在注入的快照中搜索，而没有调用服务端搜索能力。
+11. Requirements 意图识别会把否定句误判为修改
 
-因此第 31 条以后的 MCP 永远不可发现。并且任何一个外部 catalog 不可用都会让整个 session start 失败，即使用户只需要本地工具；这是较强的可用性耦合。
+- 状态：已修复。
+- 修复：在修改 marker 前识别中英文“无需修改/没有修改/no change”等否定表达；测试覆盖确认、否定、明确修改和同指纹恢复。
+- 提交：`8c6945ee`。
 
-10. 前端所谓 typed card AST 仍大量依赖 `any` 和强制断言
+12. Identity 保存存在数据库与 Redis 双写窗口
 
-核心 payload 类型仍是 `Record<string, any>`：[cardValidation.ts](/home/sil/nexent/frontend/components/nl2agent/cardValidation.ts:17)，renderer 根据 `language` 强制转换 payload：[index.tsx](/home/sil/nexent/frontend/components/nl2agent/index.tsx:244)。
+- 状态：已修复。
+- 修复：数据库 display name 更新与 Redis identity 确认在同一个 caller-owned 数据库事务边界内执行；Redis 失败导致数据库回滚，测试断言事务退出异常和身份状态未确认。
+- 提交：`8c6945ee`。
 
-`WebMcpCard.onInstall` 还形成了死回调链：
+13. 错误语义被压扁为统一 409
 
-- Props 声明了回调：[WebMcpCard.tsx](/home/sil/nexent/frontend/components/nl2agent/WebMcpCard.tsx:19)
-- 组件实现没有解构或调用它：[WebMcpCard.tsx](/home/sil/nexent/frontend/components/nl2agent/WebMcpCard.tsx:76)
-- 测试只检查 React element 上的 prop 并手动调用，没有挂载验证真实行为：[nl2agentCards.test.tsx](/home/sil/nexent/frontend/components/nl2agent/__tests__/nl2agentCards.test.tsx:194)
+- 状态：已修复。
+- 修复：结构化区分请求/配置错误 `030206/400`、工作流冲突 `030202/409`、内部持久化失败 `030207/500`、外部安装/连接失败 `030208/502`；已有 Draft、stale Card、CAS 和 Catalog 错误原样透传。
+- 防回归：App 边界测试断言 error code 与 HTTP status；Service 测试直接断言校验、内部操作和外部服务异常子类。
+- 提交：`69299730` `🐛 Bugfix: Preserve NL2AGENT error semantics`。
 
-11. Requirements 意图识别使用简单子串，否定句会误判
+14. 高圈复杂度与职责过载
 
-[`classify_requirements_intent()`](/home/sil/nexent/backend/agents/nl2agent_session_catalog.py:318) 使用 `marker in normalized_text` 判断修改意图。
+- 状态：NL2AGENT 专用生产代码范围已清零 Ruff `C901`。
+- 修复：Publication 拆分为模型、工作流、proposal、资源、更新构建与持久化职责；Skill 安装拆分 name/ID 路径；MCP/Tool 字段验证下沉；Session 启动拆出 builder 解析、seed 校验和补偿；权威 evaluator 拆分为事实投影与阶段决策。
+- 说明：通用 Agent Runtime 的 `create_agent_info.py` 仍含历史复杂函数，但它不是 NL2AGENT feature 新增的专用职责，本轮未以跨 feature 重写扩大变更范围。
+- 提交：`9ba91745` `♻️ Refactor: Reduce NL2AGENT service complexity`，以及最终文档/契约提交中的 evaluator 拆分。
 
-例如：
+15. 设计文档和代码走读已过期
 
-- “No change, looks good”
-- “无需修改，可以继续”
+- 状态：已修复。
+- 修复：设计与走读不再绑定 commit/revision/文件计数；同步全量 MCP 分页、外部源故障隔离、online Skill 绑定、强类型共享 AST、生成响应类型和新错误码；删除已经解决的限制与重复文件索引。
+- 本文改为按原始 15 项维护修复状态、提交和防回归证据，不再使用绝对本机路径和易漂移行号。
 
-分别包含 `change` 和 `修改`，会被分类成修改请求，重新进入 collecting。如果重新生成的 summary 指纹没有变化，状态还可能无法回到 awaiting confirmation。
+## 3. 分阶段提交记录
 
-12. Identity 保存存在数据库与 Redis 双写不一致窗口
+| 阶段 | Commit | 主题 |
+|---:|---|---|
+| 1 | `3112a80f` | 同步/异步依赖契约 |
+| 2 | `2652ee22` | 模型类型与输出上限 |
+| 3 | `de2ebfb7` | Verification 契约 |
+| 4 | `8c6945ee` | 工作流与事务一致性 |
+| 5 | `e24ca715` | Card/API 限制与失效字段 |
+| 6 | `ecb39068` | API response model 与生成类型 |
+| 7 | `fe79ce9a` | MCP 全量分页与故障隔离 |
+| 8 | `bba15b41` | 删除死回调链 |
+| 9 | `7455ccd6` | 强类型 Card payload AST |
+| 10 | `9ba91745` | 服务圈复杂度治理 |
+| 11 | `69299730` | 结构化错误语义 |
+| 12 | 当前文档提交 | 契约门、文档同步与最终验证 |
 
-[`save_identity()`](/home/sil/nexent/backend/services/nl2agent_workflow_service.py:321) 先更新数据库 display name，再确认 Redis workflow，没有共享事务或补偿。
+## 4. 保留的架构约束
 
-Redis 失败时，API 报错且工作流仍停留在 identity，但数据库名称已经改变。重试通常能恢复，不过这是清晰的部分提交窗口。
+以下是明确的架构约束，不作为未修复坏味道：
 
-13. 错误语义被压扁
+- `nl2agent_service.py` 仍是依赖装配 facade，并保留 seed、模型投影与共享展示解析；副作用编排已位于六个专用 Service。
+- Workflow State 公开 `revision`，Session Catalog 使用 WATCH/MULTI CAS 但不公开 revision。
+- Canonical Card payload 允许省略 `agent_id`，以 trusted Conversation Draft ID 为准；payload ID 存在时必须完全一致。
+- Frontend Final Review 的门禁用于即时 UX，Backend Publication 始终执行完整权威校验。
+- official Skill 的 `resource_missing` 只过滤并告警，尚无自动修复入口。
+- `Nl2AgentContext` 为实例级隔离，但不是 frozen/deep-copy 强制不可变。
 
-[`_session_http_error()`](/home/sil/nexent/backend/apps/nl2agent_app.py:62) 将大量历史 `AgentRunException` 统一映射成 workflow conflict 409。
+## 5. 最终验证矩阵
 
-配置无效、MCP 连接失败、数据库保存失败可能得到相同状态码和错误类别，削弱客户端重试判断与服务端可观测性。
+最终验证全部使用 miniconda `nexent` 环境：
 
-14. 复杂度和文件体积已经偏高
+- 后端、SDK、Contract 定向测试：`204 passed`；
+- 前端完整 Vitest：`56 passed`；
+- 前端 TypeScript type-check：通过；
+- OpenAPI/Card Contract 同步检查：通过；
+- NL2AGENT 生产代码与定向测试 Ruff 标准规则：通过；
+- NL2AGENT 专用生产代码 Ruff `C901`：无命中；
+- NL2AGENT 相关 Prettier check：通过；
+- `git diff --check`：通过；最终提交后工作区应为空。
 
-NL2Agent 相关主要大文件：
-
-- `test_nl2agent_service.py`：3423 行
-- `create_agent_info.py`：1684 行
-- `nl2agent_service.py`：1000 行
-- `nl2agent_session_catalog.py`：932 行
-- `nl2agent_mcp_service.py`：845 行
-
-Ruff 标准规则全部通过，但启用 `C901` 后发现 7 个高复杂度函数，其中 `evaluate_workflow` 复杂度为 21，`publish_agent` 为 13，`start_session` 为 12。复杂度和宽松的 `Callable[..., Any]` 共同降低了签名错误被静态发现的可能。
-
-15. 设计文档已经不再代表当前实现
-
-[NL2Agent 设计文档](/home/sil/nexent/doc/docs/zh/developer-guide/nl2agent-design.md:3) 仍称旧 revision 为“当前实现”，当前分支已经领先 23 个提交。旧 smell review 还包含过期行号和本机 Windows 路径；walkthrough 中也存在已经被代码改变的行为描述。
-
-## 已确认做得较好的部分
-
-- Redis workflow/catalog 更新采用 CAS，并刷新 TTL。
-- 搜索结果批次绑定服务端可信结果，客户端不能任意伪造资源 ID。
-- MCP 安装锁带 owner token 和 heartbeat。
-- Tool/MCP catalog 对敏感配置进行了脱敏。
-- Card delivery 会验证服务器持久化的最新 assistant message，而不是直接信任客户端。
-- 多数 select/apply/bind 路径已有数据库事务或补偿逻辑。
-- 中英文 YAML 提示词结构基本一致，示例卡片通过当前 canonical schema。
-
-## 只读验证结果
-
-全部使用 miniconda 的 `nexent` 环境：
-
-- 后端、SDK、contracts 定向测试：`181 passed`
-- 前端 NL2Agent Vitest：`51 passed`
-- 前端 TypeScript type-check：通过
-- contracts check：通过
-- NL2Agent Prettier check：通过
-- Ruff 标准检查：通过
-- Ruff `C901`：发现 7 个复杂度问题
-- 定向 ESLint 未能启动：仓库使用旧式 Next/ESLint 配置，而直接调用 ESLint 9 要求 flat config；这是验证限制，不计为 NL2Agent 缺陷
-- 最终 `git status --short` 无输出，工作区未产生任何修改
-
-建议修复优先级：先处理三个同步/异步契约错误并用真实函数签名测试覆盖；随后统一模型类型和 publication 校验；再收敛 Card Schema、Pydantic 模型、OpenAPI 与前端生成类型。此次仅执行了只读验证，没有修改、提交或推送。
+ESLint 仍受仓库级旧式 Next/ESLint 配置限制：直接运行 ESLint 9 会要求 flat config。该限制不是 NL2AGENT feature 引入，不在本轮扩大为全仓工具链迁移。

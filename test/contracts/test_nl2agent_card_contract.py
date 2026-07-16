@@ -7,6 +7,12 @@ from pathlib import Path
 from jsonschema import Draft7Validator, RefResolver
 import yaml
 
+from consts.model import (
+    Nl2AgentFinalizeRequest,
+    Nl2AgentRecommendationBatchRequest,
+    Nl2AgentRequirementsSummaryRequest,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = json.loads(
@@ -174,6 +180,69 @@ def test_card_limits_match_http_request_boundaries() -> None:
     assert list(_validator("requirements_summary").iter_errors(requirements))
     assert list(_validator("local_resources").iter_errors(local_resources))
     assert list(_validator("final_review").iter_errors(final_review))
+
+
+def _non_null_schema(schema: dict) -> dict:
+    return next(
+        (item for item in schema.get("anyOf", []) if item.get("type") != "null"),
+        schema,
+    )
+
+
+def test_card_constraints_equal_http_model_constraints() -> None:
+    requirements_http = Nl2AgentRequirementsSummaryRequest.model_json_schema()
+    batch_http = Nl2AgentRecommendationBatchRequest.model_json_schema()
+    finalize_http = Nl2AgentFinalizeRequest.model_json_schema()
+
+    for field_name in (
+        "goal",
+        "audience_or_scenario",
+        "primary_input",
+        "expected_output",
+        "key_constraints",
+    ):
+        card_field = SCHEMA["$defs"]["requirements_summary"]["properties"][
+            field_name
+        ]
+        http_field = requirements_http["properties"][field_name]
+        assert {
+            "minLength": card_field["minLength"],
+            "maxLength": card_field["maxLength"],
+        } == {
+            "minLength": http_field["minLength"],
+            "maxLength": http_field["maxLength"],
+        }
+
+    card_batch = SCHEMA["$defs"]["batchIdentifier"]
+    http_batch = batch_http["properties"]["recommendation_batch_id"]
+    assert {
+        "minLength": card_batch["minLength"],
+        "maxLength": card_batch["maxLength"],
+    } == {
+        "minLength": http_batch["minLength"],
+        "maxLength": http_batch["maxLength"],
+    }
+
+    for field_name, constraints in {
+        "description": ("maxLength",),
+        "business_description": ("minLength", "maxLength"),
+        "duty_prompt": ("minLength", "maxLength"),
+        "constraint_prompt": ("maxLength",),
+        "few_shots_prompt": ("maxLength",),
+        "greeting_message": ("minLength", "maxLength"),
+        "example_questions": ("maxItems",),
+        "max_steps": ("minimum", "maximum"),
+        "requested_output_tokens": ("minimum",),
+    }.items():
+        card_field = SCHEMA["$defs"]["final_review"]["properties"][field_name]
+        http_field = _non_null_schema(finalize_http["properties"][field_name])
+        assert {key: card_field[key] for key in constraints} == {
+            key: http_field[key] for key in constraints
+        }
+
+    assert requirements_http["additionalProperties"] is False
+    assert batch_http["additionalProperties"] is False
+    assert finalize_http["additionalProperties"] is False
 
 
 def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:

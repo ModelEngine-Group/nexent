@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -116,7 +117,9 @@ class Nl2AgentWorkflowState(BaseModel):
     recommendation_batches: Dict[str, RecommendationBatch] = Field(default_factory=dict)
     identity_confirmed: bool = False
     mcp_workflows: Dict[str, McpWorkflow] = Field(default_factory=dict)
-    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(default_factory=dict)
+    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
+        default_factory=dict
+    )
     online_configuration_confirmed: bool = False
     card_delivery: Dict[CardType, CardDelivery] = Field(default_factory=dict)
 
@@ -149,9 +152,26 @@ def _card_was_rendered(state: Nl2AgentWorkflowState, card_type: CardType) -> boo
     return receipt is not None and receipt.status == "rendered"
 
 
-def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
-    """Return the single authoritative next stage for a persisted state."""
-    requirements_status = state.requirements_review.status
+@dataclass(frozen=True)
+class _WorkflowFacts:
+    local_status: Literal["missing", "pending", "complete"]
+    mcp_registered: bool
+    skill_registered: bool
+    unresolved_mcp_count: int
+
+    @property
+    def all_online_registered(self) -> bool:
+        return self.mcp_registered and self.skill_registered
+
+
+@dataclass(frozen=True)
+class _StageDecision:
+    stage: WorkflowStage
+    expected: List[CardType]
+    allowed: List[str]
+
+
+def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
     local_batches = list(state.recommendation_batches.values())
     if not local_batches:
         local_status: Literal["missing", "pending", "complete"] = "missing"
@@ -160,75 +180,116 @@ def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
     else:
         local_status = "complete"
 
-    online_types = {batch.resource_type for batch in state.online_recommendation_batches.values()}
-    mcp_registered = "mcp" in online_types
-    skill_registered = "skill" in online_types
-    unresolved_mcp_count = sum(
-        workflow.status in {"installing", "connected"} for workflow in state.mcp_workflows.values()
+    online_types = {
+        batch.resource_type for batch in state.online_recommendation_batches.values()
+    }
+    return _WorkflowFacts(
+        local_status=local_status,
+        mcp_registered="mcp" in online_types,
+        skill_registered="skill" in online_types,
+        unresolved_mcp_count=sum(
+            workflow.status in {"installing", "connected"}
+            for workflow in state.mcp_workflows.values()
+        ),
     )
 
-    expected: List[CardType] = []
-    allowed: List[str] = []
+
+def _unrendered_cards(
+    state: Nl2AgentWorkflowState,
+    *card_types: CardType,
+) -> List[CardType]:
+    return [
+        card_type
+        for card_type in card_types
+        if not _card_was_rendered(state, card_type)
+    ]
+
+
+def _select_stage(
+    state: Nl2AgentWorkflowState,
+    facts: _WorkflowFacts,
+) -> _StageDecision:
+    requirements_status = state.requirements_review.status
     if requirements_status == "collecting":
-        stage: WorkflowStage = "requirements_collecting"
-        allowed = ["clarify_requirements", "render_requirements_summary"]
-    elif requirements_status == "awaiting_confirmation":
-        stage = "requirements_confirmation"
-        if not _card_was_rendered(state, "requirements_summary"):
-            expected = ["requirements_summary"]
-        allowed = ["confirm_requirements", "revise_requirements"]
-    elif not state.model_selection_confirmed:
-        stage = "model_selection"
-        if not _card_was_rendered(state, "model_selection"):
-            expected = ["model_selection"]
-        allowed = ["select_models"]
-    elif local_status == "missing":
-        stage = "local_resource_search"
-        expected = ["local_resources"]
-        allowed = ["search_local_resources"]
-    elif local_status == "pending":
-        stage = "local_resource_review"
-        if not _card_was_rendered(state, "local_resources"):
-            expected = ["local_resources"]
-        allowed = ["apply_local_resources", "skip_local_resources"]
-    elif not (mcp_registered and skill_registered):
-        stage = "online_resource_search"
-        if not mcp_registered:
-            expected.append("web_mcp")
-        if not skill_registered:
-            expected.append("web_skill")
-        allowed = ["search_online_resources"]
-        if mcp_registered or skill_registered:
-            allowed.append("configure_online_resources")
-    elif not state.online_configuration_confirmed:
-        stage = "online_resource_review"
-        if not _card_was_rendered(state, "web_mcp"):
-            expected.append("web_mcp")
-        if not _card_was_rendered(state, "web_skill"):
-            expected.append("web_skill")
-        allowed = ["configure_online_resources", "complete_online_configuration"]
-    elif not state.identity_confirmed:
-        stage = "agent_identity"
-        if not _card_was_rendered(state, "agent_identity"):
-            expected = ["agent_identity"]
-        allowed = ["save_identity"]
-    else:
-        stage = "final_review"
-        if not _card_was_rendered(state, "final_review"):
-            expected = ["final_review"]
-        allowed = ["publish_agent"]
+        return _StageDecision(
+            "requirements_collecting",
+            [],
+            ["clarify_requirements", "render_requirements_summary"],
+        )
+    if requirements_status == "awaiting_confirmation":
+        return _StageDecision(
+            "requirements_confirmation",
+            _unrendered_cards(state, "requirements_summary"),
+            ["confirm_requirements", "revise_requirements"],
+        )
+    if not state.model_selection_confirmed:
+        return _StageDecision(
+            "model_selection",
+            _unrendered_cards(state, "model_selection"),
+            ["select_models"],
+        )
+    if facts.local_status == "missing":
+        return _StageDecision(
+            "local_resource_search",
+            ["local_resources"],
+            ["search_local_resources"],
+        )
+    if facts.local_status == "pending":
+        return _StageDecision(
+            "local_resource_review",
+            _unrendered_cards(state, "local_resources"),
+            ["apply_local_resources", "skip_local_resources"],
+        )
+    if not facts.all_online_registered:
+        expected = [
+            card_type
+            for registered, card_type in (
+                (facts.mcp_registered, "web_mcp"),
+                (facts.skill_registered, "web_skill"),
+            )
+            if not registered
+        ]
+        allowed = ["search_online_resources"] + (
+            ["configure_online_resources"]
+            if facts.mcp_registered or facts.skill_registered
+            else []
+        )
+        return _StageDecision("online_resource_search", expected, allowed)
+    if not state.online_configuration_confirmed:
+        return _StageDecision(
+            "online_resource_review",
+            _unrendered_cards(state, "web_mcp", "web_skill"),
+            ["configure_online_resources", "complete_online_configuration"],
+        )
+    if not state.identity_confirmed:
+        return _StageDecision(
+            "agent_identity",
+            _unrendered_cards(state, "agent_identity"),
+            ["save_identity"],
+        )
+    return _StageDecision(
+        "final_review",
+        _unrendered_cards(state, "final_review"),
+        ["publish_agent"],
+    )
+
+
+def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
+    """Return the single authoritative next stage for a persisted state."""
+    facts = _workflow_facts(state)
+    decision = _select_stage(state, facts)
 
     return WorkflowSummary(
-        current_stage=stage,
-        expected_card_types=expected,
-        allowed_actions=allowed,
-        requirements_status=requirements_status,
+        current_stage=decision.stage,
+        expected_card_types=decision.expected,
+        allowed_actions=decision.allowed,
+        requirements_status=state.requirements_review.status,
         model_selection_confirmed=state.model_selection_confirmed,
-        local_review_status=local_status,
-        mcp_batch_registered=mcp_registered,
-        skill_batch_registered=skill_registered,
+        local_review_status=facts.local_status,
+        mcp_batch_registered=facts.mcp_registered,
+        skill_batch_registered=facts.skill_registered,
         online_configuration_confirmed=state.online_configuration_confirmed,
-        unresolved_mcp_count=unresolved_mcp_count,
+        unresolved_mcp_count=facts.unresolved_mcp_count,
         identity_confirmed=state.identity_confirmed,
     )
 

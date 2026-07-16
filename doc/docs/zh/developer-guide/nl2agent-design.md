@@ -1,12 +1,8 @@
 # NL2AGENT 对话式智能体构建设计
 
-> 文档快照：2026-07-16
+> 最近复核：2026-07-16
 >
-> 对比基线：Jujutsu revision `lvnqqsqn`（Git commit `4e7d9fe1`）
->
-> 当前实现：Git commit `604151c6`；其上的工作副本 `@` 在编写本文前为空
->
-> 扫描范围：Backend、SDK、Frontend、Prompt、Contract、测试与开发文档，共 106 个变更文件，约 22,500 行新增、643 行删除
+> 维护规则：本文描述当前主干实现，不绑定易失效的 commit 或变更文件计数；行为变更必须同步本文、代码走读和契约测试。
 
 本文描述当前代码已经实现的行为，不把未落地的规划、已删除的兼容逻辑或历史测试会话的恢复方案写成现有能力。模块级调用链和函数入口见《[NL2AGENT 代码走读](./nl2agent-code-walkthrough)》，重构状态与仍存问题见《[NL2AGENT 代码坏味道审查](./nl2agent-code-smell-review)》。
 
@@ -256,13 +252,13 @@ Catalog 失败发生在创建数据库对象之前。Redis 写入失败会使数
 
 Session Catalog 包含：
 
-- `local_tools`
-- `local_skills`
-- `registry_mcps`
-- `community_mcps`
+- `tool_catalog`
+- `skill_catalog`
+- `registry_results`
+- `community_results`
 - `official_skills`
 
-Registry、Community、official Skill 或本地 Catalog 的 provider 异常返回 503；合法空数组仍允许创建 Session 并在后续显示空结果卡。
+本地 Tool、租户 Skill 或 official Skill provider 异常返回 503，因为这些目录参与后续权威绑定。Registry 与 Community MCP 使用 cursor 拉取全部页（每页 100 条），两者并发加载且分别 fail-soft：单个外部市场不可用只记录告警并提供空目录，不阻断只依赖本地资源的 Session。合法空数组始终允许创建 Session 并在后续显示空结果卡。
 
 ---
 
@@ -375,8 +371,8 @@ local_<sha256(draft id + canonical query + sorted result ids)[:24]>
 
 MCP 候选来自 Session Start 时 Backend 拉取的两个来源：
 
-1. official Registry：调用现有 Registry service，`search=None, limit=30`。
-2. Community Marketplace：调用现有 Community service，`search=None, limit=30`。
+1. official Registry：调用现有 Registry service，`search=None, limit=100`，沿 `metadata.nextCursor` 拉取全部页。
+2. Community Marketplace：调用现有 Community service，`search=None, limit=100`，沿 `nextCursor` 拉取全部页。
 
 SDK 不直接访问互联网。它在注入的快照上搜索规范化后的 MCP 名称和描述。当前 normalizer 不把 tags 保留到评分候选，因此 MCP tags 实际不参与评分。
 
@@ -639,7 +635,7 @@ Frontend 将文本作为普通 user message 持久化并再次调用 `/agent/run
 
 `useNl2AgentCardLifecycle` 为各 Card 统一处理 action、busy、blocker、retry、continuation 和 unmount cleanup。Card 组件仍负责自己的展示和业务输入，例如模型下拉、MCP 动态字段、资源勾选。
 
-Card Parser 使用 Ajv 和 canonical schema 产生 typed Card AST。Markdown Renderer 与 Final Message Delivery 都调用这一共享 parser，因而不再各自维护不同 schema；但两条调用路径当前仍会分别解析一次同一消息，并没有把一个 AST 实例从 Renderer 传给 Delivery Coordinator。
+Card Parser 使用 Ajv 和 canonical schema 产生按九种 fence language 判别的 typed Card AST。Final Message Delivery 对完整消息只解析一次，并把同一组 AST 节点传给 Markdown Renderer；非 Final Message 的独立 Markdown 场景才使用单卡 fallback parser。单数/复数 online tag 与 payload 形态不匹配时在解析边界直接拒绝。
 
 ---
 
@@ -678,8 +674,11 @@ Card Parser 使用 Ajv 和 canonical schema 产生 typed Card AST。Markdown Ren
 | `030203` | 409 | Card 回执来自历史/过期消息 |
 | `030204` | 409 | Redis CAS 冲突重试耗尽 |
 | `030205` | 503 | Session Catalog provider 不可用 |
+| `030206` | 400 | 请求或建议配置不合法 |
+| `030207` | 500 | 数据库或内部持久化操作失败 |
+| `030208` | 502 | 外部安装、连接或工具发现失败 |
 
-大部分 NL2AGENT App 入口透传结构化 `AppException`。当前 `session/start`、Apply Local 和 Install Web Skill 的部分异常路径仍保留直接映射为 HTTP 500 的旧写法，这是现存接口一致性限制。
+所有 NL2AGENT App 入口统一透传结构化 `AppException`。服务层分别抛出校验、工作流、外部服务和内部操作错误；未知异常才降级为不暴露内部细节的 `SYSTEM_INTERNAL_ERROR`。
 
 ---
 
@@ -767,22 +766,16 @@ Frontend 已加入 Vitest、React Testing Library 和 jsdom。`npm run check-all
 
 ## 17. 当前实现限制
 
-以下是本次全量扫描确认的当前行为，后续改进时应避免被文档掩盖：
+以下是复核后仍然存在、但不构成本轮代码坏味道缺陷的架构约束：
 
 1. `nl2agent_service.py` 仍有约千行，虽然已拆出六个专用 Service，但 seed、模型投影和若干辅助逻辑仍集中在 facade。
 2. Session Catalog 的 CAS 更新没有像 Workflow State 一样公开 `revision`。
 3. MCP normalizer 当前未把 tags 带入评分候选，所以 MCP 搜索实际按 name + description 匹配。
 4. 资源分组只把 `source == "official"` 的 Skill 识别为 online；若持久化 source 使用中文“官方”，最终卡可能误归为 local。
-5. Frontend Model Card 客户端按 available 过滤，但模型类型的最终过滤主要依赖 Backend；Backend seed 模型候选和保存校验对 `chat`/`llm` 的处理口径并不完全相同。
-6. 部分 Card UI 文案仍为硬编码英文，尚未全部收敛到中英文 i18n。
-7. Frontend 已生成 API request 类型，但较复杂的 response 和 Session State 仍有手写 TypeScript interface。
-8. Canonical Card Schema 为兼容可信 Conversation Draft ID，允许 payload 不含 `agent_id`，并普遍允许附加字段；更严格的 ID 冲突和唯一卡片检查在 Frontend parser 中完成。
-9. `FinalizeCard` 的客户端 `canPublish` 主要检查身份、proposal 和 invalid references；完整 workflow 门禁由 Backend Finalization 兜底。
-10. `backend/database/tool_db.py` 中仍有一处旧注释写“6 tools”，实际定义和 seed 均为 3 个。
-11. NL2AGENT Router 的异常映射尚未在所有入口完全统一。
-12. official Skill 的 `resource_missing` 当前只过滤并告警，没有重新安装或修复入口。
-13. online Skill Card 当前只安装租户 Skill 并从 Session Catalog 删除推荐，不会创建 Draft `SkillInstance`；因此它不会仅凭“Installed”状态自动出现在最终持久化资源列表中。
-14. Frontend 已统一 Card parser/schema，但 Renderer 和 Final Message Delivery 仍各自调用 parser，尚未跨组件共享同一个 AST 实例。
-15. `Nl2AgentContext` 已做到每 Tool 实例隔离，但 dataclass 不是 frozen，Catalog List 也未深拷贝；“只读”目前依赖搜索代码不修改输入，而不是类型系统强制。
+5. 部分 Card UI 文案仍为硬编码英文，尚未全部收敛到中英文 i18n。
+6. Canonical Card Schema 为兼容可信 Conversation Draft ID，允许 payload 不含 `agent_id`；所有对象均禁止附加字段，ID 冲突和唯一卡片检查由 Frontend parser 完成。
+7. `FinalizeCard` 的客户端 `canPublish` 只做即时 UX 门禁；完整 workflow 与持久化引用校验始终由 Backend Finalization 负责。
+8. official Skill 的 `resource_missing` 当前只过滤并告警，没有重新安装或修复入口。
+9. `Nl2AgentContext` 已做到每 Tool 实例隔离，但 dataclass 不是 frozen，Catalog List 也未深拷贝；“只读”目前依赖搜索代码不修改输入，而不是类型系统强制。
 
 这些限制不影响本文描述的主流程，但属于维护和后续重构时必须考虑的真实实现约束。

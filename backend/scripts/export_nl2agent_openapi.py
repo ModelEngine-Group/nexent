@@ -6,9 +6,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "sdk"))
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
-from apps.runtime_app import app
+from apps.runtime_app import app  # noqa: E402 -- repository paths must precede app import
 
 
 def _referenced_schema_names(value: Any) -> set[str]:

@@ -166,6 +166,7 @@
         "type": "object"
       },
       "Nl2AgentApplyLocalResourcesRequest": {
+        "additionalProperties": false,
         "description": "Request body for bulk-binding local tools and skills to a draft agent.",
         "properties": {
           "recommendation_batch_id": {
@@ -255,6 +256,7 @@
         "type": "object"
       },
       "Nl2AgentCardDeliveryRequest": {
+        "additionalProperties": false,
         "description": "Report final-message rendering success or failure for one NL2AGENT card.",
         "properties": {
           "card_key": {
@@ -603,6 +605,7 @@
         "type": "object"
       },
       "Nl2AgentIdentityRequest": {
+        "additionalProperties": false,
         "description": "Persist the user-confirmed display name for an NL2AGENT draft.",
         "properties": {
           "display_name": {
@@ -659,6 +662,7 @@
         "type": "object"
       },
       "Nl2AgentInstallWebSkillRequest": {
+        "additionalProperties": false,
         "description": "Request body for installing a single official/web skill into the tenant.",
         "properties": {
           "skill_id": {
@@ -844,6 +848,7 @@
         "type": "object"
       },
       "Nl2AgentMcpBindToolsRequest": {
+        "additionalProperties": false,
         "description": "Bind selected tools from an installed MCP to an NL2AGENT draft.",
         "properties": {
           "tool_ids": {
@@ -886,6 +891,7 @@
         "type": "object"
       },
       "Nl2AgentMcpInstallRequest": {
+        "additionalProperties": false,
         "description": "Install a recommended MCP using user-confirmed configuration.",
         "properties": {
           "config_values": {
@@ -1070,6 +1076,7 @@
         "type": "object"
       },
       "Nl2AgentModelSelectionRequest": {
+        "additionalProperties": false,
         "description": "Persist the ordered LLM selection for an NL2AGENT draft.",
         "properties": {
           "fallback_model_ids": {
@@ -1196,6 +1203,7 @@
         "type": "object"
       },
       "Nl2AgentOnlineRecommendationBatchRequest": {
+        "additionalProperties": false,
         "description": "Register a rendered MCP or web-Skill recommendation batch.",
         "properties": {
           "item_keys": {
@@ -1305,6 +1313,7 @@
         "type": "object"
       },
       "Nl2AgentRecommendationBatchRequest": {
+        "additionalProperties": false,
         "description": "Register a local-resource recommendation card rendered by the client.",
         "properties": {
           "recommendation_batch_id": {
@@ -1335,6 +1344,7 @@
         "type": "object"
       },
       "Nl2AgentRecommendationSkipRequest": {
+        "additionalProperties": false,
         "description": "Explicitly skip one rendered local-resource recommendation batch.",
         "properties": {
           "recommendation_batch_id": {
@@ -1351,6 +1361,7 @@
         "type": "object"
       },
       "Nl2AgentRequirementsConfirmRequest": {
+        "additionalProperties": false,
         "description": "Confirm the currently registered NL2AGENT requirements summary.",
         "properties": {
           "fingerprint": {
@@ -1508,6 +1519,7 @@
         "type": "object"
       },
       "Nl2AgentRequirementsSummaryRequest": {
+        "additionalProperties": false,
         "description": "Register the read-only requirements summary rendered by NL2AGENT.",
         "properties": {
           "audience_or_scenario": {
