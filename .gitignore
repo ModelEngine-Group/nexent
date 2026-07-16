@@ -81,6 +81,7 @@ doc/mermaid
 _doc/
 
 .claude/skills/python-import-triage
+.claude/settings.local.json
 /deploy/env/.env
 /deploy/env/.env.bak
 

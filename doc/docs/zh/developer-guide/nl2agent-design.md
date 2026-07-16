@@ -882,7 +882,7 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 - 不支持已删除的 `NL2AgentApplyLocalResourcesTool` 等旧 builtin tools。
 - 不对旧测试 Agent 自动做 legacy reconciliation。
 - 历史 Conversation 如果没有 conversation/draft 映射，不得猜测草稿 ID。
-- Finalize request 暂时保留部分旧字段以维持接口形状，但服务端不会将其作为可信身份、模型或资源来源。
+- Finalize request 只接受描述、Prompt、欢迎语、示例问题和受支持的 runtime options；旧的身份、模型和资源字段直接拒绝。
 
 ---
 
@@ -997,14 +997,57 @@ FinalizeCard 不信任 proposal 中的身份、模型和资源字段：
 ## 13. 已知限制与后续事项
 
 1. Redis Catalog 和工作流状态 TTL 为 24 小时，超时的未完成会话需要重新开始或增加产品级恢复策略。
-2. SDK 搜索缓存当前为单进程内 10 分钟缓存；Catalog 已跨 worker 持久化，但搜索结果缓存本身不是分布式缓存。
+2. SDK 不再保存进程内搜索缓存；每次 Agent Run 通过 Backend 注入的不可变 Catalog 重新构建搜索工具并计算结果。
 3. 放弃的 `draft_*` Agent 仍可能累积，后续可增加显式丢弃操作或定时清理策略。
 4. 在线 Skill 安装和草稿 SkillInstance 绑定是不同概念，交互上应继续明确区分“已安装到租户”和“已应用到当前草稿”。
 5. 最终配置返回 `draft_ready`，正式版本发布继续复用平台既有评审和发布流程，不自动发布。
-6. SDK 中仍保留 `nl2agent_finalize_proposal` Skill 资料作为历史/辅助资产，但它不是 runtime callable tool；系统 Prompt 也禁止把 Skill 名称作为函数执行。
+6. 已删除过时的 `nl2agent_finalize_proposal` Skill 及生成脚本；最终方案由模型直接输出 `nl2agent-finalize` 卡片，发布仍由用户显式触发。
 7. MCP 搜索只覆盖 session start 时获取的 Registry 和 Community 各前 30 条，用户查询不会实时下推到远程 Marketplace；默认排序之外的 MCP 可能无法被发现。
 8. 在线 Skill 搜索实际扫描 official ZIP 目录，不是远程互联网检索；目录之外的 Skill 不会成为候选。
 9. `resource_missing` Skill 当前只会被过滤并记录上下文 warning，不提供重新安装或资源修复按钮；修复能力不在当前范围。
+
+## 14. v2 工作流、契约与服务边界
+
+### 14.1 Redis v2 State
+
+Session State 使用 `schema_version=2`、单调 `revision` 和权威 `conversation_id`。所有 mutation 通过统一 Repository 执行 Redis `WATCH/MULTI` CAS；旧 schema、损坏 JSON 或缺失状态会返回初始化错误，不会替换为空状态。
+
+Backend 的纯函数 Workflow Evaluator 是阶段判断的唯一来源，输出：
+
+- `current_stage`
+- `expected_card_types`
+- `allowed_actions`
+- 需求、模型、本地审查、联网审查、MCP 和身份摘要
+
+System Prompt 不再复制 Redis 字段组合规则，只根据上述摘要选择唯一动作；Fresh Observation 只在渲染本轮真实搜索结果时优先于运行开始快照。
+
+### 14.2 Card Delivery
+
+Card Delivery 请求使用数据库整数 `message_id`。Backend 仅接受属于当前 Session Conversation、角色为 assistant、状态为 completed 且是最新完成 assistant 消息的回执。失败回执不修改需求、推荐批次或资源绑定等业务状态。
+
+Frontend 使用 conversation/draft/message 作用域记录 `pending/succeeded/failed`，只有 API 成功后才标记完成；历史、分享、只读消息和组件重挂载不会提交回执或自动续跑。
+
+### 14.3 Canonical Card Contract
+
+七类卡片共用 `contracts/nl2agent-card.schema.json`：
+
+- Requirements Summary
+- Model Selection
+- Local Resources
+- Web MCP
+- Web Skill
+- Agent Identity
+- Final Review
+
+Frontend 通过 `contracts:generate` 同步 Schema，并由 `contracts:check` 检查漂移。Ajv 负责一次解析和 schema 校验，生成的 card AST 同时提供 payload、可信 conversation draft ID、card type、card key 和注册要求；renderer 不再二次 `JSON.parse`。
+
+### 14.4 当前服务拆分
+
+- `nl2agent_publication_service.py`：发布前权威模型/资源/身份校验及 draft 更新。
+- `nl2agent_resource_service.py`：本地资源批次注册、原子 Apply All 与 Skip。
+- `nl2agent_service.py`：当前仍作为兼容 facade，并暂时承载 Session、Catalog、MCP 和 Skill 流程；这些职责会继续拆分。
+
+所有 HTTP 错误通过结构化领域异常和固定 ErrorCode 映射，包括 draft not found、workflow conflict、stale card、state conflict 和 catalog unavailable，不再依赖英文错误字符串。
 
 ### 13.1 在线 Skill 搜索实现保证
 

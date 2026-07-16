@@ -1,9 +1,11 @@
 """Cross-runtime checks for the canonical NL2AGENT card contract."""
 
 import json
+import re
 from pathlib import Path
 
 from jsonschema import Draft7Validator, RefResolver
+import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -98,3 +100,25 @@ def test_contract_rejects_unstable_resource_payloads() -> None:
 
     assert list(_validator("local_resources").iter_errors(invalid_local))
     assert list(_validator("web_mcp").iter_errors(invalid_mcp))
+
+
+def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:
+    language_to_type = {
+        "nl2agent-requirements-summary": "requirements_summary",
+        "nl2agent-model-selection": "model_selection",
+        "nl2agent-agent-identity": "agent_identity",
+        "nl2agent-finalize": "final_review",
+    }
+    for language in ("en", "zh"):
+        prompt_path = (
+            PROJECT_ROOT
+            / "backend"
+            / "prompts"
+            / f"nl2agent_system_prompt_{language}.yaml"
+        )
+        prompt = yaml.safe_load(prompt_path.read_text(encoding="utf-8"))["system_prompt"]
+        examples = re.findall(r"```(nl2agent-[^\n]+)\n(.+?)\n```", prompt, re.DOTALL)
+        assert examples
+        for card_language, raw_payload in examples:
+            card_type = language_to_type[card_language]
+            _validator(card_type).validate(json.loads(raw_payload))

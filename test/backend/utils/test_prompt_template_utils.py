@@ -194,237 +194,122 @@ class TestPromptTemplateUtils:
 
         assert result == "  runtime builder prompt  "
 
-    @pytest.mark.parametrize(
-        ("language", "tool_rule", "card_rule"),
-        [
-            (
-                "en",
-                "A search query is tool input, never card JSON.",
-                "There is no `nl2agent-search-local-resources`",
-            ),
-            (
-                "zh",
-                "搜索词是工具入参，绝不是卡片 JSON。",
-                "不存在 `nl2agent-search-local-resources`",
-            ),
-        ],
-    )
-    def test_nl2agent_prompt_separates_search_tools_from_result_cards(
-        self, language, tool_rule, card_rule
+    @pytest.mark.parametrize("language", ["en", "zh"])
+    def test_nl2agent_prompt_consumes_authoritative_workflow_summary(
+        self, language
     ):
-        """Search requests must execute tools instead of becoming fake cards."""
+        """The prompt selects actions from the shared evaluator summary."""
+        prompt = get_nl2agent_system_prompt(language=language)
+
+        for field in (
+            "current_stage",
+            "expected_card_types",
+            "allowed_actions",
+            "draft_agent_id",
+        ):
+            assert field in prompt
+        assert "model_selection_confirmed=false" not in prompt
+        assert "mcp_batch_registered=false" not in prompt
+        assert "[[NL2AGENT_AUTO_CONTINUE]]" in prompt
+        assert "[[NL2AGENT_CARD_RETRY]]" in prompt
+
+    @pytest.mark.parametrize("language", ["en", "zh"])
+    def test_nl2agent_prompt_limits_execution_to_three_search_tools(
+        self, language
+    ):
+        """Skills and cards must never be treated as callable tools."""
         prompt = get_nl2agent_system_prompt(language=language)
 
         assert "<code>" in prompt
-        assert "Wait for real Observations" in prompt or "等待真实 Observation" in prompt
-        assert "`nl2agent_search_web_mcps`" in prompt
-        assert "`nl2agent-web-mcps`" in prompt
-        assert "`nl2agent-search-*`" in prompt
-
-    @pytest.mark.parametrize(
-        ("language", "direct_output_rule"),
-        [
-            (
-                "en",
-                "emit the `nl2agent-finalize` result card directly in the final response",
-            ),
-            (
-                "zh",
-                "在最终回复中直接输出 `nl2agent-finalize` 结果卡片",
-            ),
-        ],
-    )
-    def test_nl2agent_prompt_generates_final_card_without_calling_a_skill(
-        self, language, direct_output_rule
-    ):
-        """Finalization is response generation, not code execution."""
-        prompt = get_nl2agent_system_prompt(language=language)
-
-        assert "nl2agent_finalize_proposal" not in prompt
-        assert "Ready for final review" in prompt or "可进入最终审核" in prompt
-        assert "```nl2agent-finalize" in prompt
-        assert '"agent_id": 123' in prompt
-        for required_field in (
-            "business_description",
-            "duty_prompt",
-            "greeting_message",
-        ):
-            assert f'"{required_field}"' in prompt
         for tool_name in (
             "nl2agent_search_local_resources",
             "nl2agent_search_web_mcps",
             "nl2agent_search_web_skills",
         ):
-            assert f"`{tool_name}`" in prompt
+            assert tool_name in prompt
+        assert "nl2agent_finalize_proposal" not in prompt
+        assert "nl2agent-search-" not in prompt
+        assert "print(result)" in prompt
+        assert "print(mcp_result)" in prompt
+        assert "print(skill_result)" in prompt
 
     @pytest.mark.parametrize("language", ["en", "zh"])
-    def test_nl2agent_prompt_uses_persisted_state_after_hidden_continuation(
+    def test_nl2agent_prompt_preserves_fresh_observations_as_cards(
         self, language
     ):
         prompt = get_nl2agent_system_prompt(language=language)
 
-        assert "[[NL2AGENT_AUTO_CONTINUE]]" in prompt
-        assert "configuration_confirmed" in prompt
-        assert "snapshot" in prompt or "快照" in prompt
-        assert '"recommendation_batch_id": "online_..."' in prompt
-
-    @pytest.mark.parametrize(
-        ("language", "closed_gate_rule", "failure_rule", "required_instruction"),
-        [
-            (
-                "en",
-                "your entire response must contain exactly the following one-sentence instruction and one card",
-                "never compensate with your own model knowledge",
-                "Choose a primary LLM and optional ordered fallbacks from the platform card below.",
-            ),
-            (
-                "zh",
-                "只包含这一句操作指示和一张卡片",
-                "绝不能用自身模型知识补充选项",
-                "请在下方平台卡片中选择一个主模型，并按需选择有序的备用模型。",
-            ),
-        ],
-    )
-    def test_nl2agent_model_selection_is_a_closed_platform_card_gate(
-        self, language, closed_gate_rule, failure_rule, required_instruction
-    ):
-        """The model gate cannot leak invented recommendations into chat."""
-        prompt = get_nl2agent_system_prompt(language=language)
-
-        assert "model_selection_confirmed=false" in prompt
-        assert "Never name, recommend, compare, rank, or invent an LLM" in prompt or "不得说出、推荐、比较、排序或编造任何 LLM" in prompt
-        assert required_instruction in prompt
-        assert "model_selection_confirmed" in prompt
-        assert "```nl2agent-model-selection" in prompt
-        assert '{"agent_id": 123}' in prompt
-        assert "<CURRENT_DRAFT_AGENT_ID>" not in prompt
-
-    @pytest.mark.parametrize(
-        ("language", "generation_rule", "example_name"),
-        [
-            (
-                "en",
-                "generate a concise user-facing display name yourself",
-                "Document Presentation Assistant",
-            ),
-            (
-                "zh",
-                "自行生成一个简洁的用户可见显示名称",
-                "文档演示生成助手",
-            ),
-        ],
-    )
-    def test_nl2agent_generates_and_prefills_identity_display_name(
-        self, language, generation_rule, example_name
-    ):
-        """Identity should be generated by NL2AGENT and confirmed in the card."""
-        prompt = get_nl2agent_system_prompt(language=language)
-
-        assert "generate a natural 2-50 character display name" in prompt or "生成自然的 2-50 字符显示名称" in prompt
-        assert "display_name" in prompt
-        assert example_name in prompt
-        assert "identity_confirmed" in prompt
-
-    @pytest.mark.parametrize(
-        ("language", "protocol_rule", "visibility_rule"),
-        [
-            (
-                "en",
-                "executes tool calls only when they are inside literal `<code>...</code>` tags",
-                "Never show `nl2agent_search_...(query=...)` as prose",
-            ),
-            (
-                "zh",
-                "只会执行放在字面量 `<code>...</code>` 标签中的工具调用",
-                "绝不能把 `nl2agent_search_...(query=...)` 显示为说明文字",
-            ),
-        ],
-    )
-    def test_nl2agent_search_tools_use_executable_code_protocol(
-        self, language, protocol_rule, visibility_rule
-    ):
-        """Search calls must reach the code executor instead of visible chat."""
-        prompt = get_nl2agent_system_prompt(language=language)
-
-        assert "Only literal `<code>...</code>` blocks are executable" in prompt or "只有字面量 `<code>...</code>` 块可以执行" in prompt
-        assert "Never print a call expression as prose" in prompt or "不得把调用表达式打印为普通文字" in prompt
-        assert '<code>\nresult = nl2agent_search_local_resources(query=' in prompt
-        assert "print(result)\n</code>" in prompt
-        assert "Wait for real Observations" in prompt or "等待真实 Observation" in prompt
-
-    @pytest.mark.parametrize(
-        ("language", "single_call_rule", "single_card_rule", "no_keyword_loop_rule"),
-        [
-            (
-                "en",
-                "call each search tool at most once",
-                "render exactly one combined card for that tool",
-                "Do not issue separate calls for individual keywords.",
-            ),
-            (
-                "zh",
-                "每个搜索工具最多调用一次",
-                "只渲染该工具的一张合并卡片",
-                "不得为单个关键词分别发起调用。",
-            ),
-        ],
-    )
-    def test_nl2agent_searches_each_catalog_once_with_combined_keywords(
-        self, language, single_call_rule, single_card_rule, no_keyword_loop_rule
-    ):
-        """The prompt must aggregate keywords instead of emitting repeated searches."""
-        prompt = get_nl2agent_system_prompt(language=language)
-
-        assert "call both online search tools once in the same executable block" in prompt or "在同一个可执行块中各调用一次两个联网搜索工具" in prompt
+        assert "Observation" in prompt
+        assert "recommendation_batch_id" in prompt
+        assert "nl2agent-local-resources" in prompt
+        assert "nl2agent-web-mcps" in prompt
+        assert "nl2agent-web-skills" in prompt
+        assert "Do not reconstruct" in prompt or "不得重建" in prompt
         assert "Do not loop over keywords" in prompt or "不得逐关键词循环" in prompt
-        assert "atomic capability keyword" in prompt or "原子能力关键词" in prompt
 
     @pytest.mark.parametrize("language", ["en", "zh"])
-    def test_nl2agent_prompt_has_deterministic_priority_state_machine(self, language):
-        """Each persisted-state shape maps to the first matching action."""
-        prompt = get_nl2agent_system_prompt(language=language)
-
-        assert "Ordered State Machine" in prompt or "有序状态机" in prompt
-        assert "first matching action" in prompt or "第一个匹配项" in prompt
-        assert "goal" in prompt or "智能体目标" in prompt
-        assert "primary input" in prompt or "主要输入" in prompt
-        assert "expected output" in prompt or "期望输出" in prompt
-        assert "mcp_batch_registered=false" in prompt
-        assert "skill_batch_registered=false" in prompt
-        assert "Fresh Observation" in prompt or "存在新 Observation" in prompt
-
-    @pytest.mark.parametrize("language", ["en", "zh"])
-    def test_nl2agent_prompt_requires_explicit_requirements_confirmation(
+    def test_nl2agent_prompt_keeps_requirements_and_model_gates(
         self, language
     ):
         prompt = get_nl2agent_system_prompt(language=language)
 
-        assert 'requirements_review.status="collecting"' in prompt
-        assert 'requirements_review.status="awaiting_confirmation"' in prompt
-        assert 'requirements_review.status="confirmed"' in prompt
-        assert "audience_or_scenario" in prompt
-        assert "key_constraints" in prompt
-        assert "```nl2agent-requirements-summary" in prompt
+        for stage in (
+            "requirements_collecting",
+            "requirements_confirmation",
+            "model_selection",
+        ):
+            assert stage in prompt
+        for field in (
+            "goal",
+            "audience_or_scenario",
+            "primary_input",
+            "expected_output",
+            "key_constraints",
+        ):
+            assert field in prompt
+        assert "nl2agent-requirements-summary" in prompt
         assert "nl2agent-model-selection" in prompt
-        assert "Confirm Requirements" in prompt or "确认需求" in prompt
         assert (
-            "never confirms requirements" in prompt
-            or "绝不表示需求已确认" in prompt
-        )
-        assert (
-            "Only authoritative persisted state changed by the summary card button"
-            in prompt
-            or "只有摘要卡按钮更新后的权威持久化状态" in prompt
+            "Never name, recommend, compare, rank, or invent an LLM" in prompt
+            or "不得说出、推荐、比较、排序或编造任何 LLM" in prompt
         )
 
     @pytest.mark.parametrize("language", ["en", "zh"])
-    def test_nl2agent_prompt_collects_all_mcp_configuration_in_card(self, language):
-        """The chat must not collect MCP configuration before rendering results."""
+    def test_nl2agent_prompt_generates_identity_and_direct_final_card(
+        self, language
+    ):
         prompt = get_nl2agent_system_prompt(language=language)
 
-        assert "collected only by the MCP card" in prompt or "全部只在 MCP 卡片中收集" in prompt
+        assert "agent_identity" in prompt
+        assert "final_review" in prompt
+        assert "display_name" in prompt
+        assert "nl2agent-agent-identity" in prompt
+        assert "nl2agent-finalize" in prompt
+        for required_field in (
+            "business_description",
+            "duty_prompt",
+            "greeting_message",
+        ):
+            assert required_field in prompt
+        for forbidden_field in (
+            '"business_logic_model_id"',
+            '"selected_tools"',
+            '"selected_skills"',
+            '"sub_agent_ids"',
+        ):
+            assert forbidden_field not in prompt
+
+    @pytest.mark.parametrize("language", ["en", "zh"])
+    def test_nl2agent_prompt_collects_mcp_configuration_only_in_card(
+        self, language
+    ):
+        prompt = get_nl2agent_system_prompt(language=language)
+
+        assert "MCP card" in prompt or "MCP 卡片" in prompt
         assert "Never ask for them in chat" in prompt or "不得在聊天中询问" in prompt
+        assert "secret" in prompt.lower()
         assert "ask one focused question at a time for required non-secret" not in prompt.lower()
+
 
     def test_get_nl2agent_seed_config_normalizes_metadata(self, mocker):
         """Test NL2AGENT seed metadata extraction from the richer YAML shape."""

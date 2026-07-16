@@ -11,6 +11,30 @@
 
 当前版本已经将 NL2AGENT 从简单 Agent 扩展为跨 Backend、SDK、Redis、Prompt 和 Frontend 的完整工作流。主要风险并非单纯来自代码规模，而是工作流状态和副作用分散在多个层级，部分实现已存在明确的数据一致性缺陷。
 
+## 1.1 分阶段整改进度（2026-07-15）
+
+| 审查项 | 当前状态 | 已实施行为 |
+|---|---|---|
+| 2.1 Redis 整对象覆盖 | 已解决 | v2 State 增加 `revision`，所有修改统一使用 `WATCH/MULTI` CAS，冲突最多重试 5 次。 |
+| 2.2 Card Delivery 时序 | 已解决 | 回执使用数据库 `message_id`，校验 Conversation、assistant、completed 和最新完成消息。 |
+| 2.3 失败回滚过大 | 已解决 | `failed` 回执只记录失败原因和次数，不再删除业务状态。 |
+| 2.4 前端全局回执集合 | 已解决 | 改为 conversation/draft/message 作用域 coordinator，API 成功后才标记完成。 |
+| 2.5 Apply All 假成功 | 已解决 | Tool/Skill 使用共享 SQLAlchemy Session，全有或全无；Redis 失败可幂等对账。 |
+| 2.6 MCP 幂等与补偿 | 已解决 | 稳定 installation key、Redis 安装锁、直接返回 `mcp_id`，支持发现阶段恢复及容器补偿。 |
+| 2.7 Session 初始化补偿 | 已解决 | 先验证 Catalog，再在一个数据库事务创建 draft/Conversation，Redis 与数据库失败双向补偿。 |
+| 3.1 状态机重复 | 已解决 | Backend Workflow Evaluator 统一输出 `current_stage`、`expected_card_types`、`allowed_actions`；Prompt 只消费摘要。 |
+| 3.2 God Service | 进行中 | Publication 与 Local Resource Binding 已拆为专用 Service；Session/Catalog/MCP 仍待完成物理拆分。 |
+| 3.3 Catalog 故障伪装为空 | 已解决 | 合法空目录与加载失败分离；加载失败返回带上下文的 503 领域错误。 |
+| 3.4 异常字符串映射 | 已解决 | 使用固定 ErrorCode 的领域异常；App 不再按错误文案匹配状态码。 |
+| 3.5 Finalize 失效参数 | 已解决 | 请求体只保留 proposal、Prompt 和受支持 runtime 字段，额外旧字段直接拒绝。 |
+| 4.1 SDK 全局搜索缓存 | 已解决 | 删除 `_search_cache`；每次 Agent Run 使用 Backend 注入的不可变 Catalog 重新计算。 |
+| 4.2 SDK 误导状态 | 已解决 | 删除 applied/config/searched 等实例状态。 |
+| 5.1/5.2 多套 Schema 与重复解析 | 已解决 | 增加 canonical JSON Schema；Frontend 用 Ajv 一次解析生成 typed card AST。 |
+| 5.3 卡片副作用重复 | 待处理 | 仍需完成统一 `useNl2AgentCardLifecycle`。 |
+| 5.4 前端真实交互测试 | 部分解决 | 已加入 Vitest、jsdom、React Testing Library 并纳入 `check-all`；仍需补齐完整 effect/API/会话切换用例。 |
+
+每个已完成阶段均以独立 Jujutsu commit 提交，并通过对应 Backend、SDK 或 Frontend 聚焦测试。
+
 ## 2. 高风险正确性问题
 
 ### 2.1 Redis Session State 使用非原子整对象覆盖
