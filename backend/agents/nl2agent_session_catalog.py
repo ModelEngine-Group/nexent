@@ -267,11 +267,8 @@ def get_workflow_summary(tenant_id: Optional[str], draft_agent_id: Optional[int]
     return evaluate_workflow(state).model_dump(mode="json")
 
 
-def assert_workflow_action_allowed(
-    tenant_id: Optional[str], draft_agent_id: Optional[int], action: str
-) -> Dict[str, Any]:
-    """Reject state mutations that do not belong to the current workflow stage."""
-    summary = get_workflow_summary(tenant_id, draft_agent_id)
+def _ensure_workflow_action_allowed(summary: Dict[str, Any], action: str) -> None:
+    """Validate one action against an already loaded workflow snapshot."""
     idempotent_registration_stages = {
         "render_requirements_summary": "requirements_confirmation",
         "search_local_resources": "local_resource_review",
@@ -283,6 +280,14 @@ def assert_workflow_action_allowed(
         raise Nl2AgentSessionCatalogError(
             f"Action '{action}' is not allowed during stage '{summary['current_stage']}'."
         )
+
+
+def assert_workflow_action_allowed(
+    tenant_id: Optional[str], draft_agent_id: Optional[int], action: str
+) -> Dict[str, Any]:
+    """Reject state mutations that do not belong to the current workflow stage."""
+    summary = get_workflow_summary(tenant_id, draft_agent_id)
+    _ensure_workflow_action_allowed(summary, action)
     return summary
 
 
@@ -688,6 +693,57 @@ def record_trusted_search_batch(
     item_keys: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Idempotently persist the exact batch produced by an SDK search tool."""
+    return _record_trusted_search_batch(
+        tenant_id,
+        draft_agent_id,
+        recommendation_batch_id=recommendation_batch_id,
+        resource_type=resource_type,
+        tool_ids=tool_ids,
+        skill_ids=skill_ids,
+        item_keys=item_keys,
+    )
+
+
+def record_stage_validated_search_batch(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    *,
+    recommendation_batch_id: str,
+    resource_type: str,
+    tool_ids: Optional[List[int]] = None,
+    skill_ids: Optional[List[int]] = None,
+    item_keys: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Persist an SDK search result only while its search action is allowed."""
+    workflow_action = (
+        "search_local_resources"
+        if resource_type == "local"
+        else "search_online_resources"
+    )
+    return _record_trusted_search_batch(
+        tenant_id,
+        draft_agent_id,
+        recommendation_batch_id=recommendation_batch_id,
+        resource_type=resource_type,
+        tool_ids=tool_ids,
+        skill_ids=skill_ids,
+        item_keys=item_keys,
+        workflow_action=workflow_action,
+    )
+
+
+def _record_trusted_search_batch(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    *,
+    recommendation_batch_id: str,
+    resource_type: str,
+    tool_ids: Optional[List[int]] = None,
+    skill_ids: Optional[List[int]] = None,
+    item_keys: Optional[List[str]] = None,
+    workflow_action: Optional[str] = None,
+) -> Dict[str, Any]:
+    """CAS one immutable search proof with an optional stage precondition."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
@@ -699,6 +755,11 @@ def record_trusted_search_batch(
     )
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        if workflow_action:
+            _ensure_workflow_action_allowed(
+                evaluate_workflow(state).model_dump(mode="json"),
+                workflow_action,
+            )
         existing = state.trusted_search_batches.get(recommendation_batch_id)
         if existing is None:
             state.trusted_search_batches[recommendation_batch_id] = batch

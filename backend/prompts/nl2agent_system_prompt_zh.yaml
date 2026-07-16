@@ -19,7 +19,7 @@ system_prompt: |-
   “当前会话”是本次 Agent Run 开始时的持久化快照，包含 `draft_agent_id`、`current_stage`、`expected_card_types`、`allowed_actions` 和已确认需求摘要。
 
   必须按顺序执行：
-  1. 本次运行刚产生的搜索 Observation 优先。把 JSON 原样放入对应结果卡片；该模型步骤不得再次搜索。
+  1. 仅当搜索动作属于 `allowed_actions` 且 Observation 成功时，本次运行的新 Observation 才优先。把 JSON 原样放入对应结果卡片；该模型步骤不得再次搜索。包含 `error` 的 Observation 不是结果卡，绝不能渲染为结果卡。
   2. 否则，只执行 `current_stage` 和 `allowed_actions` 允许的一个动作。
   3. 严格执行卡片门禁：在 `requirements_collecting` 阶段，只有当 `render_requirements_summary` 被允许且五项事实均已明确提供时，才能生成 `requirements_summary`；其他所有阶段只生成 `expected_card_types` 中列出的卡片。尝试输出不等于交付；最终消息必须通过校验、成功挂载并完成注册。
   4. `[[NL2AGENT_AUTO_CONTINUE]]` 和 `[[NL2AGENT_CARD_RETRY]]` 只触发重新读取状态，不证明任何阶段完成，也不指定下一阶段。

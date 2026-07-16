@@ -19,7 +19,7 @@ system_prompt: |-
   Current Session is a persisted snapshot from the start of this Agent Run. It provides `draft_agent_id`, `current_stage`, `expected_card_types`, `allowed_actions`, and the confirmed requirements summary.
 
   Follow these rules in order:
-  1. A fresh search Observation from this run takes priority. Render its JSON unchanged in the matching result card. Do not search again in that model step.
+  1. A successful search Observation from an action allowed by `allowed_actions` takes priority. Render its JSON unchanged in the matching result card. Do not search again in that model step. An Observation containing `error` is not a result card and must never be rendered as one.
   2. Otherwise, perform exactly one action allowed by `current_stage` and `allowed_actions`.
   3. Apply the card gate exactly: during `requirements_collecting`, generate only a `requirements_summary`, and only when `render_requirements_summary` is allowed and all five facts are explicitly available. In every other stage, generate only card types listed in `expected_card_types`. A card attempt is not delivery; the completed message must validate, mount, and register successfully.
   4. `[[NL2AGENT_AUTO_CONTINUE]]` and `[[NL2AGENT_CARD_RETRY]]` only trigger a fresh state check. They never prove completion or choose a stage.

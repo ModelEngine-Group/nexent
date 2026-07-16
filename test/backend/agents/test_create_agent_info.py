@@ -2255,6 +2255,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
                 patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_nl2agent_session_catalogs', return_value=session_catalogs) as mock_get_catalogs, \
+                patch('backend.agents.create_agent_info.record_stage_validated_search_batch') as mock_record_search, \
                 patch('backend.agents.create_agent_info.get_nl2agent_session_state', return_value={
                     "conversation_id": 300,
                     "requirements_review": {"status": "confirmed", "summary": {}},
@@ -2308,6 +2309,20 @@ class TestCreateAgentConfig:
             mock_get_catalogs.assert_called_once_with("tenant_1", 202)
             record_search_result = search_tool.metadata.pop("record_search_result")
             assert callable(record_search_result)
+            record_search_result(
+                recommendation_batch_id="local_1",
+                resource_type="local",
+                tool_ids=[],
+                skill_ids=[],
+            )
+            mock_record_search.assert_called_once_with(
+                "tenant_1",
+                202,
+                recommendation_batch_id="local_1",
+                resource_type="local",
+                tool_ids=[],
+                skill_ids=[],
+            )
             assert search_tool.metadata == {
                 "agent_id": "agent_1",
                 "user_id": "user_1",

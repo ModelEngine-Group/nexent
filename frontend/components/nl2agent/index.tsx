@@ -9,7 +9,10 @@ import { FinalizeCard } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
-import { registerOnlineResourceRecommendations } from "@/services/nl2agentService";
+import {
+  isNl2AgentWorkflowConflict,
+  registerOnlineResourceRecommendations,
+} from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import {
@@ -43,11 +46,13 @@ export const OnlineRecommendationGroup: React.FC<{
   registrationEnabled = true,
 }) => {
   const workflow = useNl2AgentWorkflow();
+  const { notifyStateChanged } = workflow;
   const { execute, error } = useNl2AgentCardLifecycle(
     `online:${agentId}:${resourceType}:${recommendationBatchId}`
   );
   const serializedKeys = JSON.stringify(itemKeys);
   const [registered, setRegistered] = useState(false);
+  const [registrationRetryable, setRegistrationRetryable] = useState(true);
 
   const register = useCallback(async () => {
     if (
@@ -57,6 +62,7 @@ export const OnlineRecommendationGroup: React.FC<{
       !registrationEnabled
     )
       return;
+    setRegistrationRetryable(true);
     try {
       await execute(
         () =>
@@ -75,16 +81,20 @@ export const OnlineRecommendationGroup: React.FC<{
           },
           notifyStateChanged: true,
           blockInput: true,
-          retainInputBlockOnError: true,
+          retainInputBlockOnError: (error) =>
+            !isNl2AgentWorkflowConflict(error),
         }
       );
-    } catch {
-      // The lifecycle exposes registration failure and retry state to the card.
+    } catch (error) {
+      const retryable = !isNl2AgentWorkflowConflict(error);
+      setRegistrationRetryable(retryable);
+      if (!retryable) notifyStateChanged();
     }
   }, [
     agentId,
     execute,
     onRegistered,
+    notifyStateChanged,
     recommendationBatchId,
     resourceType,
     serializedKeys,
@@ -105,9 +115,11 @@ export const OnlineRecommendationGroup: React.FC<{
           type="error"
           message={error}
           action={
-            <Button size="small" onClick={() => void register()}>
-              Retry registration
-            </Button>
+            registrationRetryable ? (
+              <Button size="small" onClick={() => void register()}>
+                Retry registration
+              </Button>
+            ) : undefined
           }
         />
       )}

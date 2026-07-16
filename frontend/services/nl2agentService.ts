@@ -14,6 +14,31 @@ import type { components as Nl2AgentApiComponents } from "@/contracts/generated/
 
 type Nl2AgentApiSchemas = Nl2AgentApiComponents["schemas"];
 
+export class Nl2AgentRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "Nl2AgentRequestError";
+    this.status = status;
+  }
+}
+
+const throwNl2AgentRequestError = async (
+  response: Response
+): Promise<never> => {
+  const message = await response.text().catch(() => "");
+  throw new Nl2AgentRequestError(
+    message || `NL2AGENT request failed with status ${response.status}.`,
+    response.status
+  );
+};
+
+export const isNl2AgentWorkflowConflict = (
+  error: unknown
+): error is Nl2AgentRequestError =>
+  error instanceof Nl2AgentRequestError && error.status === 409;
+
 export const getAvailablePlatformLlms = async (): Promise<
   Array<{ id: number; displayName: string }>
 > => {
@@ -104,7 +129,7 @@ export const registerLocalResourceRecommendations = async (
     API_ENDPOINTS.nl2agent.registerLocalResources(agentId),
     { method: "POST", body: JSON.stringify(payload) }
   );
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) await throwNl2AgentRequestError(response);
   return response.json();
 };
 
@@ -131,7 +156,7 @@ export const registerOnlineResourceRecommendations = async (
     API_ENDPOINTS.nl2agent.registerOnlineRecommendations(agentId),
     { method: "POST", body: JSON.stringify(payload) }
   );
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) await throwNl2AgentRequestError(response);
   return response.json();
 };
 

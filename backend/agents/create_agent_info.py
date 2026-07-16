@@ -64,7 +64,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from .nl2agent_session_catalog import (
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
-    record_trusted_search_batch,
+    record_stage_validated_search_batch,
 )
 from .nl2agent_workflow import Nl2AgentWorkflowState, evaluate_workflow
 from utils.context_utils import build_context_components, build_system_prompt_component
@@ -840,9 +840,9 @@ async def create_agent_config(
         nl2agent_system_prompt += (
             "\n\n### Current Session\n"
             "This authoritative JSON is a snapshot taken at the start of this Agent Run. "
-            "Select exactly one next action from the ordered state machine. Fresh tool "
-            "Observations produced during this run take precedence over this snapshot "
-            "only for rendering their result cards.\n"
+            "Select exactly one allowed next action from the ordered state machine. "
+            "Successful tool Observations produced by that action take precedence over "
+            "this snapshot only for rendering their result cards.\n"
             f"{json.dumps(current_session, ensure_ascii=False, sort_keys=True)}"
         )
 
@@ -1098,7 +1098,7 @@ async def create_agent_config(
                 ),
                 "record_search_result": (
                     partial(
-                        record_trusted_search_batch,
+                        record_stage_validated_search_batch,
                         tenant_id,
                         draft_agent_id,
                     )

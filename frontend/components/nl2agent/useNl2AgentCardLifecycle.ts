@@ -9,7 +9,7 @@ interface LifecycleOptions<T> {
   continuationText?: (result: T) => string | undefined;
   notifyStateChanged?: boolean;
   blockInput?: boolean;
-  retainInputBlockOnError?: boolean;
+  retainInputBlockOnError?: boolean | ((error: unknown) => boolean);
 }
 
 type LifecycleAction<T> = () => Promise<T>;
@@ -58,6 +58,7 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
       beginAction();
       if (options.blockInput) setInputBlocked(scopeKey, true);
       let succeeded = false;
+      let failure: unknown;
       try {
         const result = await action();
         if (!mountedRef.current) return result;
@@ -70,6 +71,7 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
         succeeded = true;
         return result;
       } catch (caught) {
+        failure = caught;
         if (mountedRef.current) {
           setError(
             caught instanceof Error
@@ -81,10 +83,11 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
       } finally {
         pendingRef.current = false;
         if (mountedRef.current) setPending(false);
-        if (
-          options.blockInput &&
-          (succeeded || !options.retainInputBlockOnError)
-        ) {
+        const retainInputBlock =
+          typeof options.retainInputBlockOnError === "function"
+            ? options.retainInputBlockOnError(failure)
+            : options.retainInputBlockOnError;
+        if (options.blockInput && (succeeded || !retainInputBlock)) {
           setInputBlocked(scopeKey, false);
         }
         endAction();

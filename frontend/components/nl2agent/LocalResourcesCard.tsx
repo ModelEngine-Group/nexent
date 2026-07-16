@@ -15,6 +15,7 @@ import {
 import { CheckCircle2, Loader2 } from "lucide-react";
 import {
   applyLocalResources,
+  isNl2AgentWorkflowConflict,
   registerLocalResourceRecommendations,
   skipLocalResourceRecommendations,
 } from "@/services/nl2agentService";
@@ -67,7 +68,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const lifecycle = useNl2AgentCardLifecycle(
     `local:${agentId}:${recommendationBatchId}`
   );
-  const { active } = workflow;
+  const { active, notifyStateChanged } = workflow;
   const { execute, pending } = lifecycle;
   const { t } = useTranslation("common");
   const [selected, setSelected] = useState<Set<string>>(() => {
@@ -80,6 +81,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const [skipped, setSkipped] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registrationError, setRegistrationError] = useState<string>();
+  const [registrationRetryable, setRegistrationRetryable] = useState(true);
   const [toolParameterSchemas, setToolParameterSchemas] = useState<
     Record<string, LocalToolParameterSchema[]>
   >({});
@@ -102,6 +104,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     if (registered || !recommendationBatchId || !active || !registrationEnabled)
       return;
     setRegistrationError(undefined);
+    setRegistrationRetryable(true);
     try {
       await execute(
         () =>
@@ -117,10 +120,14 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           },
           notifyStateChanged: true,
           blockInput: true,
-          retainInputBlockOnError: true,
+          retainInputBlockOnError: (error) =>
+            !isNl2AgentWorkflowConflict(error),
         }
       );
     } catch (error) {
+      const retryable = !isNl2AgentWorkflowConflict(error);
+      setRegistrationRetryable(retryable);
+      if (!retryable) notifyStateChanged();
       setRegistrationError(
         error instanceof Error
           ? error.message
@@ -136,6 +143,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     registered,
     registrationEnabled,
     resourceIds,
+    notifyStateChanged,
   ]);
 
   useEffect(() => {
@@ -447,7 +455,11 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           type="error"
           message={registrationError}
           action={
-            <Button onClick={() => void register()}>Retry registration</Button>
+            registrationRetryable ? (
+              <Button onClick={() => void register()}>
+                Retry registration
+              </Button>
+            ) : undefined
           }
         />
       )}

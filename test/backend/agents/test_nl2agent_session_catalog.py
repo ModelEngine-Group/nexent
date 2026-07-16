@@ -171,6 +171,72 @@ def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
         )
 
 
+def test_stage_validated_search_batch_is_atomic_with_workflow_stage(fake_redis):
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="requirements_collecting",
+    ):
+        catalog_module.record_stage_validated_search_batch(
+            "tenant_1",
+            202,
+            recommendation_batch_id="wrong_stage",
+            resource_type="local",
+        )
+
+    review = catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+    catalog_module.confirm_requirements_summary(
+        "tenant_1", 202, review["fingerprint"]
+    )
+    catalog_module.set_model_selection_confirmed("tenant_1", 202, True)
+
+    recorded = catalog_module.record_stage_validated_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="local_allowed",
+        resource_type="local",
+    )
+    assert recorded["resource_type"] == "local"
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="local_resource_search",
+    ):
+        catalog_module.record_stage_validated_search_batch(
+            "tenant_1",
+            202,
+            recommendation_batch_id="online_too_early",
+            resource_type="mcp",
+        )
+
+    catalog_module.register_recommendation_batch(
+        "tenant_1", 202, "local_allowed", [], []
+    )
+    catalog_module.resolve_recommendation_batch(
+        "tenant_1", 202, "local_allowed", "skipped"
+    )
+    online = catalog_module.record_stage_validated_search_batch(
+        "tenant_1",
+        202,
+        recommendation_batch_id="online_allowed",
+        resource_type="mcp",
+    )
+    assert online["resource_type"] == "mcp"
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert "wrong_stage" not in state["trusted_search_batches"]
+    assert "online_too_early" not in state["trusted_search_batches"]
+
+
 def test_identity_confirmation_round_trip(fake_redis):
     assert not catalog_module.get_nl2agent_session_state("tenant_1", 202)["identity_confirmed"]
     catalog_module.confirm_agent_identity("tenant_1", 202)

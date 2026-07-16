@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  Nl2AgentRequestError,
   registerLocalResourceRecommendations,
   registerOnlineResourceRecommendations,
 } from "@/services/nl2agentService";
@@ -100,5 +101,49 @@ describe("online recommendation registration lifecycle", () => {
     await waitFor(() => expect(onRegistered).toHaveBeenCalledTimes(2));
     expect(registerLocalResourceRecommendations).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(continueButton).not.toBeDisabled());
+  });
+
+  it("does not retry or block input for a stale online card", async () => {
+    vi.mocked(registerOnlineResourceRecommendations).mockRejectedValue(
+      new Nl2AgentRequestError("workflow conflict", 409)
+    );
+    renderGroup(vi.fn(async () => undefined));
+
+    await screen.findByText("workflow conflict");
+    expect(
+      screen.queryByRole("button", { name: "Retry registration" })
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(registerOnlineResourceRecommendations).toHaveBeenCalledOnce()
+    );
+  });
+
+  it("does not retry a stale local card", async () => {
+    vi.mocked(registerLocalResourceRecommendations).mockRejectedValue(
+      new Nl2AgentRequestError("local workflow conflict", 409)
+    );
+    render(
+      <Nl2AgentWorkflowProvider
+        enabled
+        scopeKey="conversation:1:draft:202"
+        onContinue={vi.fn(async () => undefined)}
+      >
+        <LocalResourcesCard
+          agentId={202}
+          recommendationBatchId="local_stale"
+          tools={[]}
+          skills={[]}
+          onRegistered={vi.fn(async () => undefined)}
+        />
+      </Nl2AgentWorkflowProvider>
+    );
+
+    await screen.findByText("local workflow conflict");
+    expect(
+      screen.queryByRole("button", { name: "Retry registration" })
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(registerLocalResourceRecommendations).toHaveBeenCalledOnce()
+    );
   });
 });

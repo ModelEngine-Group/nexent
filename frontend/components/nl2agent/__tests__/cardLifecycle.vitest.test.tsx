@@ -108,4 +108,23 @@ describe("useNl2AgentCardLifecycle", () => {
     });
     expect(result.current.workflow.busy).toBe(false);
   });
+
+  it("releases an input blocker for a deterministic registration failure", async () => {
+    const conflict = new Error("workflow conflict");
+    const action = vi.fn<() => Promise<never>>().mockRejectedValue(conflict);
+    const { result } = renderHook(useLifecycleWithWorkflow, {
+      wrapper: wrapperFor(vi.fn(async () => undefined)),
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.lifecycle.execute(action, {
+          blockInput: true,
+          retainInputBlockOnError: (error) => error !== conflict,
+        })
+      ).rejects.toThrow("workflow conflict");
+    });
+
+    expect(result.current.workflow.busy).toBe(false);
+  });
 });
