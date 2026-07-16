@@ -44,11 +44,12 @@ class RequirementsReview(BaseModel):
 class RecommendationBatch(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    status: Literal["recommendations_ready", "applied", "skipped"]
+    status: Literal["recommendations_ready", "applying", "applied", "skipped"]
     tool_ids: List[int] = Field(default_factory=list)
     skill_ids: List[int] = Field(default_factory=list)
     applied_tool_ids: List[int] = Field(default_factory=list)
     applied_skill_ids: List[int] = Field(default_factory=list)
+    operation_id: Optional[str] = None
 
 
 class OnlineRecommendationBatch(BaseModel):
@@ -81,6 +82,7 @@ class McpWorkflow(BaseModel):
             "configuration_required",
             "installing",
             "connected",
+            "binding",
             "tools_bound",
             "binding_skipped",
             "failed",
@@ -89,6 +91,7 @@ class McpWorkflow(BaseModel):
     mcp_id: Optional[int] = None
     discovered_tool_ids: List[int] = Field(default_factory=list)
     bound_tool_ids: List[int] = Field(default_factory=list)
+    binding_operation_id: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -175,7 +178,10 @@ def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
     local_batches = list(state.recommendation_batches.values())
     if not local_batches:
         local_status: Literal["missing", "pending", "complete"] = "missing"
-    elif any(batch.status == "recommendations_ready" for batch in local_batches):
+    elif any(
+        batch.status in {"recommendations_ready", "applying"}
+        for batch in local_batches
+    ):
         local_status = "pending"
     else:
         local_status = "complete"
@@ -188,7 +194,7 @@ def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
         mcp_registered="mcp" in online_types,
         skill_registered="skill" in online_types,
         unresolved_mcp_count=sum(
-            workflow.status in {"installing", "connected"}
+            workflow.status in {"installing", "connected", "binding"}
             for workflow in state.mcp_workflows.values()
         ),
     )

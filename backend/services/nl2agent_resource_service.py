@@ -1,5 +1,7 @@
 """Local-resource binding operations for NL2AGENT drafts."""
 
+import hashlib
+import json
 import logging
 import re
 from copy import deepcopy
@@ -126,6 +128,9 @@ class LocalResourceDependencies:
     assert_trusted_batch: Callable[..., None]
     register_batch: Callable[..., Dict[str, Any]]
     resolve_batch: Callable[..., Dict[str, Any]]
+    reserve_batch_apply: Callable[..., Dict[str, Any]]
+    complete_batch_apply: Callable[..., Dict[str, Any]]
+    release_batch_apply: Callable[..., Dict[str, Any]]
     continuation_text: str
 
 
@@ -197,6 +202,23 @@ async def apply_local_resources(
             + ", ".join(map(str, missing_skill_ids))
         )
 
+    operation_payload = {
+        "recommendation_batch_id": recommendation_batch_id,
+        "tool_ids": sorted(selected_tool_ids),
+        "skill_ids": sorted(selected_skill_ids),
+    }
+    operation_id = hashlib.sha256(
+        json.dumps(operation_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    dependencies.reserve_batch_apply(
+        tenant_id,
+        agent_id,
+        recommendation_batch_id,
+        operation_id,
+        selected_tool_ids,
+        selected_skill_ids,
+    )
+
     try:
         with dependencies.get_db_session() as db_session:
             for tool_id in selected_tool_ids:
@@ -232,6 +254,15 @@ async def apply_local_resources(
                     db_session=db_session,
                 )
     except Exception as exc:
+        try:
+            dependencies.release_batch_apply(
+                tenant_id,
+                agent_id,
+                recommendation_batch_id,
+                operation_id,
+            )
+        except Exception:
+            logger.exception("Failed to release local-resource apply reservation")
         logger.exception(
             "Failed to atomically bind local resources: "
             "tenant_id=%s draft_agent_id=%s batch_id=%s",
@@ -244,13 +275,11 @@ async def apply_local_resources(
         ) from exc
 
     try:
-        dependencies.resolve_batch(
+        dependencies.complete_batch_apply(
             tenant_id,
             agent_id,
             recommendation_batch_id,
-            "applied",
-            selected_tool_ids,
-            selected_skill_ids,
+            operation_id,
         )
     except Exception as exc:
         logger.exception(

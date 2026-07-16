@@ -1,6 +1,7 @@
 """NL2AGENT workflow actions backed by authoritative database and Redis state."""
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -279,9 +280,19 @@ async def get_session_state(
             tenant_id,
         )
     )
-    workflow_state = dependencies.get_session_state(tenant_id, agent_id)
+    workflow_state = deepcopy(dependencies.get_session_state(tenant_id, agent_id))
     workflow_summary = dependencies.get_workflow_summary(tenant_id, agent_id)
+    for batch in workflow_state.get("recommendation_batches", {}).values():
+        batch.pop("operation_id", None)
+        if batch.get("status") == "applying":
+            batch["status"] = "recommendations_ready"
+            batch["applied_tool_ids"] = []
+            batch["applied_skill_ids"] = []
     for workflow in workflow_state.get("mcp_workflows", {}).values():
+        workflow.pop("binding_operation_id", None)
+        if workflow.get("status") == "binding":
+            workflow["status"] = "connected"
+            workflow["bound_tool_ids"] = []
         discovered_ids = [
             int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])
         ]

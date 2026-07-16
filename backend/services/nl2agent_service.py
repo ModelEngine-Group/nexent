@@ -27,7 +27,9 @@ from agents.nl2agent_session_catalog import (
     assert_mcp_workflows_resolved,
     assert_online_configuration_complete,
     assert_resource_review_complete,
+    complete_recommendation_batch_apply,
     complete_online_configuration as complete_online_configuration_state,
+    complete_mcp_binding_operation,
     confirm_requirements_summary,
     confirm_agent_identity,
     delete_nl2agent_session_catalogs,
@@ -42,8 +44,12 @@ from agents.nl2agent_session_catalog import (
     register_requirements_summary,
     record_card_delivery,
     release_mcp_installation_lock,
+    release_mcp_binding_operation,
+    release_recommendation_batch_apply,
     renew_mcp_installation_lock,
     resolve_recommendation_batch,
+    reserve_recommendation_batch_apply,
+    reserve_mcp_binding_operation,
     set_nl2agent_session_catalogs,
     set_model_selection_confirmed,
     update_mcp_workflow,
@@ -674,8 +680,9 @@ def _mcp_binding_dependencies(user_id: str) -> McpBindingDependencies:
         bind_tool=create_or_update_tool_by_tool_info,
         delete_tool_instances=delete_tool_instances_by_ids,
         get_db_session=get_db_session,
-        find_mcp_workflow_by_id=find_mcp_workflow_by_id,
-        update_mcp_workflow=update_mcp_workflow,
+        reserve_binding=reserve_mcp_binding_operation,
+        complete_binding=complete_mcp_binding_operation,
+        release_binding=release_mcp_binding_operation,
     )
 
 
@@ -729,6 +736,9 @@ def _local_resource_dependencies(user_id: str) -> LocalResourceDependencies:
         assert_trusted_batch=assert_trusted_local_search_batch,
         register_batch=register_recommendation_batch,
         resolve_batch=resolve_recommendation_batch,
+        reserve_batch_apply=reserve_recommendation_batch_apply,
+        complete_batch_apply=complete_recommendation_batch_apply,
+        release_batch_apply=release_recommendation_batch_apply,
         continuation_text=NL2AGENT_CHAT_INJECTION_TEXT,
     )
 

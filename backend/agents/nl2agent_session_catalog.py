@@ -510,6 +510,7 @@ def update_mcp_workflow(
         "mcp_id",
         "discovered_tool_ids",
         "bound_tool_ids",
+        "binding_operation_id",
         "error",
     }
 
@@ -533,9 +534,127 @@ def find_mcp_workflow_by_id(tenant_id: str, draft_agent_id: int, mcp_id: int) ->
     raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
 
 
+def reserve_mcp_binding_operation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    mcp_id: int,
+    operation_id: str,
+    tool_ids: List[int],
+) -> Dict[str, Any]:
+    """Reserve one connected MCP for exactly one bind or skip operation."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    selected_tool_ids = sorted(set(map(int, tool_ids or [])))
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        match = next(
+            (
+                workflow
+                for workflow in state.mcp_workflows.values()
+                if workflow.mcp_id == int(mcp_id)
+            ),
+            None,
+        )
+        if match is None:
+            raise Nl2AgentSessionCatalogError(
+                "Installed MCP workflow was not found."
+            )
+        if not set(selected_tool_ids).issubset(set(match.discovered_tool_ids)):
+            raise Nl2AgentSessionCatalogError(
+                "Selected MCP tools were not discovered by this installation."
+            )
+        if match.status == "binding":
+            if (
+                match.binding_operation_id == operation_id
+                and match.bound_tool_ids == selected_tool_ids
+            ):
+                return match.model_dump(mode="json")
+            raise Nl2AgentSessionCatalogError(
+                "MCP tool binding is reserved by another operation."
+            )
+        if match.status in {"tools_bound", "binding_skipped"}:
+            if (
+                match.binding_operation_id == operation_id
+                and match.bound_tool_ids == selected_tool_ids
+            ):
+                return match.model_dump(mode="json")
+            raise Nl2AgentSessionCatalogError(
+                "MCP tool binding is already resolved."
+            )
+        if match.status != "connected":
+            raise Nl2AgentSessionCatalogError(
+                "MCP tool binding is already resolved."
+            )
+        match.status = "binding"
+        match.binding_operation_id = operation_id
+        match.bound_tool_ids = selected_tool_ids
+        return match.model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def complete_mcp_binding_operation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_id: str,
+    operation_id: str,
+    status: str,
+) -> Dict[str, Any]:
+    """Complete an MCP bind/skip only for the reservation owner."""
+    if status not in {"tools_bound", "binding_skipped"}:
+        raise Nl2AgentSessionCatalogError("Invalid MCP binding completion status.")
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        workflow = state.mcp_workflows.get(recommendation_id)
+        if workflow is None:
+            raise Nl2AgentSessionCatalogError(
+                "Installed MCP workflow was not found."
+            )
+        if workflow.status == status and workflow.binding_operation_id == operation_id:
+            return workflow.model_dump(mode="json")
+        if workflow.status != "binding" or workflow.binding_operation_id != operation_id:
+            raise Nl2AgentSessionCatalogError(
+                "MCP binding reservation is no longer owned by this operation."
+            )
+        workflow.status = status
+        if status == "binding_skipped":
+            workflow.bound_tool_ids = []
+        return workflow.model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def release_mcp_binding_operation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_id: str,
+    operation_id: str,
+) -> Dict[str, Any]:
+    """Release an MCP binding reservation after a database failure."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        workflow = state.mcp_workflows.get(recommendation_id)
+        if workflow is None:
+            raise Nl2AgentSessionCatalogError(
+                "Installed MCP workflow was not found."
+            )
+        if workflow.status == "binding" and workflow.binding_operation_id == operation_id:
+            workflow.status = "connected"
+            workflow.binding_operation_id = None
+            workflow.bound_tool_ids = []
+        return workflow.model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
 def assert_mcp_workflows_resolved(tenant_id: str, draft_agent_id: int) -> None:
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    unresolved = [workflow for workflow in state["mcp_workflows"].values() if workflow.get("status") == "connected"]
+    unresolved = [
+        workflow
+        for workflow in state["mcp_workflows"].values()
+        if workflow.get("status") in {"connected", "binding"}
+    ]
     if unresolved:
         raise Nl2AgentSessionCatalogError(
             "Bind discovered MCP tools or explicitly skip tool binding before finalizing."
@@ -594,7 +713,7 @@ def complete_online_configuration(tenant_id: Optional[str], draft_agent_id: Opti
             raise Nl2AgentSessionCatalogError(
                 "Show online resource recommendations for both MCP and Skill before completing configuration."
             )
-        if any(workflow.status in {"installing", "connected"} for workflow in state.mcp_workflows.values()):
+        if any(workflow.status in {"installing", "connected", "binding"} for workflow in state.mcp_workflows.values()):
             raise Nl2AgentSessionCatalogError(
                 "Bind discovered MCP tools or explicitly skip tool binding before completing online configuration."
             )
@@ -656,7 +775,7 @@ def register_recommendation_batch(
             )
         elif existing.tool_ids != normalized_tool_ids or existing.skill_ids != normalized_skill_ids:
             raise Nl2AgentSessionCatalogError("Recommendation batch contents do not match the registered card.")
-        return batches[recommendation_batch_id].model_dump(mode="json")
+        return _recommendation_batch_response(batches[recommendation_batch_id])
 
     return _mutate_session_state(tenant, draft_id, mutate)
 
@@ -774,6 +893,11 @@ def _record_trusted_search_batch(
     return _mutate_session_state(tenant, draft_id, mutate)
 
 
+def _recommendation_batch_response(batch: RecommendationBatch) -> Dict[str, Any]:
+    """Hide internal reservation metadata from action responses."""
+    return batch.model_dump(mode="json", exclude={"operation_id"})
+
+
 def resolve_recommendation_batch(
     tenant_id: Optional[str],
     draft_agent_id: Optional[int],
@@ -782,26 +906,129 @@ def resolve_recommendation_batch(
     tool_ids: Optional[List[int]] = None,
     skill_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """Mark one registered batch applied or skipped."""
-    if status not in {"applied", "skipped"}:
-        raise Nl2AgentSessionCatalogError("Invalid recommendation batch status.")
+    """Atomically skip one unresolved recommendation batch."""
+    if status != "skipped":
+        raise Nl2AgentSessionCatalogError(
+            "Applied batches must use the reservation completion workflow."
+        )
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    applied_tool_ids = sorted(set(map(int, tool_ids or [])))
-    applied_skill_ids = sorted(set(map(int, skill_ids or [])))
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendation_batches.get(recommendation_batch_id)
         if batch is None:
             raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
-        if status == "applied":
-            if not set(applied_tool_ids).issubset(set(batch.tool_ids)):
-                raise Nl2AgentSessionCatalogError("Applied tools are not part of the recommendation batch.")
-            if not set(applied_skill_ids).issubset(set(batch.skill_ids)):
-                raise Nl2AgentSessionCatalogError("Applied skills are not part of the recommendation batch.")
-            batch.applied_tool_ids = applied_tool_ids
-            batch.applied_skill_ids = applied_skill_ids
-        batch.status = status
-        return batch.model_dump(mode="json")
+        if batch.status == "skipped":
+            return _recommendation_batch_response(batch)
+        if batch.status != "recommendations_ready":
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch is already being applied or resolved."
+            )
+        batch.status = "skipped"
+        return _recommendation_batch_response(batch)
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def reserve_recommendation_batch_apply(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_batch_id: str,
+    operation_id: str,
+    tool_ids: List[int],
+    skill_ids: List[int],
+) -> Dict[str, Any]:
+    """Reserve one unresolved batch for an idempotent database apply."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    selected_tool_ids = sorted(set(map(int, tool_ids or [])))
+    selected_skill_ids = sorted(set(map(int, skill_ids or [])))
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        batch = state.recommendation_batches.get(recommendation_batch_id)
+        if batch is None:
+            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+        if not set(selected_tool_ids).issubset(set(batch.tool_ids)) or not set(
+            selected_skill_ids
+        ).issubset(set(batch.skill_ids)):
+            raise Nl2AgentSessionCatalogError(
+                "Applied resources are not part of the recommendation batch."
+            )
+        if batch.status == "applying":
+            if (
+                batch.operation_id == operation_id
+                and batch.applied_tool_ids == selected_tool_ids
+                and batch.applied_skill_ids == selected_skill_ids
+            ):
+                return _recommendation_batch_response(batch)
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch is already reserved by another operation."
+            )
+        if batch.status == "applied":
+            if (
+                batch.operation_id == operation_id
+                and batch.applied_tool_ids == selected_tool_ids
+                and batch.applied_skill_ids == selected_skill_ids
+            ):
+                return _recommendation_batch_response(batch)
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch is already resolved."
+            )
+        if batch.status != "recommendations_ready":
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch is already resolved."
+            )
+        batch.status = "applying"
+        batch.operation_id = operation_id
+        batch.applied_tool_ids = selected_tool_ids
+        batch.applied_skill_ids = selected_skill_ids
+        return _recommendation_batch_response(batch)
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def complete_recommendation_batch_apply(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_batch_id: str,
+    operation_id: str,
+) -> Dict[str, Any]:
+    """Complete only the operation that owns an apply reservation."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        batch = state.recommendation_batches.get(recommendation_batch_id)
+        if batch is None:
+            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+        if batch.status == "applied" and batch.operation_id == operation_id:
+            return _recommendation_batch_response(batch)
+        if batch.status != "applying" or batch.operation_id != operation_id:
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation apply reservation is no longer owned by this operation."
+            )
+        batch.status = "applied"
+        return _recommendation_batch_response(batch)
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def release_recommendation_batch_apply(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    recommendation_batch_id: str,
+    operation_id: str,
+) -> Dict[str, Any]:
+    """Release an apply reservation after a database transaction failure."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        batch = state.recommendation_batches.get(recommendation_batch_id)
+        if batch is None:
+            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+        if batch.status == "applying" and batch.operation_id == operation_id:
+            batch.status = "recommendations_ready"
+            batch.operation_id = None
+            batch.applied_tool_ids = []
+            batch.applied_skill_ids = []
+        return _recommendation_batch_response(batch)
 
     return _mutate_session_state(tenant, draft_id, mutate)
 
@@ -811,7 +1038,7 @@ def assert_resource_review_complete(tenant_id: str, draft_agent_id: int) -> None
     batches = state["recommendation_batches"]
     if not batches:
         raise Nl2AgentSessionCatalogError("Show the local resource recommendation card before finalizing.")
-    if any(batch.get("status") == "recommendations_ready" for batch in batches.values()):
+    if any(batch.get("status") in {"recommendations_ready", "applying"} for batch in batches.values()):
         raise Nl2AgentSessionCatalogError("Apply or skip every shown local resource recommendation before finalizing.")
 
 

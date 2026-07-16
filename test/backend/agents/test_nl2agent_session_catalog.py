@@ -44,6 +44,16 @@ def _register_local_batch(batch_id, tool_ids, skill_ids):
     )
 
 
+def _complete_local_apply(batch_id, tool_ids, skill_ids):
+    operation_id = f"test-apply:{batch_id}"
+    catalog_module.reserve_recommendation_batch_apply(
+        "tenant_1", 202, batch_id, operation_id, tool_ids, skill_ids
+    )
+    return catalog_module.complete_recommendation_batch_apply(
+        "tenant_1", 202, batch_id, operation_id
+    )
+
+
 def _register_online_batch(batch_id, resource_type, item_keys):
     catalog_module.record_trusted_search_batch(
         "tenant_1",
@@ -105,8 +115,63 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Apply or skip"):
         catalog_module.assert_resource_review_complete("tenant_1", 202)
 
-    catalog_module.resolve_recommendation_batch("tenant_1", 202, "batch_1", "applied", [1], [7])
+    _complete_local_apply("batch_1", [1], [7])
     catalog_module.assert_resource_review_complete("tenant_1", 202)
+
+
+def test_local_apply_and_skip_cannot_both_reserve_the_same_batch(fake_redis):
+    _register_local_batch("race", [1], [])
+
+    def reserve_apply():
+        return catalog_module.reserve_recommendation_batch_apply(
+            "tenant_1", 202, "race", "apply-op", [1], []
+        )
+
+    def skip_batch():
+        return catalog_module.resolve_recommendation_batch(
+            "tenant_1", 202, "race", "skipped"
+        )
+
+    successes = []
+    failures = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(reserve_apply), executor.submit(skip_batch)]
+        for future in futures:
+            try:
+                successes.append(future.result())
+            except catalog_module.Nl2AgentSessionCatalogError as exc:
+                failures.append(exc)
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert state["recommendation_batches"]["race"]["status"] in {
+        "applying",
+        "skipped",
+    }
+
+
+def test_completed_local_apply_is_idempotent_only_for_its_owner(fake_redis):
+    _register_local_batch("batch_1", [1], [])
+    catalog_module.reserve_recommendation_batch_apply(
+        "tenant_1", 202, "batch_1", "apply-op", [1], []
+    )
+    catalog_module.complete_recommendation_batch_apply(
+        "tenant_1", 202, "batch_1", "apply-op"
+    )
+
+    retried = catalog_module.reserve_recommendation_batch_apply(
+        "tenant_1", 202, "batch_1", "apply-op", [1], []
+    )
+    assert retried["status"] == "applied"
+    catalog_module.complete_recommendation_batch_apply(
+        "tenant_1", 202, "batch_1", "apply-op"
+    )
+
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="resolved"):
+        catalog_module.reserve_recommendation_batch_apply(
+            "tenant_1", 202, "batch_1", "other-op", [1], []
+        )
 
 
 def test_empty_recommendation_batch_can_be_explicitly_skipped(fake_redis):
@@ -263,6 +328,97 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_r
     assert "config_values" not in workflow
 
 
+def test_mcp_bind_and_skip_reservations_are_mutually_exclusive(fake_redis):
+    catalog_module.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        mcp_id=5,
+        discovered_tool_ids=[11, 12],
+        bound_tool_ids=[],
+    )
+
+    def reserve_bind():
+        return catalog_module.reserve_mcp_binding_operation(
+            "tenant_1", 202, 5, "bind-op", [11]
+        )
+
+    def reserve_skip():
+        return catalog_module.reserve_mcp_binding_operation(
+            "tenant_1", 202, 5, "skip-op", []
+        )
+
+    successes = []
+    failures = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(reserve_bind), executor.submit(reserve_skip)]
+        for future in futures:
+            try:
+                successes.append(future.result())
+            except catalog_module.Nl2AgentSessionCatalogError as exc:
+                failures.append(exc)
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+    workflow = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
+        "mcp_workflows"
+    ]["registry:github"]
+    assert workflow["status"] == "binding"
+    assert workflow["binding_operation_id"] in {"bind-op", "skip-op"}
+
+
+def test_mcp_binding_reservation_rejects_tools_not_discovered(fake_redis):
+    catalog_module.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        mcp_id=5,
+        discovered_tool_ids=[11],
+        bound_tool_ids=[],
+    )
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="not discovered",
+    ):
+        catalog_module.reserve_mcp_binding_operation(
+            "tenant_1", 202, 5, "bind-op", [12]
+        )
+
+
+def test_completed_mcp_binding_is_idempotent_only_for_its_owner(fake_redis):
+    catalog_module.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        mcp_id=5,
+        discovered_tool_ids=[11],
+        bound_tool_ids=[],
+    )
+    catalog_module.reserve_mcp_binding_operation(
+        "tenant_1", 202, 5, "bind-op", [11]
+    )
+    catalog_module.complete_mcp_binding_operation(
+        "tenant_1", 202, "registry:github", "bind-op", "tools_bound"
+    )
+
+    retried = catalog_module.reserve_mcp_binding_operation(
+        "tenant_1", 202, 5, "bind-op", [11]
+    )
+    assert retried["status"] == "tools_bound"
+    catalog_module.complete_mcp_binding_operation(
+        "tenant_1", 202, "registry:github", "bind-op", "tools_bound"
+    )
+
+    with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="resolved"):
+        catalog_module.reserve_mcp_binding_operation(
+            "tenant_1", 202, 5, "other-op", [11]
+        )
+
+
 def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_redis):
     first = _register_online_batch(
         "online_mcp", "mcp", ["registry:b", "registry:a"]
@@ -384,7 +540,7 @@ def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
 def test_failed_delivery_never_rolls_back_business_state(fake_redis):
     _register_local_batch("pending", [1], [])
     _register_local_batch("applied", [2], [])
-    catalog_module.resolve_recommendation_batch("tenant_1", 202, "applied", "applied", [2], [])
+    _complete_local_apply("applied", [2], [])
 
     catalog_module.record_card_delivery(
         "tenant_1",

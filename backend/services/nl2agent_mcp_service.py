@@ -745,8 +745,9 @@ class McpBindingDependencies:
     bind_tool: Callable[..., Any]
     delete_tool_instances: Callable[..., Any]
     get_db_session: Callable[..., Any]
-    find_mcp_workflow_by_id: Callable[..., tuple[str, Dict[str, Any]]]
-    update_mcp_workflow: Callable[..., Any]
+    reserve_binding: Callable[..., Dict[str, Any]]
+    complete_binding: Callable[..., Dict[str, Any]]
+    release_binding: Callable[..., Dict[str, Any]]
 
 
 async def bind_mcp_tools(
@@ -779,11 +780,17 @@ async def bind_mcp_tools(
         raise Nl2AgentValidationError(
             "One or more tools do not belong to the selected MCP."
         )
-    recommendation_id, _ = dependencies.find_mcp_workflow_by_id(
+    operation_id = "bind:" + hashlib.sha256(
+        json.dumps(sorted(valid)).encode("utf-8")
+    ).hexdigest()
+    workflow = dependencies.reserve_binding(
         tenant_id,
         agent_id,
         mcp_id,
+        operation_id,
+        sorted(valid),
     )
+    recommendation_id = str(workflow["recommendation_id"])
     try:
         with dependencies.get_db_session() as db_session:
             for tool_id in valid:
@@ -800,25 +807,30 @@ async def bind_mcp_tools(
                     version_no=0,
                     db_session=db_session,
                 )
-            dependencies.update_mcp_workflow(
-                tenant_id,
-                agent_id,
-                recommendation_id,
-                status="tools_bound",
-                bound_tool_ids=sorted(valid),
-            )
     except Exception as exc:
         try:
-            dependencies.update_mcp_workflow(
+            dependencies.release_binding(
                 tenant_id,
                 agent_id,
                 recommendation_id,
-                status="connected",
-                bound_tool_ids=[],
+                operation_id,
             )
         except Exception:
-            logger.exception("Failed to compensate MCP tool binding state")
+            logger.exception("Failed to release MCP tool binding reservation")
         raise Nl2AgentOperationError("Failed to bind MCP tools.") from exc
+    try:
+        dependencies.complete_binding(
+            tenant_id,
+            agent_id,
+            recommendation_id,
+            operation_id,
+            "tools_bound",
+        )
+    except Exception as exc:
+        logger.exception("MCP tools were committed but workflow completion failed")
+        raise Nl2AgentOperationError(
+            "MCP tools were saved, but workflow state could not be reconciled. Retry binding."
+        ) from exc
     return {
         "agent_id": agent_id,
         "mcp_id": mcp_id,
@@ -838,13 +850,15 @@ async def skip_mcp_tool_binding(
     dependencies.get_owned_draft(agent_id, tenant_id)
     if not dependencies.get_mcp_record(mcp_id=mcp_id, tenant_id=tenant_id):
         raise AgentRunException("Installed MCP not found.")
-    recommendation_id, workflow = dependencies.find_mcp_workflow_by_id(
+    operation_id = "skip:" + hashlib.sha256(str(mcp_id).encode("utf-8")).hexdigest()
+    workflow = dependencies.reserve_binding(
         tenant_id,
         agent_id,
         mcp_id,
+        operation_id,
+        [],
     )
-    if workflow.get("status") != "connected":
-        raise AgentRunException("MCP tool binding is already resolved.")
+    recommendation_id = str(workflow["recommendation_id"])
     try:
         with dependencies.get_db_session() as db_session:
             dependencies.delete_tool_instances(
@@ -855,26 +869,31 @@ async def skip_mcp_tool_binding(
                 version_no=0,
                 db_session=db_session,
             )
-            dependencies.update_mcp_workflow(
-                tenant_id,
-                agent_id,
-                recommendation_id,
-                status="binding_skipped",
-                bound_tool_ids=[],
-            )
     except Exception as exc:
         try:
-            dependencies.update_mcp_workflow(
+            dependencies.release_binding(
                 tenant_id,
                 agent_id,
                 recommendation_id,
-                status="connected",
-                bound_tool_ids=[],
+                operation_id,
             )
         except Exception:
-            logger.exception("Failed to compensate MCP binding skip state")
+            logger.exception("Failed to release MCP binding skip reservation")
         raise Nl2AgentOperationError(
             "Failed to skip MCP tool binding."
+        ) from exc
+    try:
+        dependencies.complete_binding(
+            tenant_id,
+            agent_id,
+            recommendation_id,
+            operation_id,
+            "binding_skipped",
+        )
+    except Exception as exc:
+        logger.exception("MCP skip committed but workflow completion failed")
+        raise Nl2AgentOperationError(
+            "MCP tools were removed, but workflow state could not be reconciled. Retry skip."
         ) from exc
     return {
         "agent_id": agent_id,
