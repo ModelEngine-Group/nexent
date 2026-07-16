@@ -116,6 +116,7 @@ sys.modules['utils.tool_utils'] = tool_utils_mock
 from backend.database.tool_db import (
     create_tool,
     create_or_update_tool_by_tool_info,
+    delete_tool_instances_by_ids,
     query_all_tools,
     query_tools_by_labels,
     update_tool_labels,
@@ -318,6 +319,37 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
     assert isinstance(result, dict)
     session.add.assert_called_once()
     session.flush.assert_called_once()
+
+
+def test_delete_tool_instances_by_ids_uses_caller_transaction(
+    monkeypatch,
+    mock_session,
+):
+    session, query = mock_session
+    mock_update = MagicMock()
+    query.filter.return_value.update = mock_update
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    get_db_session = MagicMock(return_value=mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session",
+        get_db_session,
+    )
+
+    delete_tool_instances_by_ids(
+        agent_id=1,
+        tool_ids=[12, 11, 12],
+        tenant_id="tenant1",
+        user_id="user1",
+        db_session=session,
+    )
+
+    get_db_session.assert_called_once_with(session)
+    mock_update.assert_called_once_with(
+        {"delete_flag": "Y", "updated_by": "user1"},
+        synchronize_session=False,
+    )
 
 
 

@@ -144,9 +144,9 @@ async def skip_mcp_tools_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    _, tenant_id, _ = _current_user(authorization, http_request)
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await skip_mcp_tool_binding(agent_id, mcp_id, tenant_id)
+        return await skip_mcp_tool_binding(agent_id, mcp_id, tenant_id, user_id)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 

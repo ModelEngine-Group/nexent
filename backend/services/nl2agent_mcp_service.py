@@ -655,6 +655,8 @@ class McpBindingDependencies:
     get_mcp_record: Callable[..., Dict[str, Any] | None]
     query_tools_by_ids: Callable[..., List[Dict[str, Any]]]
     bind_tool: Callable[..., Any]
+    delete_tool_instances: Callable[..., Any]
+    get_db_session: Callable[..., Any]
     find_mcp_workflow_by_id: Callable[..., tuple[str, Dict[str, Any]]]
     update_mcp_workflow: Callable[..., Any]
 
@@ -685,31 +687,46 @@ async def bind_mcp_tools(
     }
     if set(map(int, tool_ids)) != set(valid):
         raise AgentRunException("One or more tools do not belong to the selected MCP.")
-    for tool_id in valid:
-        dependencies.bind_tool(
-            ToolInstanceInfoRequest(
-                tool_id=tool_id,
-                agent_id=agent_id,
-                params={},
-                enabled=True,
-                version_no=0,
-            ),
-            tenant_id=tenant_id,
-            user_id=user_id,
-            version_no=0,
-        )
     recommendation_id, _ = dependencies.find_mcp_workflow_by_id(
         tenant_id,
         agent_id,
         mcp_id,
     )
-    dependencies.update_mcp_workflow(
-        tenant_id,
-        agent_id,
-        recommendation_id,
-        status="tools_bound",
-        bound_tool_ids=sorted(valid),
-    )
+    try:
+        with dependencies.get_db_session() as db_session:
+            for tool_id in valid:
+                dependencies.bind_tool(
+                    ToolInstanceInfoRequest(
+                        tool_id=tool_id,
+                        agent_id=agent_id,
+                        params={},
+                        enabled=True,
+                        version_no=0,
+                    ),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    version_no=0,
+                    db_session=db_session,
+                )
+            dependencies.update_mcp_workflow(
+                tenant_id,
+                agent_id,
+                recommendation_id,
+                status="tools_bound",
+                bound_tool_ids=sorted(valid),
+            )
+    except Exception as exc:
+        try:
+            dependencies.update_mcp_workflow(
+                tenant_id,
+                agent_id,
+                recommendation_id,
+                status="connected",
+                bound_tool_ids=[],
+            )
+        except Exception:
+            logger.exception("Failed to compensate MCP tool binding state")
+        raise AgentRunException("Failed to bind MCP tools.") from exc
     return {
         "agent_id": agent_id,
         "mcp_id": mcp_id,
@@ -723,6 +740,7 @@ async def skip_mcp_tool_binding(
     agent_id: int,
     mcp_id: int,
     tenant_id: str,
+    user_id: str,
 ) -> Dict[str, Any]:
     """Resolve an installed MCP without binding discovered tools."""
     dependencies.get_owned_draft(agent_id, tenant_id)
@@ -735,13 +753,35 @@ async def skip_mcp_tool_binding(
     )
     if workflow.get("status") != "connected":
         raise AgentRunException("MCP tool binding is already resolved.")
-    dependencies.update_mcp_workflow(
-        tenant_id,
-        agent_id,
-        recommendation_id,
-        status="binding_skipped",
-        bound_tool_ids=[],
-    )
+    try:
+        with dependencies.get_db_session() as db_session:
+            dependencies.delete_tool_instances(
+                agent_id=agent_id,
+                tool_ids=workflow.get("discovered_tool_ids", []),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                version_no=0,
+                db_session=db_session,
+            )
+            dependencies.update_mcp_workflow(
+                tenant_id,
+                agent_id,
+                recommendation_id,
+                status="binding_skipped",
+                bound_tool_ids=[],
+            )
+    except Exception as exc:
+        try:
+            dependencies.update_mcp_workflow(
+                tenant_id,
+                agent_id,
+                recommendation_id,
+                status="connected",
+                bound_tool_ids=[],
+            )
+        except Exception:
+            logger.exception("Failed to compensate MCP binding skip state")
+        raise AgentRunException("Failed to skip MCP tool binding.") from exc
     return {
         "agent_id": agent_id,
         "mcp_id": mcp_id,

@@ -79,6 +79,7 @@ from database.skill_db import (
 )
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
+    delete_tool_instances_by_ids,
     query_all_enabled_tool_instances,
     query_tools_by_ids_for_tenant,
     seed_nl2agent_builtin_tools,
@@ -760,6 +761,8 @@ def _mcp_binding_dependencies() -> McpBindingDependencies:
         get_mcp_record=get_mcp_record_by_id_and_tenant,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         bind_tool=create_or_update_tool_by_tool_info,
+        delete_tool_instances=delete_tool_instances_by_ids,
+        get_db_session=get_db_session,
         find_mcp_workflow_by_id=find_mcp_workflow_by_id,
         update_mcp_workflow=update_mcp_workflow,
     )
@@ -787,6 +790,7 @@ async def skip_mcp_tool_binding(
     agent_id: int,
     mcp_id: int,
     tenant_id: str,
+    user_id: str,
 ) -> Dict[str, Any]:
     """Delegate explicit MCP binding skip to the MCP service."""
     return await skip_mcp_tool_binding_service(
@@ -794,6 +798,7 @@ async def skip_mcp_tool_binding(
         agent_id=agent_id,
         mcp_id=mcp_id,
         tenant_id=tenant_id,
+        user_id=user_id,
     )
 
 

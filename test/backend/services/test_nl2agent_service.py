@@ -1054,6 +1054,7 @@ async def test_finalize_revalidates_persisted_model_availability(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
+    db_session, _ = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
@@ -1094,6 +1095,7 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
 
     assert result["bound_tool_ids"] == [11]
     assert bind.call_count == 1
+    assert bind.call_args.kwargs["db_session"] is db_session
     update_workflow.assert_called_once_with(
         "tenant_1",
         202,
@@ -1104,7 +1106,69 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
+    _, transaction = _mock_database_transaction(monkeypatch)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 202, "name": "draft_test"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_mcp_record_by_id_and_tenant",
+        MagicMock(return_value={"mcp_id": 5, "mcp_name": "github"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids_for_tenant",
+        MagicMock(
+            return_value=[
+                {
+                    "tool_id": tool_id,
+                    "author": "tenant_1",
+                    "source": "mcp",
+                    "usage": "github",
+                }
+                for tool_id in (11, 12)
+            ]
+        ),
+    )
+    bind = MagicMock(side_effect=[None, RuntimeError("second tool failed")])
+    monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "find_mcp_workflow_by_id",
+        MagicMock(return_value=("registry:github", {"status": "connected"})),
+    )
+    update_workflow = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "update_mcp_workflow", update_workflow)
+
+    with pytest.raises(
+        nl2agent_service.AgentRunException,
+        match="Failed to bind MCP tools",
+    ):
+        await nl2agent_service.bind_mcp_tools(
+            agent_id=202,
+            mcp_id=5,
+            tool_ids=[11, 12],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    assert bind.call_count == 2
+    assert transaction.__exit__.call_args.args[0] is RuntimeError
+    update_workflow.assert_called_once_with(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        bound_tool_ids=[],
+    )
+
+
+@pytest.mark.asyncio
 async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
+    db_session, _ = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
@@ -1118,14 +1182,38 @@ async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "find_mcp_workflow_by_id",
-        MagicMock(return_value=("registry:github", {"status": "connected"})),
+        MagicMock(
+            return_value=(
+                "registry:github",
+                {"status": "connected", "discovered_tool_ids": [11, 12]},
+            )
+        ),
+    )
+    delete_instances = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "delete_tool_instances_by_ids",
+        delete_instances,
     )
     update_workflow = MagicMock()
     monkeypatch.setattr(nl2agent_service, "update_mcp_workflow", update_workflow)
 
-    result = await nl2agent_service.skip_mcp_tool_binding(202, 5, "tenant_1")
+    result = await nl2agent_service.skip_mcp_tool_binding(
+        202,
+        5,
+        "tenant_1",
+        "user_1",
+    )
 
     assert result["status"] == "binding_skipped"
+    delete_instances.assert_called_once_with(
+        agent_id=202,
+        tool_ids=[11, 12],
+        tenant_id="tenant_1",
+        user_id="user_1",
+        version_no=0,
+        db_session=db_session,
+    )
     update_workflow.assert_called_once_with(
         "tenant_1",
         202,

@@ -90,6 +90,31 @@ def create_or_update_tool_by_tool_info(
         return as_dict(tool_instance)
 
 
+def delete_tool_instances_by_ids(
+    agent_id: int,
+    tool_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    db_session=None,
+) -> None:
+    """Soft-delete selected ToolInstances within an optional shared transaction."""
+    if not tool_ids:
+        return
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
+        session.query(ToolInstance).filter(
+            ToolInstance.agent_id == agent_id,
+            ToolInstance.tool_id.in_(sorted(set(map(int, tool_ids)))),
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.version_no == version_no,
+            ToolInstance.delete_flag != 'Y',
+        ).update(
+            {"delete_flag": "Y", "updated_by": user_id},
+            synchronize_session=False,
+        )
+
+
 def query_all_tools(tenant_id: str):
     """
     Query ToolInfo in the database based on tenant_id and agent_id, optional user_id.
