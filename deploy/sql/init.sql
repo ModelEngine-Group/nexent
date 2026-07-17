@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
 );
 CREATE INDEX IF NOT EXISTS "idx_nl2agent_session_owner_status"
 ON "nl2agent_session_t" ("tenant_id", "user_id", "status");
+CREATE INDEX IF NOT EXISTS "idx_nl2agent_session_status_update"
+ON "nl2agent_session_t" ("status", "update_time");
 COMMENT ON TABLE "nl2agent_session_t" IS 'Durable NL2AGENT workflow session snapshots';
 
 CREATE TABLE IF NOT EXISTS "conversation_message_t" (

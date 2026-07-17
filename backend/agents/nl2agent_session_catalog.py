@@ -1498,11 +1498,18 @@ def delete_nl2agent_session_catalogs(
 ) -> None:
     """Delete one draft's workflow and catalog keys during initialization compensation."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    get_redis_service().client.delete(
+    client = get_redis_service().client
+    keys = [
         _cache_key(tenant, draft_id),
         _catalog_revision_key(tenant, draft_id),
         _state_key(tenant, draft_id),
+    ]
+    keys.extend(
+        client.scan_iter(
+            match=f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:*"
+        )
     )
+    client.delete(*keys)
 
 
 def acquire_mcp_installation_lock(

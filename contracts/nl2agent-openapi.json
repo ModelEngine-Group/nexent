@@ -1563,6 +1563,23 @@
         "title": "Nl2AgentRequirementsSummaryRequest",
         "type": "object"
       },
+      "Nl2AgentSessionListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "Nl2AgentSessionListResponse",
+        "type": "object"
+      },
       "Nl2AgentSessionStartResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1732,6 +1749,59 @@
           "resource_review"
         ],
         "title": "Nl2AgentSessionStateResponse",
+        "type": "object"
+      },
+      "Nl2AgentSessionSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "integer"
+          },
+          "create_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create Time"
+          },
+          "draft_agent_id": {
+            "title": "Draft Agent Id",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "completed",
+              "abandoned"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "update_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Time"
+          }
+        },
+        "required": [
+          "draft_agent_id",
+          "conversation_id",
+          "status"
+        ],
+        "title": "Nl2AgentSessionSummaryResponse",
         "type": "object"
       },
       "Nl2AgentSkillSummary": {
@@ -1980,7 +2050,6 @@
             "type": "object"
           },
           "conversation_id": {
-            "minimum": 1.0,
             "title": "Conversation Id",
             "type": "integer"
           },
@@ -2025,7 +2094,6 @@
           },
           "revision": {
             "default": 0,
-            "minimum": 0.0,
             "title": "Revision",
             "type": "integer"
           },
@@ -2102,6 +2170,17 @@
             "title": "Applied Tool Ids",
             "type": "array"
           },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
           "skill_ids": {
             "items": {
               "type": "integer"
@@ -2112,6 +2191,7 @@
           "status": {
             "enum": [
               "recommendations_ready",
+              "applying",
               "applied",
               "skipped"
             ],
@@ -2222,6 +2302,62 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/nl2agent/session/by-conversation/{conversation_id}": {
+      "get": {
+        "description": "Resolve an active owned draft after local browser state is lost.",
+        "operationId": "resolve_session_api_nl2agent_session_by_conversation__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Session Api"
+      }
+    },
     "/nl2agent/session/start": {
       "post": {
         "description": "Start a new NL2AGENT session: creates a draft agent and a conversation.\n\nReturns ``{\"agent_id\": int, \"conversation_id\": int, \"draft_name\": str}``.\nThe frontend then opens the chat page with the NL2AGENT default agent_id\nand this conversation_id.",
@@ -2267,6 +2403,62 @@
           }
         },
         "summary": "Start Session Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/abandon": {
+      "post": {
+        "description": "Explicitly end one owned draft session without deleting it immediately.",
+        "operationId": "abandon_session_api_nl2agent_session__agent_id__abandon_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abandon Session Api"
       }
     },
     "/nl2agent/session/{agent_id}/apply-local-resources": {
@@ -3298,6 +3490,63 @@
           }
         },
         "summary": "Get Session State Api"
+      }
+    },
+    "/nl2agent/sessions": {
+      "get": {
+        "description": "List the current user's active NL2AGENT sessions.",
+        "operationId": "list_sessions_api_nl2agent_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions Api"
       }
     }
   }

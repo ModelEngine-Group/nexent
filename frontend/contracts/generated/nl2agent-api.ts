@@ -1,4 +1,24 @@
 export interface paths {
+  "/nl2agent/session/by-conversation/{conversation_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Resolve Session Api
+     * @description Resolve an active owned draft after local browser state is lost.
+     */
+    get: operations["resolve_session_api_nl2agent_session_by_conversation__conversation_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/nl2agent/session/start": {
     parameters: {
       query?: never;
@@ -17,6 +37,26 @@ export interface paths {
      *     and this conversation_id.
      */
     post: operations["start_session_api_nl2agent_session_start_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nl2agent/session/{agent_id}/abandon": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Abandon Session Api
+     * @description Explicitly end one owned draft session without deleting it immediately.
+     */
+    post: operations["abandon_session_api_nl2agent_session__agent_id__abandon_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -296,6 +336,26 @@ export interface paths {
     };
     /** Get Session State Api */
     get: operations["get_session_state_api_nl2agent_session__agent_id__state_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nl2agent/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Sessions Api
+     * @description List the current user's active NL2AGENT sessions.
+     */
+    get: operations["list_sessions_api_nl2agent_sessions_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -957,6 +1017,11 @@ export interface components {
       /** Primary Input */
       primary_input: string;
     };
+    /** Nl2AgentSessionListResponse */
+    Nl2AgentSessionListResponse: {
+      /** Sessions */
+      sessions: components["schemas"]["Nl2AgentSessionSummaryResponse"][];
+    };
     /** Nl2AgentSessionStartResponse */
     Nl2AgentSessionStartResponse: {
       /** Conversation Id */
@@ -1024,6 +1089,22 @@ export interface components {
       skills: components["schemas"]["Nl2AgentSkillSummary"][];
       /** Tools */
       tools: components["schemas"]["Nl2AgentToolSummary"][];
+    };
+    /** Nl2AgentSessionSummaryResponse */
+    Nl2AgentSessionSummaryResponse: {
+      /** Conversation Id */
+      conversation_id: number;
+      /** Create Time */
+      create_time?: string | null;
+      /** Draft Agent Id */
+      draft_agent_id: number;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "active" | "completed" | "abandoned";
+      /** Update Time */
+      update_time?: string | null;
     };
     /** Nl2AgentSkillSummary */
     Nl2AgentSkillSummary: {
@@ -1168,13 +1249,15 @@ export interface components {
       applied_skill_ids?: number[];
       /** Applied Tool Ids */
       applied_tool_ids?: number[];
+      /** Operation Id */
+      operation_id?: string | null;
       /** Skill Ids */
       skill_ids?: number[];
       /**
        * Status
        * @enum {string}
        */
-      status: "recommendations_ready" | "applied" | "skipped";
+      status: "recommendations_ready" | "applying" | "applied" | "skipped";
       /** Tool Ids */
       tool_ids?: number[];
     } & {
@@ -1219,6 +1302,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  resolve_session_api_nl2agent_session_by_conversation__conversation_id__get: {
+    parameters: {
+      query?: never;
+      header?: {
+        authorization?: string | null;
+      };
+      path: {
+        conversation_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Nl2AgentSessionSummaryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   start_session_api_nl2agent_session_start_post: {
     parameters: {
       query?: never;
@@ -1237,6 +1353,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Nl2AgentSessionStartResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  abandon_session_api_nl2agent_session__agent_id__abandon_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        authorization?: string | null;
+      };
+      path: {
+        agent_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Nl2AgentSessionSummaryResponse"];
         };
       };
       /** @description Validation Error */
@@ -1819,6 +1968,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Nl2AgentSessionStateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_sessions_api_nl2agent_sessions_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: {
+        authorization?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Nl2AgentSessionListResponse"];
         };
       };
       /** @description Validation Error */

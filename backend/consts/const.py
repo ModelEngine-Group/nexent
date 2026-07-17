@@ -302,6 +302,12 @@ MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS = os.getenv(
     "NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS", "false"
 ).lower() in ("true", "1", "yes", "on")
+NL2AGENT_ABANDONED_RETENTION_DAYS = max(
+    1, int(os.getenv("NL2AGENT_ABANDONED_RETENTION_DAYS", "30"))
+)
+NL2AGENT_CLEANUP_BATCH_SIZE = max(
+    1, min(500, int(os.getenv("NL2AGENT_CLEANUP_BATCH_SIZE", "100")))
+)
 
 
 # Invite code

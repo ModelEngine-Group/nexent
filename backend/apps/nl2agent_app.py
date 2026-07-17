@@ -52,6 +52,8 @@ from consts.nl2agent_response import (
     Nl2AgentRequirementsConfirmationResponse,
     Nl2AgentRequirementsRegistrationResponse,
     Nl2AgentSessionStartResponse,
+    Nl2AgentSessionListResponse,
+    Nl2AgentSessionSummaryResponse,
     Nl2AgentSessionStateResponse,
     Nl2AgentWebSkillInstallResponse,
 )
@@ -73,6 +75,12 @@ from services.nl2agent_service import (
     skip_mcp_tool_binding,
     skip_local_resource_recommendations,
     start_session,
+)
+from services.nl2agent_session_lifecycle_service import (
+    abandon_session,
+    cleanup_expired_abandoned_sessions,
+    list_active_sessions,
+    resolve_active_session,
 )
 from utils.auth_utils import get_current_user_info
 
@@ -113,6 +121,74 @@ def _session_http_error(exc: Exception) -> Exception:
         ErrorCode.SYSTEM_INTERNAL_ERROR,
         "Failed to load or update NL2AGENT session state.",
     )
+
+
+@router.get(
+    "/sessions",
+    response_model=Nl2AgentSessionListResponse,
+    response_model_exclude_none=True,
+)
+async def list_sessions_api(
+    http_request: Request,
+    limit: int = 50,
+    authorization: Optional[str] = Header(None),
+):
+    """List the current user's active NL2AGENT sessions."""
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return {
+            "sessions": list_active_sessions(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                limit=limit,
+            )
+        }
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.get(
+    "/session/by-conversation/{conversation_id}",
+    response_model=Nl2AgentSessionSummaryResponse,
+    response_model_exclude_none=True,
+)
+async def resolve_session_api(
+    conversation_id: int,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Resolve an active owned draft after local browser state is lost."""
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return resolve_active_session(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post(
+    "/session/{agent_id}/abandon",
+    response_model=Nl2AgentSessionSummaryResponse,
+    response_model_exclude_none=True,
+)
+async def abandon_session_api(
+    agent_id: int,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Explicitly end one owned draft session without deleting it immediately."""
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return abandon_session(
+            draft_agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
 
 
 @router.put(
@@ -222,6 +298,13 @@ async def start_session_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
 
     try:
+        try:
+            cleanup_expired_abandoned_sessions()
+        except Exception:
+            logger.warning(
+                "Failed to clean expired NL2AGENT sessions before start",
+                exc_info=True,
+            )
         return await start_session(
             user_id=user_id,
             tenant_id=tenant_id,

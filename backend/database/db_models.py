@@ -502,6 +502,11 @@ class Nl2AgentSession(TableBase):
             "user_id",
             "status",
         ),
+        Index(
+            "idx_nl2agent_session_status_update",
+            "status",
+            "update_time",
+        ),
         {"schema": SCHEMA},
     )
 

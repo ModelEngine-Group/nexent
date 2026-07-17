@@ -1,6 +1,7 @@
 """Focused tests for the durable NL2AGENT session repository."""
 
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -71,6 +72,59 @@ def test_get_session_can_enforce_owner(monkeypatch):
         "tenant-a", 11, user_id="user-a"
     ) == {"session_id": 1}
     assert query.filter.call_count == 2
+
+
+def test_get_session_by_conversation_is_owner_and_status_scoped(monkeypatch):
+    record = SimpleNamespace(session_id=1)
+    query = MagicMock()
+    query.filter.return_value = query
+    query.first.return_value = record
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "as_dict",
+        lambda value: {"session_id": value.session_id},
+    )
+
+    result = nl2agent_session_db.get_nl2agent_session_by_conversation(
+        "tenant-a",
+        "user-a",
+        22,
+    )
+
+    assert result == {"session_id": 1}
+    assert query.filter.call_count == 2
+
+
+def test_list_sessions_enforces_owner_status_order_and_limit(monkeypatch):
+    query = MagicMock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = [SimpleNamespace(session_id=1)]
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "as_dict",
+        lambda value: {"session_id": value.session_id},
+    )
+
+    assert nl2agent_session_db.list_nl2agent_sessions(
+        "tenant-a", "user-a", limit=1000
+    ) == [{"session_id": 1}]
+    query.limit.assert_called_once_with(100)
 
 
 @pytest.mark.parametrize("updated_count, expected", [(1, True), (0, False)])
@@ -162,6 +216,38 @@ def test_status_update_only_accepts_terminal_states(monkeypatch):
         status=nl2agent_session_db.NL2AGENT_SESSION_COMPLETED,
         user_id="user-a",
     )
+
+
+def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
+    records = [
+        SimpleNamespace(draft_agent_id=11, conversation_id=21, delete_flag="N"),
+        SimpleNamespace(draft_agent_id=12, conversation_id=22, delete_flag="N"),
+    ]
+    session_query = MagicMock()
+    for method_name in ("filter", "order_by", "with_for_update", "limit"):
+        getattr(session_query, method_name).return_value = session_query
+    session_query.all.return_value = records
+    mutation_queries = [MagicMock() for _ in range(9)]
+    for query in mutation_queries:
+        query.filter.return_value = query
+    session = MagicMock()
+    session.query.side_effect = [session_query, *mutation_queries]
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+
+    count = nl2agent_session_db.cleanup_abandoned_nl2agent_sessions(
+        abandoned_before=datetime(2026, 6, 1),
+        limit=20,
+    )
+
+    assert count == 2
+    session_query.with_for_update.assert_called_once_with(skip_locked=True)
+    session_query.limit.assert_called_once_with(20)
+    assert all(query.update.call_count == 1 for query in mutation_queries)
+    assert all(record.delete_flag == "Y" for record in records)
 
 
 def test_model_and_fresh_init_match_incremental_migration():

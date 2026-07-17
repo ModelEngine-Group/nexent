@@ -1,5 +1,6 @@
 """Typed HTTP responses for the NL2AGENT workflow API."""
 
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,6 +31,18 @@ class Nl2AgentSessionStartResponse(Nl2AgentResponse):
     draft_agent_id: int
     conversation_id: int
     draft_name: str
+
+
+class Nl2AgentSessionSummaryResponse(Nl2AgentResponse):
+    draft_agent_id: int
+    conversation_id: int
+    status: Literal["active", "completed", "abandoned"]
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+
+
+class Nl2AgentSessionListResponse(Nl2AgentResponse):
+    sessions: List[Nl2AgentSessionSummaryResponse]
 
 
 class Nl2AgentModelSummary(Nl2AgentResponse):

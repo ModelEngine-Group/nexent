@@ -523,7 +523,12 @@ export const API_ENDPOINTS = {
     status: `${API_BASE_URL}/monitoring/status`,
   },
   nl2agent: {
+    sessions: `${API_BASE_URL}/nl2agent/sessions`,
     sessionStart: `${API_BASE_URL}/nl2agent/session/start`,
+    sessionByConversation: (conversationId: number) =>
+      `${API_BASE_URL}/nl2agent/session/by-conversation/${conversationId}`,
+    abandonSession: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/abandon`,
     selectModels: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/models`,
     installMcp: (agentId: number) =>

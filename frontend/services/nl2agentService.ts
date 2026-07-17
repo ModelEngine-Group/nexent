@@ -66,6 +66,40 @@ export const getAvailablePlatformLlms = async (): Promise<
 
 export type Nl2AgentSessionStartResponse =
   Nl2AgentApiSchemas["Nl2AgentSessionStartResponse"];
+export type Nl2AgentSessionSummary =
+  Nl2AgentApiSchemas["Nl2AgentSessionSummaryResponse"];
+
+export const resolveNl2AgentSessionByConversation = async (
+  conversationId: number
+): Promise<Nl2AgentSessionSummary | null> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.sessionByConversation(conversationId)
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) await throwNl2AgentRequestError(response);
+  return response.json();
+};
+
+export const listActiveNl2AgentSessions = async (): Promise<
+  Nl2AgentSessionSummary[]
+> => {
+  const response = await fetchWithAuth(API_ENDPOINTS.nl2agent.sessions);
+  if (!response.ok) await throwNl2AgentRequestError(response);
+  const result: Nl2AgentApiSchemas["Nl2AgentSessionListResponse"] =
+    await response.json();
+  return result.sessions;
+};
+
+export const abandonNl2AgentSession = async (
+  agentId: number
+): Promise<Nl2AgentSessionSummary> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.abandonSession(agentId),
+    { method: "POST" }
+  );
+  if (!response.ok) await throwNl2AgentRequestError(response);
+  return response.json();
+};
 
 export type Nl2AgentApplyLocalResourcesPayload =
   Nl2AgentApiSchemas["Nl2AgentApplyLocalResourcesRequest"] & {

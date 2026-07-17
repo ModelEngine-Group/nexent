@@ -83,6 +83,11 @@ async def test_start_session_api_maps_workflow_conflict(monkeypatch) -> None:
         "start_session",
         AsyncMock(side_effect=AgentRunException("session conflict")),
     )
+    monkeypatch.setattr(
+        nl2agent_app,
+        "cleanup_expired_abandoned_sessions",
+        MagicMock(return_value=0),
+    )
 
     with pytest.raises(AppException) as exc_info:
         await nl2agent_app.start_session_api(MagicMock(), None)
@@ -90,6 +95,78 @@ async def test_start_session_api_maps_workflow_conflict(monkeypatch) -> None:
     assert (
         exc_info.value.error_code
         == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_api_passes_authenticated_owner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    resolve = MagicMock(
+        return_value={
+            "draft_agent_id": 202,
+            "conversation_id": 902,
+            "status": "active",
+        }
+    )
+    monkeypatch.setattr(nl2agent_app, "resolve_active_session", resolve)
+
+    result = await nl2agent_app.resolve_session_api(902, MagicMock(), None)
+
+    assert result["draft_agent_id"] == 202
+    resolve.assert_called_once_with(
+        conversation_id=902,
+        tenant_id="tenant",
+        user_id="user",
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_api_passes_authenticated_owner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    list_sessions = MagicMock(return_value=[])
+    monkeypatch.setattr(nl2agent_app, "list_active_sessions", list_sessions)
+
+    assert await nl2agent_app.list_sessions_api(MagicMock(), 25, None) == {
+        "sessions": []
+    }
+    list_sessions.assert_called_once_with(
+        tenant_id="tenant",
+        user_id="user",
+        limit=25,
+    )
+
+
+@pytest.mark.asyncio
+async def test_abandon_session_api_passes_authenticated_owner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    abandon = MagicMock(
+        return_value={
+            "draft_agent_id": 202,
+            "conversation_id": 902,
+            "status": "abandoned",
+        }
+    )
+    monkeypatch.setattr(nl2agent_app, "abandon_session", abandon)
+
+    result = await nl2agent_app.abandon_session_api(202, MagicMock(), None)
+
+    assert result["status"] == "abandoned"
+    abandon.assert_called_once_with(
+        draft_agent_id=202,
+        tenant_id="tenant",
+        user_id="user",
     )
 
 
