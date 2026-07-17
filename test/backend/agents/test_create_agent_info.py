@@ -5,6 +5,18 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 
+_ISOLATED_MODULE_PREFIXES = (
+    "agents", "backend", "boto3", "consts", "database", "dotenv",
+    "nexent", "redis", "services", "smolagents", "utils",
+)
+_ORIGINAL_MODULES = dict(sys.modules)
+_ORIGINAL_MODULE_DICTS = {
+    name: dict(module.__dict__)
+    for name, module in _ORIGINAL_MODULES.items()
+    if name in _ISOLATED_MODULE_PREFIXES
+    or name.startswith(tuple(f"{prefix}." for prefix in _ISOLATED_MODULE_PREFIXES))
+}
+
 from backend.utils import nl2agent_catalog_snapshot
 from test.common.test_mocks import bootstrap_test_env
 
@@ -653,6 +665,43 @@ ToolParamsRequest = sys.modules["consts.model"].ToolParamsRequest
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
+
+
+def _is_isolated_module(name: str) -> bool:
+    return name in _ISOLATED_MODULE_PREFIXES or name.startswith(
+        tuple(f"{prefix}." for prefix in _ISOLATED_MODULE_PREFIXES)
+    )
+
+
+_TEST_MODULES = {
+    name: module
+    for name, module in sys.modules.items()
+    if _is_isolated_module(name) and _ORIGINAL_MODULES.get(name) is not module
+}
+for _name in list(sys.modules):
+    if _is_isolated_module(_name) and _name not in _ORIGINAL_MODULES:
+        sys.modules.pop(_name, None)
+for _name, _module in _ORIGINAL_MODULES.items():
+    if not _is_isolated_module(_name):
+        continue
+    sys.modules[_name] = _module
+    if _name in _ORIGINAL_MODULE_DICTS:
+        _module.__dict__.clear()
+        _module.__dict__.update(_ORIGINAL_MODULE_DICTS[_name])
+
+
+@pytest.fixture(autouse=True)
+def isolated_create_agent_info_modules(monkeypatch):
+    """Install this legacy test's import stubs only for one test invocation."""
+    for name, module in _TEST_MODULES.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    for name, module in _TEST_MODULES.items():
+        parent_name, _, child_name = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if parent is not None:
+            monkeypatch.setattr(parent, child_name, module, raising=False)
+
+    yield
 
 
 class TestResolveInputBudget:

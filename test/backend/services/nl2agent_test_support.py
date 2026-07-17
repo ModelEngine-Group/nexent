@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from agents import nl2agent_session_catalog
 from agents import nl2agent_session_store
 from agents.nl2agent_session_catalog import (
-    clear_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
 )
 from consts.exceptions import (
@@ -124,6 +123,11 @@ _REQUIREMENTS_SUMMARY = {
 }
 
 
+def clear_nl2agent_session_catalogs():
+    """Reset only the per-test fake Redis database."""
+    nl2agent_session_store.get_redis_service().client.flushdb()
+
+
 def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
     review = nl2agent_session_catalog.register_requirements_summary(
         tenant_id, draft_agent_id, _REQUIREMENTS_SUMMARY
@@ -138,7 +142,7 @@ def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     nl2agent_session_catalog.set_model_selection_confirmed(
         tenant_id, draft_agent_id, True
     )
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         tenant_id,
         draft_agent_id,
         recommendation_batch_id="local_empty",
@@ -152,7 +156,7 @@ def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     nl2agent_session_catalog.resolve_recommendation_batch(
         tenant_id, draft_agent_id, "local_empty", "skipped"
     )
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         tenant_id,
         draft_agent_id,
         recommendation_batch_id="online_mcp",
@@ -162,7 +166,7 @@ def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     nl2agent_session_catalog.register_online_recommendation_batch(
         tenant_id, draft_agent_id, "online_mcp", "mcp", []
     )
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         tenant_id,
         draft_agent_id,
         recommendation_batch_id="online_skill",
@@ -180,7 +184,7 @@ def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
 
 
 def _register_local_batch(batch_id, tool_ids, skill_ids):
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id=batch_id,

@@ -126,7 +126,7 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="trusted_batch",
@@ -194,7 +194,7 @@ async def test_register_local_resources_does_not_advance_state_for_deleted_resou
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="deleted_resource_batch",
@@ -259,7 +259,7 @@ async def test_genuine_empty_local_search_can_register_its_trusted_batch(monkeyp
         skill_catalog=[],
         requirements_confirmed=True,
         record_search_result=lambda **result: (
-            nl2agent_session_catalog.record_trusted_search_batch(
+            nl2agent_session_catalog._record_trusted_search_batch(
                 "tenant_1", 202, **result
             )
         ),

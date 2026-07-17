@@ -32,26 +32,51 @@ def _validate_requested_output_tokens(
 
 
 @dataclass(frozen=True)
-class PublicationDependencies:
-    """Persistence and workflow operations required to publish a draft."""
-
+class PublicationDraftDependencies:
     validate_draft_agent_id: Callable[[int], None]
     get_owned_draft: Callable[[int, str], Dict[str, Any]]
-    normalize_model_ids: Callable[[Any], List[int]]
-    validate_available_llm_ids: Callable[..., Dict[int, Dict[str, Any]]]
+    generate_internal_name: Callable[[str, int, str], str]
+
+
+@dataclass(frozen=True)
+class PublicationWorkflowDependencies:
     assert_requirements_confirmed: Callable[[str, int], None]
     assert_resource_review_complete: Callable[[str, int], None]
     assert_mcp_workflows_resolved: Callable[[str, int], None]
     assert_online_configuration_complete: Callable[[str, int], None]
     assert_identity_confirmed: Callable[[str, int], None]
+
+
+@dataclass(frozen=True)
+class PublicationModelDependencies:
+    normalize_model_ids: Callable[[Any], List[int]]
+    validate_available_llm_ids: Callable[..., Dict[int, Dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class PublicationResourceDependencies:
     query_enabled_tools: Callable[..., List[Dict[str, Any]]]
     query_enabled_skills: Callable[..., List[Dict[str, Any]]]
     resolve_resource_summaries: Callable[..., Any]
     raise_for_invalid_references: Callable[[List[Dict[str, Any]]], None]
-    generate_internal_name: Callable[[str, int, str], str]
+
+
+@dataclass(frozen=True)
+class PublicationPersistenceDependencies:
     get_db_session: Callable[..., Any]
     update_agent: Callable[..., Any]
     complete_session: Callable[..., bool]
+
+
+@dataclass(frozen=True)
+class PublicationDependencies:
+    """Responsibility-grouped operations required to publish a draft."""
+
+    draft: PublicationDraftDependencies
+    workflow: PublicationWorkflowDependencies
+    models: PublicationModelDependencies
+    resources: PublicationResourceDependencies
+    persistence: PublicationPersistenceDependencies
 
 
 @dataclass(frozen=True)
@@ -78,41 +103,16 @@ async def publish_agent(
     agent_id: int,
     user_id: str,
     tenant_id: str,
-    description: Optional[str] = None,
-    business_description: Optional[str] = None,
-    duty_prompt: Optional[str] = None,
-    constraint_prompt: Optional[str] = None,
-    few_shots_prompt: Optional[str] = None,
-    greeting_message: Optional[str] = None,
-    example_questions: Optional[List[str]] = None,
-    max_steps: Optional[int] = None,
-    requested_output_tokens: Optional[int] = None,
-    provide_run_summary: bool = False,
-    verification_config: Optional[Dict[str, Any]] = None,
-    enable_context_manager: bool = True,
+    proposal: PublicationProposal,
 ) -> Dict[str, Any]:
     """Publish a draft using proposal text and authoritative persisted state."""
-    dependencies.validate_draft_agent_id(agent_id)
-    current_draft = dependencies.get_owned_draft(agent_id, tenant_id)
-    proposal = PublicationProposal(
-        description=description,
-        business_description=business_description,
-        duty_prompt=duty_prompt,
-        constraint_prompt=constraint_prompt,
-        few_shots_prompt=few_shots_prompt,
-        greeting_message=greeting_message,
-        example_questions=example_questions,
-        max_steps=max_steps,
-        requested_output_tokens=requested_output_tokens,
-        provide_run_summary=provide_run_summary,
-        verification_config=verification_config,
-        enable_context_manager=enable_context_manager,
-    )
+    dependencies.draft.validate_draft_agent_id(agent_id)
+    current_draft = dependencies.draft.get_owned_draft(agent_id, tenant_id)
     primary_model_id, model_ids = _validate_publication_models(
         dependencies,
         current_draft=current_draft,
         tenant_id=tenant_id,
-        requested_output_tokens=requested_output_tokens,
+        requested_output_tokens=proposal.requested_output_tokens,
     )
     _assert_publication_workflow(dependencies, tenant_id, agent_id)
     _validate_proposal(proposal)
@@ -155,12 +155,12 @@ def _validate_publication_models(
     requested_output_tokens: Optional[int],
 ) -> tuple[int, List[int]]:
     primary_model_id = current_draft.get("business_logic_model_id")
-    model_ids = dependencies.normalize_model_ids(current_draft.get("model_ids"))
+    model_ids = dependencies.models.normalize_model_ids(current_draft.get("model_ids"))
     if not primary_model_id or primary_model_id not in model_ids:
         raise Nl2AgentValidationError(
             "Select a primary LLM before finalizing the agent."
         )
-    validated_models = dependencies.validate_available_llm_ids(
+    validated_models = dependencies.models.validate_available_llm_ids(
         tenant_id,
         model_ids,
         finalizing=True,
@@ -178,11 +178,11 @@ def _assert_publication_workflow(
     agent_id: int,
 ) -> None:
     checks = (
-        dependencies.assert_requirements_confirmed,
-        dependencies.assert_resource_review_complete,
-        dependencies.assert_mcp_workflows_resolved,
-        dependencies.assert_online_configuration_complete,
-        dependencies.assert_identity_confirmed,
+        dependencies.workflow.assert_requirements_confirmed,
+        dependencies.workflow.assert_resource_review_complete,
+        dependencies.workflow.assert_mcp_workflows_resolved,
+        dependencies.workflow.assert_online_configuration_complete,
+        dependencies.workflow.assert_identity_confirmed,
     )
     for check in checks:
         try:
@@ -216,14 +216,20 @@ def _validate_persisted_resources(
     agent_id: int,
     tenant_id: str,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    tools = dependencies.query_enabled_tools(agent_id, tenant_id, version_no=0) or []
-    skills = dependencies.query_enabled_skills(agent_id, tenant_id, version_no=0) or []
-    _, _, invalid_references = dependencies.resolve_resource_summaries(
+    tools = (
+        dependencies.resources.query_enabled_tools(agent_id, tenant_id, version_no=0)
+        or []
+    )
+    skills = (
+        dependencies.resources.query_enabled_skills(agent_id, tenant_id, version_no=0)
+        or []
+    )
+    _, _, invalid_references = dependencies.resources.resolve_resource_summaries(
         tools,
         skills,
         tenant_id,
     )
-    dependencies.raise_for_invalid_references(invalid_references)
+    dependencies.resources.raise_for_invalid_references(invalid_references)
     return tools, skills
 
 
@@ -239,12 +245,10 @@ def _build_agent_update(
 ) -> Dict[str, Any]:
     display_name = str(current_draft.get("display_name") or "").strip()[:50]
     if not display_name:
-        raise Nl2AgentValidationError(
-            "The persisted agent display name is missing."
-        )
+        raise Nl2AgentValidationError("The persisted agent display name is missing.")
     agent_update: Dict[str, Any] = {
         "display_name": display_name,
-        "name": dependencies.generate_internal_name(
+        "name": dependencies.draft.generate_internal_name(
             display_name,
             agent_id,
             tenant_id,
@@ -288,15 +292,15 @@ def _persist_agent_update(
     agent_update: Dict[str, Any],
 ) -> None:
     try:
-        with dependencies.get_db_session() as db_session:
-            dependencies.update_agent(
+        with dependencies.persistence.get_db_session() as db_session:
+            dependencies.persistence.update_agent(
                 agent_id=agent_id,
                 agent_info=AgentInfoRequest(**agent_update),
                 user_id=user_id,
                 version_no=0,
                 db_session=db_session,
             )
-            completed = dependencies.complete_session(
+            completed = dependencies.persistence.complete_session(
                 tenant_id=tenant_id,
                 draft_agent_id=agent_id,
                 status="completed",

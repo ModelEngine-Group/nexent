@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backend.database import nl2agent_session_db
-from backend.database.db_models import Nl2AgentSession
+from database import nl2agent_session_db
+from database.db_models import Nl2AgentSession
 
 
 @contextmanager

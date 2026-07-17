@@ -122,7 +122,6 @@ get_nl2agent_session_state = _session_store.get_session_state
 _mutate_session_state = _session_store.mutate_session_state
 set_nl2agent_session_catalogs = _session_store.set_session_catalogs
 get_nl2agent_session_catalogs = _session_store.get_session_catalogs
-clear_nl2agent_session_catalogs = _session_store.clear_session_cache
 
 
 def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -795,28 +794,6 @@ def assert_trusted_local_search_batch(
         raise Nl2AgentSessionCatalogError(
             "Recommendation batch does not match a trusted search result."
         )
-
-
-def record_trusted_search_batch(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    *,
-    recommendation_batch_id: str,
-    resource_type: str,
-    tool_ids: Optional[List[int]] = None,
-    skill_ids: Optional[List[int]] = None,
-    item_keys: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """Idempotently persist the exact batch produced by an SDK search tool."""
-    return _record_trusted_search_batch(
-        tenant_id,
-        draft_agent_id,
-        recommendation_batch_id=recommendation_batch_id,
-        resource_type=resource_type,
-        tool_ids=tool_ids,
-        skill_ids=skill_ids,
-        item_keys=item_keys,
-    )
 
 
 def record_stage_validated_search_batch(

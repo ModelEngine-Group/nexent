@@ -317,7 +317,7 @@ async def test_finalize_requires_both_online_catalogs(
     nl2agent_session_catalog.resolve_recommendation_batch(
         "tenant_1", 202, "batch_1", "skipped"
     )
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id=f"online_{registered_resource_type}",
@@ -572,7 +572,7 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
         ),
     )
 
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="online_1",
@@ -583,7 +583,7 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
         202, "online_1", "skill", ["skill:7"], "tenant_1", "user_1"
     )
     assert registered["status"] == "recommendations_ready"
-    nl2agent_session_catalog.record_trusted_search_batch(
+    nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="online_mcp",

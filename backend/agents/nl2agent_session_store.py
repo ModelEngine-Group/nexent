@@ -416,13 +416,3 @@ def get_session_catalogs(
             f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
         )
     return validate_catalogs(catalogs)
-
-
-def clear_session_cache() -> None:
-    """Clear persisted NL2AGENT projections. Intended for tests."""
-    client = get_redis_service().client
-    keys = list(client.scan_iter(match=f"{CACHE_KEY_PREFIX}:*"))
-    keys.extend(client.scan_iter(match=f"{CATALOG_SNAPSHOT_KEY_PREFIX}:*"))
-    keys.extend(client.scan_iter(match=f"{STATE_KEY_PREFIX}:*"))
-    if keys:
-        client.delete(*keys)

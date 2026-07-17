@@ -23,27 +23,47 @@ _LOCK_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
-class McpInstallationDependencies:
-    """External operations used by the recoverable MCP installation saga."""
-
+class McpSessionDependencies:
     get_owned_draft: Callable[..., Dict[str, Any]]
     get_session_catalogs: Callable[..., Dict[str, List[Dict[str, Any]]]]
     normalize_candidate: Callable[..., Dict[str, Any]]
+    update_mcp_workflow: Callable[..., Any]
+    recommendation_id: Callable[[str, Dict[str, Any]], str]
+
+
+@dataclass(frozen=True)
+class McpLockDependencies:
     acquire_installation_lock: Callable[..., Optional[str]]
     renew_installation_lock: Callable[..., bool]
     release_installation_lock: Callable[..., Any]
-    update_mcp_workflow: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class McpProviderDependencies:
     get_mcp_records: Callable[..., List[Dict[str, Any]]]
     add_remote_mcp: Callable[..., Awaitable[int]]
     add_container_mcp: Callable[..., Awaitable[Dict[str, Any]]]
     update_remote_mcp: Callable[..., None]
     reconfigure_container_mcp: Callable[..., Awaitable[None]]
     get_mcp_record: Callable[..., Optional[Dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class McpDiscoveryDependencies:
     discover_tools: Callable[..., Awaitable[List[Any]]]
     upsert_discovered_tools: Callable[..., List[Dict[str, Any]]]
-    recommendation_id: Callable[[str, Dict[str, Any]], str]
     validate_remote_url: Callable[[str], str]
     build_httpx_client_factory: Callable[[str], Callable[..., Any]]
+
+
+@dataclass(frozen=True)
+class McpInstallationDependencies:
+    """Responsibility-grouped operations for the recoverable MCP installation saga."""
+
+    session: McpSessionDependencies
+    lock: McpLockDependencies
+    provider: McpProviderDependencies
+    discovery: McpDiscoveryDependencies
 
 
 def installation_key(
@@ -88,7 +108,10 @@ def _resolve_recommendation(
         ("community", "community_results"),
     ):
         for item in catalogs.get(key, []):
-            if dependencies.recommendation_id(source, item) == recommendation_id:
+            if (
+                dependencies.session.recommendation_id(source, item)
+                == recommendation_id
+            ):
                 return source, item
     raise AgentRunException("MCP recommendation is not part of this NL2AGENT session.")
 
@@ -106,7 +129,7 @@ async def install_recommended_mcp(
     """Install an MCP and persist redacted success or failure state."""
     stable_key = installation_key(agent_id, recommendation_id, option_id)
     lock_key = installation_lock_key(agent_id, recommendation_id)
-    lock_token = dependencies.acquire_installation_lock(
+    lock_token = dependencies.lock.acquire_installation_lock(
         tenant_id,
         agent_id,
         lock_key,
@@ -130,7 +153,7 @@ async def install_recommended_mcp(
         )
     except Exception as exc:
         try:
-            dependencies.update_mcp_workflow(
+            dependencies.session.update_mcp_workflow(
                 tenant_id,
                 agent_id,
                 recommendation_id,
@@ -151,7 +174,7 @@ async def install_recommended_mcp(
         ) from exc
     finally:
         try:
-            dependencies.release_installation_lock(
+            dependencies.lock.release_installation_lock(
                 tenant_id,
                 agent_id,
                 lock_key,
@@ -182,7 +205,7 @@ async def _perform_with_lock_heartbeat(
     async def heartbeat() -> None:
         while True:
             await asyncio.sleep(_LOCK_HEARTBEAT_INTERVAL_SECONDS)
-            if not dependencies.renew_installation_lock(
+            if not dependencies.lock.renew_installation_lock(
                 tenant_id, agent_id, lock_key, lock_token
             ):
                 raise AgentRunException(
@@ -229,14 +252,14 @@ async def _perform_recommended_mcp_install(
     stable_key: str,
 ) -> Dict[str, Any]:
     """Resolve, install, health-check, and discover one MCP recommendation."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
-    catalogs = dependencies.get_session_catalogs(tenant_id, agent_id)
+    dependencies.session.get_owned_draft(agent_id, tenant_id)
+    catalogs = dependencies.session.get_session_catalogs(tenant_id, agent_id)
     source, raw = _resolve_recommendation(
         dependencies,
         catalogs,
         recommendation_id,
     )
-    normalized = dependencies.normalize_candidate(source, raw)
+    normalized = dependencies.session.normalize_candidate(source, raw)
     option = next(
         (
             candidate
@@ -252,7 +275,7 @@ async def _perform_recommended_mcp_install(
             option.get("unsupported_reason")
             or "This MCP installation option is unsupported."
         )
-    dependencies.update_mcp_workflow(
+    dependencies.session.update_mcp_workflow(
         tenant_id,
         agent_id,
         recommendation_id,
@@ -281,7 +304,7 @@ async def _perform_recommended_mcp_install(
     record = next(
         (
             item
-            for item in dependencies.get_mcp_records(tenant_id)
+            for item in dependencies.provider.get_mcp_records(tenant_id)
             if _record_installation_key(item) == stable_key
         ),
         None,
@@ -461,9 +484,9 @@ async def _install_remote(
         raise Nl2AgentValidationError(
             "MCP server URL must be a valid HTTP or HTTPS URL."
         )
-    server_url = dependencies.validate_remote_url(str(server_url))
+    server_url = dependencies.discovery.validate_remote_url(str(server_url))
     if existing_mcp_id is not None:
-        dependencies.update_remote_mcp(
+        dependencies.provider.update_remote_mcp(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=existing_mcp_id,
@@ -475,8 +498,8 @@ async def _install_remote(
             tags=raw.get("tags") or [],
         )
         return existing_mcp_id
-    httpx_client_factory = dependencies.build_httpx_client_factory(server_url)
-    return await dependencies.add_remote_mcp(
+    httpx_client_factory = dependencies.discovery.build_httpx_client_factory(server_url)
+    return await dependencies.provider.add_remote_mcp(
         tenant_id=tenant_id,
         user_id=user_id,
         name=name,
@@ -553,7 +576,7 @@ async def _install_container(
         )
     mcp_config = MCPConfigRequest(**config_json)
     if existing_mcp_id is not None:
-        await dependencies.reconfigure_container_mcp(
+        await dependencies.provider.reconfigure_container_mcp(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=existing_mcp_id,
@@ -567,7 +590,7 @@ async def _install_container(
             mcp_config=mcp_config,
         )
         return existing_mcp_id
-    result = await dependencies.add_container_mcp(
+    result = await dependencies.provider.add_container_mcp(
         tenant_id=tenant_id,
         user_id=user_id,
         name=name,
@@ -667,7 +690,7 @@ async def _discover_and_complete(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    record = dependencies.get_mcp_record(
+    record = dependencies.provider.get_mcp_record(
         mcp_id=int(mcp_id),
         tenant_id=tenant_id,
     )
@@ -675,23 +698,23 @@ async def _discover_and_complete(
         raise Nl2AgentOperationError("Installed MCP record could not be resolved.")
     resolved_mcp_id = int(record["mcp_id"])
     try:
-        discovered = await dependencies.discover_tools(
+        discovered = await dependencies.discovery.discover_tools(
             mcp_server_name=name,
             remote_mcp_server=record.get("mcp_server"),
             tenant_id=tenant_id,
             authorization_token=authorization_token,
             custom_headers=custom_headers or None,
-            httpx_client_factory=dependencies.build_httpx_client_factory(
+            httpx_client_factory=dependencies.discovery.build_httpx_client_factory(
                 str(record.get("mcp_server"))
             ),
         )
-        tools = dependencies.upsert_discovered_tools(
+        tools = dependencies.discovery.upsert_discovered_tools(
             tenant_id,
             user_id,
             discovered,
         )
     except Exception as exc:
-        dependencies.update_mcp_workflow(
+        dependencies.session.update_mcp_workflow(
             tenant_id,
             agent_id,
             recommendation_id,
@@ -705,7 +728,7 @@ async def _discover_and_complete(
             "MCP tool discovery failed. Retry installation."
         ) from exc
 
-    dependencies.update_mcp_workflow(
+    dependencies.session.update_mcp_workflow(
         tenant_id,
         agent_id,
         recommendation_id,

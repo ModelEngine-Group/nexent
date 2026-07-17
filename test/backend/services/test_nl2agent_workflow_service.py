@@ -182,7 +182,7 @@ async def test_dual_online_cards_accept_registration_and_receipts_in_either_orde
         "skill": ("online_skill", "web_skill"),
     }
     for resource_type, (batch_id, _card_type) in batches.items():
-        nl2agent_session_catalog.record_trusted_search_batch(
+        nl2agent_session_catalog._record_trusted_search_batch(
             "tenant_1",
             202,
             recommendation_batch_id=batch_id,
@@ -881,7 +881,7 @@ async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
         await asyncio.Event().wait()
 
     dependencies = MagicMock()
-    dependencies.renew_installation_lock.return_value = False
+    dependencies.lock.renew_installation_lock.return_value = False
     monkeypatch.setattr(nl2agent_mcp_service, "_LOCK_HEARTBEAT_INTERVAL_SECONDS", 0)
     monkeypatch.setattr(
         nl2agent_mcp_service,

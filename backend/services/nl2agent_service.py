@@ -119,7 +119,11 @@ from services.nl2agent_catalog_service import (
 )
 from services.nl2agent_mcp_service import (
     McpBindingDependencies,
+    McpDiscoveryDependencies,
     McpInstallationDependencies,
+    McpLockDependencies,
+    McpProviderDependencies,
+    McpSessionDependencies,
     bind_mcp_tools as bind_mcp_tools_service,
     install_recommended_mcp as install_recommended_mcp_service,
     skip_mcp_tool_binding as skip_mcp_tool_binding_service,
@@ -129,7 +133,13 @@ from services.nl2agent_mcp_url_security import (
     validate_remote_mcp_url as validate_nl2agent_remote_mcp_url,
 )
 from services.nl2agent_publication_service import (
+    PublicationDraftDependencies,
     PublicationDependencies,
+    PublicationModelDependencies,
+    PublicationPersistenceDependencies,
+    PublicationProposal,
+    PublicationResourceDependencies,
+    PublicationWorkflowDependencies,
     publish_agent,
 )
 from services.nl2agent_resource_service import (
@@ -477,24 +487,32 @@ def _raise_for_invalid_resource_references(
 def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
     """Build MCP installation dependencies from facade-level operations."""
     return McpInstallationDependencies(
-        get_owned_draft=_owned_draft_reader(user_id),
-        get_session_catalogs=get_nl2agent_session_catalogs,
-        normalize_candidate=normalize_mcp_candidate,
-        acquire_installation_lock=acquire_mcp_installation_lock,
-        renew_installation_lock=renew_mcp_installation_lock,
-        release_installation_lock=release_mcp_installation_lock,
-        update_mcp_workflow=update_mcp_workflow,
-        get_mcp_records=get_mcp_records_by_tenant,
-        add_remote_mcp=add_mcp_service,
-        add_container_mcp=add_container_mcp_service,
-        update_remote_mcp=update_mcp_service,
-        reconfigure_container_mcp=reconfigure_container_mcp_service,
-        get_mcp_record=get_mcp_record_by_id_and_tenant,
-        discover_tools=get_tool_from_remote_mcp_server,
-        upsert_discovered_tools=upsert_discovered_mcp_tools,
-        recommendation_id=_recommendation_id,
-        validate_remote_url=validate_nl2agent_remote_mcp_url,
-        build_httpx_client_factory=build_pinned_httpx_client_factory,
+        session=McpSessionDependencies(
+            get_owned_draft=_owned_draft_reader(user_id),
+            get_session_catalogs=get_nl2agent_session_catalogs,
+            normalize_candidate=normalize_mcp_candidate,
+            update_mcp_workflow=update_mcp_workflow,
+            recommendation_id=_recommendation_id,
+        ),
+        lock=McpLockDependencies(
+            acquire_installation_lock=acquire_mcp_installation_lock,
+            renew_installation_lock=renew_mcp_installation_lock,
+            release_installation_lock=release_mcp_installation_lock,
+        ),
+        provider=McpProviderDependencies(
+            get_mcp_records=get_mcp_records_by_tenant,
+            add_remote_mcp=add_mcp_service,
+            add_container_mcp=add_container_mcp_service,
+            update_remote_mcp=update_mcp_service,
+            reconfigure_container_mcp=reconfigure_container_mcp_service,
+            get_mcp_record=get_mcp_record_by_id_and_tenant,
+        ),
+        discovery=McpDiscoveryDependencies(
+            discover_tools=get_tool_from_remote_mcp_server,
+            upsert_discovered_tools=upsert_discovered_mcp_tools,
+            validate_remote_url=validate_nl2agent_remote_mcp_url,
+            build_httpx_client_factory=build_pinned_httpx_client_factory,
+        ),
     )
 
 
@@ -902,41 +920,53 @@ async def finalize_agent(
     """Delegate draft publication to the dedicated publication service."""
     _require_workflow_action(agent_id, tenant_id, user_id, "publish_agent")
     dependencies = PublicationDependencies(
-        validate_draft_agent_id=_validate_draft_agent_id,
-        get_owned_draft=_owned_draft_reader(user_id),
-        normalize_model_ids=normalize_model_ids,
-        validate_available_llm_ids=_validate_available_llm_ids,
-        assert_requirements_confirmed=assert_requirements_confirmed,
-        assert_resource_review_complete=assert_resource_review_complete,
-        assert_mcp_workflows_resolved=assert_mcp_workflows_resolved,
-        assert_online_configuration_complete=assert_online_configuration_complete,
-        assert_identity_confirmed=assert_identity_confirmed,
-        query_enabled_tools=query_all_enabled_tool_instances,
-        query_enabled_skills=query_enabled_skill_instances,
-        resolve_resource_summaries=_resolve_resource_summaries,
-        raise_for_invalid_references=_raise_for_invalid_resource_references,
-        generate_internal_name=_generate_internal_agent_name,
-        get_db_session=get_db_session,
-        update_agent=update_agent,
-        complete_session=update_nl2agent_session_status,
+        draft=PublicationDraftDependencies(
+            validate_draft_agent_id=_validate_draft_agent_id,
+            get_owned_draft=_owned_draft_reader(user_id),
+            generate_internal_name=_generate_internal_agent_name,
+        ),
+        workflow=PublicationWorkflowDependencies(
+            assert_requirements_confirmed=assert_requirements_confirmed,
+            assert_resource_review_complete=assert_resource_review_complete,
+            assert_mcp_workflows_resolved=assert_mcp_workflows_resolved,
+            assert_online_configuration_complete=assert_online_configuration_complete,
+            assert_identity_confirmed=assert_identity_confirmed,
+        ),
+        models=PublicationModelDependencies(
+            normalize_model_ids=normalize_model_ids,
+            validate_available_llm_ids=_validate_available_llm_ids,
+        ),
+        resources=PublicationResourceDependencies(
+            query_enabled_tools=query_all_enabled_tool_instances,
+            query_enabled_skills=query_enabled_skill_instances,
+            resolve_resource_summaries=_resolve_resource_summaries,
+            raise_for_invalid_references=_raise_for_invalid_resource_references,
+        ),
+        persistence=PublicationPersistenceDependencies(
+            get_db_session=get_db_session,
+            update_agent=update_agent,
+            complete_session=update_nl2agent_session_status,
+        ),
     )
     return await publish_agent(
         dependencies,
         agent_id=agent_id,
         user_id=user_id,
         tenant_id=tenant_id,
-        description=description,
-        business_description=business_description,
-        duty_prompt=duty_prompt,
-        constraint_prompt=constraint_prompt,
-        few_shots_prompt=few_shots_prompt,
-        greeting_message=greeting_message,
-        example_questions=example_questions,
-        max_steps=max_steps,
-        requested_output_tokens=requested_output_tokens,
-        provide_run_summary=provide_run_summary,
-        verification_config=verification_config,
-        enable_context_manager=enable_context_manager,
+        proposal=PublicationProposal(
+            description=description,
+            business_description=business_description,
+            duty_prompt=duty_prompt,
+            constraint_prompt=constraint_prompt,
+            few_shots_prompt=few_shots_prompt,
+            greeting_message=greeting_message,
+            example_questions=example_questions,
+            max_steps=max_steps,
+            requested_output_tokens=requested_output_tokens,
+            provide_run_summary=provide_run_summary,
+            verification_config=verification_config,
+            enable_context_manager=enable_context_manager,
+        ),
     )
 
 

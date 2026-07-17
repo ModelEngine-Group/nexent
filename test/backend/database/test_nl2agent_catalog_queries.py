@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from backend.database import skill_db, tool_db
+from database import skill_db, tool_db
 
 
 @contextmanager

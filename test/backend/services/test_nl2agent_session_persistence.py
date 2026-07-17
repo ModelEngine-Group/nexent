@@ -17,7 +17,10 @@ from services.nl2agent_session_service import (
     SessionInitializationDependencies,
     start_session,
 )
-from services.nl2agent_publication_service import _persist_agent_update
+from services.nl2agent_publication_service import (
+    PublicationPersistenceDependencies,
+    _persist_agent_update,
+)
 from consts.exceptions import Nl2AgentOperationError
 from utils.nl2agent_catalog_snapshot import catalog_snapshot_id
 
@@ -389,9 +392,11 @@ def test_finalize_updates_agent_and_session_lifecycle_in_one_transaction():
     update_agent = MagicMock()
     complete_session = MagicMock(return_value=True)
     dependencies = SimpleNamespace(
-        get_db_session=MagicMock(return_value=_database_transaction(db_session)),
-        update_agent=update_agent,
-        complete_session=complete_session,
+        persistence=PublicationPersistenceDependencies(
+            get_db_session=MagicMock(return_value=_database_transaction(db_session)),
+            update_agent=update_agent,
+            complete_session=complete_session,
+        )
     )
 
     _persist_agent_update(

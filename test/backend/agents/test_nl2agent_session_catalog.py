@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from unittest.mock import MagicMock
 
 import fakeredis
@@ -22,9 +23,53 @@ def fake_redis(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
-    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=None))
-    monkeypatch.setattr(session_store, "persist_workflow_state", MagicMock(return_value=True))
-    catalog_module.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
+    initial_state = catalog_module.initialize_nl2agent_session_state(
+        "tenant_1", 202, conversation_id=902
+    )
+    durable_snapshot = {
+        "tenant_id": "tenant_1",
+        "draft_agent_id": 202,
+        "status": "active",
+        "workflow_revision": 0,
+        "catalog_snapshot_id": "test-catalog",
+        "workflow_state": initial_state,
+        "catalog_snapshot": _catalogs(),
+    }
+
+    def load_durable_session(tenant_id, draft_agent_id):
+        if tenant_id != "tenant_1" or draft_agent_id != 202:
+            return None
+        return deepcopy(durable_snapshot)
+
+    def persist_workflow_state(
+        tenant_id, draft_agent_id, expected_revision, workflow_state
+    ):
+        if tenant_id != "tenant_1" or draft_agent_id != 202:
+            return False
+        if durable_snapshot["workflow_revision"] != expected_revision:
+            return False
+        durable_snapshot["workflow_revision"] = workflow_state["revision"]
+        durable_snapshot["workflow_state"] = deepcopy(workflow_state)
+        return True
+
+    monkeypatch.setattr(
+        session_store, "load_durable_session", MagicMock(side_effect=load_durable_session)
+    )
+    monkeypatch.setattr(
+        session_store,
+        "persist_workflow_state",
+        MagicMock(side_effect=persist_workflow_state),
+    )
+    cache_catalogs = catalog_module.set_nl2agent_session_catalogs
+
+    def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
+        if tenant_id == "tenant_1" and draft_agent_id == 202:
+            durable_snapshot["catalog_snapshot"] = deepcopy(catalogs)
+        return cache_catalogs(tenant_id, draft_agent_id, catalogs)
+
+    monkeypatch.setattr(
+        catalog_module, "set_nl2agent_session_catalogs", set_session_catalogs
+    )
     return client
 
 
@@ -39,7 +84,7 @@ def _catalogs():
 
 
 def _register_local_batch(batch_id, tool_ids, skill_ids):
-    catalog_module.record_trusted_search_batch(
+    catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id=batch_id,
@@ -63,7 +108,7 @@ def _complete_local_apply(batch_id, tool_ids, skill_ids):
 
 
 def _register_online_batch(batch_id, resource_type, item_keys):
-    catalog_module.record_trusted_search_batch(
+    catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id=batch_id,
@@ -159,7 +204,10 @@ def test_search_projection_hides_installed_mcp_and_marks_installed_skill(
     assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == catalogs
 
 
-def test_missing_catalogs_raise_contextual_error(fake_redis, caplog):
+def test_missing_catalogs_raise_contextual_error(fake_redis, caplog, monkeypatch):
+    monkeypatch.setattr(
+        session_store, "load_durable_session", MagicMock(return_value=None)
+    )
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
         match="tenant=tenant_1, draft_agent_id=202",
@@ -267,7 +315,7 @@ def test_recommendation_registration_requires_exact_trusted_search(fake_redis):
             "tenant_1", 202, "forged", [], []
         )
 
-    catalog_module.record_trusted_search_batch(
+    catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="local_1",
@@ -285,14 +333,14 @@ def test_recommendation_registration_requires_exact_trusted_search(fake_redis):
 
 
 def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
-    first = catalog_module.record_trusted_search_batch(
+    first = catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="mcp_1",
         resource_type="mcp",
         item_keys=["registry:b", "registry:a"],
     )
-    second = catalog_module.record_trusted_search_batch(
+    second = catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="mcp_1",
@@ -305,7 +353,7 @@ def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
         catalog_module.Nl2AgentSessionCatalogError,
         match="contents changed",
     ):
-        catalog_module.record_trusted_search_batch(
+        catalog_module._record_trusted_search_batch(
             "tenant_1",
             202,
             recommendation_batch_id="mcp_1",
@@ -590,15 +638,18 @@ def test_online_completion_requires_both_catalogs(fake_redis):
         catalog_module.assert_online_configuration_complete("tenant_1", 202)
 
 
-def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
-    fake_redis.set(
-        catalog_module._state_key("tenant_1", 202),
-        json.dumps(
-            {
-                "recommendation_batches": {},
-                "online_recommendation_batches": {"online_bad": {"resource_type": "mcp", "item_keys": "not-a-list"}},
-            }
-        ),
+def test_malformed_online_state_is_rejected_with_context(
+    fake_redis, caplog, monkeypatch
+):
+    snapshot = session_store.load_durable_session("tenant_1", 202)
+    snapshot["workflow_state"] = {
+        "recommendation_batches": {},
+        "online_recommendation_batches": {
+            "online_bad": {"resource_type": "mcp", "item_keys": "not-a-list"}
+        },
+    }
+    monkeypatch.setattr(
+        session_store, "load_durable_session", MagicMock(return_value=snapshot)
     )
 
     with pytest.raises(
@@ -609,10 +660,35 @@ def test_malformed_online_state_is_rejected_with_context(fake_redis, caplog):
     assert "Malformed NL2AGENT session state" in caplog.text
 
 
-def test_session_state_is_isolated_by_tenant_and_draft(fake_redis):
+def test_session_state_is_isolated_by_tenant_and_draft(fake_redis, monkeypatch):
     _register_local_batch("batch_1", [1], [])
-    catalog_module.initialize_nl2agent_session_state("tenant_1", 303, 903)
-    catalog_module.initialize_nl2agent_session_state("tenant_2", 202, 904)
+    primary = session_store.load_durable_session("tenant_1", 202)
+    snapshots = {
+        ("tenant_1", 202): primary,
+        ("tenant_1", 303): {
+            **primary,
+            "draft_agent_id": 303,
+            "workflow_state": catalog_module.initialize_nl2agent_session_state(
+                "tenant_1", 303, 903
+            ),
+        },
+        ("tenant_2", 202): {
+            **primary,
+            "tenant_id": "tenant_2",
+            "workflow_state": catalog_module.initialize_nl2agent_session_state(
+                "tenant_2", 202, 904
+            ),
+        },
+    }
+    monkeypatch.setattr(
+        session_store,
+        "load_durable_session",
+        MagicMock(
+            side_effect=lambda tenant, draft: deepcopy(
+                snapshots.get((tenant, draft))
+            )
+        ),
+    )
     assert not catalog_module.get_nl2agent_session_state("tenant_1", 303)["recommendation_batches"]
     assert not catalog_module.get_nl2agent_session_state("tenant_2", 202)["recommendation_batches"]
 
@@ -849,14 +925,14 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
 
 
 def test_concurrent_online_batch_registration_preserves_both_updates(fake_redis):
-    catalog_module.record_trusted_search_batch(
+    catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="online_mcp",
         resource_type="mcp",
         item_keys=["registry:one"],
     )
-    catalog_module.record_trusted_search_batch(
+    catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
         recommendation_batch_id="online_skill",
@@ -919,13 +995,15 @@ def test_workflow_summary_is_authoritative(fake_redis):
     assert catalog_module.get_workflow_summary("tenant_1", 202)["current_stage"] == "model_selection"
 
 
-def test_missing_or_old_workflow_state_is_rejected(fake_redis):
+def test_missing_or_old_workflow_state_is_rejected(fake_redis, monkeypatch):
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="missing"):
         catalog_module.get_nl2agent_session_state("tenant_1", 999)
 
-    fake_redis.set(
-        catalog_module._state_key("tenant_1", 303),
-        json.dumps({"schema_version": 1}),
+    snapshot = session_store.load_durable_session("tenant_1", 202)
+    snapshot["draft_agent_id"] = 303
+    snapshot["workflow_state"] = {"schema_version": 1}
+    monkeypatch.setattr(
+        session_store, "load_durable_session", MagicMock(return_value=snapshot)
     )
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="Malformed"):
         catalog_module.get_nl2agent_session_state("tenant_1", 303)
