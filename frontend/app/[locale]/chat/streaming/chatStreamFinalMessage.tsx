@@ -47,7 +47,10 @@ import { AttachmentItem } from "@/types/chat";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatAttachment } from "../components/chatAttachment";
 import { AlertTriangle } from "lucide-react";
-import { validateNl2AgentCards } from "@/components/nl2agent/cardValidation";
+import {
+  validateNl2AgentCards,
+  type Nl2AgentCardRegistrationReceipt,
+} from "@/components/nl2agent/cardValidation";
 import {
   getNl2AgentSessionState,
   reportNl2AgentCardDelivery,
@@ -135,10 +138,7 @@ function ChatStreamFinalMessageInner({
   });
 
   const handleCardRegistered = useCallback(
-    async (
-      cardType: Parameters<typeof reportNl2AgentCardDelivery>[1]["card_type"],
-      cardKey?: string
-    ) => {
+    async ({ cardType, cardKey }: Nl2AgentCardRegistrationReceipt) => {
       if (
         !workflowActive ||
         readOnly ||

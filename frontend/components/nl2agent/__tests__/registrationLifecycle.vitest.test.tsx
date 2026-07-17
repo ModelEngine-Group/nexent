@@ -58,6 +58,7 @@ describe("online recommendation registration lifecycle", () => {
   });
 
   it("omits the card agent ID from the requirements registration body", async () => {
+    const onRegistered = vi.fn(async () => undefined);
     render(
       <Nl2AgentWorkflowProvider
         enabled
@@ -74,6 +75,7 @@ describe("online recommendation registration lifecycle", () => {
             expected_output: "PPT files",
             key_constraints: "Preserve source facts",
           }}
+          onRegistered={onRegistered}
         />
       </Nl2AgentWorkflowProvider>
     );
@@ -87,6 +89,9 @@ describe("online recommendation registration lifecycle", () => {
       primary_input: "DOCX files",
       expected_output: "PPT files",
       key_constraints: "Preserve source facts",
+    });
+    expect(onRegistered).toHaveBeenCalledWith({
+      cardType: "requirements_summary",
     });
   });
 

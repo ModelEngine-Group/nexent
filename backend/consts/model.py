@@ -519,7 +519,14 @@ class Nl2AgentCardDeliveryRequest(_StrictNl2AgentRequest):
         "final_review",
     ]
     status: Literal["rendered", "failed"]
-    card_key: Optional[str] = Field(default=None, max_length=300)
+    card_key: Optional[str] = Field(
+        default=None,
+        max_length=300,
+        description=(
+            "The recommendation_batch_id for local or online resource cards; "
+            "omit for all other card types."
+        ),
+    )
     reason: Optional[
         Literal[
             "truncated_fence",

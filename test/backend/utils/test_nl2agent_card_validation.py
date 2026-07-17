@@ -14,6 +14,19 @@ def _fence(language: str, payload: object) -> str:
 @pytest.mark.parametrize(
     ("language", "card_type", "payload", "card_key"),
     [
+        (
+            "nl2agent-requirements-summary",
+            "requirements_summary",
+            {
+                "agent_id": 202,
+                "goal": "Build presentations",
+                "audience_or_scenario": "Office users",
+                "primary_input": "DOCX files",
+                "expected_output": "PPT files",
+                "key_constraints": "Preserve source facts",
+            },
+            None,
+        ),
         ("nl2agent-model-selection", "model_selection", {"agent_id": 202}, None),
         (
             "nl2agent-local-resources",
@@ -67,6 +80,21 @@ def test_message_contains_matching_schema_valid_card(
             _fence("nl2agent-web-mcps", {"recommendation_batch_id": "other", "items": []}),
             "web_mcp",
             "expected",
+        ),
+        (
+            _fence(
+                "nl2agent-requirements-summary",
+                {
+                    "agent_id": 202,
+                    "goal": "Build presentations",
+                    "audience_or_scenario": "Office users",
+                    "primary_input": "DOCX files",
+                    "expected_output": "PPT files",
+                    "key_constraints": "Preserve source facts",
+                },
+            ),
+            "requirements_summary",
+            "a" * 64,
         ),
     ],
 )

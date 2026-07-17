@@ -17,7 +17,7 @@ import {
   type Nl2AgentRequirementsSummary,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import type { Nl2AgentCardType } from "./cardValidation";
+import type { Nl2AgentCardRegistrationHandler } from "./cardValidation";
 import {
   toRequirementsSummaryRequest,
   type RequirementsSummaryCardPayload,
@@ -27,10 +27,7 @@ import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 export interface RequirementsSummaryCardProps {
   agentId: number;
   summary: RequirementsSummaryCardPayload;
-  onRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>;
+  onRegistered?: Nl2AgentCardRegistrationHandler;
   registrationEnabled?: boolean;
 }
 
@@ -106,7 +103,7 @@ export const RequirementsSummaryCard: React.FC<
               });
               ignoreNextStateVersionRef.current = notify;
               setInputBlocked(blockerKey, false);
-              await onRegistered?.("requirements_summary", result.fingerprint);
+              await onRegistered?.({ cardType: "requirements_summary" });
             },
             notifyStateChanged: notify,
           }

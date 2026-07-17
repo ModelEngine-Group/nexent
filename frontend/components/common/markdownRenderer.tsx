@@ -22,7 +22,7 @@ import {
   tryRenderNl2AgentCard,
 } from "@/components/nl2agent";
 import type {
-  Nl2AgentCardType,
+  Nl2AgentCardRegistrationHandler,
   ValidatedNl2AgentCard,
 } from "@/components/nl2agent/cardValidation";
 import {
@@ -58,10 +58,7 @@ interface MarkdownRendererProps {
   nl2AgentDraftAgentId?: number | null;
   /** Only a completed final assistant message may mount interactive cards. */
   nl2AgentCardRenderMode?: "placeholder" | "readonly" | "interactive";
-  onNl2AgentCardRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>;
+  onNl2AgentCardRegistered?: Nl2AgentCardRegistrationHandler;
   nl2AgentCardRegistrationEnabled?: boolean;
   /** Parsed once by the final-message boundary and reused during rendering. */
   nl2AgentCards?: readonly ValidatedNl2AgentCard[];

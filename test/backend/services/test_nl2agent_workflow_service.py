@@ -106,6 +106,69 @@ async def test_card_delivery_accepts_valid_card_in_persisted_message(monkeypatch
     assert result["message_id"] == 10
 
 
+async def test_requirements_card_delivery_omits_fingerprint_card_key(monkeypatch):
+    review = nl2agent_session_catalog.register_requirements_summary(
+        "tenant_1", 202, _REQUIREMENTS_SUMMARY
+    )
+    message_content = (
+        "```nl2agent-requirements-summary\n"
+        + json.dumps({"agent_id": 202, **_REQUIREMENTS_SUMMARY})
+        + "\n```"
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 10,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": message_content,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=10),
+    )
+
+    first = await nl2agent_service.report_card_delivery(
+        agent_id=202,
+        message_id=10,
+        card_type="requirements_summary",
+        status="rendered",
+        card_key=None,
+        reason=None,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+    duplicate = await nl2agent_service.report_card_delivery(
+        agent_id=202,
+        message_id=10,
+        card_type="requirements_summary",
+        status="rendered",
+        card_key=None,
+        reason=None,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert review["fingerprint"]
+    assert first == duplicate
+    assert first["card_key"] is None
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["card_delivery"]["requirements_summary"]["card_key"] is None
+
+
 async def test_card_delivery_accepts_valid_card_from_completed_message_units(
     monkeypatch,
 ):
@@ -181,6 +244,7 @@ async def test_card_delivery_accepts_valid_card_from_completed_message_units(
 async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
     monkeypatch,
     message_content,
+    caplog,
 ):
     _confirm_requirements()
     monkeypatch.setattr(
@@ -239,6 +303,7 @@ async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
 
     state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
     assert "model_selection" not in state["card_delivery"]
+    assert "stale_reason=persisted_card_mismatch" in caplog.text
 
 
 @pytest.mark.asyncio

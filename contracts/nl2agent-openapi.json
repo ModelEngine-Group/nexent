@@ -274,6 +274,7 @@
                 "type": "null"
               }
             ],
+            "description": "The recommendation_batch_id for local or online resource cards; omit for all other card types.",
             "title": "Card Key"
           },
           "card_type": {

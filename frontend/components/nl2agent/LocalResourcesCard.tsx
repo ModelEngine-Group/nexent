@@ -21,7 +21,7 @@ import {
 } from "@/services/nl2agentService";
 import type { LocalToolParameterSchema } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import type { Nl2AgentCardType } from "./cardValidation";
+import type { Nl2AgentCardRegistrationHandler } from "./cardValidation";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface LocalResourceItem {
@@ -41,10 +41,7 @@ export interface LocalResourcesCardProps {
   recommendationBatchId: string;
   tools: LocalResourceItem[];
   skills: LocalResourceItem[];
-  onRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>;
+  onRegistered?: Nl2AgentCardRegistrationHandler;
   registrationEnabled?: boolean;
 }
 
@@ -115,7 +112,10 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         {
           onSuccess: async (result) => {
             setToolParameterSchemas(result.tool_parameter_schemas ?? {});
-            await onRegistered?.("local_resources", recommendationBatchId);
+            await onRegistered?.({
+              cardType: "local_resources",
+              cardKey: recommendationBatchId,
+            });
           },
           notifyStateChanged: true,
           blockInput: true,

@@ -17,7 +17,7 @@ import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import {
   parseNl2AgentCard,
-  type Nl2AgentCardType,
+  type Nl2AgentCardRegistrationHandler,
   type ValidatedNl2AgentCard,
 } from "./cardValidation";
 import {
@@ -31,10 +31,7 @@ export const OnlineRecommendationGroup: React.FC<{
   resourceType: "mcp" | "skill";
   itemKeys: string[];
   children: React.ReactNode;
-  onRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>;
+  onRegistered?: Nl2AgentCardRegistrationHandler;
   registrationEnabled?: boolean;
 }> = ({
   agentId,
@@ -73,10 +70,10 @@ export const OnlineRecommendationGroup: React.FC<{
           }),
         {
           onSuccess: async () => {
-            await onRegistered?.(
-              resourceType === "mcp" ? "web_mcp" : "web_skill",
-              recommendationBatchId
-            );
+            await onRegistered?.({
+              cardType: resourceType === "mcp" ? "web_mcp" : "web_skill",
+              cardKey: recommendationBatchId,
+            });
             setRegistered(true);
           },
           notifyStateChanged: true,
@@ -151,10 +148,7 @@ export interface Nl2AgentCardRendererProps {
   language: string;
   content: string;
   trustedDraftAgentId?: number | null;
-  onRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>;
+  onRegistered?: Nl2AgentCardRegistrationHandler;
   registrationEnabled?: boolean;
 }
 
@@ -193,10 +187,7 @@ export const tryRenderNl2AgentCard = (
   language: string,
   content: string,
   trustedDraftAgentId?: number | null,
-  onRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>,
+  onRegistered?: Nl2AgentCardRegistrationHandler,
   registrationEnabled = false
 ): React.ReactNode | null => {
   const normalizedLanguage = language?.trim().toLowerCase();
@@ -252,10 +243,7 @@ export const tryRenderNl2AgentCard = (
 /** Render an already parsed and schema-validated card AST node. */
 export const renderValidatedNl2AgentCard = (
   card: ValidatedNl2AgentCard,
-  onRegistered?: (
-    cardType: Nl2AgentCardType,
-    cardKey?: string
-  ) => void | Promise<void>,
+  onRegistered?: Nl2AgentCardRegistrationHandler,
   registrationEnabled = false
 ): React.ReactNode => {
   const agentId = card.agentId;

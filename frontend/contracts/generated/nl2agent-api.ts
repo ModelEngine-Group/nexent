@@ -515,7 +515,10 @@ export interface components {
      * @description Report final-message rendering success or failure for one NL2AGENT card.
      */
     Nl2AgentCardDeliveryRequest: {
-      /** Card Key */
+      /**
+       * Card Key
+       * @description The recommendation_batch_id for local or online resource cards; omit for all other card types.
+       */
       card_key?: string | null;
       /**
        * Card Type

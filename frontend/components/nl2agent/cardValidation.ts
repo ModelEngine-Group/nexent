@@ -22,6 +22,17 @@ export type Nl2AgentCardType =
   | "agent_identity"
   | "final_review";
 
+export type Nl2AgentCardRegistrationReceipt =
+  | { cardType: "requirements_summary"; cardKey?: never }
+  | {
+      cardType: "local_resources" | "web_mcp" | "web_skill";
+      cardKey: string;
+    };
+
+export type Nl2AgentCardRegistrationHandler = (
+  receipt: Nl2AgentCardRegistrationReceipt
+) => void | Promise<void>;
+
 export type Nl2AgentCardFailureReason =
   "truncated_fence" | "invalid_json" | "invalid_schema" | "missing_card";
 

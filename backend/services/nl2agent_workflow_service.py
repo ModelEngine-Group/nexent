@@ -27,6 +27,39 @@ def _matches_registered_online_card(
     return batch.get("resource_type") == expected_resource_type
 
 
+def _raise_stale_card(
+    *,
+    reason: str,
+    agent_id: int,
+    message_id: int,
+    card_type: str,
+    status: str,
+    card_key: Optional[str],
+    message: Optional[Dict[str, Any]] = None,
+    latest_message_id: Optional[int] = None,
+    expected_card_types: Optional[List[str]] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    """Log a safe rejection reason while preserving the public stale-card error."""
+    logger.warning(
+        "Rejected NL2AGENT card delivery: stale_reason=%s agent_id=%s "
+        "message_id=%s card_type=%s status=%s has_card_key=%s "
+        "latest_message_id=%s message_status=%s message_conversation_id=%s "
+        "expected_card_types=%s",
+        reason,
+        agent_id,
+        message_id,
+        card_type,
+        status,
+        bool(card_key),
+        latest_message_id,
+        message.get("status") if message else None,
+        message.get("conversation_id") if message else None,
+        expected_card_types,
+    )
+    raise Nl2AgentStaleCardError(error_message or "The NL2AGENT card delivery receipt is stale.")
+
+
 @dataclass(frozen=True)
 class WorkflowDependencies:
     """Persistence and evaluator operations consumed by workflow actions."""
@@ -107,14 +140,28 @@ async def report_card_delivery(
         conversation_id,
         user_id=user_id,
     )
-    if (
-        not message
-        or int(message.get("conversation_id") or 0) != conversation_id
-        or message.get("message_role") != "assistant"
-        or message.get("status") != "completed"
-        or latest_message_id != message_id
-    ):
-        raise Nl2AgentStaleCardError()
+    stale_reason = None
+    if not message:
+        stale_reason = "message_missing"
+    elif int(message.get("conversation_id") or 0) != conversation_id:
+        stale_reason = "conversation_mismatch"
+    elif message.get("message_role") != "assistant":
+        stale_reason = "role_mismatch"
+    elif message.get("status") != "completed":
+        stale_reason = "message_not_completed"
+    elif latest_message_id != message_id:
+        stale_reason = "message_not_latest"
+    if stale_reason:
+        _raise_stale_card(
+            reason=stale_reason,
+            agent_id=agent_id,
+            message_id=message_id,
+            card_type=card_type,
+            status=status,
+            card_key=card_key,
+            message=message,
+            latest_message_id=latest_message_id,
+        )
     if status == "rendered":
         parent_content = str(message.get("message_content") or "")
         contains_valid_card = dependencies.message_contains_valid_card(
@@ -136,8 +183,18 @@ async def report_card_delivery(
                     card_type,
                 )
         if not contains_valid_card:
-            raise Nl2AgentStaleCardError(
-                "The persisted assistant message does not contain the reported valid NL2AGENT card."
+            _raise_stale_card(
+                reason="persisted_card_mismatch",
+                agent_id=agent_id,
+                message_id=message_id,
+                card_type=card_type,
+                status=status,
+                card_key=card_key,
+                message=message,
+                latest_message_id=latest_message_id,
+                error_message=(
+                    "The persisted assistant message does not contain the reported valid NL2AGENT card."
+                ),
             )
 
     summary = dependencies.summarize_workflow_state(state)
@@ -151,7 +208,17 @@ async def report_card_delivery(
         if not is_idempotent_receipt and not _matches_registered_online_card(
             state, card_type, card_key
         ):
-            raise Nl2AgentStaleCardError()
+            _raise_stale_card(
+                reason="card_not_expected",
+                agent_id=agent_id,
+                message_id=message_id,
+                card_type=card_type,
+                status=status,
+                card_key=card_key,
+                message=message,
+                latest_message_id=latest_message_id,
+                expected_card_types=list(summary["expected_card_types"]),
+            )
 
     delivery = dependencies.record_card_delivery(
         tenant_id,
