@@ -56,6 +56,15 @@ def installation_key(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def installation_lock_key(
+    draft_agent_id: int,
+    recommendation_id: str,
+) -> str:
+    """Create one mutex scope shared by every option for a recommendation."""
+    payload = f"{draft_agent_id}:{recommendation_id}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _record_installation_key(record: Dict[str, Any]) -> Optional[str]:
     registry_json = record.get("registry_json")
     if isinstance(registry_json, str):
@@ -96,10 +105,11 @@ async def install_recommended_mcp(
 ) -> Dict[str, Any]:
     """Install an MCP and persist redacted success or failure state."""
     stable_key = installation_key(agent_id, recommendation_id, option_id)
+    lock_key = installation_lock_key(agent_id, recommendation_id)
     lock_token = dependencies.acquire_installation_lock(
         tenant_id,
         agent_id,
-        stable_key,
+        lock_key,
     )
     if not lock_token:
         raise AgentRunException(
@@ -115,6 +125,7 @@ async def install_recommended_mcp(
             tenant_id=tenant_id,
             user_id=user_id,
             stable_key=stable_key,
+            lock_key=lock_key,
             lock_token=lock_token,
         )
     except Exception as exc:
@@ -142,7 +153,7 @@ async def install_recommended_mcp(
         dependencies.release_installation_lock(
             tenant_id,
             agent_id,
-            stable_key,
+            lock_key,
             lock_token,
         )
 
@@ -157,6 +168,7 @@ async def _perform_with_lock_heartbeat(
     tenant_id: str,
     user_id: str,
     stable_key: str,
+    lock_key: str,
     lock_token: str,
 ) -> Dict[str, Any]:
     """Run installation while renewing its ownership lease."""
@@ -165,7 +177,7 @@ async def _perform_with_lock_heartbeat(
         while True:
             await asyncio.sleep(_LOCK_HEARTBEAT_INTERVAL_SECONDS)
             if not dependencies.renew_installation_lock(
-                tenant_id, agent_id, stable_key, lock_token
+                tenant_id, agent_id, lock_key, lock_token
             ):
                 raise AgentRunException(
                     "MCP installation lock ownership was lost. Retry installation."

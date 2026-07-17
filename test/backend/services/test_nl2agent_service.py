@@ -1161,6 +1161,37 @@ def test_mcp_installation_lock_renews_only_for_its_owner():
     )
 
 
+def test_mcp_options_share_one_recommendation_installation_lock():
+    remote_operation = nl2agent_mcp_service.installation_key(
+        202, "registry:github", "remote-0"
+    )
+    package_operation = nl2agent_mcp_service.installation_key(
+        202, "registry:github", "package-0"
+    )
+    lock_key = nl2agent_mcp_service.installation_lock_key(
+        202, "registry:github"
+    )
+
+    assert remote_operation != package_operation
+    token = nl2agent_session_catalog.acquire_mcp_installation_lock(
+        "tenant_1", 202, lock_key
+    )
+    assert token
+    assert (
+        nl2agent_session_catalog.acquire_mcp_installation_lock(
+            "tenant_1", 202, lock_key
+        )
+        is None
+    )
+
+    other_lock_key = nl2agent_mcp_service.installation_lock_key(
+        202, "registry:slack"
+    )
+    assert nl2agent_session_catalog.acquire_mcp_installation_lock(
+        "tenant_1", 202, other_lock_key
+    )
+
+
 def test_idempotent_state_mutation_does_not_increment_revision():
     first = nl2agent_session_catalog.record_card_delivery(
         "tenant_1",
@@ -1209,9 +1240,10 @@ async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
             option_id="remote",
             config_values={},
             tenant_id="tenant_1",
-            user_id="user_1",
-            stable_key="install-key",
-            lock_token="token",
+                user_id="user_1",
+                stable_key="install-key",
+                lock_key="recommendation-lock-key",
+                lock_token="token",
         )
 
 
