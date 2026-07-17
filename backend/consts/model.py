@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, Any, List, Dict, Literal
+from typing import Annotated, Optional, Any, List, Dict, Literal
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
@@ -452,21 +452,27 @@ class _StrictNl2AgentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+Nl2AgentPositiveInt = Annotated[int, Field(strict=True, ge=1)]
+Nl2AgentItemKey = Annotated[str, Field(min_length=1, max_length=300)]
+
+
 class Nl2AgentApplyLocalResourcesRequest(_StrictNl2AgentRequest):
     """Request body for bulk-binding local tools and skills to a draft agent."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
-    tool_config_values: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
+    tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
+    skill_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
+    tool_config_values: Dict[Nl2AgentPositiveInt, Dict[str, Any]] = Field(
+        default_factory=dict, max_length=100
+    )
 
 
 class Nl2AgentRecommendationBatchRequest(_StrictNl2AgentRequest):
     """Register a local-resource recommendation card rendered by the client."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
+    tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
+    skill_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
 
 
 class Nl2AgentRecommendationSkipRequest(_StrictNl2AgentRequest):
@@ -480,7 +486,7 @@ class Nl2AgentOnlineRecommendationBatchRequest(_StrictNl2AgentRequest):
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
     resource_type: Literal["mcp", "skill"]
-    item_keys: List[str] = Field(default_factory=list, max_length=100)
+    item_keys: List[Nl2AgentItemKey] = Field(default_factory=list, max_length=100)
 
 
 class Nl2AgentRequirementsSummaryRequest(_StrictNl2AgentRequest):
@@ -502,7 +508,7 @@ class Nl2AgentRequirementsConfirmRequest(_StrictNl2AgentRequest):
 class Nl2AgentCardDeliveryRequest(_StrictNl2AgentRequest):
     """Report final-message rendering success or failure for one NL2AGENT card."""
 
-    message_id: int = Field(..., ge=1)
+    message_id: Nl2AgentPositiveInt
     card_type: Literal[
         "requirements_summary",
         "model_selection",
@@ -527,8 +533,10 @@ class Nl2AgentCardDeliveryRequest(_StrictNl2AgentRequest):
 class Nl2AgentModelSelectionRequest(_StrictNl2AgentRequest):
     """Persist the ordered LLM selection for an NL2AGENT draft."""
 
-    primary_model_id: int = Field(..., ge=1)
-    fallback_model_ids: List[int] = Field(default_factory=list, max_length=4)
+    primary_model_id: Nl2AgentPositiveInt
+    fallback_model_ids: List[Nl2AgentPositiveInt] = Field(
+        default_factory=list, max_length=4
+    )
 
 
 class Nl2AgentIdentityRequest(_StrictNl2AgentRequest):
@@ -542,20 +550,20 @@ class Nl2AgentMcpInstallRequest(_StrictNl2AgentRequest):
 
     recommendation_id: str = Field(..., min_length=1, max_length=300)
     option_id: str = Field(default="remote", min_length=1, max_length=100)
-    config_values: Dict[str, Any] = Field(default_factory=dict)
+    config_values: Dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class Nl2AgentMcpBindToolsRequest(_StrictNl2AgentRequest):
     """Bind selected tools from an installed MCP to an NL2AGENT draft."""
 
-    tool_ids: List[int] = Field(default_factory=list, max_length=100)
+    tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
 
 
 class Nl2AgentInstallWebSkillRequest(_StrictNl2AgentRequest):
     """Request body for installing a single official/web skill into the tenant."""
 
-    skill_id: Optional[int] = None
-    skill_name: Optional[str] = None
+    skill_id: Optional[Nl2AgentPositiveInt] = None
+    skill_name: Optional[str] = Field(default=None, min_length=1, max_length=300)
 
 
 class Nl2AgentFinalizeRequest(_StrictNl2AgentRequest):
@@ -573,11 +581,13 @@ class Nl2AgentFinalizeRequest(_StrictNl2AgentRequest):
 
     # UI
     greeting_message: str = Field(..., min_length=1, max_length=500)
-    example_questions: List[str] = Field(default_factory=list, max_length=6)
+    example_questions: List[Annotated[str, Field(max_length=500)]] = Field(
+        default_factory=list, max_length=6
+    )
 
     # Runtime
-    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
-    requested_output_tokens: Optional[int] = Field(default=None, ge=1)
+    max_steps: Optional[Annotated[int, Field(strict=True, ge=1, le=30)]] = None
+    requested_output_tokens: Optional[Nl2AgentPositiveInt] = None
     provide_run_summary: bool = Field(default=False)
     verification_config: Optional[AgentVerificationConfig] = Field(default=None)
     enable_context_manager: bool = Field(default=True)

@@ -90,7 +90,7 @@ from database.nl2agent_session_db import (
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
     get_skill_by_name as get_tenant_skill_by_name,
-    list_skills as list_tenant_skills,
+    list_skills_for_catalog as list_tenant_skills,
     query_enabled_skill_instances,
     query_skills_by_ids,
 )
@@ -853,6 +853,7 @@ def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependenc
         get_installed_by_name=get_tenant_skill_by_name,
         bind_skill=create_or_update_skill_by_skill_info,
         acquire_installation_lock=acquire_mcp_installation_lock,
+        renew_installation_lock=renew_mcp_installation_lock,
         release_installation_lock=release_mcp_installation_lock,
         reserve_installation=reserve_online_installation,
         complete_installation=complete_online_installation,

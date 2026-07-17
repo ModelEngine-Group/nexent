@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
@@ -256,15 +257,67 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=fake_redis)),
     )
+    initial_state = nl2agent_session_catalog.initialize_nl2agent_session_state(
+        "tenant_1", 202, conversation_id=902
+    )
+    durable_snapshot = {
+        "tenant_id": "tenant_1",
+        "user_id": "user_1",
+        "draft_agent_id": 202,
+        "conversation_id": 902,
+        "status": "active",
+        "workflow_revision": 0,
+        "catalog_snapshot_id": "test-catalog",
+        "workflow_state": initial_state,
+        "catalog_snapshot": {
+            "tool_catalog": [],
+            "skill_catalog": [],
+            "registry_results": [],
+            "community_results": [],
+            "official_skills": [],
+        },
+    }
+    cache_catalogs = nl2agent_session_catalog.set_nl2agent_session_catalogs
+
+    def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
+        if tenant_id == "tenant_1" and draft_agent_id == 202:
+            durable_snapshot["catalog_snapshot"] = deepcopy(catalogs)
+        return cache_catalogs(tenant_id, draft_agent_id, catalogs)
+
+    monkeypatch.setattr(
+        nl2agent_session_catalog,
+        "set_nl2agent_session_catalogs",
+        set_session_catalogs,
+    )
+
+    def load_durable_session(tenant_id, draft_agent_id):
+        if tenant_id != "tenant_1" or draft_agent_id != 202:
+            return None
+        return deepcopy(durable_snapshot)
+
+    def persist_workflow_state(
+        tenant_id,
+        draft_agent_id,
+        expected_revision,
+        workflow_state,
+    ):
+        if tenant_id != "tenant_1" or draft_agent_id != 202:
+            return False
+        if durable_snapshot["workflow_revision"] != expected_revision:
+            return False
+        durable_snapshot["workflow_revision"] = workflow_state["revision"]
+        durable_snapshot["workflow_state"] = deepcopy(workflow_state)
+        return True
+
     monkeypatch.setattr(
         nl2agent_session_store,
         "load_durable_session",
-        MagicMock(return_value=None),
+        MagicMock(side_effect=load_durable_session),
     )
     monkeypatch.setattr(
         nl2agent_session_store,
         "persist_workflow_state",
-        MagicMock(return_value=True),
+        MagicMock(side_effect=persist_workflow_state),
     )
     transaction = MagicMock()
     transaction.__enter__.return_value = MagicMock()
@@ -280,9 +333,6 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         MagicMock(return_value=True),
     )
     clear_nl2agent_session_catalogs()
-    nl2agent_session_catalog.initialize_nl2agent_session_state(
-        "tenant_1", 202, conversation_id=902
-    )
     monkeypatch.setattr(
         nl2agent_service,
         "_require_workflow_action",

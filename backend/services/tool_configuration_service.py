@@ -505,14 +505,22 @@ async def update_tool_list(tenant_id: str, user_id: str):
                                           tool_list=local_tools+mcp_tools+langchain_tools)
 
 
-async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
+async def list_all_tools(
+    tenant_id: str,
+    labels: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+):
     """
     List all tools for a given tenant, optionally filtered by labels (OR match).
     """
     if labels:
         tools_info = query_tools_by_labels(tenant_id, labels)
     else:
-        tools_info = query_all_tools(tenant_id)
+        tools_info = (
+            query_all_tools(tenant_id, limit=limit)
+            if limit is not None
+            else query_all_tools(tenant_id)
+        )
 
     # Get description_zh from SDK for local tools (not persisted to DB)
     local_tool_descriptions = get_local_tools_description_zh()

@@ -285,6 +285,12 @@ async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
 async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secrets(
     monkeypatch,
 ):
+    release_lock = MagicMock(side_effect=RuntimeError("redis release failed"))
+    monkeypatch.setattr(
+        nl2agent_service,
+        "release_mcp_installation_lock",
+        release_lock,
+    )
     catalogs = {
         "tool_catalog": [],
         "skill_catalog": [],
@@ -394,6 +400,7 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
         ],
     }
     assert "secret-token" not in str(result)
+    release_lock.assert_called_once()
     nl2agent_service.validate_nl2agent_remote_mcp_url.assert_called_once_with(
         "https://acme.example/eu/sse"
     )
@@ -1086,6 +1093,12 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
 
 @pytest.mark.asyncio
 async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
+    release_lock = MagicMock(side_effect=RuntimeError("redis release failed"))
+    monkeypatch.setattr(
+        nl2agent_service,
+        "release_mcp_installation_lock",
+        release_lock,
+    )
     _prepare_required_online_review()
     install_by_id = MagicMock(return_value=[107])
     bind_skill = MagicMock()
@@ -1126,6 +1139,7 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
         tenant_id="tenant_1",
         user_id="user_1",
     )
+    release_lock.assert_called_once()
 
     install_by_id.assert_called_once_with(
         skill_ids=[77], tenant_id="tenant_1", user_id="user_1"

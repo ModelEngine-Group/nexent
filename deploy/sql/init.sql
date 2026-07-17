@@ -346,6 +346,10 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_nl2agent_builder_tenant_active"
+ON nexent.ag_tenant_agent_t (tenant_id)
+WHERE name = 'nl2agent' AND delete_flag <> 'Y';
+
 -- Create a function to update the update_time column
 CREATE OR REPLACE FUNCTION update_ag_tenant_agent_update_time()
 RETURNS TRIGGER AS $$

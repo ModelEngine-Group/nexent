@@ -139,3 +139,25 @@ def test_marketplace_metadata_redaction_removes_declared_and_container_secrets()
     assert sanitized["headers"][1]["default"] is None
     environment = sanitized["configJson"]["mcpServers"]["example"]["env"]
     assert environment == {"API_TOKEN": None, "REGION": "eu"}
+
+
+@pytest.mark.asyncio
+async def test_local_catalog_queries_are_bounded_at_provider_boundary():
+    list_tools = AsyncMock(return_value=[])
+    list_skills = MagicMock(return_value=[])
+    dependencies = nl2agent_catalog_service.CatalogDependencies(
+        list_all_tools=list_tools,
+        list_tenant_skills=list_skills,
+        list_registry_mcp_services=AsyncMock(return_value={"servers": []}),
+        list_community_mcp_services=AsyncMock(return_value={"items": []}),
+        get_official_skills_with_status=MagicMock(return_value=[]),
+    )
+
+    await nl2agent_catalog_service.load_session_catalogs("tenant_1", dependencies)
+
+    list_tools.assert_awaited_once_with(
+        tenant_id="tenant_1",
+        labels=None,
+        limit=2_000,
+    )
+    list_skills.assert_called_once_with(tenant_id="tenant_1", limit=2_000)

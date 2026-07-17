@@ -236,6 +236,31 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
         return results
 
 
+def list_skills_for_catalog(tenant_id: str, limit: int) -> List[Dict[str, Any]]:
+    """Return the bounded Skill projection required by NL2AGENT catalogs."""
+    bounded_limit = max(1, min(10_000, int(limit)))
+    with get_db_session() as session:
+        skills = (
+            session.query(SkillInfo)
+            .filter(
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.delete_flag != 'Y',
+            )
+            .order_by(SkillInfo.skill_id.asc())
+            .limit(bounded_limit)
+            .all()
+        )
+        return [
+            {
+                "skill_id": skill.skill_id,
+                "name": skill.skill_name,
+                "description": skill.skill_description,
+                "tags": skill.skill_tags or [],
+            }
+            for skill in skills
+        ]
+
+
 def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     """Get skill by name within a tenant.
 
@@ -324,11 +349,6 @@ def list_global_official_skills() -> List[Dict[str, Any]]:
             SkillInfo.source == 'official'
         ).all()
         return [_to_dict(s) for s in skills]
-        if skill:
-            result = _to_dict(skill)
-            result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
-            return result
-        return None
 
 
 def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:

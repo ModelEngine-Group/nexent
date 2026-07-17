@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 WORKFLOW_SCHEMA_VERSION = 2
+MAX_WORKFLOW_COLLECTION_ITEMS = 100
+
+PositiveStrictInt = Annotated[int, Field(strict=True, ge=1)]
+BoundedItemKey = Annotated[str, Field(min_length=1, max_length=300)]
 
 CardType = Literal[
     "requirements_summary",
@@ -42,21 +46,25 @@ class RequirementsReview(BaseModel):
 
 
 class RecommendationBatch(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     status: Literal["recommendations_ready", "applying", "applied", "skipped"]
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
-    applied_tool_ids: List[int] = Field(default_factory=list)
-    applied_skill_ids: List[int] = Field(default_factory=list)
-    operation_id: Optional[str] = None
+    tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    applied_tool_ids: List[PositiveStrictInt] = Field(
+        default_factory=list, max_length=100
+    )
+    applied_skill_ids: List[PositiveStrictInt] = Field(
+        default_factory=list, max_length=100
+    )
+    operation_id: Optional[str] = Field(default=None, max_length=128)
 
 
 class OnlineRecommendationBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resource_type: Literal["mcp", "skill"]
-    item_keys: List[str] = Field(default_factory=list)
+    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
     status: Literal["recommendations_ready", "completed"]
 
 
@@ -66,8 +74,8 @@ class OnlineInstallation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["installing", "completed"]
-    operation_id: str
-    result: Dict[str, Any] = Field(default_factory=dict)
+    operation_id: str = Field(min_length=1, max_length=128)
+    result: Dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class TrustedSearchBatch(BaseModel):
@@ -76,17 +84,17 @@ class TrustedSearchBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resource_type: Literal["local", "mcp", "skill"]
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
-    item_keys: List[str] = Field(default_factory=list)
+    tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
 
 
 class McpWorkflow(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
-    recommendation_id: str
-    option_id: Optional[str] = None
-    installation_key: Optional[str] = None
+    recommendation_id: str = Field(min_length=1, max_length=300)
+    option_id: Optional[str] = Field(default=None, max_length=100)
+    installation_key: Optional[str] = Field(default=None, max_length=300)
     status: Optional[
         Literal[
             "configuration_required",
@@ -98,11 +106,15 @@ class McpWorkflow(BaseModel):
             "failed",
         ]
     ] = None
-    mcp_id: Optional[int] = None
-    discovered_tool_ids: List[int] = Field(default_factory=list)
-    bound_tool_ids: List[int] = Field(default_factory=list)
-    binding_operation_id: Optional[str] = None
-    error: Optional[str] = None
+    mcp_id: Optional[PositiveStrictInt] = None
+    discovered_tool_ids: List[PositiveStrictInt] = Field(
+        default_factory=list, max_length=100
+    )
+    bound_tool_ids: List[PositiveStrictInt] = Field(
+        default_factory=list, max_length=100
+    )
+    binding_operation_id: Optional[str] = Field(default=None, max_length=128)
+    error: Optional[str] = Field(default=None, max_length=1000)
 
 
 class CardDelivery(BaseModel):
@@ -123,19 +135,29 @@ class Nl2AgentWorkflowState(BaseModel):
 
     schema_version: Literal[2] = WORKFLOW_SCHEMA_VERSION
     revision: int = Field(default=0, ge=0)
-    conversation_id: int = Field(ge=1)
+    conversation_id: PositiveStrictInt
     requirements_review: RequirementsReview = Field(default_factory=RequirementsReview)
     model_selection_confirmed: bool = False
-    trusted_search_batches: Dict[str, TrustedSearchBatch] = Field(default_factory=dict)
-    recommendation_batches: Dict[str, RecommendationBatch] = Field(default_factory=dict)
-    identity_confirmed: bool = False
-    mcp_workflows: Dict[str, McpWorkflow] = Field(default_factory=dict)
-    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
-        default_factory=dict
+    trusted_search_batches: Dict[str, TrustedSearchBatch] = Field(
+        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
     )
-    online_installations: Dict[str, OnlineInstallation] = Field(default_factory=dict)
+    recommendation_batches: Dict[str, RecommendationBatch] = Field(
+        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
+    )
+    identity_confirmed: bool = False
+    mcp_workflows: Dict[str, McpWorkflow] = Field(
+        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
+    )
+    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
+        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
+    )
+    online_installations: Dict[str, OnlineInstallation] = Field(
+        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
+    )
     online_configuration_confirmed: bool = False
-    card_delivery: Dict[CardType, CardDelivery] = Field(default_factory=dict)
+    card_delivery: Dict[CardType, CardDelivery] = Field(
+        default_factory=dict, max_length=7
+    )
 
     @field_validator("conversation_id")
     @classmethod
@@ -190,8 +212,7 @@ def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
     if not local_batches:
         local_status: Literal["missing", "pending", "complete"] = "missing"
     elif any(
-        batch.status in {"recommendations_ready", "applying"}
-        for batch in local_batches
+        batch.status in {"recommendations_ready", "applying"} for batch in local_batches
     ):
         local_status = "pending"
     else:

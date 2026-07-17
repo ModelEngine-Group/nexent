@@ -4,7 +4,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from consts.model import AgentInfoRequest, ModelConnectStatusEnum, ToolInstanceInfoRequest
+from consts.model import (
+    AgentInfoRequest,
+    ModelConnectStatusEnum,
+    ToolInstanceInfoRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,9 +190,15 @@ def ensure_seed_defaults(
         if agent.get(field) != defaults[field]
     }
     desired_model_ids = defaults.get("model_ids") or []
-    if desired_model_ids and normalize_model_ids(agent.get("model_ids")) != desired_model_ids:
+    if (
+        desired_model_ids
+        and normalize_model_ids(agent.get("model_ids")) != desired_model_ids
+    ):
         update_values["model_ids"] = desired_model_ids
-    if desired_model_ids and agent.get("business_logic_model_id") not in desired_model_ids:
+    if (
+        desired_model_ids
+        and agent.get("business_logic_model_id") not in desired_model_ids
+    ):
         update_values["business_logic_model_id"] = desired_model_ids[0]
     if not update_values:
         return
@@ -285,16 +295,45 @@ def seed_default_agent(
                     exc,
                 )
                 return None
-            logger.info("NL2AGENT default agent already exists (agent_id=%s)", existing_id)
+            logger.info(
+                "NL2AGENT default agent already exists (agent_id=%s)", existing_id
+            )
             return existing_id
 
     payload = {"max_steps": 20, "enabled": True, "is_new": False}
     payload.update(build_seed_defaults(dependencies, tenant_id))
     try:
-        created = dependencies.create_agent(payload, tenant_id=tenant_id, user_id=user_id)
+        created = dependencies.create_agent(
+            payload, tenant_id=tenant_id, user_id=user_id
+        )
     except Exception as exc:
-        logger.error("Failed to create NL2AGENT default agent: %s", exc)
-        return None
+        logger.warning(
+            "NL2AGENT builder creation raced or failed; checking the tenant winner: %s",
+            exc,
+        )
+        try:
+            concurrent = next(
+                (
+                    agent
+                    for agent in (dependencies.query_all_agents(tenant_id) or [])
+                    if (agent.get("name") or "") == dependencies.agent_name
+                ),
+                None,
+            )
+            if concurrent is None:
+                raise RuntimeError("No concurrent NL2AGENT builder was committed")
+            ensure_seed_defaults(dependencies, concurrent, user_id, tenant_id)
+            _bind_builtin_tools(
+                dependencies,
+                agent_id=concurrent["agent_id"],
+                tool_ids=tool_ids,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            return int(concurrent["agent_id"])
+        except Exception:
+            logger.error("Failed to create NL2AGENT default agent", exc_info=True)
+            return None
     agent_id = created.get("agent_id")
     if not agent_id:
         logger.error("NL2AGENT default agent creation returned no agent_id.")

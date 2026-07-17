@@ -150,12 +150,18 @@ async def install_recommended_mcp(
             "MCP installation failed during connection or tool discovery."
         ) from exc
     finally:
-        dependencies.release_installation_lock(
-            tenant_id,
-            agent_id,
-            lock_key,
-            lock_token,
-        )
+        try:
+            dependencies.release_installation_lock(
+                tenant_id,
+                agent_id,
+                lock_key,
+                lock_token,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to release MCP installation lock without changing the operation result",
+                exc_info=True,
+            )
 
 
 async def _perform_with_lock_heartbeat(
@@ -266,9 +272,7 @@ async def _perform_recommended_mcp_install(
     description = str(server.get("description") or raw.get("description") or "")
     field_values = config_values.get("fields") or {}
     if not isinstance(field_values, dict):
-        raise Nl2AgentValidationError(
-            "MCP configuration fields must be an object."
-        )
+        raise Nl2AgentValidationError("MCP configuration fields must be an object.")
     resolved_values = _validate_configuration(option, field_values)
     authorization_token, custom_headers = _resolve_headers(option, resolved_values)
 
@@ -382,15 +386,11 @@ def _validate_mcp_field_value(
             or not parsed_field_url.netloc
             or re.search(r"\{[^{}]+\}", str(value))
         ):
-            raise Nl2AgentValidationError(
-                f"Invalid URL for MCP configuration: {label}"
-            )
+            raise Nl2AgentValidationError(f"Invalid URL for MCP configuration: {label}")
 
     choices = field.get("choices") or []
     if choices and str(value) not in set(map(str, choices)):
-        raise Nl2AgentValidationError(
-            f"Invalid choice for MCP configuration: {label}"
-        )
+        raise Nl2AgentValidationError(f"Invalid choice for MCP configuration: {label}")
 
 
 def _resolve_headers(
@@ -544,13 +544,9 @@ async def _install_container(
     try:
         port_number = int(port)
     except (TypeError, ValueError) as exc:
-        raise Nl2AgentValidationError(
-            "MCP container port must be an integer."
-        ) from exc
+        raise Nl2AgentValidationError("MCP container port must be an integer.") from exc
     if not 1 <= port_number <= 65535:
-        raise Nl2AgentValidationError(
-            "MCP container port must be between 1 and 65535."
-        )
+        raise Nl2AgentValidationError("MCP container port must be between 1 and 65535.")
     if not isinstance(config_json, dict):
         raise Nl2AgentValidationError(
             "This MCP requires container configuration and a port."
@@ -676,9 +672,7 @@ async def _discover_and_complete(
         tenant_id=tenant_id,
     )
     if not record:
-        raise Nl2AgentOperationError(
-            "Installed MCP record could not be resolved."
-        )
+        raise Nl2AgentOperationError("Installed MCP record could not be resolved.")
     resolved_mcp_id = int(record["mcp_id"])
     try:
         discovered = await dependencies.discover_tools(
@@ -783,9 +777,9 @@ async def bind_mcp_tools(
         raise Nl2AgentValidationError(
             "One or more tools do not belong to the selected MCP."
         )
-    operation_id = "bind:" + hashlib.sha256(
-        json.dumps(sorted(valid)).encode("utf-8")
-    ).hexdigest()
+    operation_id = (
+        "bind:" + hashlib.sha256(json.dumps(sorted(valid)).encode("utf-8")).hexdigest()
+    )
     workflow = dependencies.reserve_binding(
         tenant_id,
         agent_id,
@@ -882,9 +876,7 @@ async def skip_mcp_tool_binding(
             )
         except Exception:
             logger.exception("Failed to release MCP binding skip reservation")
-        raise Nl2AgentOperationError(
-            "Failed to skip MCP tool binding."
-        ) from exc
+        raise Nl2AgentOperationError("Failed to skip MCP tool binding.") from exc
     try:
         dependencies.complete_binding(
             tenant_id,

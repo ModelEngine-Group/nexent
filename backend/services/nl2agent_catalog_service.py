@@ -5,9 +5,11 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from consts.exceptions import (
@@ -30,6 +32,8 @@ _MARKETPLACE_MAX_PAGES = 20
 _MARKETPLACE_MAX_ITEMS = 2_000
 _MARKETPLACE_MAX_BYTES = 5 * 1024 * 1024
 _MARKETPLACE_TIMEOUT_SECONDS = 15.0
+_LOCAL_CATALOG_MAX_ITEMS = 2_000
+_LOCK_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,7 @@ class SkillInstallationDependencies:
     get_installed_by_name: Callable[[str, str], Optional[CatalogItem]]
     bind_skill: Callable[..., Any]
     acquire_installation_lock: Callable[..., Optional[str]]
+    renew_installation_lock: Callable[..., bool]
     release_installation_lock: Callable[..., Any]
     reserve_installation: Callable[..., Dict[str, Any]]
     complete_installation: Callable[..., Dict[str, Any]]
@@ -176,10 +181,14 @@ async def load_session_catalogs(
 ) -> tuple[SessionCatalogs, List[str]]:
     """Load required catalogs while distinguishing valid emptiness from failures."""
     try:
-        all_tools = await dependencies.list_all_tools(
-            tenant_id=tenant_id,
-            labels=None,
-        ) or []
+        all_tools = (
+            await dependencies.list_all_tools(
+                tenant_id=tenant_id,
+                labels=None,
+                limit=_LOCAL_CATALOG_MAX_ITEMS,
+            )
+            or []
+        )
         tool_catalog = [
             {
                 "tool_id": tool.get("tool_id"),
@@ -199,7 +208,13 @@ async def load_session_catalogs(
         ) from exc
 
     try:
-        tenant_skills = dependencies.list_tenant_skills(tenant_id=tenant_id) or []
+        tenant_skills = (
+            dependencies.list_tenant_skills(
+                tenant_id=tenant_id,
+                limit=_LOCAL_CATALOG_MAX_ITEMS,
+            )
+            or []
+        )
         skill_catalog = [
             {
                 "skill_id": skill.get("skill_id"),
@@ -398,7 +413,8 @@ async def install_web_skill(
         if reservation.get("status") == "completed":
             return _public_skill_install_result(reservation.get("result") or {})
         if skill_name:
-            result = _install_skill_by_name(
+            installer = partial(
+                _install_skill_by_name,
                 dependencies,
                 agent_id=agent_id,
                 canonical_name=canonical_name,
@@ -407,13 +423,22 @@ async def install_web_skill(
                 locale=locale,
             )
         else:
-            result = _install_skill_by_id(
+            installer = partial(
+                _install_skill_by_id,
                 dependencies,
                 agent_id=agent_id,
                 canonical_id=canonical_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
             )
+        result = await _install_skill_with_lock_heartbeat(
+            dependencies,
+            agent_id=agent_id,
+            installation_key=installation_key,
+            lock_token=lock_token,
+            installer=installer,
+            tenant_id=tenant_id,
+        )
         operation_committed = True
         try:
             workflow_result = {
@@ -446,12 +471,64 @@ async def install_web_skill(
                 logger.exception("Failed to release online Skill installation")
         raise
     finally:
-        dependencies.release_installation_lock(
-            tenant_id,
-            agent_id,
-            installation_key,
-            lock_token,
-        )
+        try:
+            dependencies.release_installation_lock(
+                tenant_id,
+                agent_id,
+                installation_key,
+                lock_token,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to release Skill installation lock without changing the operation result",
+                exc_info=True,
+            )
+
+
+async def _install_skill_with_lock_heartbeat(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    installation_key: str,
+    lock_token: str,
+    installer: Callable[[], Dict[str, Any]],
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Run a blocking Skill installer while renewing distributed lock ownership."""
+    stopped = threading.Event()
+    renewal_errors: List[Exception] = []
+
+    def heartbeat() -> None:
+        while not stopped.wait(_LOCK_HEARTBEAT_INTERVAL_SECONDS):
+            try:
+                renewed = dependencies.renew_installation_lock(
+                    tenant_id,
+                    agent_id,
+                    installation_key,
+                    lock_token,
+                )
+                if not renewed:
+                    raise AgentRunException(
+                        "Skill installation lock ownership was lost. Retry installation."
+                    )
+            except Exception as exc:
+                renewal_errors.append(exc)
+                return
+
+    renewal = threading.Thread(
+        target=heartbeat,
+        name="nl2agent-skill-lock-heartbeat",
+        daemon=True,
+    )
+    renewal.start()
+    try:
+        result = installer()
+    finally:
+        stopped.set()
+        renewal.join()
+    if renewal_errors:
+        raise renewal_errors[0]
+    return result
 
 
 def _install_skill_by_name(
@@ -464,9 +541,7 @@ def _install_skill_by_name(
     locale: Optional[str],
 ) -> Dict[str, Any]:
     if not canonical_name:
-        raise Nl2AgentValidationError(
-            "The requested Skill has no canonical name."
-        )
+        raise Nl2AgentValidationError("The requested Skill has no canonical name.")
     try:
         installed_names = dependencies.install_by_name(
             skill_names=[canonical_name],
@@ -480,9 +555,7 @@ def _install_skill_by_name(
             f"Failed to install skill {canonical_name}."
         ) from exc
     if not installed_names:
-        raise Nl2AgentExternalServiceError(
-            f"Failed to install skill {canonical_name}."
-        )
+        raise Nl2AgentExternalServiceError(f"Failed to install skill {canonical_name}.")
     installed_skill = dependencies.get_installed_by_name(installed_names[0], tenant_id)
     if not installed_skill or not installed_skill.get("skill_id"):
         raise Nl2AgentOperationError(
@@ -529,9 +602,7 @@ def _install_skill_by_id(
             f"Failed to install skill {canonical_id}."
         ) from exc
     if not installed_ids:
-        raise Nl2AgentExternalServiceError(
-            f"Failed to install skill {canonical_id}."
-        )
+        raise Nl2AgentExternalServiceError(f"Failed to install skill {canonical_id}.")
     installed_skill_id = int(installed_ids[0])
     _bind_installed_skill(
         dependencies,

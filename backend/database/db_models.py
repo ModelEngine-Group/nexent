@@ -435,7 +435,15 @@ class AgentInfo(TableBase):
     Information table for agents
     """
     __tablename__ = "ag_tenant_agent_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "uq_nl2agent_builder_tenant_active",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("name = 'nl2agent' AND delete_flag <> 'Y'"),
+        ),
+        {"schema": SCHEMA},
+    )
 
     agent_id = Column(Integer, Sequence(
         "ag_tenant_agent_t_agent_id_seq", schema=SCHEMA), nullable=False, primary_key=True, autoincrement=True, doc="ID")

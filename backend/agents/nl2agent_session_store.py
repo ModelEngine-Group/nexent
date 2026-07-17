@@ -264,10 +264,16 @@ def mutate_session_state(
         )
         original_state = state_to_dict(state)
         result = mutator(state)
-        if state_to_dict(state) == original_state:
+        try:
+            validated_state = Nl2AgentWorkflowState.model_validate(state_to_dict(state))
+        except ValidationError as exc:
+            raise Nl2AgentSessionCatalogError(
+                "NL2AGENT workflow state exceeds its schema or capacity limits."
+            ) from exc
+        if state_to_dict(validated_state) == original_state:
             return deepcopy(result)
-        state.revision += 1
-        persisted_state = state_to_dict(state)
+        validated_state.revision += 1
+        persisted_state = state_to_dict(validated_state)
         if not persist_workflow_state(
             tenant_id,
             draft_agent_id,

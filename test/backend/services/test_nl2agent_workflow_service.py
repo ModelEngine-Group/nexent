@@ -284,6 +284,7 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
     nl2agent_service.list_all_tools.assert_awaited_once_with(
         tenant_id="tenant_1",
         labels=None,
+        limit=2_000,
     )
     nl2agent_service.list_community_mcp_services.assert_awaited_once_with(
         search=None,
@@ -397,7 +398,7 @@ async def test_start_session_degrades_when_registry_catalog_is_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_start_session_removes_redis_state_when_database_commit_fails(
+async def test_start_session_does_not_expose_state_when_database_commit_fails(
     monkeypatch,
 ):
     clear_nl2agent_session_catalogs()
@@ -432,6 +433,11 @@ async def test_start_session_removes_redis_state_when_database_commit_fails(
             user_id="user_1", tenant_id="tenant_1", language="en"
         )
 
+    monkeypatch.setattr(
+        nl2agent_session_store,
+        "load_durable_session",
+        MagicMock(return_value=None),
+    )
     with pytest.raises(nl2agent_session_catalog.Nl2AgentSessionCatalogError):
         get_nl2agent_session_catalogs("tenant_1", 202)
     with pytest.raises(nl2agent_session_catalog.Nl2AgentSessionCatalogError):

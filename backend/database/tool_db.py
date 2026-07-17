@@ -1,6 +1,6 @@
 import re
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
@@ -115,7 +115,7 @@ def delete_tool_instances_by_ids(
         )
 
 
-def query_all_tools(tenant_id: str):
+def query_all_tools(tenant_id: str, limit: Optional[int] = None):
     """
     Query ToolInfo in the database based on tenant_id and agent_id, optional user_id.
     Filter tools that belong to the specific tenant_id or have tenant_id as "tenant_id"
@@ -126,6 +126,8 @@ def query_all_tools(tenant_id: str):
             ToolInfo.delete_flag != 'Y',
             ToolInfo.author == tenant_id)
 
+        if limit is not None:
+            query = query.limit(max(1, min(10_000, int(limit))))
         tools = query.all()
         return [as_dict(tool) for tool in tools]
 
