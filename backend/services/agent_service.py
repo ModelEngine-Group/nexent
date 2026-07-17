@@ -75,6 +75,7 @@ from database.tool_db import (
 )
 from database import skill_db
 from database.attachment_db import upload_fileobj
+from database.conversation_db import get_last_unit_for_message, get_latest_assistant_message
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
 from database.agent_version_db import query_version_list, query_current_version_no
@@ -88,8 +89,6 @@ from services.prompt_template_service import (
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
-    get_latest_assistant_message,
-    get_last_unit_for_message,
     save_conversation_user,
     save_message,
     save_message_unit,
