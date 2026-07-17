@@ -88,8 +88,17 @@ router = APIRouter(prefix="/nl2agent")
 logger = logging.getLogger("nl2agent_app")
 
 
-def _current_user(authorization, http_request):
-    return get_current_user_info(authorization, http_request)
+def _current_user(
+    authorization: Optional[str], http_request: Request
+) -> tuple[str, str, str]:
+    """Authenticate one NL2AGENT request at the HTTP boundary."""
+    try:
+        return get_current_user_info(authorization, http_request)
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
 
 
 def _session_http_error(exc: Exception) -> Exception:
@@ -292,10 +301,7 @@ async def start_session_api(
     The frontend then opens the chat page with the NL2AGENT default agent_id
     and this conversation_id.
     """
-    try:
-        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    user_id, tenant_id, language = _current_user(authorization, http_request)
 
     try:
         try:
@@ -325,10 +331,7 @@ async def apply_local_resources_api(
     authorization: Optional[str] = Header(None),
 ):
     """Bulk-bind local tools and skills to the draft agent."""
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
 
     try:
         return await apply_local_resources_batch(
@@ -541,10 +544,7 @@ async def install_web_skill_api(
     authorization: Optional[str] = Header(None),
 ):
     """Install a single official/web skill and bind it to the draft agent."""
-    try:
-        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    user_id, tenant_id, language = _current_user(authorization, http_request)
 
     try:
         return await install_web_skill(
@@ -570,10 +570,7 @@ async def finalize_agent_api(
     authorization: Optional[str] = Header(None),
 ):
     """Finalize the draft agent by generating its full prompt set."""
-    try:
-        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    user_id, tenant_id, language = _current_user(authorization, http_request)
 
     try:
         return await finalize_agent(

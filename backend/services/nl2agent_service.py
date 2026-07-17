@@ -273,6 +273,7 @@ def _session_initialization_dependencies() -> SessionInitializationDependencies:
     """Build session initialization dependencies from facade operations."""
     return SessionInitializationDependencies(
         search_agent_id_by_name=search_agent_id_by_agent_name,
+        provision_builder=seed_nl2agent_default_agent,
         search_agent_info_by_id=search_agent_info_by_agent_id,
         ensure_builder_ready=_ensure_nl2agent_builder_ready,
         load_session_catalogs=_load_session_catalogs,

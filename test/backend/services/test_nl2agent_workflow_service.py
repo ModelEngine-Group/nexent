@@ -439,21 +439,76 @@ async def test_start_session_removes_redis_state_when_database_commit_fails(
 
 
 @pytest.mark.asyncio
-async def test_start_session_requires_config_seed_when_builder_is_missing(
+async def test_start_session_provisions_builder_for_existing_tenant_when_missing(
     monkeypatch,
 ):
+    clear_nl2agent_session_catalogs()
+    _mock_database_transaction(monkeypatch)
     search_builder = MagicMock(side_effect=ValueError("agent not found"))
+    provision_builder = MagicMock(return_value=101)
 
     monkeypatch.setattr(
         nl2agent_service, "search_agent_id_by_agent_name", search_builder
     )
+    monkeypatch.setattr(
+        nl2agent_service, "seed_nl2agent_default_agent", provision_builder
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value=_seeded_nl2agent_info()),
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "create_agent", MagicMock(return_value={"agent_id": 202})
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_conversation",
+        MagicMock(return_value={"conversation_id": 303}),
+    )
+
+    result = await nl2agent_service.start_session(
+        user_id="user_1", tenant_id="tenant_1", language="en"
+    )
+
+    assert result["nl2agent_agent_id"] == 101
+    search_builder.assert_called_once_with("nl2agent", "tenant_1")
+    provision_builder.assert_called_once_with(
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provisioned_id", [None, 0, -1, True])
+async def test_start_session_fails_before_draft_creation_when_provisioning_fails(
+    monkeypatch,
+    provisioned_id,
+):
+    create_draft = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_id_by_agent_name",
+        MagicMock(side_effect=ValueError("agent not found")),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "seed_nl2agent_default_agent",
+        MagicMock(return_value=provisioned_id),
+    )
+    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+
     with pytest.raises(
-        nl2agent_service.AgentRunException, match="Restart the config service"
+        Nl2AgentOperationError,
+        match="could not be provisioned for this tenant",
     ):
         await nl2agent_service.start_session(
-            user_id="user_1", tenant_id="tenant_1", language="en"
+            user_id="user_1",
+            tenant_id="tenant_1",
+            language="en",
         )
-    search_builder.assert_called_once_with("nl2agent", "tenant_1")
+
+    create_draft.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ class SessionInitializationDependencies:
     """Database, Redis, and catalog operations required to start a session."""
 
     search_agent_id_by_name: Callable[..., int]
+    provision_builder: Callable[..., Optional[int]]
     search_agent_info_by_id: Callable[..., Optional[Dict[str, Any]]]
     ensure_builder_ready: Callable[..., Any]
     load_session_catalogs: Callable[
@@ -41,7 +42,11 @@ async def start_session(
 ) -> Dict[str, Any]:
     """Create a draft and Conversation, then atomically hand off Redis state."""
     del language
-    builder_agent_id = _resolve_builder_agent_id(dependencies, tenant_id)
+    builder_agent_id = _resolve_builder_agent_id(
+        dependencies,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
     _ensure_builder_ready(
         dependencies,
         builder_agent_id=builder_agent_id,
@@ -142,7 +147,9 @@ async def start_session(
 
 def _resolve_builder_agent_id(
     dependencies: SessionInitializationDependencies,
+    *,
     tenant_id: str,
+    user_id: str,
 ) -> int:
     try:
         return dependencies.search_agent_id_by_name(
@@ -152,8 +159,18 @@ def _resolve_builder_agent_id(
     except ValueError as exc:
         if str(exc) != "agent not found":
             raise
+        builder_agent_id = dependencies.provision_builder(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if (
+            isinstance(builder_agent_id, int)
+            and not isinstance(builder_agent_id, bool)
+            and builder_agent_id > 0
+        ):
+            return builder_agent_id
         raise Nl2AgentOperationError(
-            "NL2AGENT default agent is not initialized. Restart the config service first."
+            "NL2AGENT default agent could not be provisioned for this tenant."
         ) from exc
 
 

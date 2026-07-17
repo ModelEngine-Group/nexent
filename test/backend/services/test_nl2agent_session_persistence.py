@@ -238,6 +238,7 @@ async def test_start_session_creates_snapshot_in_draft_transaction():
     cache_catalogs = MagicMock()
     dependencies = SessionInitializationDependencies(
         search_agent_id_by_name=MagicMock(return_value=101),
+        provision_builder=MagicMock(),
         search_agent_info_by_id=MagicMock(return_value={"agent_id": 101}),
         ensure_builder_ready=MagicMock(),
         load_session_catalogs=AsyncMock(return_value=(_catalogs(), [])),

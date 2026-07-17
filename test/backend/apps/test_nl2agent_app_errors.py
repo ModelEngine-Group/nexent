@@ -2,7 +2,9 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
 from consts.error_code import ErrorCode
 from consts.exceptions import (
@@ -12,11 +14,80 @@ from consts.exceptions import (
     Nl2AgentExternalServiceError,
     Nl2AgentOperationError,
     Nl2AgentValidationError,
+    UnauthorizedError,
 )
 from consts.model import Nl2AgentFinalizeRequest, Nl2AgentRecommendationBatchRequest
 
 from apps import nl2agent_app
 from apps.nl2agent_app import _session_http_error
+
+
+def test_current_user_maps_authentication_failure_to_http_401(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "get_current_user_info",
+        MagicMock(side_effect=UnauthorizedError("Invalid token")),
+    )
+
+    with pytest.raises(nl2agent_app.HTTPException) as exc_info:
+        nl2agent_app._current_user(None, MagicMock())
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid token"
+
+
+def test_current_user_does_not_mask_unexpected_auth_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "get_current_user_info",
+        MagicMock(side_effect=RuntimeError("auth database unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="auth database unavailable"):
+        nl2agent_app._current_user(None, MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_api_rejects_unauthenticated_request_before_service_call(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "get_current_user_info",
+        MagicMock(side_effect=UnauthorizedError("Missing token")),
+    )
+    list_sessions = MagicMock()
+    monkeypatch.setattr(nl2agent_app, "list_active_sessions", list_sessions)
+
+    with pytest.raises(nl2agent_app.HTTPException) as exc_info:
+        await nl2agent_app.list_sessions_api(MagicMock(), 25, None)
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Missing token"
+    list_sessions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_http_contract_returns_401_for_missing_auth(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "get_current_user_info",
+        MagicMock(side_effect=UnauthorizedError("Missing token")),
+    )
+    app = FastAPI()
+    app.include_router(nl2agent_app.router)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/nl2agent/sessions")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing token"}
 
 
 def test_session_error_preserves_domain_exception() -> None:
