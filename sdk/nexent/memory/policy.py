@@ -182,6 +182,20 @@ class MemoryRetrievalPolicy:
         return layer in cls.FULL_CONTEXT_LAYERS
 
     @classmethod
+    def uses_full_context_for_layer(cls, layer) -> bool:
+        """String-friendly variant of :py:meth:`uses_full_context`.
+
+        Accepts either a :class:`MemoryLayer` enum or a raw string value so
+        service-layer callers that already have a string layer name don't
+        need to import the enum.
+        """
+        try:
+            layer_enum = layer if isinstance(layer, MemoryLayer) else MemoryLayer(layer)
+        except ValueError:
+            return False
+        return cls.uses_full_context(layer_enum)
+
+    @classmethod
     def uses_vector_search(cls, layer: MemoryLayer) -> bool:
         """Check if a layer uses vector search.
 

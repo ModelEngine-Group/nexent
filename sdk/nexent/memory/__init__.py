@@ -11,11 +11,10 @@ memory design document. The new architecture supports:
   ``IngestibleMemoryProvider``
 """
 
-from .embedding_registry import (
+from .embedding_model import (
     EmbeddingModelInfo,
-    EmbeddingModelRegistry,
-    get_embedding_registry,
-    reset_embedding_registry,
+    get_embedding_client,
+    reset_embedding_client_cache,
 )
 from .models import (
     ExternalMemoryItem,
@@ -90,9 +89,8 @@ __all__ = [
     "MemoryStoragePolicy",
     # Embedding
     "EmbeddingModelInfo",
-    "EmbeddingModelRegistry",
-    "get_embedding_registry",
-    "reset_embedding_registry",
+    "get_embedding_client",
+    "reset_embedding_client_cache",
     # Providers
     "BaseMemoryProvider",
     "SearchableMemoryProvider",

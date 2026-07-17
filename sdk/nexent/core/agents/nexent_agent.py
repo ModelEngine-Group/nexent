@@ -275,18 +275,25 @@ class NexentAgent:
                                        validate_url_access=validate_url_access,
                                        **params)
             elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                metadata = tool_config.metadata or {}
                 tools_obj = tool_class()
                 tools_obj.observer = self.observer
-                tools_obj.memory_config = tool_config.metadata.get(
-                    "memory_config", {}) if tool_config.metadata else {}
-                tools_obj.tenant_id = tool_config.metadata.get(
-                    "tenant_id", "") if tool_config.metadata else ""
-                tools_obj.user_id = tool_config.metadata.get(
-                    "user_id", "") if tool_config.metadata else ""
-                tools_obj.agent_id = tool_config.metadata.get(
-                    "agent_id", "") if tool_config.metadata else ""
-                tools_obj.memory_user_config = tool_config.metadata.get(
-                    "memory_user_config", None) if tool_config.metadata else None
+                tools_obj.memory_config = metadata.get(
+                    "memory_config", {}) if metadata else {}
+                tools_obj.tenant_id = metadata.get(
+                    "tenant_id", "") if metadata else ""
+                tools_obj.user_id = metadata.get(
+                    "user_id", "") if metadata else ""
+                tools_obj.agent_id = metadata.get(
+                    "agent_id", "") if metadata else ""
+                tools_obj.memory_user_config = metadata.get(
+                    "memory_user_config", None) if metadata else None
+                # New SDK facade wiring (Phase 2). When the backend
+                # supplies ``memory_service`` in metadata, the tool calls
+                # it directly; otherwise it falls back to the legacy
+                # ``memory_config`` based path.
+                tools_obj.memory_service = metadata.get(
+                    "memory_service", None) if metadata else None
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

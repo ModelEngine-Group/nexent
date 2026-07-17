@@ -117,11 +117,17 @@ class MemorySearchRequest(BaseModel):
     limit: int = 5
     threshold: Optional[float] = 0.65
     embedding: Optional[List[float]] = None
+    # When True, the index service is asked to run a hybrid (BM25 + kNN)
+    # query against Elasticsearch instead of pure kNN. Falls back to kNN
+    # silently if the backend cannot honour the request. Defaults to False
+    # to keep existing callers bit-for-bit identical.
+    hybrid: bool = False
+    weight_accurate: float = 0.3
 
 
 class MemorySearchResult(BaseModel):
     """Result model for memory search operations."""
-    memory_id: Optional[str] = None
+    memory_id: Optional[int] = None
     external_id: Optional[str] = None
     content: str
     score: float
