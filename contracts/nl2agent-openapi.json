@@ -177,8 +177,10 @@
           },
           "skill_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Skill Ids",
             "type": "array"
           },
@@ -187,13 +189,16 @@
               "additionalProperties": true,
               "type": "object"
             },
+            "maxProperties": 100,
             "title": "Tool Config Values",
             "type": "object"
           },
           "tool_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Tool Ids",
             "type": "array"
           }
@@ -485,6 +490,7 @@
           },
           "example_questions": {
             "items": {
+              "maxLength": 500,
               "type": "string"
             },
             "maxItems": 6,
@@ -668,6 +674,7 @@
           "skill_id": {
             "anyOf": [
               {
+                "minimum": 1.0,
                 "type": "integer"
               },
               {
@@ -679,6 +686,8 @@
           "skill_name": {
             "anyOf": [
               {
+                "maxLength": 300,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -853,6 +862,7 @@
         "properties": {
           "tool_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
             "maxItems": 100,
@@ -896,6 +906,7 @@
         "properties": {
           "config_values": {
             "additionalProperties": true,
+            "maxProperties": 100,
             "title": "Config Values",
             "type": "object"
           },
@@ -1081,6 +1092,7 @@
         "properties": {
           "fallback_model_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
             "maxItems": 4,
@@ -1208,6 +1220,8 @@
         "properties": {
           "item_keys": {
             "items": {
+              "maxLength": 300,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 100,
@@ -1324,15 +1338,19 @@
           },
           "skill_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Skill Ids",
             "type": "array"
           },
           "tool_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Tool Ids",
             "type": "array"
           }
@@ -2124,8 +2142,11 @@
         "properties": {
           "item_keys": {
             "items": {
+              "maxLength": 300,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Item Keys",
             "type": "array"
           },
@@ -2154,25 +2175,30 @@
         "type": "object"
       },
       "RecommendationBatch": {
-        "additionalProperties": true,
+        "additionalProperties": false,
         "properties": {
           "applied_skill_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Applied Skill Ids",
             "type": "array"
           },
           "applied_tool_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Applied Tool Ids",
             "type": "array"
           },
           "operation_id": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -2183,8 +2209,10 @@
           },
           "skill_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Skill Ids",
             "type": "array"
           },
@@ -2200,8 +2228,10 @@
           },
           "tool_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Tool Ids",
             "type": "array"
           }
@@ -2218,8 +2248,11 @@
         "properties": {
           "item_keys": {
             "items": {
+              "maxLength": 300,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Item Keys",
             "type": "array"
           },
@@ -2234,15 +2267,19 @@
           },
           "skill_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Skill Ids",
             "type": "array"
           },
           "tool_ids": {
             "items": {
+              "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 100,
             "title": "Tool Ids",
             "type": "array"
           }

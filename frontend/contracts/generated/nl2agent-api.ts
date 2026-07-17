@@ -1260,8 +1260,6 @@ export interface components {
       status: "recommendations_ready" | "applying" | "applied" | "skipped";
       /** Tool Ids */
       tool_ids?: number[];
-    } & {
-      [key: string]: unknown;
     };
     /**
      * TrustedSearchBatch

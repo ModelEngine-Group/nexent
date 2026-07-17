@@ -6,11 +6,25 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from fastapi import FastAPI
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "sdk"))
 sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
-from apps.runtime_app import app  # noqa: E402 -- repository paths must precede app import
+from apps.app_factory import create_app  # noqa: E402 -- repository paths must precede app import
+from apps.nl2agent_app import router as nl2agent_router  # noqa: E402
+
+
+def _build_contract_app() -> FastAPI:
+    """Build the Runtime-compatible app subset owned by the NL2AGENT contract."""
+    app = create_app(
+        title="Nexent Runtime API",
+        description="Runtime APIs",
+        enable_monitoring=False,
+    )
+    app.include_router(nl2agent_router)
+    return app
 
 
 def _referenced_schema_names(value: Any) -> set[str]:
@@ -29,7 +43,7 @@ def _referenced_schema_names(value: Any) -> set[str]:
 
 def build_nl2agent_openapi() -> dict[str, Any]:
     """Return NL2AGENT paths plus their transitive component schemas."""
-    source = app.openapi()
+    source = _build_contract_app().openapi()
     paths = {
         path: definition
         for path, definition in source.get("paths", {}).items()
