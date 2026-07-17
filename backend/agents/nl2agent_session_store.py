@@ -131,13 +131,31 @@ def refresh_cache_best_effort(snapshot: Optional[Dict[str, Any]]) -> None:
         return
     try:
         cache_durable_snapshot(snapshot)
-    except redis.RedisError:
+    except Exception:
         logger.warning(
             "Failed to refresh disposable NL2AGENT Redis cache: tenant_id=%s draft_agent_id=%s",
             snapshot.get("tenant_id"),
             snapshot.get("draft_agent_id"),
             exc_info=True,
         )
+
+
+def recover_committed_cache_best_effort(
+    tenant_id: str, draft_agent_id: int
+) -> None:
+    """Reconcile cache after commit without changing the committed outcome."""
+    try:
+        snapshot = load_durable_session(tenant_id, draft_agent_id)
+    except Exception:
+        logger.warning(
+            "Failed to reload committed NL2AGENT state for cache reconciliation: "
+            "tenant_id=%s draft_agent_id=%s",
+            tenant_id,
+            draft_agent_id,
+            exc_info=True,
+        )
+        return
+    refresh_cache_best_effort(snapshot)
 
 
 def validate_identifiers(
@@ -312,16 +330,12 @@ def mutate_session_state(
             return deepcopy(result)
         except redis.WatchError:
             if durable_committed:
-                refresh_cache_best_effort(
-                    load_durable_session(tenant_id, draft_agent_id)
-                )
+                recover_committed_cache_best_effort(tenant_id, draft_agent_id)
                 return deepcopy(result)
             continue
         except redis.RedisError:
             if durable_committed:
-                refresh_cache_best_effort(
-                    load_durable_session(tenant_id, draft_agent_id)
-                )
+                recover_committed_cache_best_effort(tenant_id, draft_agent_id)
                 return deepcopy(result)
             raise
         finally:

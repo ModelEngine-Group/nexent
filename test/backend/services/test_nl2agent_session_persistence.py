@@ -151,6 +151,35 @@ def test_committed_workflow_mutation_survives_redis_write_failure(monkeypatch):
     assert result == {"model_selection_confirmed": True}
 
 
+def test_committed_mutation_survives_reconciliation_read_failure(monkeypatch):
+    real_client = fakeredis.FakeRedis(decode_responses=True)
+    state = state_to_dict(Nl2AgentWorkflowState(conversation_id=902))
+    real_client.set(catalog._state_key("tenant_1", 202), json.dumps(state))
+    pipe = MagicMock(wraps=real_client.pipeline())
+    pipe.execute.side_effect = redis.ConnectionError("redis write failed")
+    client = MagicMock(wraps=real_client)
+    client.pipeline.return_value = pipe
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
+    monkeypatch.setattr(
+        session_store,
+        "persist_workflow_state",
+        MagicMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        session_store,
+        "load_durable_session",
+        MagicMock(side_effect=RuntimeError("database temporarily unavailable")),
+    )
+
+    result = catalog.set_model_selection_confirmed("tenant_1", 202, True)
+
+    assert result == {"model_selection_confirmed": True}
+
+
 def test_database_conflict_recovers_and_retries_from_latest_revision(
     durable_cache, monkeypatch
 ):
