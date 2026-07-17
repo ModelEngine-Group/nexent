@@ -1108,6 +1108,14 @@ class ManageTenantModelCreateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
+    context_window_tokens: Optional[int] = Field(None, description="Total combined input/output context window in tokens")
+    max_input_tokens: Optional[int] = Field(None, description="Provider hard input-token limit")
+    max_output_tokens: Optional[int] = Field(None, description="Provider-supported completion output cap")
+    default_output_reserve_tokens: Optional[int] = Field(None, description="Default output allowance reserved per request")
+    tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
+    capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
+    capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
     # W11 accept-signal fields. Same audit-only contract as ModelRequest:
     # the app layer pops them off model_data before the dict reaches the
     # service/DB layer and forwards them to
@@ -1139,6 +1147,14 @@ class ManageTenantModelUpdateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
+    context_window_tokens: Optional[int] = Field(None, description="Total combined input/output context window in tokens")
+    max_input_tokens: Optional[int] = Field(None, description="Provider hard input-token limit")
+    max_output_tokens: Optional[int] = Field(None, description="Provider-supported completion output cap")
+    default_output_reserve_tokens: Optional[int] = Field(None, description="Default output allowance reserved per request")
+    tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
+    capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
+    capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
     # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
     # contract. The app layer pops them before calling the service so
     # update_model_record never sees them.
