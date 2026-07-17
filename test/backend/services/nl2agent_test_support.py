@@ -40,6 +40,7 @@ from services.nl2agent_resource_service import (
     _resolve_tool_config_values,
     redact_tool_parameter_defaults,
 )
+from services.nl2agent_seed_service import NL2AGENT_VERIFICATION_CONFIG
 
 
 class _FixedUuid:
@@ -373,7 +374,7 @@ def _seeded_nl2agent_info(agent_id: int = 101):
         "duty_prompt": "NL2AGENT concise duty",
         "constraint_prompt": "NL2AGENT concise constraint",
         "few_shots_prompt": "",
-        "verification_config": nl2agent_service._NL2AGENT_VERIFICATION_CONFIG,
+        "verification_config": NL2AGENT_VERIFICATION_CONFIG,
         "model_ids": [],
     }
 

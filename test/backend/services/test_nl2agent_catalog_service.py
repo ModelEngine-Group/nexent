@@ -110,7 +110,7 @@ async def test_marketplace_loader_enforces_total_time_budget():
 
 
 def test_marketplace_metadata_redaction_removes_declared_and_container_secrets():
-    sanitized = nl2agent_service._redact_mcp_marketplace_metadata(
+    sanitized = nl2agent_catalog_service.redact_mcp_marketplace_metadata(
         {
             "headers": [
                 {

@@ -116,14 +116,12 @@ from services.nl2agent_catalog_service import (
     install_web_skill as install_web_skill_service,
     load_session_catalogs,
     recommendation_id as _recommendation_id,
-    redact_mcp_marketplace_metadata,
 )
 from services.nl2agent_mcp_service import (
     McpBindingDependencies,
     McpInstallationDependencies,
     bind_mcp_tools as bind_mcp_tools_service,
     install_recommended_mcp as install_recommended_mcp_service,
-    installation_key as mcp_installation_key,
     skip_mcp_tool_binding as skip_mcp_tool_binding_service,
 )
 from services.nl2agent_mcp_url_security import (
@@ -145,7 +143,6 @@ from services.nl2agent_session_service import (
     start_session as initialize_session,
 )
 from services.nl2agent_seed_service import (
-    NL2AGENT_VERIFICATION_CONFIG,
     SeedDependencies,
     ensure_builder_ready,
     normalize_model_ids,
@@ -185,15 +182,6 @@ from services.tool_configuration_service import list_all_tools
 from utils.prompt_template_utils import get_nl2agent_seed_config
 
 logger = logging.getLogger(__name__)
-
-# Compatibility alias for callers that inspect the historical facade constant.
-_NL2AGENT_VERIFICATION_CONFIG = NL2AGENT_VERIFICATION_CONFIG
-
-
-def _redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
-    """Compatibility facade for catalog sanitization."""
-    return redact_mcp_marketplace_metadata(value, parent_key)
-
 
 # Reserved name of the NL2AGENT default agent shipped with the product.
 NL2AGENT_AGENT_NAME = "nl2agent"
@@ -483,13 +471,6 @@ def _raise_for_invalid_resource_references(
 ) -> None:
     """Block publication when a persisted resource no longer resolves."""
     raise_for_invalid_resource_references(invalid_references)
-
-
-def _mcp_installation_key(
-    draft_agent_id: int, recommendation_id: str, option_id: str
-) -> str:
-    """Compatibility facade for the MCP installation idempotency key."""
-    return mcp_installation_key(draft_agent_id, recommendation_id, option_id)
 
 
 def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:

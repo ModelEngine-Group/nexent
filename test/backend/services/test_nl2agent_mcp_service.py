@@ -450,7 +450,7 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
         "official_skills": [],
     }
     nl2agent_session_catalog.set_nl2agent_session_catalogs("tenant_1", 202, catalogs)
-    installation_key = nl2agent_service._mcp_installation_key(
+    installation_key = nl2agent_mcp_service.installation_key(
         202, "registry:github", "remote-0"
     )
     record = {
@@ -703,7 +703,7 @@ async def test_install_recommended_package_reconfigures_existing_container(
             }
         ],
     }
-    installation_key = nl2agent_service._mcp_installation_key(
+    installation_key = nl2agent_mcp_service.installation_key(
         202,
         "registry:package-mcp",
         "package-0",

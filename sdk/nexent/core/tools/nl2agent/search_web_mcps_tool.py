@@ -331,9 +331,6 @@ def normalize_mcp_candidate(source: str, raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-_normalize_mcp_candidate = normalize_mcp_candidate
-
-
 def get_search_web_mcps_tool(
     agent_id: Optional[int] = None,
     user_id: Optional[str] = None,
