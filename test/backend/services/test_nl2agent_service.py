@@ -583,6 +583,34 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=fake_redis)),
     )
+    monkeypatch.setattr(
+        nl2agent_session_catalog,
+        "_load_durable_session",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        nl2agent_session_catalog,
+        "_persist_workflow_state",
+        MagicMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        nl2agent_session_catalog,
+        "_persist_session_catalogs",
+        MagicMock(return_value=True),
+    )
+    transaction = MagicMock()
+    transaction.__enter__.return_value = MagicMock()
+    transaction.__exit__.return_value = None
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_db_session",
+        MagicMock(return_value=transaction),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "update_nl2agent_session_status",
+        MagicMock(return_value=True),
+    )
     clear_nl2agent_session_catalogs()
     nl2agent_session_catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     monkeypatch.setattr(

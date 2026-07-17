@@ -85,6 +85,10 @@ from database.conversation_db import (
 )
 from database.client import get_db_session
 from database.model_management_db import get_model_records
+from database.nl2agent_session_db import (
+    create_nl2agent_session,
+    update_nl2agent_session_status,
+)
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
     get_skill_by_name as get_tenant_skill_by_name,
@@ -282,6 +286,7 @@ def _session_initialization_dependencies() -> SessionInitializationDependencies:
         get_db_session=get_db_session,
         create_agent=create_agent,
         create_conversation=create_conversation,
+        create_session_snapshot=create_nl2agent_session,
         initialize_session_state=initialize_nl2agent_session_state,
         set_session_catalogs=set_nl2agent_session_catalogs,
         delete_session_catalogs=delete_nl2agent_session_catalogs,
@@ -1074,7 +1079,9 @@ async def finalize_agent(
         resolve_resource_summaries=_resolve_resource_summaries,
         raise_for_invalid_references=_raise_for_invalid_resource_references,
         generate_internal_name=_generate_internal_agent_name,
+        get_db_session=get_db_session,
         update_agent=update_agent,
+        complete_session=update_nl2agent_session_status,
     )
     return await publish_agent(
         dependencies,

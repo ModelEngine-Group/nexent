@@ -16,6 +16,9 @@ def fake_redis(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
+    monkeypatch.setattr(catalog_module, "_load_durable_session", MagicMock(return_value=None))
+    monkeypatch.setattr(catalog_module, "_persist_workflow_state", MagicMock(return_value=True))
+    monkeypatch.setattr(catalog_module, "_persist_session_catalogs", MagicMock(return_value=True))
     catalog_module.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     return client
 

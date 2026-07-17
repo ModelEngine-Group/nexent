@@ -69,13 +69,20 @@ def update_nl2agent_workflow_state(
     expected_revision: int,
     workflow_schema_version: int,
     workflow_state: Dict[str, Any],
-    user_id: str,
+    user_id: Optional[str] = None,
 ) -> bool:
     """Replace workflow state iff the active row still has the expected revision."""
     next_revision = int(workflow_state.get("revision", -1))
     if next_revision != expected_revision + 1:
         raise ValueError("workflow_state revision must advance exactly once")
     with get_db_session() as session:
+        values = {
+            "workflow_schema_version": workflow_schema_version,
+            "workflow_revision": next_revision,
+            "workflow_state": workflow_state,
+        }
+        if user_id is not None:
+            values["updated_by"] = user_id
         updated = (
             session.query(Nl2AgentSession)
             .filter(
@@ -85,15 +92,7 @@ def update_nl2agent_workflow_state(
                 Nl2AgentSession.workflow_revision == expected_revision,
                 Nl2AgentSession.delete_flag != "Y",
             )
-            .update(
-                {
-                    "workflow_schema_version": workflow_schema_version,
-                    "workflow_revision": next_revision,
-                    "workflow_state": workflow_state,
-                    "updated_by": user_id,
-                },
-                synchronize_session=False,
-            )
+            .update(values, synchronize_session=False)
         )
         return updated == 1
 
@@ -104,10 +103,16 @@ def update_nl2agent_session_catalogs(
     draft_agent_id: int,
     expected_revision: int,
     session_catalogs: Dict[str, Any],
-    user_id: str,
+    user_id: Optional[str] = None,
 ) -> bool:
     """Replace catalogs iff the active row still has the expected revision."""
     with get_db_session() as session:
+        values = {
+            "catalog_revision": expected_revision + 1,
+            "session_catalogs": session_catalogs,
+        }
+        if user_id is not None:
+            values["updated_by"] = user_id
         updated = (
             session.query(Nl2AgentSession)
             .filter(
@@ -117,14 +122,7 @@ def update_nl2agent_session_catalogs(
                 Nl2AgentSession.catalog_revision == expected_revision,
                 Nl2AgentSession.delete_flag != "Y",
             )
-            .update(
-                {
-                    "catalog_revision": expected_revision + 1,
-                    "session_catalogs": session_catalogs,
-                    "updated_by": user_id,
-                },
-                synchronize_session=False,
-            )
+            .update(values, synchronize_session=False)
         )
         return updated == 1
 
@@ -135,11 +133,13 @@ def update_nl2agent_session_status(
     draft_agent_id: int,
     status: str,
     user_id: str,
+    db_session=None,
 ) -> bool:
     """Move an active session to one terminal lifecycle state."""
     if status not in {NL2AGENT_SESSION_COMPLETED, NL2AGENT_SESSION_ABANDONED}:
         raise ValueError("NL2AGENT session status must be terminal")
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         updated = (
             session.query(Nl2AgentSession)
             .filter(

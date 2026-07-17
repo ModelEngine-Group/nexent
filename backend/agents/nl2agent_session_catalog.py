@@ -41,6 +41,7 @@ _CATALOG_KEYS = (
     "official_skills",
 )
 _CACHE_KEY_PREFIX = "nl2agent:session_catalog"
+_CATALOG_REVISION_KEY_PREFIX = "nl2agent:session_catalog_revision"
 _STATE_KEY_PREFIX = "nl2agent:session_state"
 _INSTALLATION_LOCK_KEY_PREFIX = "nl2agent:mcp_installation_lock"
 _CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -147,6 +148,98 @@ def _state_key(tenant_id: str, draft_agent_id: int) -> str:
     return f"{_STATE_KEY_PREFIX}:{tenant_id}:{int(draft_agent_id)}"
 
 
+def _catalog_revision_key(tenant_id: str, draft_agent_id: int) -> str:
+    return f"{_CATALOG_REVISION_KEY_PREFIX}:{tenant_id}:{int(draft_agent_id)}"
+
+
+def _load_durable_session(tenant_id: str, draft_agent_id: int) -> Optional[Dict[str, Any]]:
+    """Load the database snapshot lazily to keep agent imports lightweight."""
+    from database.nl2agent_session_db import get_nl2agent_session
+
+    return get_nl2agent_session(tenant_id, draft_agent_id)
+
+
+def _persist_workflow_state(
+    tenant_id: str,
+    draft_agent_id: int,
+    expected_revision: int,
+    workflow_state: Dict[str, Any],
+) -> bool:
+    """Advance the authoritative database workflow revision."""
+    from database.nl2agent_session_db import update_nl2agent_workflow_state
+
+    return update_nl2agent_workflow_state(
+        tenant_id=tenant_id,
+        draft_agent_id=draft_agent_id,
+        expected_revision=expected_revision,
+        workflow_schema_version=WORKFLOW_SCHEMA_VERSION,
+        workflow_state=workflow_state,
+    )
+
+
+def _persist_session_catalogs(
+    tenant_id: str,
+    draft_agent_id: int,
+    expected_revision: int,
+    catalogs: Dict[str, Any],
+) -> bool:
+    """Advance the authoritative database catalog revision."""
+    from database.nl2agent_session_db import update_nl2agent_session_catalogs
+
+    return update_nl2agent_session_catalogs(
+        tenant_id=tenant_id,
+        draft_agent_id=draft_agent_id,
+        expected_revision=expected_revision,
+        session_catalogs=catalogs,
+    )
+
+
+def _cache_durable_snapshot(snapshot: Dict[str, Any]) -> None:
+    """Refresh disposable Redis projections from one database snapshot."""
+    tenant_id = str(snapshot["tenant_id"])
+    draft_agent_id = int(snapshot["draft_agent_id"])
+    client = get_redis_service().client
+    pipe = client.pipeline()
+    pipe.setex(
+        _state_key(tenant_id, draft_agent_id),
+        _CACHE_TTL_SECONDS,
+        json.dumps(snapshot["workflow_state"], ensure_ascii=False),
+    )
+    pipe.setex(
+        _cache_key(tenant_id, draft_agent_id),
+        _CACHE_TTL_SECONDS,
+        json.dumps(snapshot["session_catalogs"], ensure_ascii=False),
+    )
+    pipe.setex(
+        _catalog_revision_key(tenant_id, draft_agent_id),
+        _CACHE_TTL_SECONDS,
+        int(snapshot["catalog_revision"]),
+    )
+    pipe.execute()
+
+
+def _recover_durable_session(tenant_id: str, draft_agent_id: int) -> Optional[Dict[str, Any]]:
+    snapshot = _load_durable_session(tenant_id, draft_agent_id)
+    if snapshot is not None:
+        _cache_durable_snapshot(snapshot)
+    return snapshot
+
+
+def _refresh_cache_best_effort(snapshot: Optional[Dict[str, Any]]) -> None:
+    """Refresh Redis without turning a committed database write into a failure."""
+    if snapshot is None:
+        return
+    try:
+        _cache_durable_snapshot(snapshot)
+    except redis.RedisError:
+        logger.warning(
+            "Failed to refresh disposable NL2AGENT Redis cache: tenant_id=%s draft_agent_id=%s",
+            snapshot.get("tenant_id"),
+            snapshot.get("draft_agent_id"),
+            exc_info=True,
+        )
+
+
 def _new_session_state(conversation_id: int) -> Nl2AgentWorkflowState:
     return Nl2AgentWorkflowState(conversation_id=int(conversation_id))
 
@@ -213,6 +306,27 @@ def get_nl2agent_session_state(tenant_id: Optional[str], draft_agent_id: Optiona
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     try:
         raw = get_redis_service().client.get(_state_key(tenant, draft_id))
+        if raw is None:
+            snapshot = _recover_durable_session(tenant, draft_id)
+            raw = (
+                json.dumps(snapshot["workflow_state"], ensure_ascii=False)
+                if snapshot is not None
+                else None
+            )
+    except redis.RedisError:
+        logger.warning(
+            "NL2AGENT state cache is unavailable; loading durable snapshot: "
+            "tenant_id=%s draft_agent_id=%s",
+            tenant,
+            draft_id,
+            exc_info=True,
+        )
+        snapshot = _load_durable_session(tenant, draft_id)
+        raw = (
+            json.dumps(snapshot["workflow_state"], ensure_ascii=False)
+            if snapshot is not None
+            else None
+        )
     except Exception as exc:
         logger.error(
             "Failed to load NL2AGENT session state: tenant_id=%s draft_agent_id=%s",
@@ -236,25 +350,62 @@ def _mutate_session_state(
     client = get_redis_service().client
     for _attempt in range(_CAS_MAX_RETRIES):
         pipe = client.pipeline()
+        durable_committed = False
+        result: Any = None
         try:
             pipe.watch(key)
-            state = _parse_session_state(pipe.get(key), tenant_id, draft_agent_id)
+            raw_state = pipe.get(key)
+            if raw_state is None:
+                pipe.unwatch()
+                if _recover_durable_session(tenant_id, draft_agent_id) is None:
+                    raise Nl2AgentSessionCatalogError(
+                        f"NL2AGENT session state is missing for tenant={tenant_id}, "
+                        f"draft_agent_id={draft_agent_id}."
+                    )
+                continue
+            state = _parse_session_state(raw_state, tenant_id, draft_agent_id)
             original_state = state_to_dict(state)
             result = mutator(state)
             if state_to_dict(state) == original_state:
                 pipe.unwatch()
                 return deepcopy(result)
             state.revision += 1
+            persisted_state = state_to_dict(state)
+            if not _persist_workflow_state(
+                tenant_id,
+                draft_agent_id,
+                expected_revision=int(original_state["revision"]),
+                workflow_state=persisted_state,
+            ):
+                pipe.unwatch()
+                if _recover_durable_session(tenant_id, draft_agent_id) is None:
+                    raise Nl2AgentSessionCatalogError(
+                        "NL2AGENT durable session is missing."
+                    )
+                continue
+            durable_committed = True
             pipe.multi()
             pipe.setex(
                 key,
                 _CACHE_TTL_SECONDS,
-                json.dumps(state_to_dict(state), ensure_ascii=False),
+                json.dumps(persisted_state, ensure_ascii=False),
             )
             pipe.execute()
             return deepcopy(result)
         except redis.WatchError:
+            if durable_committed:
+                _refresh_cache_best_effort(
+                    _load_durable_session(tenant_id, draft_agent_id)
+                )
+                return deepcopy(result)
             continue
+        except redis.RedisError:
+            if durable_committed:
+                _refresh_cache_best_effort(
+                    _load_durable_session(tenant_id, draft_agent_id)
+                )
+                return deepcopy(result)
+            raise
         finally:
             pipe.reset()
     raise Nl2AgentStateConflictError(
@@ -270,9 +421,8 @@ def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_workflow_summary(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> Dict[str, Any]:
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    state = _parse_session_state(get_redis_service().client.get(_state_key(tenant, draft_id)), tenant, draft_id)
-    return summarize_workflow_state(state.model_dump(mode="json"))
+    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+    return summarize_workflow_state(state)
 
 
 def _ensure_workflow_action_allowed(summary: Dict[str, Any], action: str) -> None:
@@ -1162,11 +1312,19 @@ def set_nl2agent_session_catalogs(
     payload = _validate_catalogs(catalogs)
     key = _cache_key(tenant, draft_id)
     try:
-        get_redis_service().client.setex(
+        client = get_redis_service().client
+        pipe = client.pipeline()
+        pipe.setex(
             key,
             _CACHE_TTL_SECONDS,
             json.dumps(payload, ensure_ascii=False),
         )
+        pipe.setex(
+            _catalog_revision_key(tenant, draft_id),
+            _CACHE_TTL_SECONDS,
+            0,
+        )
+        pipe.execute()
     except Exception as exc:
         logger.error(
             "Failed to persist NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
@@ -1187,32 +1345,63 @@ def mutate_nl2agent_session_catalogs(
     """Atomically update one draft catalog without losing concurrent changes."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     key = _cache_key(tenant, draft_id)
+    revision_key = _catalog_revision_key(tenant, draft_id)
     client = get_redis_service().client
     for _attempt in range(_CAS_MAX_RETRIES):
         pipe = client.pipeline()
+        durable_committed = False
+        result: Any = None
         try:
-            pipe.watch(key)
+            pipe.watch(key, revision_key)
             raw = pipe.get(key)
             if raw is None:
-                raise Nl2AgentSessionCatalogError(
-                    f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
-                )
+                pipe.unwatch()
+                if _recover_durable_session(tenant, draft_id) is None:
+                    raise Nl2AgentSessionCatalogError(
+                        f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
+                    )
+                continue
             catalogs = _validate_catalogs(json.loads(raw))
+            raw_revision = pipe.get(revision_key)
+            catalog_revision = int(raw_revision or 0)
             original_catalogs = deepcopy(catalogs)
             result = mutator(catalogs)
             if catalogs == original_catalogs:
                 pipe.unwatch()
                 return deepcopy(result)
+            persisted_catalogs = _validate_catalogs(catalogs)
+            if not _persist_session_catalogs(
+                tenant,
+                draft_id,
+                expected_revision=catalog_revision,
+                catalogs=persisted_catalogs,
+            ):
+                pipe.unwatch()
+                if _recover_durable_session(tenant, draft_id) is None:
+                    raise Nl2AgentSessionCatalogError(
+                        "NL2AGENT durable session is missing."
+                    )
+                continue
+            durable_committed = True
             pipe.multi()
             pipe.setex(
                 key,
                 _CACHE_TTL_SECONDS,
-                json.dumps(_validate_catalogs(catalogs), ensure_ascii=False),
+                json.dumps(persisted_catalogs, ensure_ascii=False),
             )
+            pipe.setex(revision_key, _CACHE_TTL_SECONDS, catalog_revision + 1)
             pipe.execute()
             return deepcopy(result)
         except redis.WatchError:
+            if durable_committed:
+                _refresh_cache_best_effort(_load_durable_session(tenant, draft_id))
+                return deepcopy(result)
             continue
+        except redis.RedisError:
+            if durable_committed:
+                _refresh_cache_best_effort(_load_durable_session(tenant, draft_id))
+                return deepcopy(result)
+            raise
         finally:
             pipe.reset()
     raise Nl2AgentStateConflictError(
@@ -1228,6 +1417,27 @@ def get_nl2agent_session_catalogs(
     key = _cache_key(tenant, draft_id)
     try:
         raw_catalogs = get_redis_service().client.get(key)
+        if raw_catalogs is None:
+            snapshot = _recover_durable_session(tenant, draft_id)
+            raw_catalogs = (
+                json.dumps(snapshot["session_catalogs"], ensure_ascii=False)
+                if snapshot is not None
+                else None
+            )
+    except redis.RedisError:
+        logger.warning(
+            "NL2AGENT catalog cache is unavailable; loading durable snapshot: "
+            "tenant_id=%s draft_agent_id=%s",
+            tenant,
+            draft_id,
+            exc_info=True,
+        )
+        snapshot = _load_durable_session(tenant, draft_id)
+        raw_catalogs = (
+            json.dumps(snapshot["session_catalogs"], ensure_ascii=False)
+            if snapshot is not None
+            else None
+        )
     except Exception as exc:
         logger.error(
             "Failed to load NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
@@ -1267,6 +1477,7 @@ def clear_nl2agent_session_catalogs() -> None:
     """Clear persisted NL2AGENT catalogs. Intended for tests."""
     client = get_redis_service().client
     keys = list(client.scan_iter(match=f"{_CACHE_KEY_PREFIX}:*"))
+    keys.extend(client.scan_iter(match=f"{_CATALOG_REVISION_KEY_PREFIX}:*"))
     keys.extend(client.scan_iter(match=f"{_STATE_KEY_PREFIX}:*"))
     if keys:
         client.delete(*keys)
@@ -1279,6 +1490,7 @@ def delete_nl2agent_session_catalogs(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     get_redis_service().client.delete(
         _cache_key(tenant, draft_id),
+        _catalog_revision_key(tenant, draft_id),
         _state_key(tenant, draft_id),
     )
 

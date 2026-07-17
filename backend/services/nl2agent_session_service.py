@@ -23,6 +23,7 @@ class SessionInitializationDependencies:
     get_db_session: Callable[..., Any]
     create_agent: Callable[..., Dict[str, Any]]
     create_conversation: Callable[..., Dict[str, Any]]
+    create_session_snapshot: Callable[..., Dict[str, Any]]
     initialize_session_state: Callable[..., Any]
     set_session_catalogs: Callable[..., Any]
     delete_session_catalogs: Callable[..., Any]
@@ -86,7 +87,7 @@ async def start_session(
                     "Conversation creation returned no conversation_id."
                 )
 
-            dependencies.initialize_session_state(
+            workflow_state = dependencies.initialize_session_state(
                 tenant_id,
                 draft_agent_id,
                 conversation_id=conversation_id,
@@ -95,6 +96,16 @@ async def start_session(
                 tenant_id,
                 draft_agent_id,
                 session_catalogs,
+            )
+            dependencies.create_session_snapshot(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                draft_agent_id=draft_agent_id,
+                conversation_id=conversation_id,
+                workflow_schema_version=workflow_state["schema_version"],
+                workflow_state=workflow_state,
+                session_catalogs=session_catalogs,
+                db_session=db_session,
             )
     except Exception as exc:
         _compensate_session_catalogs(

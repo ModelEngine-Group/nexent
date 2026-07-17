@@ -49,7 +49,9 @@ class PublicationDependencies:
     resolve_resource_summaries: Callable[..., Any]
     raise_for_invalid_references: Callable[[List[Dict[str, Any]]], None]
     generate_internal_name: Callable[[str, int, str], str]
+    get_db_session: Callable[..., Any]
     update_agent: Callable[..., Any]
+    complete_session: Callable[..., bool]
 
 
 @dataclass(frozen=True)
@@ -286,12 +288,23 @@ def _persist_agent_update(
     agent_update: Dict[str, Any],
 ) -> None:
     try:
-        dependencies.update_agent(
-            agent_id=agent_id,
-            agent_info=AgentInfoRequest(**agent_update),
-            user_id=user_id,
-            version_no=0,
-        )
+        with dependencies.get_db_session() as db_session:
+            dependencies.update_agent(
+                agent_id=agent_id,
+                agent_info=AgentInfoRequest(**agent_update),
+                user_id=user_id,
+                version_no=0,
+                db_session=db_session,
+            )
+            completed = dependencies.complete_session(
+                tenant_id=tenant_id,
+                draft_agent_id=agent_id,
+                status="completed",
+                user_id=user_id,
+                db_session=db_session,
+            )
+            if not completed:
+                raise RuntimeError("NL2AGENT session is no longer active")
     except Exception as exc:
         logger.error(
             "Failed to update NL2AGENT draft during publication: "
