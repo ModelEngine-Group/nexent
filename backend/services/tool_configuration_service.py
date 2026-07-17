@@ -50,7 +50,12 @@ from utils.tool_utils import get_local_tools_classes, get_local_tools_descriptio
 logger = logging.getLogger("tool_configuration_service")
 
 
-def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, custom_headers: Optional[Dict[str, Any]] = None):
+def _create_mcp_transport(
+    url: str,
+    authorization_token: Optional[str] = None,
+    custom_headers: Optional[Dict[str, Any]] = None,
+    httpx_client_factory=None,
+):
     """
     Create appropriate MCP transport based on URL ending.
 
@@ -68,14 +73,15 @@ def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, c
         headers["Authorization"] = authorization_token
     if custom_headers:
         headers.update(custom_headers)
+    client_factory = httpx_client_factory or create_httpx_client
 
     if url_stripped.endswith("/sse"):
-        return SSETransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
+        return SSETransport(url=url_stripped, headers=headers, httpx_client_factory=client_factory)
     elif url_stripped.endswith("/mcp"):
-        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=client_factory)
     else:
         # Default to StreamableHttpTransport for unrecognized formats
-        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=client_factory)
 
 
 def python_type_to_json_schema(annotation: Any) -> str:
@@ -367,7 +373,8 @@ async def get_tool_from_remote_mcp_server(
     remote_mcp_server: str,
     tenant_id: Optional[str] = None,
     authorization_token: Optional[str] = None,
-    custom_headers: Optional[Dict[str, Any]] = None
+    custom_headers: Optional[Dict[str, Any]] = None,
+    httpx_client_factory=None,
 ):
     """
     Get the tool information from the remote MCP server, avoid blocking the event loop
@@ -398,7 +405,16 @@ async def get_tool_from_remote_mcp_server(
     tools_info = []
 
     try:
-        transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
+        transport_args = (
+            remote_mcp_server,
+            authorization_token,
+            custom_headers,
+        )
+        transport = (
+            _create_mcp_transport(*transport_args, httpx_client_factory)
+            if httpx_client_factory is not None
+            else _create_mcp_transport(*transport_args)
+        )
         client = Client(transport=transport, timeout=10)
         async with client:
             # List available operations
@@ -739,8 +755,6 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
-        runtime_inputs = dict(inputs or {})
-
         # Parse instantiation parameters first
         instantiation_params = params or {}
         # Get signature and extract default values for all parameters
@@ -764,7 +778,7 @@ def _validate_local_tool(
 
         if tool_name == "knowledge_base_search":
             index_names = instantiation_params.get("index_names", [])
-            is_multimodal = instantiation_params.pop("multimodal", False)
+            instantiation_params.pop("multimodal", None)
 
             # Must have embedding model for knowledge base search
             if not index_names or not tenant_id:
@@ -884,17 +898,6 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         else:
             tool_instance = tool_class(**instantiation_params)
-
-        # # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
-        # declared_inputs = getattr(tool_class, "inputs", {}) or {}
-        # allowed_input_names = (
-        #     set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
-        # )
-        # filtered_runtime_inputs = (
-        #     {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
-        #     if allowed_input_names
-        #     else runtime_inputs
-        # )
 
         result = tool_instance.forward(**(inputs or {}))
         return result

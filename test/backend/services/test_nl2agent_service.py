@@ -615,6 +615,11 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
+        "build_pinned_httpx_client_factory",
+        MagicMock(return_value=MagicMock(name="pinned_httpx_client_factory")),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
         "get_nl2agent_seed_config",
         MagicMock(
             return_value={
@@ -1884,10 +1889,11 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
             ]
         ),
     )
+    discover_tools = AsyncMock(return_value=[MagicMock()])
     monkeypatch.setattr(
         nl2agent_service,
         "get_tool_from_remote_mcp_server",
-        AsyncMock(return_value=[MagicMock()]),
+        discover_tools,
     )
     monkeypatch.setattr(
         nl2agent_service,
@@ -1932,6 +1938,13 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
     )
     assert add_mcp.call_args.kwargs["server_url"] == "https://acme.example/eu/sse"
     assert add_mcp.call_args.kwargs["authorization_token"] == "secret-token"
+    pinned_factory = nl2agent_service.build_pinned_httpx_client_factory.return_value
+    assert add_mcp.call_args.kwargs["httpx_client_factory"] is pinned_factory
+    assert discover_tools.call_args.kwargs["httpx_client_factory"] is pinned_factory
+    assert [call.args[0] for call in nl2agent_service.build_pinned_httpx_client_factory.call_args_list] == [
+        "https://acme.example/eu/sse",
+        "https://mcp.example/sse",
+    ]
     assert len(get_nl2agent_session_catalogs("tenant_1", 202)["registry_results"]) == 1
     assert nl2agent_session_catalog.get_nl2agent_search_catalogs(
         "tenant_1", 202

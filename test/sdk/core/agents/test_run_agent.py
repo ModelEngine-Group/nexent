@@ -194,7 +194,6 @@ with patch.dict("sys.modules", module_mocks):
         AgentRunInfo,
         ModelConfig,
         AgentConfig,
-        ToolConfig,
     )  # noqa: E402
     import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
 
@@ -463,6 +462,13 @@ def test_normalize_mcp_config():
     # Test string format (auto-detect based on URL ending)
     result = run_agent._normalize_mcp_config("http://server/mcp")
     assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+
+    factory = MagicMock()
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "httpx_client_factory": factory,
+    })
+    assert result["httpx_client_factory"] is factory
     
     result = run_agent._normalize_mcp_config("http://server/sse")
     assert result == {"url": "http://server/sse", "transport": "sse"}

@@ -44,7 +44,12 @@ logger = logging.getLogger("remote_mcp_service")
 # Health Check
 # ---------------------------------------------------------------------------
 
-async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
+async def mcp_server_health(
+    remote_mcp_server: str,
+    authorization_token: str | None = None,
+    custom_headers: dict | None = None,
+    httpx_client_factory=None,
+) -> bool:
     """Check if an MCP server is healthy and reachable."""
     try:
         url_stripped = remote_mcp_server.strip()
@@ -53,25 +58,26 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
             headers["Authorization"] = authorization_token
         if custom_headers:
             headers.update(custom_headers)
+        client_factory = httpx_client_factory or create_httpx_client
 
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client
+                httpx_client_factory=client_factory
             )
         elif url_stripped.endswith("/mcp"):
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client
+                httpx_client_factory=client_factory
             )
         else:
             # Default to StreamableHttpTransport for unrecognized formats
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client
+                httpx_client_factory=client_factory
             )
 
         client = Client(transport=transport)
@@ -235,6 +241,7 @@ async def add_mcp_service(
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
+    httpx_client_factory=None,
 ) -> int:
     """Add an MCP service record.
 
@@ -264,7 +271,14 @@ async def add_mcp_service(
             logger.error(f"MCP name already exists: {name}")
             raise MCPNameIllegal("MCP name already exists")
 
-        if not await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token, custom_headers=custom_headers):
+        health_kwargs = {
+            "remote_mcp_server": server_url,
+            "authorization_token": authorization_token,
+            "custom_headers": custom_headers,
+        }
+        if httpx_client_factory is not None:
+            health_kwargs["httpx_client_factory"] = httpx_client_factory
+        if not await mcp_server_health(**health_kwargs):
             raise MCPConnectionError("MCP connection failed")
 
         status = True

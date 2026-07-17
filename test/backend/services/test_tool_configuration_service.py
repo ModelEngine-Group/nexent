@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 # Environment variables are now configured in conftest.py
 
@@ -217,7 +218,16 @@ if memory_pkg is not None:
     nexent_mock.memory = memory_pkg
     if real_memory_service is not None:
         sys.modules["nexent.memory.memory_service"] = real_memory_service
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+agent_model_stub = types.ModuleType('nexent.core.agents.agent_model')
+
+
+class StubAgentModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+agent_model_stub.AgentVerificationConfig = StubAgentModel
+agent_model_stub.ToolConfig = StubAgentModel
+sys.modules['nexent.core.agents.agent_model'] = agent_model_stub
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
@@ -4599,6 +4609,21 @@ class TestCreateMcpTransport:
 
         from fastmcp.client.transports import StreamableHttpTransport
         assert isinstance(transport, StreamableHttpTransport)
+
+    def test_create_mcp_transport_uses_supplied_httpx_factory(self):
+        """Test that a pinned HTTP client factory reaches FastMCP."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+
+        factory = MagicMock()
+        with patch(
+            "backend.services.tool_configuration_service.StreamableHttpTransport"
+        ) as transport_class:
+            _create_mcp_transport(
+                "http://server/mcp",
+                httpx_client_factory=factory,
+            )
+
+        assert transport_class.call_args.kwargs["httpx_client_factory"] is factory
 
     def test_create_mcp_transport_strips_whitespace(self):
         """Test that URL whitespace is stripped."""

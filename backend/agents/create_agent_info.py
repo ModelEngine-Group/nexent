@@ -41,6 +41,7 @@ from services.vectordatabase_service import (
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+from services.nl2agent_mcp_url_security import build_pinned_httpx_client_factory
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
@@ -1657,6 +1658,10 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http",
             }
+            if mcp_record.get("source") in {"mcp_registry", "community"}:
+                mcp_config["httpx_client_factory"] = (
+                    build_pinned_httpx_client_factory(url)
+                )
             headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:

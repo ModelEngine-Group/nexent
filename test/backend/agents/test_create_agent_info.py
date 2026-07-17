@@ -229,6 +229,10 @@ sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
+sys.modules['services.nl2agent_mcp_url_security'] = _create_stub_module(
+    "services.nl2agent_mcp_url_security",
+    build_pinned_httpx_client_factory=MagicMock(),
+)
 database_module = _create_stub_module("database")
 sys.modules['database'] = database_module
 sys.modules['database.agent_db'] = MagicMock()
@@ -3764,6 +3768,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.build_pinned_httpx_client_factory') as mock_build_factory, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -3776,12 +3781,15 @@ class TestCreateAgentRunInfo:
                     "remote_mcp_server_name": "test_server",
                     "remote_mcp_server": "http://test.server",
                     "status": True,
+                    "source": "mcp_registry",
                     "authorization_token": None
                 }
             ]
             mock_create_agent.return_value = "agent_config"
             mock_urljoin.return_value = "http://nexent.mcp/sse"
             mock_filter.return_value = ["http://test.server"]
+            pinned_factory = MagicMock(name="pinned_factory")
+            mock_build_factory.return_value = pinned_factory
             mock_threading.Event.return_value = "stop_event"
             mock_version_no.return_value = 1  # Mock published version
 
@@ -3804,13 +3812,15 @@ class TestCreateAgentRunInfo:
                 agent_config="agent_config",
                 mcp_host=[{
                     "url": "http://test.server",
-                    "transport": "streamable-http"
+                    "transport": "streamable-http",
+                    "httpx_client_factory": pinned_factory,
                 }],
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None
             )
+            mock_build_factory.assert_called_once_with("http://test.server")
 
             # Verify that other functions were called correctly
             mock_join_query.assert_called_once_with(
@@ -3832,6 +3842,7 @@ class TestCreateAgentRunInfo:
                     "remote_mcp_server_name": "test_server",
                     "remote_mcp_server": "http://test.server",
                     "status": True,
+                    "source": "mcp_registry",
                     "authorization_token": None
                 },
                 "outer-apis": {

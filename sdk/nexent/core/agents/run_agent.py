@@ -14,6 +14,7 @@ from ...monitor import (
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
 
+
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
 
@@ -140,6 +141,11 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             result["headers"] = {"Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
+
+        if "httpx_client_factory" in mcp_host_item:
+            result["httpx_client_factory"] = mcp_host_item[
+                "httpx_client_factory"
+            ]
 
         return result
     else:

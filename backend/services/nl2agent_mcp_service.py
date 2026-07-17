@@ -43,6 +43,7 @@ class McpInstallationDependencies:
     upsert_discovered_tools: Callable[..., List[Dict[str, Any]]]
     recommendation_id: Callable[[str, Dict[str, Any]], str]
     validate_remote_url: Callable[[str], str]
+    build_httpx_client_factory: Callable[[str], Callable[..., Any]]
 
 
 def installation_key(
@@ -474,6 +475,7 @@ async def _install_remote(
             tags=raw.get("tags") or [],
         )
         return existing_mcp_id
+    httpx_client_factory = dependencies.build_httpx_client_factory(server_url)
     return await dependencies.add_remote_mcp(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -487,6 +489,7 @@ async def _install_remote(
         container_config=None,
         registry_json=persisted_registry_json,
         enabled=True,
+        httpx_client_factory=httpx_client_factory,
     )
 
 
@@ -684,6 +687,9 @@ async def _discover_and_complete(
             tenant_id=tenant_id,
             authorization_token=authorization_token,
             custom_headers=custom_headers or None,
+            httpx_client_factory=dependencies.build_httpx_client_factory(
+                str(record.get("mcp_server"))
+            ),
         )
         tools = dependencies.upsert_discovered_tools(
             tenant_id,

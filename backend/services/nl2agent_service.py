@@ -128,6 +128,7 @@ from services.nl2agent_mcp_service import (
     skip_mcp_tool_binding as skip_mcp_tool_binding_service,
 )
 from services.nl2agent_mcp_url_security import (
+    build_pinned_httpx_client_factory,
     validate_remote_mcp_url as validate_nl2agent_remote_mcp_url,
 )
 from services.nl2agent_publication_service import (
@@ -656,6 +657,7 @@ def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
         upsert_discovered_tools=upsert_discovered_mcp_tools,
         recommendation_id=_recommendation_id,
         validate_remote_url=validate_nl2agent_remote_mcp_url,
+        build_httpx_client_factory=build_pinned_httpx_client_factory,
     )
 
 
