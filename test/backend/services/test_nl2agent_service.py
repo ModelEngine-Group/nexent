@@ -3186,6 +3186,73 @@ async def test_apply_local_resources_batch_reconciles_after_redis_failure(monkey
 
 
 @pytest.mark.asyncio
+async def test_local_apply_different_config_cannot_reuse_pending_operation(
+    monkeypatch,
+):
+    bind_tool = MagicMock()
+    _mock_database_transaction(monkeypatch)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "query_tools_by_ids_for_tenant",
+        MagicMock(
+            return_value=[
+                {
+                    "tool_id": 42,
+                    "params": [
+                        {"name": "endpoint", "type": "string", "optional": False}
+                    ],
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    _register_local_batch("batch_1", [42], [])
+    monkeypatch.setattr(
+        nl2agent_service,
+        "complete_recommendation_batch_apply",
+        MagicMock(
+            side_effect=nl2agent_session_catalog.Nl2AgentSessionCatalogError(
+                "redis unavailable"
+            )
+        ),
+    )
+
+    with pytest.raises(Nl2AgentOperationError, match="Retry Apply All"):
+        await nl2agent_service.apply_local_resources_batch(
+            agent_id=202,
+            recommendation_batch_id="batch_1",
+            tool_ids=[42],
+            skill_ids=[],
+            tool_config_values={42: {"endpoint": "https://first.example"}},
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="another operation",
+    ):
+        await nl2agent_service.apply_local_resources_batch(
+            agent_id=202,
+            recommendation_batch_id="batch_1",
+            tool_ids=[42],
+            skill_ids=[],
+            tool_config_values={42: {"endpoint": "https://second.example"}},
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    assert bind_tool.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_apply_local_resources_batch_rejects_invalid_draft_agent_id(monkeypatch):
     query_tools = MagicMock()
     monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)

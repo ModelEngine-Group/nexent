@@ -202,13 +202,30 @@ async def apply_local_resources(
             + ", ".join(map(str, missing_skill_ids))
         )
 
+    resolved_tool_params = {
+        tool_id: _resolve_tool_config_values(
+            tool_id,
+            tools_by_id[tool_id].get("params"),
+            submitted_config.get(tool_id, {}),
+        )
+        for tool_id in selected_tool_ids
+    }
     operation_payload = {
         "recommendation_batch_id": recommendation_batch_id,
         "tool_ids": sorted(selected_tool_ids),
         "skill_ids": sorted(selected_skill_ids),
+        "tool_params": {
+            str(tool_id): resolved_tool_params[tool_id]
+            for tool_id in sorted(resolved_tool_params)
+        },
     }
     operation_id = hashlib.sha256(
-        json.dumps(operation_payload, sort_keys=True).encode("utf-8")
+        json.dumps(
+            operation_payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()
     dependencies.reserve_batch_apply(
         tenant_id,
@@ -222,16 +239,11 @@ async def apply_local_resources(
     try:
         with dependencies.get_db_session() as db_session:
             for tool_id in selected_tool_ids:
-                params = _resolve_tool_config_values(
-                    tool_id,
-                    tools_by_id[tool_id].get("params"),
-                    submitted_config.get(tool_id, {}),
-                )
                 dependencies.bind_tool(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,
                         agent_id=agent_id,
-                        params=params,
+                        params=resolved_tool_params[tool_id],
                         enabled=True,
                         version_no=0,
                     ),
