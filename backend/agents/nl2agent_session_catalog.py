@@ -378,9 +378,14 @@ def _mutate_session_state(
                 workflow_state=persisted_state,
             ):
                 pipe.unwatch()
-                if _recover_durable_session(tenant_id, draft_agent_id) is None:
+                snapshot = _recover_durable_session(tenant_id, draft_agent_id)
+                if snapshot is None:
                     raise Nl2AgentSessionCatalogError(
                         "NL2AGENT durable session is missing."
+                    )
+                if snapshot.get("status") != "active":
+                    raise Nl2AgentSessionCatalogError(
+                        "NL2AGENT session is no longer active."
                     )
                 continue
             durable_committed = True
@@ -1377,9 +1382,14 @@ def mutate_nl2agent_session_catalogs(
                 catalogs=persisted_catalogs,
             ):
                 pipe.unwatch()
-                if _recover_durable_session(tenant, draft_id) is None:
+                snapshot = _recover_durable_session(tenant, draft_id)
+                if snapshot is None:
                     raise Nl2AgentSessionCatalogError(
                         "NL2AGENT durable session is missing."
+                    )
+                if snapshot.get("status") != "active":
+                    raise Nl2AgentSessionCatalogError(
+                        "NL2AGENT session is no longer active."
                     )
                 continue
             durable_committed = True

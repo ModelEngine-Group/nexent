@@ -147,6 +147,22 @@ def test_database_conflict_recovers_and_retries_from_latest_revision(
     assert catalog.get_nl2agent_session_state("tenant_1", 202)["revision"] == 2
 
 
+def test_terminal_session_rejects_mutation_without_exhausting_retries(
+    durable_cache, monkeypatch
+):
+    catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
+    persist = MagicMock(return_value=False)
+    terminal = _snapshot()
+    terminal["status"] = "completed"
+    monkeypatch.setattr(catalog, "_persist_workflow_state", persist)
+    monkeypatch.setattr(catalog, "_load_durable_session", MagicMock(return_value=terminal))
+
+    with pytest.raises(catalog.Nl2AgentSessionCatalogError, match="no longer active"):
+        catalog.set_model_selection_confirmed("tenant_1", 202, True)
+
+    persist.assert_called_once()
+
+
 def test_catalog_mutation_persists_independent_revision(
     durable_cache, monkeypatch
 ):
