@@ -19,28 +19,37 @@ def _client():
 
 
 def test_list_tasks_http_smoke(monkeypatch):
-    monkeypatch.setattr(agent_automation_app, "get_current_user_id", lambda authorization: ("user", "tenant"))
+    monkeypatch.setattr(
+        agent_automation_app,
+        "get_current_user_id",
+        lambda authorization: ("user", "tenant"),
+    )
     monkeypatch.setattr(
         agent_automation_app.agent_automation_facade,
         "list_tasks",
-        lambda tenant_id, user_id, status=None: [
+        lambda tenant_id, user_id, status=None, search=None: [
             {
                 "task_id": 1,
                 "tenant_id": tenant_id,
                 "user_id": user_id,
                 "status": status or "ACTIVE",
+                "search": search,
             }
         ],
     )
 
-    response = _client().get("/agent/automations", headers={"Authorization": "Bearer token"})
+    response = _client().get(
+        "/agent/automations?status=PAUSED&search=%E5%A4%A9%E6%B0%94",
+        headers={"Authorization": "Bearer token"},
+    )
 
     assert response.status_code == 200
     assert response.json()["data"][0] == {
         "task_id": 1,
         "tenant_id": "tenant",
         "user_id": "user",
-        "status": "ACTIVE",
+        "status": "PAUSED",
+        "search": "天气",
     }
 
 
@@ -101,6 +110,41 @@ def test_chat_proposal_can_start_a_new_bound_conversation(monkeypatch):
     assert captured["user_id"] == "user"
 
 
+def test_chat_proposal_can_be_updated(monkeypatch):
+    captured = {}
+
+    async def fake_update_proposal(proposal_id, request, tenant_id, user_id):
+        captured.update({
+            "proposal_id": proposal_id,
+            "request": request,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        })
+        return {
+            "proposal_id": proposal_id,
+            "task": {"title": request.title},
+        }
+
+    monkeypatch.setattr(agent_automation_app, "get_current_user_id", lambda authorization: ("user", "tenant"))
+    monkeypatch.setattr(
+        agent_automation_app.agent_automation_facade,
+        "update_proposal",
+        fake_update_proposal,
+    )
+
+    response = _client().patch(
+        "/agent/automations/proposals/7",
+        headers={"Authorization": "Bearer token"},
+        json={"title": "修改后的任务"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["task"]["title"] == "修改后的任务"
+    assert captured["proposal_id"] == 7
+    assert captured["tenant_id"] == "tenant"
+    assert captured["user_id"] == "user"
+
+
 def test_list_tasks_without_authorization_returns_401(monkeypatch):
     def raise_unauthorized(authorization):
         raise UnauthorizedError("No authorization header provided")
@@ -113,3 +157,39 @@ def test_list_tasks_without_authorization_returns_401(monkeypatch):
     response = _client().get("/agent/automations")
 
     assert response.status_code == 401
+
+
+def test_delete_run_endpoint_uses_authenticated_owner(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        agent_automation_app,
+        "get_current_user_id",
+        lambda authorization: ("user", "tenant"),
+    )
+
+    def fake_delete_run(run_id, tenant_id, user_id):
+        captured.update({
+            "run_id": run_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        })
+        return True
+
+    monkeypatch.setattr(
+        agent_automation_app.agent_automation_facade,
+        "delete_run",
+        fake_delete_run,
+    )
+
+    response = _client().delete(
+        "/agent/automations/runs/7",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] is True
+    assert captured == {
+        "run_id": 7,
+        "tenant_id": "tenant",
+        "user_id": "user",
+    }

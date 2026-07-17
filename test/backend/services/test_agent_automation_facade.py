@@ -14,6 +14,7 @@ from services.agent_automation.facade import AgentAutomationFacade
 from services.agent_automation.intent_analyzer import AutomationIntentContext
 from services.agent_automation.models import (
     AutomationProposalCreateRequest,
+    AutomationProposalPatchRequest,
     AutomationProposalConfirmRequest,
     AutomationProposalStatus,
     AutomationRunStatus,
@@ -343,6 +344,132 @@ async def test_confirm_proposal_updates_persisted_conversation_card(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_update_proposal_revalidates_and_persists_card(monkeypatch):
+    captured = {}
+    proposal = {
+        "proposal_id": 10,
+        "tenant_id": "tenant",
+        "user_id": "user",
+        "conversation_id": 100,
+        "agent_id": 7,
+        "status": AutomationProposalStatus.PENDING.value,
+        "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+        "proposed_task": {
+            "title": "旧标题",
+            "instruction": "旧指令",
+            "agent_version_no": None,
+            "_conversation_unit_id": 41,
+            "schedule_trigger": {
+                "mode": "ONCE",
+                "rule_type": "AT",
+                "timezone": "Asia/Shanghai",
+                "start_at": "2030-01-01T09:00:00+08:00",
+            },
+        },
+    }
+
+    async def fake_resolve_agent_capabilities(*args, **kwargs):
+        captured["resolved_instruction"] = kwargs["instruction"]
+        return CapabilityResolution(executable=True)
+
+    def fake_update_proposal(proposal_id, tenant_id, user_id, proposed_task, capability_resolution):
+        captured["stored_task"] = proposed_task
+        captured["capability_resolution"] = capability_resolution
+        return True
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: proposal)
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal", fake_update_proposal)
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
+    monkeypatch.setattr(
+        facade_module.automation_conversation_adapter,
+        "update_proposal",
+        lambda unit_id, payload, user_id: captured.update({"unit_id": unit_id, "payload": payload}),
+    )
+
+    trigger = ScheduleTrigger(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.CRON,
+        timezone="Asia/Shanghai",
+        start_at=datetime(2030, 1, 1, 10, 0, tzinfo=timezone(timedelta(hours=8))),
+        cron_expr="0 10 * * *",
+    )
+    result = await AgentAutomationFacade().update_proposal(
+        10,
+        AutomationProposalPatchRequest(
+            title="新标题",
+            instruction="新指令",
+            schedule_trigger=trigger,
+        ),
+        "tenant",
+        "user",
+    )
+
+    assert result["task"]["title"] == "新标题"
+    assert result["task"]["schedule_trigger"]["cron_expr"] == "0 10 * * *"
+    assert captured["resolved_instruction"] == "新指令"
+    assert captured["stored_task"]["_conversation_unit_id"] == 41
+    assert captured["unit_id"] == 41
+    assert "_conversation_unit_id" not in captured["payload"]["task"]
+
+
+@pytest.mark.asyncio
+async def test_update_confirmed_proposal_updates_task_and_persisted_card(monkeypatch):
+    captured = {}
+    proposal = {
+        "proposal_id": 10,
+        "tenant_id": "tenant",
+        "user_id": "user",
+        "conversation_id": 100,
+        "agent_id": 7,
+        "status": AutomationProposalStatus.ACCEPTED.value,
+        "expires_at": datetime.now(timezone.utc) - timedelta(hours=1),
+        "capability_resolution": {"executable": True},
+        "proposed_task": {
+            "title": "旧标题",
+            "instruction": "旧指令",
+            "agent_version_no": None,
+            "_conversation_unit_id": 41,
+            "schedule_trigger": {
+                "mode": "ONCE",
+                "rule_type": "AT",
+                "timezone": "Asia/Shanghai",
+                "start_at": "2030-01-01T09:00:00+08:00",
+            },
+        },
+    }
+    facade = AgentAutomationFacade()
+
+    async def fake_patch_task(task_id, request, tenant_id, user_id):
+        captured["task_patch"] = request
+        return {
+            "task_id": task_id,
+            "capability_requirements": {"executable": True},
+        }
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: proposal)
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal", lambda *args: True)
+    monkeypatch.setattr(facade, "get_task_for_conversation", lambda *args: {"task_id": 22})
+    monkeypatch.setattr(facade, "patch_task", fake_patch_task)
+    monkeypatch.setattr(
+        facade_module.automation_conversation_adapter,
+        "update_proposal",
+        lambda unit_id, payload, user_id: captured.update({"unit_id": unit_id, "payload": payload}),
+    )
+
+    result = await facade.update_proposal(
+        10,
+        AutomationProposalPatchRequest(title="新标题"),
+        "tenant",
+        "user",
+    )
+
+    assert captured["task_patch"].title == "新标题"
+    assert result["confirmed_task_id"] == 22
+    assert result["task"]["title"] == "新标题"
+    assert captured["payload"]["confirmed_task_id"] == 22
+
+
+@pytest.mark.asyncio
 async def test_confirm_proposal_rejects_missing_capabilities(monkeypatch):
     async def fake_resolve_agent_capabilities(*args, **kwargs):
         return CapabilityResolution(
@@ -458,6 +585,78 @@ def test_cancel_run_marks_running_run_canceled(monkeypatch):
     assert stopped == {"conversation_id": 99, "user_id": "user"}
 
 
+def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_run",
+        lambda run_id, tenant_id, user_id: {
+            "run_id": run_id,
+            "task_id": 88,
+            "status": AutomationRunStatus.SUCCEEDED.value,
+        },
+    )
+
+    def fake_soft_delete_run(run_id, tenant_id, user_id, expected_statuses):
+        captured["deleted"] = (run_id, tenant_id, user_id)
+        captured["expected_statuses"] = set(expected_statuses)
+        return {"run_id": run_id, "delete_flag": "Y"}
+
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "soft_delete_run",
+        fake_soft_delete_run,
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_runs",
+        lambda task_id, tenant_id, user_id, limit=50: [
+            {
+                "status": AutomationRunStatus.FAILED.value,
+                "error_message": "previous failure",
+            }
+        ],
+    )
+
+    def fake_update_task(task_id, tenant_id, user_id, values):
+        captured["task_update"] = (task_id, tenant_id, user_id, values)
+        return {"task_id": task_id, **values}
+
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "update_task",
+        fake_update_task,
+    )
+
+    assert AgentAutomationFacade().delete_run(7, "tenant", "user") is True
+    assert captured["deleted"] == (7, "tenant", "user")
+    assert AutomationRunStatus.RUNNING.value not in captured["expected_statuses"]
+    assert captured["task_update"] == (
+        88,
+        "tenant",
+        "user",
+        {
+            "last_run_status": AutomationRunStatus.FAILED.value,
+            "last_error": "previous failure",
+        },
+    )
+
+
+def test_delete_run_rejects_active_record(monkeypatch):
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_run",
+        lambda run_id, tenant_id, user_id: {
+            "run_id": run_id,
+            "task_id": 88,
+            "status": AutomationRunStatus.RUNNING.value,
+        },
+    )
+
+    with pytest.raises(AutomationScheduleInvalidError, match="canceled before deletion"):
+        AgentAutomationFacade().delete_run(7, "tenant", "user")
+
+
 @pytest.mark.asyncio
 async def test_create_task_requires_and_reuses_bound_conversation(monkeypatch):
     created_task = {}
@@ -478,6 +677,11 @@ async def test_create_task_requires_and_reuses_bound_conversation(monkeypatch):
         lambda conversation_id, user_id: None,
     )
     monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {(3, 0): "销售助手"},
+    )
 
     def fake_create_task(task_data, user_id):
         created_task.update(task_data)
@@ -509,6 +713,7 @@ async def test_create_task_requires_and_reuses_bound_conversation(monkeypatch):
     assert task["status"] == "ACTIVE"
     assert created_task["runtime_snapshot"] == {
         "agent_id": 3,
+        "display_name": "Agent #3",
         "model_id": 55,
         "tool_params": {"tools": {"search": {"top_k": 5}}},
         "original_instruction": "总结销售线索变化",
@@ -534,6 +739,35 @@ def test_conversation_deleted_soft_deletes_task_and_cancels_runs(monkeypatch):
 
     assert deleted_count == 1
     assert events == [(77, "user", "Conversation was deleted.")]
+
+
+def test_list_tasks_enriches_agent_display_name(monkeypatch):
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_tasks",
+        lambda tenant_id, user_id, status, search: [
+            {
+                "task_id": 1,
+                "agent_id": 3,
+                "agent_version_no": 0,
+                "runtime_snapshot": {"name": "weather_query_assistant"},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {(3, 0): "天气查询助手"},
+    )
+
+    tasks = AgentAutomationFacade().list_tasks(
+        "tenant",
+        "user",
+        status="ACTIVE",
+        search="天气",
+    )
+
+    assert tasks[0]["agent_name"] == "天气查询助手"
 
 
 @pytest.mark.asyncio

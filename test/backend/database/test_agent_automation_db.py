@@ -26,6 +26,48 @@ class _FakeSession:
         return _FakeResult()
 
 
+class _FakeScalarRows:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+
+def test_list_tasks_filters_by_owner_status_and_literal_title_search(monkeypatch):
+    class ListSession(_FakeSession):
+        def execute(self, statement, params=None):
+            self.statement = statement
+            self.params = params
+            return _FakeScalarRows()
+
+    fake_session = ListSession()
+
+    @contextmanager
+    def fake_get_db_session():
+        yield fake_session
+
+    monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
+
+    tasks = agent_automation_db.list_tasks(
+        "tenant-1",
+        "user-1",
+        status="ACTIVE",
+        search="  100%_天气  ",
+    )
+
+    compiled = fake_session.statement.compile()
+    statement = str(fake_session.statement)
+    assert tasks == []
+    assert "tenant_id" in statement
+    assert "user_id" in statement
+    assert "status" in statement
+    assert "lower" in statement
+    assert "LIKE" in statement
+    assert "ESCAPE" in statement
+    assert r"%100\%\_天气%" in compiled.params.values()
+
+
 def test_claim_due_tasks_uses_db_lease_and_skip_locked(monkeypatch):
     fake_session = _FakeSession()
 

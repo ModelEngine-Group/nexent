@@ -152,9 +152,7 @@ export function ChatHeader({
                 {title}
               </h1>
               {hasAutomation && (
-                <Tooltip
-                  title={t("agentAutomation.boundTask", "已绑定自动任务")}
-                >
+                <Tooltip title={t("agentAutomation.boundTask")}>
                   <CalendarClock className="h-4 w-4 shrink-0 text-blue-600" />
                 </Tooltip>
               )}

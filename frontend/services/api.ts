@@ -127,7 +127,11 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/automations/${taskId}/runs`,
     cancelRun: (runId: number) =>
       `${API_BASE_URL}/agent/automations/runs/${runId}/cancel`,
+    deleteRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}`,
     proposals: `${API_BASE_URL}/agent/automations/proposals`,
+    updateProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}`,
     confirmProposal: (proposalId: number) =>
       `${API_BASE_URL}/agent/automations/proposals/${proposalId}/confirm`,
     conversation: (conversationId: number) =>

@@ -148,6 +148,12 @@ class AutomationProposalConfirmRequest(BaseModel):
     instruction: Optional[str] = None
 
 
+class AutomationProposalPatchRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1)
+    instruction: Optional[str] = Field(default=None, min_length=1)
+    schedule_trigger: Optional[ScheduleTrigger] = None
+
+
 class AutomationResponse(BaseModel):
     code: int = 0
     message: str = "success"

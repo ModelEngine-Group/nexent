@@ -34,6 +34,7 @@ export interface AgentAutomationTask {
   user_id: string;
   conversation_id: number;
   agent_id: number;
+  agent_name?: string;
   agent_version_no?: number | null;
   title: string;
   instruction: string;
@@ -70,6 +71,7 @@ export interface AgentAutomationRun {
 }
 
 export interface AgentAutomationProposalData {
+  ui_state?: "PREPARING";
   proposal_id?: number | null;
   conversation_id?: number | null;
   confidence?: number;
@@ -80,6 +82,7 @@ export interface AgentAutomationProposalData {
     title?: string;
     instruction?: string;
     agent_id?: number;
+    agent_name?: string;
     agent_version_no?: number | null;
     model_id?: number | null;
     tool_params?: Record<string, unknown> | null;
@@ -92,6 +95,12 @@ export interface AgentAutomationProposalData {
     agent_snapshot?: Record<string, unknown>;
   } | null;
   confirmed_task_id?: number;
+}
+
+export interface UpdateAutomationProposalPayload {
+  title?: string;
+  instruction?: string;
+  schedule_trigger?: ScheduleTrigger;
 }
 
 export interface UpdateAutomationTaskPayload {

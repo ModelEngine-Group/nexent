@@ -14,8 +14,16 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
-import { agentAutomationService } from "@/services/agentAutomationService";
-import { ApiError } from "@/services/api";
+import {
+  analyzeAutomationMessage,
+  canAnalyzeAutomationMessage,
+  createPreparingAutomationMessage,
+  getAutomationConversationIds,
+  hydrateAutomationProposalMessages,
+  resolveAutomationProposalMessage,
+  resolvePreparingMessageAsAgentReply,
+} from "@/features/agentAutomation/chatAdapter";
+import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
 import {
   storageService,
   convertImageUrlToApiUrl,
@@ -144,6 +152,10 @@ export function ChatInterface() {
 
   // Use conversation management hook
   const conversationManagement = useConversationManagement();
+  const linkedConversationHandledRef = useRef(false);
+  const handleDialogClickRef = useRef<
+    (dialog: ConversationListItem) => Promise<void>
+  >(async () => undefined);
 
   // Use model list hook for model selection
   const { models: availableModels } = useModelList();
@@ -229,10 +241,7 @@ export function ChatInterface() {
 
   const loadAutomationConversationIds = useCallback(async () => {
     try {
-      const tasks = await agentAutomationService.list();
-      setAutomationConversationIds(
-        new Set(tasks.map((task) => task.conversation_id))
-      );
+      setAutomationConversationIds(await getAutomationConversationIds());
     } catch (error) {
       log.warn("Failed to load automation task markers", error);
     }
@@ -519,8 +528,11 @@ export function ChatInterface() {
       role: MESSAGE_ROLES.USER,
       content: userMessageContent,
       timestamp: new Date(),
+      isComplete: true,
+      steps: [],
       attachments:
         messageAttachments.length > 0 ? messageAttachments : undefined,
+      images: [],
     };
 
     // Clear input box and attachments
@@ -537,6 +549,17 @@ export function ChatInterface() {
       isComplete: false,
       steps: [],
     };
+    const shouldAnalyzeAutomation = canAnalyzeAutomationMessage(
+      attachments.length,
+      agentIdForRun,
+      userMessageContent
+    );
+    const preparingAutomationMessage = shouldAnalyzeAutomation
+      ? createPreparingAutomationMessage(
+          assistantMessageId,
+          initialAssistantMessage.timestamp
+        )
+      : null;
 
     // Send message and scroll to bottom
     setShouldScrollToBottom(true);
@@ -547,23 +570,31 @@ export function ChatInterface() {
     // Create independent AbortController for current conversation
     const currentController = new AbortController();
 
+    // Render the user message before automation intent analysis or the normal
+    // Agent request starts. New conversations use the existing placeholder and
+    // migrate to the backend-created conversation ID later.
+    const placeholderId = -1;
+    const id = currentConversationId ?? placeholderId;
+    cid = id;
+    setSessionMessages((prev) => ({
+      ...prev,
+      [id]: [
+        ...(prev[id] || []),
+        userMessage,
+        ...(preparingAutomationMessage ? [preparingAutomationMessage] : []),
+      ],
+    }));
+
     try {
       // Handle scheduled requests as chat commands before a normal Agent run.
       // This prevents a recurring command from executing once immediately.
-      if (
-        attachments.length === 0 &&
-        agentIdForRun !== null &&
-        userMessageContent
-      ) {
+      if (shouldAnalyzeAutomation) {
         try {
-          const timezone =
-            Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
-          const proposal = await agentAutomationService.createProposal({
-            conversation_id: currentConversationId ?? undefined,
-            agent_id: agentIdForRun,
+          const proposal = await analyzeAutomationMessage({
+            conversationId: currentConversationId ?? undefined,
+            agentId: agentIdForRun,
             message: userMessageContent,
-            timezone,
-            model_id: selectedModelId,
+            modelId: selectedModelId,
           });
           if (proposal?.proposal_id && proposal.task) {
             const proposalConversationId =
@@ -572,28 +603,29 @@ export function ChatInterface() {
               throw new Error("Automation proposal is missing conversation_id");
             }
             cid = proposalConversationId;
-            setSessionMessages((prev) => ({
-              ...prev,
-              [proposalConversationId]: [
-                ...(prev[proposalConversationId] || []),
-                {
-                  ...userMessage,
-                  isComplete: true,
-                  steps: [],
-                  attachments: [],
-                  images: [],
-                },
-                {
-                  id: uuidv4(),
-                  role: ROLE_ASSISTANT,
-                  content: "",
-                  timestamp: new Date(),
-                  isComplete: true,
-                  steps: [],
-                  automationProposal: proposal,
-                },
-              ],
-            }));
+            setSessionMessages((prev) => {
+              const optimisticMessages = prev[id] || [];
+              const proposalMessages =
+                proposalConversationId === id
+                  ? optimisticMessages
+                  : [
+                      ...(prev[proposalConversationId] || []),
+                      ...optimisticMessages,
+                    ];
+              const nextMessages = resolveAutomationProposalMessage(
+                proposalMessages,
+                assistantMessageId,
+                proposal
+              );
+              const nextState = {
+                ...prev,
+                [proposalConversationId]: nextMessages,
+              };
+              if (proposalConversationId !== id) {
+                delete nextState[id];
+              }
+              return nextState;
+            });
             conversationManagement.setSelectedConversationId(
               proposalConversationId
             );
@@ -617,24 +649,31 @@ export function ChatInterface() {
           }
         } catch (error) {
           log.warn("Failed to handle automation chat command", error);
-          const errorMessage =
-            error instanceof ApiError
-              ? error.message
-              : t("agentAutomation.proposal.createFailed", "创建自动任务失败");
+          const errorMessage = getAutomationErrorMessage(
+            error,
+            t,
+            "agentAutomation.proposal.createFailed"
+          );
           message.warning(errorMessage);
+          setSessionMessages((prev) => {
+            const existingMessages = prev[id] || [];
+            const nextMessages = existingMessages.filter(
+              (item) =>
+                item.id !== userMessageId && item.id !== assistantMessageId
+            );
+            if (nextMessages.length === existingMessages.length) return prev;
+            const nextState = { ...prev };
+            if (nextMessages.length > 0) {
+              nextState[id] = nextMessages;
+            } else {
+              delete nextState[id];
+            }
+            return nextState;
+          });
           setInput(userMessageContent);
           return;
         }
       }
-
-      // For new conversations, the backend will auto-create the conversation and emit
-      // a conversation_created SSE event with the real conversation_id. Until that
-      // happens, store messages under a placeholder key (-1) so the UI can render them.
-      // Once the SSE event arrives, the onConversationCreated callback migrates the
-      // session messages from -1 to the real conversation_id.
-      const placeholderId = -1;
-      const id = currentConversationId ?? placeholderId;
-      cid = id;
 
       // Register controller and streaming state for this conversation
       conversationControllersRef.current.set(id, currentController);
@@ -644,40 +683,29 @@ export function ChatInterface() {
         return newSet;
       });
 
-      // Now add messages after conversation is created/confirmed
-      // 1. When sending user message, complete ChatMessageType fields
-      setSessionMessages((prev) => ({
-        ...prev,
-        [id]: [
-          ...(prev[id] || []),
-          {
-            ...userMessage,
-            id: userMessage.id || uuidv4(),
-            timestamp: userMessage.timestamp || new Date(),
-            isComplete: userMessage.isComplete ?? true,
-            steps: userMessage.steps || [],
-            attachments: userMessage.attachments || [],
-            images: userMessage.images || [],
-          },
-        ],
-      }));
-
-      // 2. When adding AI reply message, complete ChatMessageType fields
-      setSessionMessages((prev) => ({
-        ...prev,
-        [id]: [
-          ...(prev[id] || []),
-          {
-            ...initialAssistantMessage,
-            id: initialAssistantMessage.id || uuidv4(),
-            timestamp: initialAssistantMessage.timestamp || new Date(),
-            isComplete: initialAssistantMessage.isComplete ?? false,
-            steps: initialAssistantMessage.steps || [],
-            attachments: initialAssistantMessage.attachments || [],
-            images: initialAssistantMessage.images || [],
-          },
-        ],
-      }));
+      // Reuse the automation-analysis placeholder for a normal Agent reply, so
+      // chat only swaps message state and does not own automation UI details.
+      setSessionMessages((prev) => {
+        const assistantMessage = {
+          ...initialAssistantMessage,
+          id: initialAssistantMessage.id || uuidv4(),
+          timestamp: initialAssistantMessage.timestamp || new Date(),
+          isComplete: initialAssistantMessage.isComplete ?? false,
+          steps: initialAssistantMessage.steps || [],
+          attachments: initialAssistantMessage.attachments || [],
+          images: initialAssistantMessage.images || [],
+        };
+        return {
+          ...prev,
+          [id]: shouldAnalyzeAutomation
+            ? resolvePreparingMessageAsAgentReply(
+                prev[id] || [],
+                assistantMessageId,
+                assistantMessage
+              )
+            : [...(prev[id] || []), assistantMessage],
+        };
+      });
 
       // If there are attachment files, skip preprocessing (no API call, no UI prompts)
       let finalQuery = userMessage.content;
@@ -1074,10 +1102,13 @@ export function ChatInterface() {
     setAttachments([]);
     setFileUrls({});
 
-    // Clear URL parameters
+    // Clear parameters that belong to the previous conversation.
     const url = new URL(window.location.href);
-    if (url.searchParams.has("q")) {
-      url.searchParams.delete("q");
+    const hasConversationParameters =
+      url.searchParams.has("q") || url.searchParams.has("conversation_id");
+    url.searchParams.delete("q");
+    url.searchParams.delete("conversation_id");
+    if (hasConversationParameters) {
       window.history.replaceState({}, "", url.toString());
     }
 
@@ -1271,6 +1302,12 @@ export function ChatInterface() {
 
     // Use conversation management hook
     conversationManagement.handleConversationSelect(dialog);
+    const conversationUrl = new URL(window.location.href);
+    conversationUrl.searchParams.set(
+      "conversation_id",
+      String(dialog.conversation_id)
+    );
+    window.history.replaceState({}, "", conversationUrl.toString());
     restoreConversationAgent(dialog.agent_id ?? null);
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
@@ -1338,9 +1375,9 @@ export function ChatInterface() {
             restoreConversationAgent(
               conversationData.agent_id ?? dialog.agent_id ?? null
             );
-            const formattedMessages = formatConversationMessagesFromResponse(
-              conversationData,
-              t
+            const formattedMessages = await hydrateAutomationProposalMessages(
+              formatConversationMessagesFromResponse(conversationData, t),
+              dialog.conversation_id
             );
 
             // Update message array
@@ -1467,9 +1504,9 @@ export function ChatInterface() {
           restoreConversationAgent(
             conversationData.agent_id ?? dialog.agent_id ?? null
           );
-          const formattedMessages = formatConversationMessagesFromResponse(
-            conversationData,
-            t
+          const formattedMessages = await hydrateAutomationProposalMessages(
+            formatConversationMessagesFromResponse(conversationData, t),
+            dialog.conversation_id
           );
 
           // Update message array
@@ -1538,6 +1575,46 @@ export function ChatInterface() {
       }
     }
   };
+  handleDialogClickRef.current = handleDialogClick;
+
+  useEffect(() => {
+    if (
+      linkedConversationHandledRef.current ||
+      conversationManagement.conversationListQuery.isLoading
+    ) {
+      return;
+    }
+
+    const rawConversationId = new URL(window.location.href).searchParams.get(
+      "conversation_id"
+    );
+    const conversationId = Number(rawConversationId);
+    if (
+      !rawConversationId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      linkedConversationHandledRef.current = true;
+      return;
+    }
+
+    const linkedConversation = conversationManagement.conversationList.find(
+      (conversation) => conversation.conversation_id === conversationId
+    );
+    if (linkedConversation) {
+      linkedConversationHandledRef.current = true;
+      void handleDialogClickRef.current(linkedConversation);
+      return;
+    }
+
+    if (conversationManagement.conversationListQuery.isFetched) {
+      linkedConversationHandledRef.current = true;
+    }
+  }, [
+    conversationManagement.conversationList,
+    conversationManagement.conversationListQuery.isFetched,
+    conversationManagement.conversationListQuery.isLoading,
+  ]);
 
   // Add function to asynchronously load attachment URLs
   const loadAttachmentUrls = async (

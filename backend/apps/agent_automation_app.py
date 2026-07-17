@@ -14,6 +14,7 @@ from services.agent_automation.facade import agent_automation_facade
 from services.agent_automation.models import (
     AutomationProposalConfirmRequest,
     AutomationProposalCreateRequest,
+    AutomationProposalPatchRequest,
     AutomationResponse,
     AutomationTaskPatchRequest,
 )
@@ -88,11 +89,39 @@ async def confirm_proposal(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-@router.get("", response_model=AutomationResponse)
-async def list_tasks(status: Optional[str] = Query(default=None), authorization: Optional[str] = Header(None)):
+@router.patch("/proposals/{proposal_id}", response_model=AutomationResponse)
+async def update_proposal(
+    proposal_id: int,
+    request: AutomationProposalPatchRequest,
+    authorization: Optional[str] = Header(None),
+):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.list_tasks(tenant_id, user_id, status))
+        data = await agent_automation_facade.update_proposal(
+            proposal_id,
+            request,
+            tenant_id,
+            user_id,
+        )
+        return AutomationResponse(data=data)
+    except AgentAutomationError as exc:
+        raise _map_error(exc)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to update automation proposal: %s", exc, exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.get("", response_model=AutomationResponse)
+async def list_tasks(
+    status: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None, max_length=200),
+    authorization: Optional[str] = Header(None),
+):
+    try:
+        user_id, tenant_id = _get_current_user(authorization)
+        return AutomationResponse(data=agent_automation_facade.list_tasks(tenant_id, user_id, status, search))
     except HTTPException:
         raise
     except Exception as exc:
@@ -173,11 +202,22 @@ async def cancel_run(run_id: int, authorization: Optional[str] = Header(None)):
         raise _map_error(exc)
 
 
+@router.delete("/runs/{run_id}", response_model=AutomationResponse)
+async def delete_run(run_id: int, authorization: Optional[str] = Header(None)):
+    try:
+        user_id, tenant_id = _get_current_user(authorization)
+        return AutomationResponse(data=agent_automation_facade.delete_run(run_id, tenant_id, user_id))
+    except AgentAutomationError as exc:
+        raise _map_error(exc)
+
+
 @conversation_automation_router.get("/{conversation_id}/automation", response_model=AutomationResponse)
 async def get_conversation_automation(conversation_id: int, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.get_task_for_conversation(conversation_id, user_id))
+        return AutomationResponse(
+            data=agent_automation_facade.get_task_for_conversation(conversation_id, tenant_id, user_id)
+        )
     except HTTPException:
         raise
     except Exception as exc:

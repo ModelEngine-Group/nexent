@@ -4,10 +4,17 @@ import type {
   AgentAutomationRun,
   AgentAutomationProposalData,
   AgentAutomationTask,
+  AutomationTaskStatus,
+  UpdateAutomationProposalPayload,
   UpdateAutomationTaskPayload,
 } from "@/types/agentAutomation";
 
 const fetch = fetchWithAuth;
+
+interface AutomationTaskListFilters {
+  status?: AutomationTaskStatus;
+  search?: string;
+}
 
 async function readResponse<T>(response: Response): Promise<T> {
   const data = await response.json();
@@ -24,8 +31,13 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 
 export const agentAutomationService = {
-  async list(status?: string): Promise<AgentAutomationTask[]> {
-    const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  async list(
+    filters: AutomationTaskListFilters = {}
+  ): Promise<AgentAutomationTask[]> {
+    const query = new URLSearchParams();
+    if (filters.status) query.set("status", filters.status);
+    if (filters.search?.trim()) query.set("search", filters.search.trim());
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     const response = await fetch(
       `${API_ENDPOINTS.agentAutomation.list}${suffix}`,
       {
@@ -97,6 +109,17 @@ export const agentAutomationService = {
     return readResponse<AgentAutomationRun>(response);
   },
 
+  async deleteRun(runId: number): Promise<boolean> {
+    const response = await fetch(
+      API_ENDPOINTS.agentAutomation.deleteRun(runId),
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }
+    );
+    return readResponse<boolean>(response);
+  },
+
   async createProposal(payload: {
     conversation_id?: number;
     agent_id: number;
@@ -127,6 +150,21 @@ export const agentAutomationService = {
       }
     );
     return readResponse<AgentAutomationTask>(response);
+  },
+
+  async updateProposal(
+    proposalId: number,
+    payload: UpdateAutomationProposalPayload
+  ): Promise<AgentAutomationProposalData> {
+    const response = await fetch(
+      API_ENDPOINTS.agentAutomation.updateProposal(proposalId),
+      {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      }
+    );
+    return readResponse<AgentAutomationProposalData>(response);
   },
 
   async getByConversation(

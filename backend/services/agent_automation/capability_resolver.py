@@ -1,6 +1,7 @@
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
+from .agent_identity_adapter import resolve_agent_display_names
 from .models import CapabilityBinding, CapabilityResolution, CapabilityType
 
 
@@ -146,6 +147,11 @@ async def resolve_agent_capabilities(
     if not matched:
         matched = all_bindings[:10]
 
+    agent_display_name = resolve_agent_display_names(
+        [(agent_id, version_no)],
+        tenant_id,
+    ).get((agent_id, version_no))
+
     return CapabilityResolution(
         matched_capabilities=matched[:20],
         missing_capabilities=missing,
@@ -153,6 +159,7 @@ async def resolve_agent_capabilities(
             "agent_id": agent_id,
             "version_no": version_no,
             "name": getattr(agent_config, "name", ""),
+            "display_name": agent_display_name or getattr(agent_config, "name", ""),
             "description": getattr(agent_config, "description", ""),
             "tools_count": len(tool_bindings),
             "skills_count": len(skill_bindings),

@@ -14,7 +14,7 @@ import { Button, Dropdown, Input, Layout, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { conversationService } from "@/services/conversationService";
-import { agentAutomationService } from "@/services/agentAutomationService";
+import { hasAutomationForConversation } from "@/features/agentAutomation/chatAdapter";
 import { type ConversationManagement } from "@/hooks/chat/useConversationManagement";
 import { ConversationListItem, SettingsMenuItem } from "@/types/chat";
 import log from "@/lib/logger";
@@ -184,9 +184,7 @@ export function ChatSidebar({
   const handleDelete = async (conversationId: number) => {
     let hasAutomation = false;
     try {
-      const automation =
-        await agentAutomationService.getByConversation(conversationId);
-      hasAutomation = Boolean(automation);
+      hasAutomation = await hasAutomationForConversation(conversationId);
     } catch (error) {
       log.warn("Failed to check conversation automation before delete", error);
     }
@@ -270,9 +268,7 @@ export function ChatSidebar({
                     {automationConversationIds.has(
                       conversation.conversation_id
                     ) && (
-                      <Tooltip
-                        title={t("agentAutomation.boundTask", "已绑定自动任务")}
-                      >
+                      <Tooltip title={t("agentAutomation.boundTask")}>
                         <CalendarClock className="mr-1.5 h-4 w-4 shrink-0 text-blue-600" />
                       </Tooltip>
                     )}

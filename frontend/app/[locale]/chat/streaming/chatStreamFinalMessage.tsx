@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import {
   Copy,
@@ -31,7 +30,7 @@ const convertToMarkdownCodeFences = (content: string): string => {
   });
   return content;
 };
-import { Button, Tooltip, message as antdMessage } from "antd";
+import { Button, Tooltip } from "antd";
 import { ChatMessageType, MaxStepsInfo } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
@@ -42,8 +41,7 @@ import { AttachmentItem } from "@/types/chat";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatAttachment } from "../components/chatAttachment";
 import { AlertTriangle } from "lucide-react";
-import AutomationProposalCard from "../../agent-tasks/components/AutomationProposalCard";
-import { agentAutomationService } from "@/services/agentAutomationService";
+import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -78,15 +76,10 @@ function ChatStreamFinalMessageInner({
   currentConversationId,
   onCitationHover,
 }: FinalMessageProps) {
-  const { t, i18n } = useTranslation("common");
-  const router = useRouter();
+  const { t } = useTranslation("common");
 
   const messageRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const [automationProposal, setAutomationProposal] = useState(
-    message.automationProposal
-  );
-  const [isConfirmingAutomation, setIsConfirmingAutomation] = useState(false);
   const [localOpinion, setLocalOpinion] = useState<string | null>(
     message.opinion_flag ?? null
   );
@@ -116,10 +109,6 @@ function ChatStreamFinalMessageInner({
   useEffect(() => {
     setLocalOpinion(message.opinion_flag ?? null);
   }, [message.opinion_flag]);
-
-  useEffect(() => {
-    setAutomationProposal(message.automationProposal);
-  }, [message.automationProposal]);
 
   // Initialize TTS service
   useEffect(() => {
@@ -191,47 +180,6 @@ function ChatStreamFinalMessageInner({
     if (onOpinionChange && message.message_id) {
       onOpinionChange(message.message_id, newOpinion as Opinion);
     }
-  };
-
-  const handleConfirmAutomationProposal = async () => {
-    if (!automationProposal?.proposal_id || readOnly) return;
-    setIsConfirmingAutomation(true);
-    try {
-      const task = await agentAutomationService.confirmProposal(
-        automationProposal.proposal_id
-      );
-      setAutomationProposal({
-        ...automationProposal,
-        confirmed_task_id: task.task_id,
-      });
-      window.dispatchEvent(new Event("automationListUpdated"));
-      antdMessage.success(
-        t("agentAutomation.proposal.created", "自动任务已创建")
-      );
-    } catch (error) {
-      const err = error as Error;
-      antdMessage.error(
-        err.message ||
-          t("agentAutomation.proposal.createFailed", "创建自动任务失败")
-      );
-    } finally {
-      setIsConfirmingAutomation(false);
-    }
-  };
-
-  const handleConfigureAutomationAgent = () => {
-    const agentId = automationProposal?.task?.agent_id;
-    const suffix = agentId ? `?agent_id=${agentId}` : "";
-    router.push(`/${i18n.language}/agents${suffix}`);
-  };
-
-  const handleEditAutomationProposal = () => {
-    antdMessage.info(
-      t(
-        "agentAutomation.proposal.editHint",
-        "请调整任务要求后重新发送创建任务指令"
-      )
-    );
   };
 
   // Handle message selection
@@ -408,18 +356,11 @@ function ChatStreamFinalMessageInner({
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
               />
 
-              {automationProposal?.task && (
+              {message.automationProposal && (
                 <div className="mt-3">
-                  <AutomationProposalCard
-                    proposal={automationProposal}
-                    confirming={isConfirmingAutomation}
-                    onConfirm={
-                      readOnly ? undefined : handleConfirmAutomationProposal
-                    }
-                    onEdit={readOnly ? undefined : handleEditAutomationProposal}
-                    onConfigureAgent={
-                      readOnly ? undefined : handleConfigureAutomationAgent
-                    }
+                  <AutomationProposalMessage
+                    proposal={message.automationProposal}
+                    readOnly={readOnly}
                   />
                 </div>
               )}
@@ -435,136 +376,140 @@ function ChatStreamFinalMessageInner({
               )}
 
               {/* Button group - only show when hideButtons is false and message is complete */}
-              {!hideButtons && message.isComplete && !automationProposal && (
-                <div className="flex items-center justify-between mt-3">
-                  {/* Source button */}
-                  <div className="flex-1">
-                    {((message?.searchResults &&
-                      message.searchResults.length > 0) ||
-                      (message?.images && message.images.length > 0)) && (
-                      <div className="flex items-center text-xs text-gray-500">
-                        <Button
-                          className={`flex items-center gap-1 p-1 pl-3 hover:bg-gray-100 rounded transition-all duration-200 border border-gray-200 ${
-                            isSelected ? "bg-gray-100" : ""
-                          }`}
-                          onClick={handleMessageSelect}
-                          onMouseEnter={() => {
-                            if (onCitationHover) {
-                              onCitationHover();
-                            }
-                          }}
-                        >
-                          <span>
-                            {searchResultsCount > 0 &&
-                              t("chatStreamMessage.sources", {
-                                count: searchResultsCount,
-                              })}
-                            {searchResultsCount > 0 && imagesCount > 0 && ", "}
-                            {imagesCount > 0 &&
-                              t("chatStreamMessage.images", {
-                                count: imagesCount,
-                              })}
-                          </span>
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Tool button */}
-                  <div className="flex items-center space-x-2 mt-1 justify-end">
-                    <div>
-                      {/* Copy button */}
-                      <Tooltip
-                        title={
-                          copied
-                            ? t("chatStreamMessage.copied")
-                            : t("chatStreamMessage.copyContent")
-                        }
-                      >
-                        <Button
-                          className={`h-8 w-8 rounded-full bg-white hover:bg-gray-100 transition-all duration-200 shadow-sm ${
-                            copied
-                              ? "bg-green-100 text-green-600 border-green-200"
-                              : ""
-                          }`}
-                          onClick={handleCopyContent}
-                          disabled={copied}
-                          shape="circle"
-                          size="small"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </Tooltip>
-
-                      {!readOnly && (
-                        <>
-                          {/* Thumbs up button */}
-                          <Tooltip
-                            title={
-                              localOpinion === chatConfig.opinion.POSITIVE
-                                ? t("chatStreamMessage.cancelLike")
-                                : t("chatStreamMessage.like")
-                            }
-                          >
-                            <Button
-                              className={`h-8 w-8 rounded-full ${
-                                localOpinion === chatConfig.opinion.POSITIVE
-                                  ? "bg-green-100 text-green-600 border-green-200"
-                                  : "bg-white hover:bg-gray-100"
-                              } transition-all duration-200 shadow-sm`}
-                              onClick={handleThumbsUp}
-                              shape="circle"
-                              size="small"
-                            >
-                              <ThumbsUp className="h-4 w-4" />
-                            </Button>
-                          </Tooltip>
-
-                          {/* Thumbs down button */}
-                          <Tooltip
-                            title={
-                              localOpinion === chatConfig.opinion.NEGATIVE
-                                ? t("chatStreamMessage.cancelDislike")
-                                : t("chatStreamMessage.dislike")
-                            }
-                          >
-                            <Button
-                              className={`h-8 w-8 rounded-full ${
-                                localOpinion === chatConfig.opinion.NEGATIVE
-                                  ? "bg-red-100 text-red-600 border-red-200"
-                                  : "bg-white hover:bg-gray-100"
-                              } transition-all duration-200 shadow-sm`}
-                              onClick={handleThumbsDown}
-                              shape="circle"
-                              size="small"
-                            >
-                              <ThumbsDown className="h-4 w-4" />
-                            </Button>
-                          </Tooltip>
-
-                          {/* Voice playback button */}
-                          <Tooltip title={ttsButtonContent.tooltip}>
-                            <Button
-                              className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
-                              onClick={handleTTSPlay}
-                              disabled={
-                                ttsStatus === "generating" ||
-                                (message.finalAnswer === undefined &&
-                                  message.content === undefined)
+              {!hideButtons &&
+                message.isComplete &&
+                !message.automationProposal && (
+                  <div className="flex items-center justify-between mt-3">
+                    {/* Source button */}
+                    <div className="flex-1">
+                      {((message?.searchResults &&
+                        message.searchResults.length > 0) ||
+                        (message?.images && message.images.length > 0)) && (
+                        <div className="flex items-center text-xs text-gray-500">
+                          <Button
+                            className={`flex items-center gap-1 p-1 pl-3 hover:bg-gray-100 rounded transition-all duration-200 border border-gray-200 ${
+                              isSelected ? "bg-gray-100" : ""
+                            }`}
+                            onClick={handleMessageSelect}
+                            onMouseEnter={() => {
+                              if (onCitationHover) {
+                                onCitationHover();
                               }
-                              shape="circle"
-                              size="small"
-                            >
-                              {ttsButtonContent.icon}
-                            </Button>
-                          </Tooltip>
-                        </>
+                            }}
+                          >
+                            <span>
+                              {searchResultsCount > 0 &&
+                                t("chatStreamMessage.sources", {
+                                  count: searchResultsCount,
+                                })}
+                              {searchResultsCount > 0 &&
+                                imagesCount > 0 &&
+                                ", "}
+                              {imagesCount > 0 &&
+                                t("chatStreamMessage.images", {
+                                  count: imagesCount,
+                                })}
+                            </span>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </div>
                       )}
                     </div>
+
+                    {/* Tool button */}
+                    <div className="flex items-center space-x-2 mt-1 justify-end">
+                      <div>
+                        {/* Copy button */}
+                        <Tooltip
+                          title={
+                            copied
+                              ? t("chatStreamMessage.copied")
+                              : t("chatStreamMessage.copyContent")
+                          }
+                        >
+                          <Button
+                            className={`h-8 w-8 rounded-full bg-white hover:bg-gray-100 transition-all duration-200 shadow-sm ${
+                              copied
+                                ? "bg-green-100 text-green-600 border-green-200"
+                                : ""
+                            }`}
+                            onClick={handleCopyContent}
+                            disabled={copied}
+                            shape="circle"
+                            size="small"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </Tooltip>
+
+                        {!readOnly && (
+                          <>
+                            {/* Thumbs up button */}
+                            <Tooltip
+                              title={
+                                localOpinion === chatConfig.opinion.POSITIVE
+                                  ? t("chatStreamMessage.cancelLike")
+                                  : t("chatStreamMessage.like")
+                              }
+                            >
+                              <Button
+                                className={`h-8 w-8 rounded-full ${
+                                  localOpinion === chatConfig.opinion.POSITIVE
+                                    ? "bg-green-100 text-green-600 border-green-200"
+                                    : "bg-white hover:bg-gray-100"
+                                } transition-all duration-200 shadow-sm`}
+                                onClick={handleThumbsUp}
+                                shape="circle"
+                                size="small"
+                              >
+                                <ThumbsUp className="h-4 w-4" />
+                              </Button>
+                            </Tooltip>
+
+                            {/* Thumbs down button */}
+                            <Tooltip
+                              title={
+                                localOpinion === chatConfig.opinion.NEGATIVE
+                                  ? t("chatStreamMessage.cancelDislike")
+                                  : t("chatStreamMessage.dislike")
+                              }
+                            >
+                              <Button
+                                className={`h-8 w-8 rounded-full ${
+                                  localOpinion === chatConfig.opinion.NEGATIVE
+                                    ? "bg-red-100 text-red-600 border-red-200"
+                                    : "bg-white hover:bg-gray-100"
+                                } transition-all duration-200 shadow-sm`}
+                                onClick={handleThumbsDown}
+                                shape="circle"
+                                size="small"
+                              >
+                                <ThumbsDown className="h-4 w-4" />
+                              </Button>
+                            </Tooltip>
+
+                            {/* Voice playback button */}
+                            <Tooltip title={ttsButtonContent.tooltip}>
+                              <Button
+                                className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
+                                onClick={handleTTSPlay}
+                                disabled={
+                                  ttsStatus === "generating" ||
+                                  (message.finalAnswer === undefined &&
+                                    message.content === undefined)
+                                }
+                                shape="circle"
+                                size="small"
+                              >
+                                {ttsButtonContent.icon}
+                              </Button>
+                            </Tooltip>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
             </div>
           )}
       </div>

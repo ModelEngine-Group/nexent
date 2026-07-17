@@ -56,7 +56,16 @@ def get_task_by_conversation(
         return as_dict(task) if task else None
 
 
-def list_tasks(tenant_id: str, user_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+def _escape_like_pattern(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def list_tasks(
+    tenant_id: str,
+    user_id: str,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     with get_db_session() as session:
         conditions = [
             AgentAutomationTask.tenant_id == tenant_id,
@@ -66,6 +75,10 @@ def list_tasks(tenant_id: str, user_id: str, status: Optional[str] = None) -> Li
         ]
         if status:
             conditions.append(AgentAutomationTask.status == status)
+        normalized_search = search.strip() if search else ""
+        if normalized_search:
+            pattern = f"%{_escape_like_pattern(normalized_search)}%"
+            conditions.append(AgentAutomationTask.title.ilike(pattern, escape="\\"))
         rows = session.execute(
             select(AgentAutomationTask)
             .where(*conditions)
@@ -214,6 +227,33 @@ def update_proposal_task(
         return bool(result.rowcount)
 
 
+def update_proposal(
+    proposal_id: int,
+    tenant_id: str,
+    user_id: str,
+    proposed_task: Dict[str, Any],
+    capability_resolution: Dict[str, Any],
+) -> bool:
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentAutomationProposal)
+            .where(
+                AgentAutomationProposal.proposal_id == proposal_id,
+                AgentAutomationProposal.tenant_id == tenant_id,
+                AgentAutomationProposal.user_id == user_id,
+                AgentAutomationProposal.status.in_(["PENDING", "ACCEPTED"]),
+                AgentAutomationProposal.delete_flag == "N",
+            )
+            .values(
+                proposed_task=proposed_task,
+                capability_resolution=capability_resolution,
+                update_time=_utcnow(),
+                updated_by=user_id,
+            )
+        )
+        return bool(result.rowcount)
+
+
 def create_run(run_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     data = add_creation_tracking({**run_data, "delete_flag": "N"}, user_id)
     with get_db_session() as session:
@@ -279,6 +319,32 @@ def cancel_run(run_id: int, tenant_id: str, user_id: str, reason: str) -> Option
                 error_code="AUTOMATION_RUN_CANCELED",
                 error_message=reason,
                 finished_at=_utcnow(),
+                update_time=_utcnow(),
+                updated_by=user_id,
+            )
+            .returning(AgentAutomationRun)
+        ).scalar_one_or_none()
+        return as_dict(run) if run else None
+
+
+def soft_delete_run(
+    run_id: int,
+    tenant_id: str,
+    user_id: str,
+    expected_statuses: List[str],
+) -> Optional[Dict[str, Any]]:
+    with get_db_session() as session:
+        run = session.execute(
+            update(AgentAutomationRun)
+            .where(
+                AgentAutomationRun.run_id == run_id,
+                AgentAutomationRun.tenant_id == tenant_id,
+                AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.status.in_(expected_statuses),
+                AgentAutomationRun.delete_flag == "N",
+            )
+            .values(
+                delete_flag="Y",
                 update_time=_utcnow(),
                 updated_by=user_id,
             )

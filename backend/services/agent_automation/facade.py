@@ -11,6 +11,7 @@ from services.conversation_management_service import (
     create_new_conversation,
     update_conversation_agent_id_service,
 )
+from . import agent_identity_adapter
 from .capability_resolver import resolve_agent_capabilities, validate_bindings_available
 from .conversation_adapter import automation_conversation_adapter
 from .errors import (
@@ -24,6 +25,7 @@ from .intent_analyzer import AutomationIntentContext, automation_intent_analyzer
 from .models import (
     AutomationProposalConfirmRequest,
     AutomationProposalCreateRequest,
+    AutomationProposalPatchRequest,
     AutomationProposalStatus,
     AutomationRunStatus,
     AutomationSource,
@@ -60,6 +62,42 @@ def _json(data: Any) -> Any:
     if isinstance(data, list):
         return [_json(item) for item in data]
     return data
+
+
+def _agent_reference(task: Dict[str, Any]) -> tuple[int, int]:
+    return int(task["agent_id"]), int(task.get("agent_version_no") or 0)
+
+
+def _enrich_tasks_with_agent_names(
+    tasks: List[Dict[str, Any]],
+    tenant_id: str,
+) -> List[Dict[str, Any]]:
+    if not tasks:
+        return []
+    try:
+        names = agent_identity_adapter.resolve_agent_display_names(
+            [_agent_reference(task) for task in tasks],
+            tenant_id,
+        )
+    except Exception:
+        logger.warning("Failed to resolve Agent display names", exc_info=True)
+        names = {}
+    enriched = []
+    for task in tasks:
+        snapshot = task.get("runtime_snapshot") or {}
+        agent_id, version_no = _agent_reference(task)
+        agent_name = (
+            names.get((agent_id, version_no))
+            or snapshot.get("display_name")
+            or snapshot.get("name")
+            or f"Agent #{agent_id}"
+        )
+        enriched.append({**task, "agent_name": agent_name})
+    return enriched
+
+
+def _enrich_task_with_agent_name(task: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    return _enrich_tasks_with_agent_names([task], tenant_id)[0]
 
 
 def _parse_trigger(raw: Dict[str, Any] | ScheduleTrigger) -> ScheduleTrigger:
@@ -168,11 +206,17 @@ class AgentAutomationFacade:
             instruction=task_content.instruction,
             version_no=request.agent_version_no or 0,
         )
+        agent_name = (
+            resolution.agent_snapshot.get("display_name")
+            or resolution.agent_snapshot.get("name")
+            or f"Agent #{request.agent_id}"
+        )
         proposed_task = {
             "title": task_content.title,
             "instruction": task_content.instruction,
             "original_instruction": parsed["instruction"],
             "agent_id": request.agent_id,
+            "agent_name": agent_name,
             "agent_version_no": request.agent_version_no,
             "model_id": request.model_id,
             "tool_params": request.tool_params,
@@ -219,6 +263,111 @@ class AgentAutomationFacade:
             )
         except Exception as exc:
             logger.warning("Failed to persist automation proposal card: %s", exc, exc_info=True)
+        return response
+
+    async def update_proposal(
+        self,
+        proposal_id: int,
+        request: AutomationProposalPatchRequest,
+        tenant_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        proposal = agent_automation_db.get_proposal(proposal_id, tenant_id, user_id)
+        editable_statuses = {
+            AutomationProposalStatus.PENDING.value,
+            AutomationProposalStatus.ACCEPTED.value,
+        }
+        if not proposal or proposal["status"] not in editable_statuses:
+            raise AutomationNotFoundError("Automation proposal does not exist or is not editable.")
+        expires_at = proposal.get("expires_at")
+        if (
+            proposal["status"] == AutomationProposalStatus.PENDING.value
+            and expires_at
+            and _as_utc(expires_at) <= _utcnow()
+        ):
+            agent_automation_db.update_proposal_status(
+                proposal_id,
+                tenant_id,
+                user_id,
+                AutomationProposalStatus.EXPIRED.value,
+            )
+            raise AutomationNotFoundError("Automation proposal has expired.")
+
+        proposed_task = dict(proposal["proposed_task"])
+        if request.title is not None:
+            proposed_task["title"] = request.title.strip()
+        if request.instruction is not None:
+            proposed_task["instruction"] = request.instruction.strip()
+        if request.schedule_trigger is not None:
+            _validate_schedule_policy(request.schedule_trigger)
+            proposed_task["schedule_trigger"] = request.schedule_trigger.model_dump(mode="json")
+
+        confirmed_task_id = None
+        if proposal["status"] == AutomationProposalStatus.ACCEPTED.value:
+            task = self.get_task_for_conversation(proposal["conversation_id"], tenant_id, user_id)
+            if not task:
+                raise AutomationNotFoundError("Confirmed automation task does not exist.")
+            updated_task = await self.patch_task(
+                task["task_id"],
+                AutomationTaskPatchRequest(
+                    title=request.title,
+                    instruction=request.instruction,
+                    schedule_trigger=request.schedule_trigger,
+                ),
+                tenant_id,
+                user_id,
+            )
+            confirmed_task_id = updated_task["task_id"]
+            resolution_data = (
+                updated_task.get("capability_requirements")
+                or proposal.get("capability_resolution")
+                or {}
+            )
+            executable = True
+        else:
+            resolution = await resolve_agent_capabilities(
+                agent_id=proposal["agent_id"],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                instruction=proposed_task["instruction"],
+                version_no=proposed_task.get("agent_version_no") or 0,
+            )
+            resolution_data = resolution.model_dump(mode="json")
+            executable = resolution.executable
+        if not agent_automation_db.update_proposal(
+            proposal_id,
+            tenant_id,
+            user_id,
+            proposed_task,
+            resolution_data,
+        ):
+            raise AutomationNotFoundError("Automation proposal does not exist or is not editable.")
+
+        public_task = {key: value for key, value in proposed_task.items() if not key.startswith("_")}
+        public_task["agent_name"] = (
+            (updated_task if confirmed_task_id is not None else {}).get("agent_name")
+            or (resolution_data.get("agent_snapshot") or {}).get("display_name")
+            or (resolution_data.get("agent_snapshot") or {}).get("name")
+            or proposed_task.get("agent_name")
+            or f"Agent #{proposal['agent_id']}"
+        )
+        response = {
+            "proposal_id": proposal_id,
+            "conversation_id": proposal["conversation_id"],
+            "executable": executable,
+            "task": public_task,
+            "capability_resolution": resolution_data,
+        }
+        if confirmed_task_id is not None:
+            response["confirmed_task_id"] = confirmed_task_id
+        try:
+            automation_conversation_adapter.update_proposal(
+                proposed_task.get("_conversation_unit_id"),
+                response,
+                user_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist updated automation proposal card: %s", exc, exc_info=True)
         return response
 
     async def confirm_proposal(
@@ -272,6 +421,11 @@ class AgentAutomationFacade:
         agent_automation_db.update_proposal_status(
             proposal_id, tenant_id, user_id, AutomationProposalStatus.ACCEPTED.value)
         public_task = {key: value for key, value in proposed_task.items() if not key.startswith("_")}
+        public_task["agent_name"] = (
+            task.get("agent_name")
+            or proposed_task.get("agent_name")
+            or f"Agent #{proposal['agent_id']}"
+        )
         try:
             automation_conversation_adapter.update_proposal(
                 proposed_task.get("_conversation_unit_id"),
@@ -337,6 +491,11 @@ class AgentAutomationFacade:
         next_fire_at = compute_next_fire_at(trigger, _utcnow(), 0)
         runtime_snapshot = {
             **resolution.agent_snapshot,
+            "display_name": (
+                resolution.agent_snapshot.get("display_name")
+                or resolution.agent_snapshot.get("name")
+                or f"Agent #{request.agent_id}"
+            ),
             "model_id": request.model_id,
             "tool_params": request.tool_params,
             "original_instruction": request.original_instruction or request.instruction,
@@ -374,19 +533,32 @@ class AgentAutomationFacade:
                     "Conversation already has an active automation task."
                 ) from exc
             raise
-        return task
+        return _enrich_task_with_agent_name(task, tenant_id)
 
-    def list_tasks(self, tenant_id: str, user_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
-        return agent_automation_db.list_tasks(tenant_id, user_id, status)
+    def list_tasks(
+        self,
+        tenant_id: str,
+        user_id: str,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        tasks = agent_automation_db.list_tasks(tenant_id, user_id, status, search)
+        return _enrich_tasks_with_agent_names(tasks, tenant_id)
 
     def get_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         task = agent_automation_db.get_task(task_id, tenant_id, user_id)
         if not task:
             raise AutomationNotFoundError("Automation task not found.")
-        return task
+        return _enrich_task_with_agent_name(task, tenant_id)
 
-    def get_task_for_conversation(self, conversation_id: int, user_id: str) -> Optional[Dict[str, Any]]:
-        return agent_automation_db.get_task_by_conversation(conversation_id, user_id)
+    def get_task_for_conversation(
+        self,
+        conversation_id: int,
+        tenant_id: str,
+        user_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        task = agent_automation_db.get_task_by_conversation(conversation_id, user_id)
+        return _enrich_task_with_agent_name(task, tenant_id) if task else None
 
     async def patch_task(
         self,
@@ -444,7 +616,7 @@ class AgentAutomationFacade:
         updated = agent_automation_db.update_task(task_id, tenant_id, user_id, values)
         if not updated:
             raise AutomationNotFoundError("Automation task not found.")
-        return updated
+        return _enrich_task_with_agent_name(updated, tenant_id)
 
     def pause_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         task = agent_automation_db.update_task(
@@ -455,7 +627,7 @@ class AgentAutomationFacade:
         )
         if not task:
             raise AutomationNotFoundError("Automation task not found.")
-        return task
+        return _enrich_task_with_agent_name(task, tenant_id)
 
     def resume_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         task = self.get_task(task_id, tenant_id, user_id)
@@ -469,7 +641,7 @@ class AgentAutomationFacade:
         })
         if not updated:
             raise AutomationNotFoundError("Automation task not found.")
-        return updated
+        return _enrich_task_with_agent_name(updated, tenant_id)
 
     def delete_task(self, task_id: int, tenant_id: str, user_id: str) -> bool:
         task = self.get_task(task_id, tenant_id, user_id)
@@ -513,6 +685,50 @@ class AgentAutomationFacade:
             "lock_until": None,
         })
         return canceled or agent_automation_db.get_run(run_id, tenant_id, user_id) or run
+
+    def delete_run(self, run_id: int, tenant_id: str, user_id: str) -> bool:
+        run = agent_automation_db.get_run(run_id, tenant_id, user_id)
+        if not run:
+            raise AutomationNotFoundError("Automation run not found.")
+
+        terminal_statuses = {
+            AutomationRunStatus.SUCCEEDED.value,
+            AutomationRunStatus.FAILED.value,
+            AutomationRunStatus.SKIPPED.value,
+            AutomationRunStatus.CANCELED.value,
+            AutomationRunStatus.TIMEOUT.value,
+        }
+        if run["status"] not in terminal_statuses:
+            raise AutomationScheduleInvalidError(
+                "Active automation runs must be canceled before deletion."
+            )
+
+        deleted = agent_automation_db.soft_delete_run(
+            run_id,
+            tenant_id,
+            user_id,
+            list(terminal_statuses),
+        )
+        if not deleted:
+            raise AutomationNotFoundError("Automation run not found or no longer deletable.")
+
+        remaining_runs = agent_automation_db.list_runs(
+            run["task_id"],
+            tenant_id,
+            user_id,
+            limit=1,
+        )
+        latest_run = remaining_runs[0] if remaining_runs else None
+        agent_automation_db.update_task(
+            run["task_id"],
+            tenant_id,
+            user_id,
+            {
+                "last_run_status": latest_run.get("status") if latest_run else None,
+                "last_error": latest_run.get("error_message") if latest_run else None,
+            },
+        )
+        return True
 
     def on_conversation_deleted(self, conversation_id: int, user_id: str) -> int:
         self._cancel_active_runs_for_conversation(
