@@ -46,29 +46,6 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
-# Agent automation runtime configuration
-AGENT_AUTOMATION_ENABLED = os.getenv(
-    "AGENT_AUTOMATION_ENABLED", "true"
-).lower() in ("true", "1", "yes", "on")
-AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
-    os.getenv("AGENT_AUTOMATION_POLL_INTERVAL_SECONDS", "5")
-)
-AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
-    os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
-)
-AGENT_AUTOMATION_LEASE_SECONDS = int(
-    os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
-)
-AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS = int(
-    os.getenv("AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS", "1800")
-)
-AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(
-    os.getenv("AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS", "30")
-)
-AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
-    os.getenv("AGENT_AUTOMATION_MIN_INTERVAL_SECONDS", "5")
-)
-
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
@@ -111,11 +88,6 @@ SUPABASE_JWT_SECRET = os.getenv(
 OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
-# OAuth login mode:
-# - disabled: hide OAuth login entries and disable automatic OAuth redirects.
-# - button: show configured OAuth providers as optional login entries.
-# - force: automatically redirect when exactly one OAuth provider is configured.
-OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 
 
 # CAS SSO Configuration
@@ -324,6 +296,69 @@ DEFAULT_MEMORY_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
+
+# ===== New Memory System (Phase 1) =====
+# These constants back the Nexent Memory framework defined in
+# ``sdk/nexent/memory``. They mirror the environment variables catalogued in
+# the implementation plan at
+# ``.cursor/plans/memory_&_dreaming_implementation_*.plan.md`` §Phase 6.
+
+# MMR (Maximal Marginal Relevance) configuration
+MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+MMR_CANDIDATE_TOP_K = int(os.getenv("MMR_CANDIDATE_TOP_K", "30"))
+MMR_FINAL_TOP_K = int(os.getenv("MMR_FINAL_TOP_K", "5"))
+MMR_DUPLICATE_THRESHOLD = float(os.getenv("MMR_DUPLICATE_THRESHOLD", "0.92"))
+
+# Temporal decay (only applied to internal agent short-term memory)
+AGENT_SHORT_TERM_HALF_LIFE_DAYS = int(
+    os.getenv("AGENT_SHORT_TERM_HALF_LIFE_DAYS", "14")
+)
+
+# Score fusion source weights
+W_AGENT_SHORT_TERM = float(os.getenv("W_AGENT_SHORT_TERM", "1.0"))
+W_EXTERNAL = float(os.getenv("W_EXTERNAL", "0.8"))
+
+# Token budget selection
+MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
+
+# Dreaming promotion thresholds
+LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
+RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
+MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
+MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
+MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
+# Scheduling/cron constants are intentionally not defined here: the
+# background Dreaming scheduler is not part of Phase 2 (an agent-driven
+# timer will be added in a later phase, at which point the cron expression
+# and heartbeat can be reintroduced).
+
+# External provider retry / timeout
+PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))
+PROVIDER_RETRY_BACKOFF_BASE_SECONDS = int(
+    os.getenv("PROVIDER_RETRY_BACKOFF_BASE_SECONDS", "1")
+)
+PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
+)
+
+# External provider toggles (configured per provider elsewhere; these constants
+# describe protocol-level defaults)
+EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "model_output",
+    "model_output_thinking",
+    "model_output_deep_thinking",
+    "model_output_code",
+    "final_answer",
+    "error",
+    "search_content",
+    "tool",
+    "parse",
+    "execution_logs",
+    "picture_web",
+    "memory_search",
+    "verification",
+    "max_steps_reached",
+)
 
 
 DEFAULT_LLM_MAX_TOKENS = 4096
