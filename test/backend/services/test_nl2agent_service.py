@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from agents import nl2agent_session_catalog
+from agents import nl2agent_session_store
 from agents.nl2agent_session_catalog import (
     clear_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
@@ -584,13 +585,18 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         MagicMock(return_value=MagicMock(client=fake_redis)),
     )
     monkeypatch.setattr(
-        nl2agent_session_catalog,
-        "_load_durable_session",
+        nl2agent_session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=fake_redis)),
+    )
+    monkeypatch.setattr(
+        nl2agent_session_store,
+        "load_durable_session",
         MagicMock(return_value=None),
     )
     monkeypatch.setattr(
-        nl2agent_session_catalog,
-        "_persist_workflow_state",
+        nl2agent_session_store,
+        "persist_workflow_state",
         MagicMock(return_value=True),
     )
     transaction = MagicMock()

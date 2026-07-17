@@ -6,6 +6,7 @@ import fakeredis
 import pytest
 
 from agents import nl2agent_session_catalog as catalog_module
+from agents import nl2agent_session_store as session_store
 
 
 @pytest.fixture
@@ -16,8 +17,13 @@ def fake_redis(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
-    monkeypatch.setattr(catalog_module, "_load_durable_session", MagicMock(return_value=None))
-    monkeypatch.setattr(catalog_module, "_persist_workflow_state", MagicMock(return_value=True))
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
+    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=None))
+    monkeypatch.setattr(session_store, "persist_workflow_state", MagicMock(return_value=True))
     catalog_module.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     return client
 
@@ -100,6 +106,11 @@ def test_catalogs_round_trip_through_shared_redis(fake_redis, monkeypatch):
     # retaining the same shared Redis storage.
     monkeypatch.setattr(
         catalog_module,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=fake_redis)),
+    )
+    monkeypatch.setattr(
+        session_store,
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=fake_redis)),
     )

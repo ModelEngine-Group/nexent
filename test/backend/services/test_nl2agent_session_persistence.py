@@ -11,6 +11,7 @@ import pytest
 import redis
 
 from agents import nl2agent_session_catalog as catalog
+from agents import nl2agent_session_store as session_store
 from agents.nl2agent_workflow import Nl2AgentWorkflowState, state_to_dict
 from services.nl2agent_session_service import (
     SessionInitializationDependencies,
@@ -18,6 +19,7 @@ from services.nl2agent_session_service import (
 )
 from services.nl2agent_publication_service import _persist_agent_update
 from consts.exceptions import Nl2AgentOperationError
+from utils.nl2agent_catalog_snapshot import catalog_snapshot_id
 
 
 def _catalogs():
@@ -32,7 +34,7 @@ def _catalogs():
 
 def _snapshot(*, state=None):
     workflow_state = state or state_to_dict(Nl2AgentWorkflowState(conversation_id=902))
-    snapshot_id = catalog.catalog_snapshot_id(_catalogs())
+    snapshot_id = catalog_snapshot_id(_catalogs())
     return {
         "tenant_id": "tenant_1",
         "user_id": "user_1",
@@ -54,6 +56,11 @@ def durable_cache(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
     return client
 
 
@@ -61,13 +68,13 @@ def test_cache_miss_recovers_workflow_and_catalogs_from_database(
     durable_cache, monkeypatch
 ):
     load = MagicMock(return_value=_snapshot())
-    monkeypatch.setattr(catalog, "_load_durable_session", load)
+    monkeypatch.setattr(session_store, "load_durable_session", load)
 
     assert catalog.get_nl2agent_session_state("tenant_1", 202)["conversation_id"] == 902
     assert catalog.get_nl2agent_session_catalogs("tenant_1", 202) == _catalogs()
     assert durable_cache.exists(catalog._state_key("tenant_1", 202))
     assert durable_cache.exists(catalog._cache_key("tenant_1", 202))
-    snapshot_id = catalog.catalog_snapshot_id(_catalogs())
+    snapshot_id = catalog_snapshot_id(_catalogs())
     assert durable_cache.exists(catalog._catalog_snapshot_key("tenant_1", snapshot_id))
     load.assert_called_once_with("tenant_1", 202)
 
@@ -80,8 +87,13 @@ def test_reads_fall_back_to_database_when_redis_is_unavailable(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
     load = MagicMock(return_value=_snapshot())
-    monkeypatch.setattr(catalog, "_load_durable_session", load)
+    monkeypatch.setattr(session_store, "load_durable_session", load)
 
     assert catalog.get_nl2agent_session_state("tenant_1", 202)["revision"] == 0
     assert catalog.get_nl2agent_session_catalogs("tenant_1", 202) == _catalogs()
@@ -93,7 +105,7 @@ def test_workflow_mutation_persists_database_revision_before_cache(
 ):
     catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     persist = MagicMock(return_value=True)
-    monkeypatch.setattr(catalog, "_persist_workflow_state", persist)
+    monkeypatch.setattr(session_store, "persist_workflow_state", persist)
 
     catalog.register_requirements_summary(
         "tenant_1",
@@ -126,8 +138,13 @@ def test_committed_workflow_mutation_survives_redis_write_failure(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
-    monkeypatch.setattr(catalog, "_persist_workflow_state", MagicMock(return_value=True))
-    monkeypatch.setattr(catalog, "_load_durable_session", MagicMock(return_value=_snapshot()))
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
+    monkeypatch.setattr(session_store, "persist_workflow_state", MagicMock(return_value=True))
+    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=_snapshot()))
 
     result = catalog.set_model_selection_confirmed("tenant_1", 202, True)
 
@@ -140,8 +157,8 @@ def test_database_conflict_recovers_and_retries_from_latest_revision(
     catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     latest = state_to_dict(Nl2AgentWorkflowState(conversation_id=902, revision=1))
     persist = MagicMock(side_effect=[False, True])
-    monkeypatch.setattr(catalog, "_persist_workflow_state", persist)
-    monkeypatch.setattr(catalog, "_load_durable_session", MagicMock(return_value=_snapshot(state=latest)))
+    monkeypatch.setattr(session_store, "persist_workflow_state", persist)
+    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=_snapshot(state=latest)))
 
     catalog.set_model_selection_confirmed("tenant_1", 202, True)
 
@@ -156,8 +173,8 @@ def test_terminal_session_rejects_mutation_without_exhausting_retries(
     persist = MagicMock(return_value=False)
     terminal = _snapshot()
     terminal["status"] = "completed"
-    monkeypatch.setattr(catalog, "_persist_workflow_state", persist)
-    monkeypatch.setattr(catalog, "_load_durable_session", MagicMock(return_value=terminal))
+    monkeypatch.setattr(session_store, "persist_workflow_state", persist)
+    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=terminal))
 
     with pytest.raises(catalog.Nl2AgentSessionCatalogError, match="no longer active"):
         catalog.set_model_selection_confirmed("tenant_1", 202, True)
@@ -169,7 +186,7 @@ def test_catalog_cache_uses_shared_content_addressed_snapshot(durable_cache):
     catalog.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
     catalog.set_nl2agent_session_catalogs("tenant_1", 203, _catalogs())
 
-    snapshot_id = catalog.catalog_snapshot_id(_catalogs())
+    snapshot_id = catalog_snapshot_id(_catalogs())
     assert durable_cache.exists(catalog._catalog_snapshot_key("tenant_1", snapshot_id))
     assert durable_cache.get(catalog._cache_key("tenant_1", 202)) == json.dumps(
         {"snapshot_id": snapshot_id}

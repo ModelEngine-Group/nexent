@@ -2,23 +2,16 @@
 
 import type React from "react";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { useDeployment } from "@/components/providers/deploymentProvider";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { conversationService } from "@/services/conversationService";
-import {
-  storageService,
-  convertImageUrlToApiUrl,
-} from "@/services/storageService";
+import { storageService } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
@@ -99,15 +92,6 @@ const getNl2AgentDraftForConversation = (
   return readNl2AgentDraftMap()[String(conversationId)] ?? null;
 };
 
-// Get internationalization key based on message type
-const getI18nKeyByType = (type: string): string => {
-  const typeToKeyMap: Record<string, string> = {
-    progress: "chatInterface.parsingFileWithProgress",
-    truncation: "chatInterface.fileTruncated",
-  };
-  return typeToKeyMap[type] || "";
-};
-
 export function ChatInterface() {
   const [input, setInput] = useState("");
   // Replace the original messages state
@@ -117,7 +101,7 @@ export function ChatInterface() {
   const sessionMessagesRef = useRef<{
     [conversationId: number]: ChatMessageType[];
   }>({});
-  const [isSwitchedConversation, setIsSwitchedConversation] = useState(false); // Add conversation switching tracking state
+  const [, setIsSwitchedConversation] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { t, i18n } = useTranslation("common");
 
@@ -140,9 +124,13 @@ export function ChatInterface() {
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
   // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content
-  const currentMessages = conversationManagement.selectedConversationId
-    ? sessionMessages[conversationManagement.selectedConversationId] || []
-    : [];
+  const currentMessages = useMemo(
+    () =>
+      conversationManagement.selectedConversationId
+        ? sessionMessages[conversationManagement.selectedConversationId] || []
+        : [],
+    [conversationManagement.selectedConversationId, sessionMessages]
+  );
 
   // Monitor changes in currentMessages
   // Calculate if the current conversation is streaming
@@ -153,13 +141,11 @@ export function ChatInterface() {
         )
       : false;
 
-  const [viewingImage, setViewingImage] = useState<string | null>(null);
-
   // Add attachment state management
   const [attachments, setAttachments] = useState<FilePreview[]>([]);
   const [fileUrls, setFileUrls] = useState<{ [id: string]: string }>({});
 
-  const [isStreaming, setIsStreaming] = useState(false); // Add streaming state
+  const [, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null); // Add AbortController reference
   const timeoutRef = useRef<NodeJS.Timeout | null>(null); // Add timeout reference
 
@@ -433,7 +419,7 @@ export function ChatInterface() {
 
   // Add click event listener to clear completed conversation indicator when user clicks anywhere on the page
   useEffect(() => {
-    const handlePageClick = (e: MouseEvent) => {
+    const handlePageClick = () => {
       // Clear completed indicator when user clicks anywhere on the page
       clearCompletedIndicator();
     };
@@ -463,7 +449,7 @@ export function ChatInterface() {
         timeoutRef.current = null;
       }
     };
-  }, []);
+  }, [t]);
 
   const handleSend = async (
     autoContinueText?: string,
@@ -1008,51 +994,8 @@ export function ChatInterface() {
     }
   };
 
-  const handleNewConversation = async () => {
-    // When creating new conversation, keep all existing SSE connections active
-    // Do not cancel any conversation requests, let them continue running in the background
-
-    // Record current running conversation
-    if (streamingConversations.size > 0) {
-      // Keep existing SSE connections active
-    }
-
-    // Reset all states
-    setInput("");
-    setIsLoading(false);
-    setIsSwitchedConversation(false);
-
-    // Use conversation management hook
-    conversationManagement.handleNewConversation();
-    setIsLoadingHistoricalConversation(false); // Ensure not loading historical conversation
-
-    // Reset streaming state
-    setIsStreaming(false);
-
-    // Reset selected message and right panel state
-    setSelectedMessageId(undefined);
-    setShowRightPanel(false);
-
-    // Reset attachment state
-    setAttachments([]);
-    setFileUrls({});
-
-    // Clear URL parameters
-    const url = new URL(window.location.href);
-    if (url.searchParams.has("q")) {
-      url.searchParams.delete("q");
-      window.history.replaceState({}, "", url.toString());
-    }
-
-    // Wait for all state updates to complete
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    // Ensure new conversation scrolls to bottom
-    setShouldScrollToBottom(true);
-  };
-
   // Helper to handle resume completion when agent finished during disconnect
-  const handleResumeCompletion = (conversationId: number, status: string) => {
+  const handleResumeCompletion = useCallback((conversationId: number) => {
     // Clean up streaming state
     setStreamingConversations((prev) => {
       const newSet = new Set(prev);
@@ -1078,7 +1021,7 @@ export function ChatInterface() {
         [conversationId]: newMessages,
       };
     });
-  };
+  }, []);
 
   // Helper to create a session messages updater for a specific conversation
   const createSessionMessagesUpdater = useCallback(
@@ -1176,11 +1119,7 @@ export function ChatInterface() {
           "type" in response &&
           response.type === "json"
         ) {
-          const jsonData = response.data as {
-            status: string;
-            message?: string;
-          };
-          handleResumeCompletion(conversationId, jsonData.status);
+          handleResumeCompletion(conversationId);
           return;
         }
 
@@ -1229,7 +1168,6 @@ export function ChatInterface() {
     },
     [
       t,
-      conversationService,
       conversationManagement,
       createSessionMessagesUpdater,
       startResumeTimeout,
@@ -1568,11 +1506,6 @@ export function ChatInterface() {
 
       return newMessages;
     });
-  };
-
-  // Handle image click preview
-  const handleImageClick = (imageUrl: string) => {
-    setViewingImage(imageUrl);
   };
 
   // Add conversation stop handling function
@@ -1921,13 +1854,7 @@ export function ChatInterface() {
         handleConversationListUpdate
       );
     };
-  }, []);
-
-  // Handle settings click - not used when menu items are provided
-  const handleSettingsClick = () => {
-    // This function is kept for compatibility but not used
-    // Both admin and regular users now use dropdown menus
-  };
+  }, [conversationManagement, t]);
 
   return (
     <>

@@ -7,15 +7,11 @@ import re
 import unicodedata
 import uuid
 from copy import deepcopy
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Dict, List, Optional
 
 import redis
-from pydantic import ValidationError
 
-from consts.exceptions import (
-    Nl2AgentStateConflictError as _Nl2AgentStateConflictError,
-    Nl2AgentWorkflowConflictError,
-)
+from agents import nl2agent_session_store as _session_store
 
 from agents.nl2agent_workflow import (
     CardDelivery,
@@ -25,32 +21,19 @@ from agents.nl2agent_workflow import (
     RecommendationBatch,
     RequirementsReview,
     TrustedSearchBatch,
-    WORKFLOW_SCHEMA_VERSION,
     Nl2AgentWorkflowState,
     evaluate_workflow,
     state_to_dict,
 )
 from utils.nl2agent_catalog_snapshot import (
-    catalog_snapshot_id,
     mcp_recommendation_id,
 )
 
 logger = logging.getLogger(__name__)
 
-_CATALOG_KEYS = (
-    "tool_catalog",
-    "skill_catalog",
-    "registry_results",
-    "community_results",
-    "official_skills",
-)
-_CACHE_KEY_PREFIX = "nl2agent:session_catalog"
-_CATALOG_SNAPSHOT_KEY_PREFIX = "nl2agent:catalog_snapshot"
-_STATE_KEY_PREFIX = "nl2agent:session_state"
 _INSTALLATION_LOCK_KEY_PREFIX = "nl2agent:mcp_installation_lock"
-_CACHE_TTL_SECONDS = 24 * 60 * 60
 _INSTALLATION_LOCK_TTL_SECONDS = 5 * 60
-_CAS_MAX_RETRIES = 5
+_CAS_MAX_RETRIES = _session_store.CAS_MAX_RETRIES
 _REQUIREMENTS_FIELDS = (
     "goal",
     "audience_or_scenario",
@@ -126,284 +109,20 @@ _NO_MODIFICATION_PHRASES = {
 }
 
 
-class Nl2AgentSessionCatalogError(Nl2AgentWorkflowConflictError):
-    """Raised when NL2AGENT session catalogs cannot be persisted or loaded."""
+Nl2AgentSessionCatalogError = _session_store.Nl2AgentSessionCatalogError
+Nl2AgentStateConflictError = _session_store.Nl2AgentStateConflictError
 
-
-class Nl2AgentStateConflictError(_Nl2AgentStateConflictError):
-    """Raised when concurrent writers exhaust the state CAS retry budget."""
-
-
-_MutationResult = TypeVar("_MutationResult")
-
-
-def get_redis_service():
-    """Resolve the shared Redis service lazily to keep agent imports lightweight."""
-    from services.redis_service import get_redis_service as redis_service_factory
-
-    return redis_service_factory()
-
-
-def _cache_key(tenant_id: str, draft_agent_id: int) -> str:
-    return f"{_CACHE_KEY_PREFIX}:{tenant_id}:{int(draft_agent_id)}"
-
-
-def _state_key(tenant_id: str, draft_agent_id: int) -> str:
-    return f"{_STATE_KEY_PREFIX}:{tenant_id}:{int(draft_agent_id)}"
-
-
-def _catalog_snapshot_key(tenant_id: str, snapshot_id: str) -> str:
-    return f"{_CATALOG_SNAPSHOT_KEY_PREFIX}:{tenant_id}:{snapshot_id}"
-
-
-def _load_durable_session(tenant_id: str, draft_agent_id: int) -> Optional[Dict[str, Any]]:
-    """Load the database snapshot lazily to keep agent imports lightweight."""
-    from database.nl2agent_session_db import get_nl2agent_session_snapshot
-
-    return get_nl2agent_session_snapshot(tenant_id, draft_agent_id)
-
-
-def _persist_workflow_state(
-    tenant_id: str,
-    draft_agent_id: int,
-    expected_revision: int,
-    workflow_state: Dict[str, Any],
-) -> bool:
-    """Advance the authoritative database workflow revision."""
-    from database.nl2agent_session_db import update_nl2agent_workflow_state
-
-    return update_nl2agent_workflow_state(
-        tenant_id=tenant_id,
-        draft_agent_id=draft_agent_id,
-        expected_revision=expected_revision,
-        workflow_schema_version=WORKFLOW_SCHEMA_VERSION,
-        workflow_state=workflow_state,
-    )
-
-
-def _cache_durable_snapshot(snapshot: Dict[str, Any]) -> None:
-    """Refresh disposable Redis projections from one database snapshot."""
-    tenant_id = str(snapshot["tenant_id"])
-    draft_agent_id = int(snapshot["draft_agent_id"])
-    snapshot_id = str(snapshot["catalog_snapshot_id"])
-    client = get_redis_service().client
-    pipe = client.pipeline()
-    pipe.setex(
-        _state_key(tenant_id, draft_agent_id),
-        _CACHE_TTL_SECONDS,
-        json.dumps(snapshot["workflow_state"], ensure_ascii=False),
-    )
-    pipe.setex(
-        _catalog_snapshot_key(tenant_id, snapshot_id),
-        _CACHE_TTL_SECONDS,
-        json.dumps(snapshot["catalog_snapshot"], ensure_ascii=False),
-    )
-    pipe.setex(
-        _cache_key(tenant_id, draft_agent_id),
-        _CACHE_TTL_SECONDS,
-        json.dumps({"snapshot_id": snapshot_id}),
-    )
-    pipe.execute()
-
-
-def _recover_durable_session(tenant_id: str, draft_agent_id: int) -> Optional[Dict[str, Any]]:
-    snapshot = _load_durable_session(tenant_id, draft_agent_id)
-    if snapshot is not None:
-        _cache_durable_snapshot(snapshot)
-    return snapshot
-
-
-def _refresh_cache_best_effort(snapshot: Optional[Dict[str, Any]]) -> None:
-    """Refresh Redis without turning a committed database write into a failure."""
-    if snapshot is None:
-        return
-    try:
-        _cache_durable_snapshot(snapshot)
-    except redis.RedisError:
-        logger.warning(
-            "Failed to refresh disposable NL2AGENT Redis cache: tenant_id=%s draft_agent_id=%s",
-            snapshot.get("tenant_id"),
-            snapshot.get("draft_agent_id"),
-            exc_info=True,
-        )
-
-
-def _new_session_state(conversation_id: int) -> Nl2AgentWorkflowState:
-    return Nl2AgentWorkflowState(conversation_id=int(conversation_id))
-
-
-def initialize_nl2agent_session_state(
-    tenant_id: Optional[str], draft_agent_id: Optional[int], conversation_id: int
-) -> Dict[str, Any]:
-    """Create a v2 workflow state exactly once for a new draft session."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    state = _new_session_state(conversation_id)
-    key = _state_key(tenant, draft_id)
-    try:
-        created = get_redis_service().client.set(
-            key,
-            json.dumps(state_to_dict(state), ensure_ascii=False),
-            ex=_CACHE_TTL_SECONDS,
-            nx=True,
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to initialize NL2AGENT session state: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Failed to initialize NL2AGENT session state for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
-    if not created:
-        raise Nl2AgentSessionCatalogError("NL2AGENT session state already exists for this draft.")
-    return state_to_dict(state)
-
-
-def _parse_session_state(raw: Any, tenant_id: str, draft_agent_id: int) -> Nl2AgentWorkflowState:
-    if raw is None:
-        raise Nl2AgentSessionCatalogError(
-            f"NL2AGENT session state is missing for tenant={tenant_id}, draft_agent_id={draft_agent_id}."
-        )
-    try:
-        payload = json.loads(raw)
-        if payload.get("schema_version") != WORKFLOW_SCHEMA_VERSION:
-            raise ValueError(f"unsupported schema_version={payload.get('schema_version')!r}")
-        return Nl2AgentWorkflowState.model_validate(payload)
-    except (
-        json.JSONDecodeError,
-        TypeError,
-        AttributeError,
-        ValueError,
-        ValidationError,
-    ) as exc:
-        logger.error(
-            "Malformed NL2AGENT session state: tenant_id=%s draft_agent_id=%s",
-            tenant_id,
-            draft_agent_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Malformed NL2AGENT session state for tenant={tenant_id}, draft_agent_id={draft_agent_id}."
-        ) from exc
-
-
-def get_nl2agent_session_state(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> Dict[str, Any]:
-    """Return resource-review state for one tenant-scoped draft."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    try:
-        raw = get_redis_service().client.get(_state_key(tenant, draft_id))
-        if raw is None:
-            snapshot = _recover_durable_session(tenant, draft_id)
-            raw = (
-                json.dumps(snapshot["workflow_state"], ensure_ascii=False)
-                if snapshot is not None
-                else None
-            )
-    except redis.RedisError:
-        logger.warning(
-            "NL2AGENT state cache is unavailable; loading durable snapshot: "
-            "tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        snapshot = _load_durable_session(tenant, draft_id)
-        raw = (
-            json.dumps(snapshot["workflow_state"], ensure_ascii=False)
-            if snapshot is not None
-            else None
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to load NL2AGENT session state: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Failed to load NL2AGENT session state for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
-    return state_to_dict(_parse_session_state(raw, tenant, draft_id))
-
-
-def _mutate_session_state(
-    tenant_id: str,
-    draft_agent_id: int,
-    mutator: Callable[[Nl2AgentWorkflowState], _MutationResult],
-) -> _MutationResult:
-    """Atomically mutate one workflow state with bounded optimistic retries."""
-    key = _state_key(tenant_id, draft_agent_id)
-    client = get_redis_service().client
-    for _attempt in range(_CAS_MAX_RETRIES):
-        pipe = client.pipeline()
-        durable_committed = False
-        result: Any = None
-        try:
-            pipe.watch(key)
-            raw_state = pipe.get(key)
-            if raw_state is None:
-                pipe.unwatch()
-                if _recover_durable_session(tenant_id, draft_agent_id) is None:
-                    raise Nl2AgentSessionCatalogError(
-                        f"NL2AGENT session state is missing for tenant={tenant_id}, "
-                        f"draft_agent_id={draft_agent_id}."
-                    )
-                continue
-            state = _parse_session_state(raw_state, tenant_id, draft_agent_id)
-            original_state = state_to_dict(state)
-            result = mutator(state)
-            if state_to_dict(state) == original_state:
-                pipe.unwatch()
-                return deepcopy(result)
-            state.revision += 1
-            persisted_state = state_to_dict(state)
-            if not _persist_workflow_state(
-                tenant_id,
-                draft_agent_id,
-                expected_revision=int(original_state["revision"]),
-                workflow_state=persisted_state,
-            ):
-                pipe.unwatch()
-                snapshot = _recover_durable_session(tenant_id, draft_agent_id)
-                if snapshot is None:
-                    raise Nl2AgentSessionCatalogError(
-                        "NL2AGENT durable session is missing."
-                    )
-                if snapshot.get("status") != "active":
-                    raise Nl2AgentSessionCatalogError(
-                        "NL2AGENT session is no longer active."
-                    )
-                continue
-            durable_committed = True
-            pipe.multi()
-            pipe.setex(
-                key,
-                _CACHE_TTL_SECONDS,
-                json.dumps(persisted_state, ensure_ascii=False),
-            )
-            pipe.execute()
-            return deepcopy(result)
-        except redis.WatchError:
-            if durable_committed:
-                _refresh_cache_best_effort(
-                    _load_durable_session(tenant_id, draft_agent_id)
-                )
-                return deepcopy(result)
-            continue
-        except redis.RedisError:
-            if durable_committed:
-                _refresh_cache_best_effort(
-                    _load_durable_session(tenant_id, draft_agent_id)
-                )
-                return deepcopy(result)
-            raise
-        finally:
-            pipe.reset()
-    raise Nl2AgentStateConflictError(
-        f"NL2AGENT session state changed concurrently for tenant={tenant_id}, draft_agent_id={draft_agent_id}."
-    )
+get_redis_service = _session_store.get_redis_service
+_cache_key = _session_store.cache_key
+_state_key = _session_store.state_key
+_catalog_snapshot_key = _session_store.catalog_snapshot_key
+_validate_identifiers = _session_store.validate_identifiers
+initialize_nl2agent_session_state = _session_store.initialize_session_state
+get_nl2agent_session_state = _session_store.get_session_state
+_mutate_session_state = _session_store.mutate_session_state
+set_nl2agent_session_catalogs = _session_store.set_session_catalogs
+get_nl2agent_session_catalogs = _session_store.get_session_catalogs
+clear_nl2agent_session_catalogs = _session_store.clear_session_cache
 
 
 def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -1276,150 +995,6 @@ def assert_resource_review_complete(tenant_id: str, draft_agent_id: int) -> None
         raise Nl2AgentSessionCatalogError("Apply or skip every shown local resource recommendation before finalizing.")
 
 
-def _validate_identifiers(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> tuple[str, int]:
-    if not tenant_id or not draft_agent_id:
-        raise Nl2AgentSessionCatalogError("NL2AGENT session catalog requires tenant_id and draft_agent_id.")
-    return tenant_id, int(draft_agent_id)
-
-
-def _validate_catalogs(catalogs: Any) -> Dict[str, List[Dict[str, Any]]]:
-    if not isinstance(catalogs, dict):
-        raise Nl2AgentSessionCatalogError("NL2AGENT session catalog payload is malformed.")
-
-    payload: Dict[str, List[Dict[str, Any]]] = {}
-    for key in _CATALOG_KEYS:
-        value = catalogs.get(key)
-        if not isinstance(value, list):
-            raise Nl2AgentSessionCatalogError(f"NL2AGENT session catalog field '{key}' is malformed.")
-        payload[key] = deepcopy(value)
-    return payload
-
-
-def set_nl2agent_session_catalogs(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    catalogs: Dict[str, List[Dict[str, Any]]],
-) -> None:
-    """Persist catalogs for a draft agent so every runtime worker can read them."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    payload = _validate_catalogs(catalogs)
-    snapshot_id = catalog_snapshot_id(payload)
-    key = _cache_key(tenant, draft_id)
-    try:
-        client = get_redis_service().client
-        pipe = client.pipeline()
-        pipe.setex(
-            _catalog_snapshot_key(tenant, snapshot_id),
-            _CACHE_TTL_SECONDS,
-            json.dumps(payload, ensure_ascii=False),
-        )
-        pipe.setex(
-            key,
-            _CACHE_TTL_SECONDS,
-            json.dumps({"snapshot_id": snapshot_id}),
-        )
-        pipe.execute()
-    except Exception as exc:
-        logger.error(
-            "Failed to persist NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Failed to persist NL2AGENT catalogs for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
-
-
-def get_nl2agent_session_catalogs(
-    tenant_id: Optional[str], draft_agent_id: Optional[int]
-) -> Dict[str, List[Dict[str, Any]]]:
-    """Load catalogs for a draft agent or fail explicitly when unavailable."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    key = _cache_key(tenant, draft_id)
-    try:
-        client = get_redis_service().client
-        raw_reference = client.get(key)
-        catalogs = None
-        if raw_reference is not None:
-            try:
-                reference = json.loads(raw_reference)
-                if isinstance(reference, dict) and reference.get("snapshot_id"):
-                    raw_snapshot = client.get(
-                        _catalog_snapshot_key(tenant, str(reference["snapshot_id"]))
-                    )
-                    if raw_snapshot is not None:
-                        catalogs = _validate_catalogs(json.loads(raw_snapshot))
-                else:
-                    catalogs = _validate_catalogs(reference)
-            except (json.JSONDecodeError, TypeError, Nl2AgentSessionCatalogError) as exc:
-                logger.error(
-                    "Malformed NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
-                    tenant,
-                    draft_id,
-                    exc_info=True,
-                )
-                raise Nl2AgentSessionCatalogError(
-                    f"Malformed NL2AGENT catalogs for tenant={tenant}, draft_agent_id={draft_id}."
-                ) from exc
-        if catalogs is None:
-            snapshot = _recover_durable_session(tenant, draft_id)
-            catalogs = (
-                _validate_catalogs(snapshot["catalog_snapshot"])
-                if snapshot is not None
-                else None
-            )
-    except redis.RedisError:
-        logger.warning(
-            "NL2AGENT catalog cache is unavailable; loading durable snapshot: "
-            "tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        snapshot = _load_durable_session(tenant, draft_id)
-        catalogs = (
-            _validate_catalogs(snapshot["catalog_snapshot"])
-            if snapshot is not None
-            else None
-        )
-    except Nl2AgentSessionCatalogError:
-        raise
-    except Exception as exc:
-        logger.error(
-            "Failed to load NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Failed to load NL2AGENT catalogs for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
-
-    if catalogs is None:
-        logger.error(
-            "NL2AGENT catalogs are missing: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
-        )
-
-    try:
-        return _validate_catalogs(catalogs)
-    except (json.JSONDecodeError, TypeError, Nl2AgentSessionCatalogError) as exc:
-        logger.error(
-            "Malformed NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Malformed NL2AGENT catalogs for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
-
-
 def get_nl2agent_search_catalogs(
     tenant_id: Optional[str],
     draft_agent_id: Optional[int],
@@ -1479,16 +1054,6 @@ def get_nl2agent_search_catalogs(
         if item_id in installed_skill_ids or item_name in installed_skill_names:
             item["status"] = "installed"
     return catalogs
-
-
-def clear_nl2agent_session_catalogs() -> None:
-    """Clear persisted NL2AGENT catalogs. Intended for tests."""
-    client = get_redis_service().client
-    keys = list(client.scan_iter(match=f"{_CACHE_KEY_PREFIX}:*"))
-    keys.extend(client.scan_iter(match=f"{_CATALOG_SNAPSHOT_KEY_PREFIX}:*"))
-    keys.extend(client.scan_iter(match=f"{_STATE_KEY_PREFIX}:*"))
-    if keys:
-        client.delete(*keys)
 
 
 def delete_nl2agent_session_catalogs(
