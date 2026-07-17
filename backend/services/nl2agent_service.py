@@ -84,7 +84,9 @@ from database.conversation_db import (
 from database.client import get_db_session
 from database.model_management_db import get_model_records
 from database.nl2agent_session_db import (
+    NL2AGENT_SESSION_ACTIVE,
     create_nl2agent_session,
+    get_nl2agent_session_by_conversation,
     update_nl2agent_session_status,
 )
 from database.skill_db import (
@@ -320,9 +322,8 @@ def _get_owned_draft(
     tenant_id: str,
     *,
     user_id: str,
-    conversation_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Resolve one user-owned NL2AGENT draft and optionally bind its Conversation."""
+    """Resolve one user-owned NL2AGENT draft."""
     _validate_draft_agent_id(agent_id)
     try:
         agent = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
@@ -336,17 +337,35 @@ def _get_owned_draft(
         or str(agent.get("created_by") or "") != str(user_id)
     ):
         raise Nl2AgentDraftNotFoundError()
-    if conversation_id is not None:
-        if not isinstance(conversation_id, int) or conversation_id <= 0:
-            raise Nl2AgentValidationError(
-                "A positive conversation_id is required for an NL2AGENT run."
-            )
-        state = get_nl2agent_session_state(tenant_id, agent_id)
-        if int(state.get("conversation_id") or 0) != conversation_id:
-            raise Nl2AgentDraftNotFoundError()
-        if not get_conversation(conversation_id, user_id=user_id):
-            raise Nl2AgentDraftNotFoundError()
     return agent
+
+
+def _require_active_run_session(
+    *,
+    draft_agent_id: int,
+    conversation_id: Optional[int],
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Require one active owner-scoped session and its live Conversation."""
+    if not isinstance(conversation_id, int) or conversation_id <= 0:
+        raise Nl2AgentValidationError(
+            "A positive conversation_id is required for an NL2AGENT run."
+        )
+    session = get_nl2agent_session_by_conversation(
+        tenant_id,
+        user_id,
+        conversation_id,
+        status=NL2AGENT_SESSION_ACTIVE,
+    )
+    if (
+        session is None
+        or session.get("status") != NL2AGENT_SESSION_ACTIVE
+        or int(session.get("draft_agent_id") or 0) != draft_agent_id
+        or int(session.get("conversation_id") or 0) != conversation_id
+        or not get_conversation(conversation_id, user_id=user_id)
+    ):
+        raise Nl2AgentDraftNotFoundError()
 
 
 def _owned_draft_reader(user_id: str):
@@ -816,7 +835,12 @@ def validate_nl2agent_run_context(
         draft_agent_id,
         tenant_id,
         user_id=user_id,
+    )
+    _require_active_run_session(
+        draft_agent_id=draft_agent_id,
         conversation_id=conversation_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
 
 

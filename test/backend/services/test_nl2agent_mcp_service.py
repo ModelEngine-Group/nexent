@@ -1311,8 +1311,14 @@ def test_validate_nl2agent_run_context_accepts_exact_user_session_binding(monkey
         ]
     )
     get_conversation = MagicMock(return_value={"conversation_id": 902})
+    get_session = MagicMock(
+        return_value={"draft_agent_id": 202, "conversation_id": 902, "status": "active"}
+    )
     monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", query_agent)
     monkeypatch.setattr(nl2agent_service, "get_conversation", get_conversation)
+    monkeypatch.setattr(
+        nl2agent_service, "get_nl2agent_session_by_conversation", get_session
+    )
 
     nl2agent_service.validate_nl2agent_run_context(
         runner_agent_id=101,
@@ -1323,9 +1329,12 @@ def test_validate_nl2agent_run_context_accepts_exact_user_session_binding(monkey
     )
 
     get_conversation.assert_called_once_with(902, user_id="user_1")
+    get_session.assert_called_once_with("tenant_1", "user_1", 902, status="active")
 
 
-def test_validate_nl2agent_run_context_rejects_redis_conversation_mismatch(monkeypatch):
+def test_validate_nl2agent_run_context_rejects_active_session_conversation_mismatch(
+    monkeypatch,
+):
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
@@ -1338,6 +1347,17 @@ def test_validate_nl2agent_run_context_rejects_redis_conversation_mismatch(monke
     )
     get_conversation = MagicMock()
     monkeypatch.setattr(nl2agent_service, "get_conversation", get_conversation)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_nl2agent_session_by_conversation",
+        MagicMock(
+            return_value={
+                "draft_agent_id": 202,
+                "conversation_id": 902,
+                "status": "active",
+            }
+        ),
+    )
 
     with pytest.raises(nl2agent_service.Nl2AgentDraftNotFoundError):
         nl2agent_service.validate_nl2agent_run_context(
@@ -1367,6 +1387,17 @@ def test_validate_nl2agent_run_context_rejects_conversation_not_owned_by_user(
     monkeypatch.setattr(
         nl2agent_service, "get_conversation", MagicMock(return_value=None)
     )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_nl2agent_session_by_conversation",
+        MagicMock(
+            return_value={
+                "draft_agent_id": 202,
+                "conversation_id": 902,
+                "status": "active",
+            }
+        ),
+    )
 
     with pytest.raises(nl2agent_service.Nl2AgentDraftNotFoundError):
         nl2agent_service.validate_nl2agent_run_context(
@@ -1392,6 +1423,74 @@ def test_validate_nl2agent_run_context_rejects_non_builder_runner(monkeypatch):
         )
 
     query_agent.assert_called_once_with(agent_id=101, tenant_id="tenant_1")
+
+
+def test_validate_nl2agent_run_context_requires_conversation(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            side_effect=[
+                {"agent_id": 101, "name": "nl2agent"},
+                {"agent_id": 202, "name": "draft_test", "created_by": "user_1"},
+            ]
+        ),
+    )
+    get_session = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service, "get_nl2agent_session_by_conversation", get_session
+    )
+
+    with pytest.raises(nl2agent_service.Nl2AgentValidationError):
+        nl2agent_service.validate_nl2agent_run_context(
+            runner_agent_id=101,
+            draft_agent_id=202,
+            conversation_id=None,
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    get_session.assert_not_called()
+
+
+@pytest.mark.parametrize("terminal_status", ["abandoned", "completed"])
+def test_validate_nl2agent_run_context_rejects_terminal_session(
+    monkeypatch, terminal_status
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            side_effect=[
+                {"agent_id": 101, "name": "nl2agent"},
+                {"agent_id": 202, "name": "draft_test", "created_by": "user_1"},
+            ]
+        ),
+    )
+    get_session = MagicMock(
+        return_value={
+            "draft_agent_id": 202,
+            "conversation_id": 902,
+            "status": terminal_status,
+        }
+    )
+    get_conversation = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service, "get_nl2agent_session_by_conversation", get_session
+    )
+    monkeypatch.setattr(nl2agent_service, "get_conversation", get_conversation)
+
+    with pytest.raises(nl2agent_service.Nl2AgentDraftNotFoundError):
+        nl2agent_service.validate_nl2agent_run_context(
+            runner_agent_id=101,
+            draft_agent_id=202,
+            conversation_id=902,
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    get_session.assert_called_once_with("tenant_1", "user_1", 902, status="active")
+    get_conversation.assert_not_called()
 
 
 @pytest.mark.asyncio
