@@ -1,233 +1,107 @@
-结论：**存在明显坏味道，且包含真实功能缺陷。**
+# NL2AGENT 代码坏味道复核报告
 
-在 `dyx/nl2a` 分支、HEAD `807a7742` 上完成只读扫描，共确认：
+复核日期：2026-07-17
 
-- **3 个 P1 高严重度问题**
-- **8 个 P2 中严重度问题**
-- **5 个 P3 低严重度/可维护性问题**
-- **1 个条件性协议注入风险**
-- 未发现 P0 级越权、任意 SSRF 或数据破坏漏洞
+复核分支：`dyx/nl2a`
 
-## P1：高严重度
+复核范围：NL2AGENT backend、SDK、frontend、数据库迁移与相关测试
 
-1. **自定义租户无法正常启动 Agent Builder**
+## 结论
 
-启动过程只为默认租户创建 `nl2agent`：
+原报告确认的 16 条问题中：
 
-- 启动调用不传租户：[config_app.py:59](/home/sil/nexent/backend/apps/config_app.py:59)
-- seed 默认使用 `DEFAULT_TENANT_ID`：[nl2agent_service.py:946](/home/sil/nexent/backend/services/nl2agent_service.py:946)
-- 新租户创建流程没有 seed Builder：[tenant_service.py:181](/home/sil/nexent/backend/services/tenant_service.py:181)
-- 启动会话时却严格按当前租户查询：[nl2agent_session_service.py:143](/home/sil/nexent/backend/services/nl2agent_session_service.py:143)、[agent_db.py:43](/home/sil/nexent/backend/database/agent_db.py:43)
+- 15 条已修复并通过针对性回归；
+- 1 条 P3 结构性坏味道仅部分缓解，仍需继续拆分巨型 facade 与长参数函数；
+- 原条件性卡片协议注入风险已修复；
+- 未发现新的 P0、P1 或 P2 级安全/功能缺陷；
+- 当前未再复现租户 Builder 启动失败、鉴权错误映射、草稿状态漂移、Redis 写依赖、陈旧缓存、无界 workflow、安装锁异常覆盖、snapshot 永久增长或 pytest collection 污染。
 
-因此，通过正常 `create_tenant()` 创建的非默认租户会得到：
+因此，NL2AGENT 当前没有已知的高、中严重度坏味道；唯一明确剩余项是低严重度的模块与参数规模问题。
 
-> NL2AGENT default agent is not initialized.
+## 原问题逐项复核
 
-测试中 Builder 查询被 mock，未覆盖真实多租户集成。
+| 编号 | 原问题 | 状态 | 修复与验证证据 |
+|---|---|---|---|
+| 1 | 自定义租户无法启动 Agent Builder | 已修复 | session start 在租户缺少 Builder 时按当前 `tenant_id` 惰性 provision；数据库增加 active `nl2agent` 租户唯一部分索引，并发 loser 会重新查询并修复 winner。多租户真实调用与 seed 竞争测试通过。 |
+| 2 | 浏览器草稿缓存成为权威状态 | 已修复 | 删除 NL2AGENT conversation→draft 的 `localStorage` 映射；发送前通过服务端 session discovery 重新验证，404 会清除过期 handoff；删除 conversation 会按 owner/tenant abandon 对应 session。 |
+| 3 | 16 个 API 鉴权失败返回 500 | 已修复 | 所有 NL2AGENT endpoint 统一通过 `_current_user()` 映射 `UnauthorizedError` 为 401；真实 ASGI 鉴权回归通过。 |
+| 4 | Active Session 不淘汰且入口可双击创建孤儿 | 已修复 | 前端两个 Builder 入口均增加 ref/state mutex；后端增加 active、abandoned、completed 三类留存策略，删除 conversation 时同步 abandon，清理采用有界批次与 `skip_locked`。 |
+| 5 | Redis 是创建和修改路径硬依赖 | 已修复 | 初始 workflow 由数据库事务持久化；事务提交后才 best-effort 预热 Redis。workflow 修改只使用数据库 revision CAS，Redis 不可用不再阻止创建或改变已提交结果。 |
+| 6 | 数据库提交后 Redis 最长保留 24 小时旧状态 | 已修复 | workflow 读取始终加载数据库权威 revision，再修复 disposable cache；测试覆盖 Redis 中 revision 0、数据库 revision 2 时必须返回并回写 revision 2。 |
+| 7 | 本地 Catalog 无界加载且 Skill N+1 | 已修复 | Tool/Skill provider 查询边界统一限制为 2,000；Skill 使用专用轻量投影，只查询 ID、名称、描述、标签，不再逐条加载 tool relation。单查询与 limit 测试通过。 |
+| 8 | 请求集合与 Workflow 无容量边界、整数不严格 | 已修复 | NL2AGENT 请求 ID 使用 strict positive integer，布尔值不再解析为 `1`；list/dict/string 增加长度上限。每次 workflow mutator 后重新执行完整 schema/capacity 校验，再允许 revision CAS。 |
+| 9 | MCP/Skill 锁释放掩盖结果，Skill 无续约 | 已修复 | 两类 release 均被保护，失败只记录告警，不覆盖成功结果或原异常；MCP 使用 asyncio heartbeat，Skill 使用独立 daemon heartbeat 续租，丢失 ownership 时拒绝正常完成。 |
+| 10 | Catalog Snapshot 没有 GC | 已修复 | abandoned 清理和 completed retention 均会释放 session 引用，并仅软删除无存活引用的候选 snapshot；内容哈希再次出现时使用 `ON CONFLICT DO UPDATE` 原子恢复 snapshot。 |
+| 11 | 默认 Builder seed check-then-create 竞争 | 已修复 | ORM、增量迁移与 fresh init 均包含 `uq_nl2agent_builder_tenant_active`；迁移先软删除历史重复 Builder，再建唯一索引；并发创建失败方重新查询 winner。 |
+| 12 | 生产模块暴露测试专用全局 API | 已修复 | 删除生产 `clear_session_cache()`/`clear_nl2agent_session_catalogs`；删除绕过阶段校验的公开 `record_trusted_search_batch()`。测试清理和搜索 proof seam 仅保留在测试代码或私有函数。 |
+| 13 | 前端错误类型不统一 | 已修复 | NL2AGENT HTTP 失败统一抛出 `Nl2AgentRequestError`，保留 status、error code 与 details；并发 session start 使用单一 pending promise 合并。 |
+| 14 | 模块和依赖对象继续膨胀 | 部分缓解，仍存在 | `PublicationDependencies` 已拆为 draft/workflow/model/resource/persistence，`McpInstallationDependencies` 已拆为 session/lock/provider/discovery；但 `nl2agent_session_catalog.py` 仍为 1,207 行，`nl2agent_service.py` 为 983 行，相关代码仍有 30 个 PLR0913 命中。该项仍是唯一确认的 P3 坏味道。 |
+| 15 | NL2AGENT 边界入口未通过格式门禁 | 已修复 | Builder 两个入口、chat 集成、service、draft context 与 NL2AGENT components 均通过 ESLint 和 Prettier；同时清理入口文件原有 unused/`any` 问题。 |
+| 16 | Python 测试依赖逐文件子进程隔离 | 已修复 | `test_create_agent_info.py` 在 collection 后恢复 `sys.modules`，每个 test 仅临时安装 stub；数据库测试改用稳定的 top-level import。将该文件置于首位时，17 个 NL2AGENT 文件在同一标准 pytest 进程 454/454 通过。 |
 
-2. **浏览器草稿缓存成为权威状态，发布或删除后会持续注入失效草稿 ID**
+## 条件性卡片协议风险复核
 
-草稿映射被保存在未按用户隔离的全局 `localStorage`：
+原风险已修复。
 
-- 读取和写入映射：[chatInterface.tsx:73](</home/sil/nexent/frontend/app/[locale]/chat/internal/chatInterface.tsx:73>)
-- 只要本地存在值，就不会向服务端重新验证：[chatInterface.tsx:192](</home/sil/nexent/frontend/app/[locale]/chat/internal/chatInterface.tsx:192>)
-- 每次 Agent Run 都继续注入该 ID：[chatInterface.tsx:782](</home/sil/nexent/frontend/app/[locale]/chat/internal/chatInterface.tsx:782>)
-- 发布成功仅跳转页面，没有清理映射：[FinalizeCard.tsx:202](/home/sil/nexent/frontend/components/nl2agent/FinalizeCard.tsx:202)
+SDK 的 NL2AGENT card parser 现在只接受位于独立完整行的结束围栏。Marketplace 名称或描述中的内联三反引号不会再提前截断卡片。回归测试使用包含三反引号标记的 JSON 字符串，能够完整提取 card body。
 
-发布后 draft 已被重命名并进入 completed 状态，旧 ID 不再满足 owned draft 校验。重新打开会话后会持续失败，直到用户手工清除浏览器缓存。删除 conversation 同样没有清理该映射，也没有 abandon 对应 session。
+Prompt 仍要求复制真实 Observation JSON；解析边界不再依赖“遇到任意第一个三反引号即结束”的脆弱规则。
 
-这不是越权漏洞——后端最终会拒绝——但属于稳定可复现的用户功能故障。
+## 持久化与生命周期不变量
 
-3. **16 个 NL2Agent API 在鉴权失败时返回 500，而不是 401**
+当前实现满足以下不变量：
 
-`_current_user()` 在这些端点的 `try` 语句之前执行，例如：
-
-- [nl2agent_app.py:131](/home/sil/nexent/backend/apps/nl2agent_app.py:131)
-- [nl2agent_app.py:155](/home/sil/nexent/backend/apps/nl2agent_app.py:155)
-
-缺少或无效认证会抛出普通 `UnauthorizedError`，最终落入全局 generic handler：
-
-- [app_factory.py:98](/home/sil/nexent/backend/apps/app_factory.py:98)
-
-扫描到 16 个此类端点；只有 start/apply-local/install-skill/finalize 等少数端点正确捕获并映射到 401。影响包括错误监控污染、客户端错误重试以及 API 契约不一致，但没有形成鉴权绕过。
-
-## P2：中严重度
-
-4. **Active Session 不会自动淘汰，且一个入口可双击创建孤儿会话**
-
-清理逻辑只处理 `abandoned`：
-
-- [nl2agent_session_db.py:211](/home/sil/nexent/backend/database/nl2agent_session_db.py:211)
-- [nl2agent_session_lifecycle_service.py:109](/home/sil/nexent/backend/services/nl2agent_session_lifecycle_service.py:109)
-
-前端虽然定义了 list/abandon API，但生产界面没有调用。用户直接离开、删除 conversation 或关闭浏览器后，session、draft agent、conversation 和 catalog snapshot 都会继续存在。
-
-另外，[AgentManageComp.tsx:47](</home/sil/nexent/frontend/app/[locale]/agents/components/AgentManageComp.tsx:47>) 的 Builder 入口没有 loading/mutex 防护，快速双击会创建两个独立 session，只有最后一次导航被采用。
-
-5. **Redis 被描述成缓存，但实际上是创建和写入路径的硬依赖**
-
-读取路径支持数据库 fallback，但：
-
-- 创建状态必须先写 Redis：[nl2agent_session_store.py:169](/home/sil/nexent/backend/agents/nl2agent_session_store.py:169)
-- 状态修改先执行 Redis WATCH/GET：[nl2agent_session_store.py:280](/home/sil/nexent/backend/agents/nl2agent_session_store.py:280)
-- Redis 在数据库提交前失败会直接中止操作
-
-因此 Redis 故障时无法创建 session，也无法修改已有 workflow。它实际上属于强一致写依赖，而不是可丢弃缓存。
-
-6. **数据库提交成功后，Redis 可能保留最长 24 小时的旧状态**
-
-更新顺序是：
-
-1. 数据库 CAS 提交新 revision。
-2. Redis `SETEX` 更新缓存。
-3. Redis 更新失败时仅 best-effort 重试并吞掉错误。
-
-见 [nl2agent_session_store.py:311](/home/sil/nexent/backend/agents/nl2agent_session_store.py:311)。
-
-Redis 恢复后，读取逻辑只要看到已有值就直接信任，不比较 Redis revision 与数据库 revision：[nl2agent_session_store.py:231](/home/sil/nexent/backend/agents/nl2agent_session_store.py:231)。
-
-结果是旧 workflow 可能在 Redis TTL 内继续被 Agent Run 使用。现有测试验证“数据库提交不应回滚”，但没有验证 Redis 恢复后的缓存新鲜度。
-
-7. **本地 Tool/Skill Catalog 无界加载，并存在 Skill N+1 查询**
-
-每次创建 session 都会加载租户全部本地资源：
-
-- Tool/Skill 全量物化：[nl2agent_catalog_service.py:173](/home/sil/nexent/backend/services/nl2agent_catalog_service.py:173)
-- Skill 查询 `.all()` 后逐条查询 tool relations：[skill_db.py:220](/home/sil/nexent/backend/database/skill_db.py:220)
-
-然而 NL2Agent 投影只需要 skill 的 ID、名称、描述和标签，额外的逐条 relation 查询没有被使用。大租户下会造成数据库 N+1、内存放大、JSONB snapshot 膨胀和搜索上下文膨胀。
-
-8. **请求集合和 Workflow 状态缺乏容量边界，整数类型也不严格**
-
-多个请求模型只配置了 `extra="forbid"`，没有：
-
-- `max_length`
-- 严格整数
-- 字典大小限制
-- batch 数量上限
-
-见 [model.py:449](/home/sil/nexent/backend/consts/model.py:449) 和 [nl2agent_workflow.py:119](/home/sil/nexent/backend/agents/nl2agent_workflow.py:119)。
-
-实测 Pydantic 会把：
-
-```python
-draft_agent_id=True
-primary_model_id=True
-```
-
-解析成整数 `1`。所有权检查仍会阻止越权，但类型契约不可靠。另一方面，持续创建不同 search batch/recommendation batch 会令 workflow JSONB 无界增长。
-
-9. **MCP/Skill 安装锁释放可能掩盖成功结果或原始异常**
-
-锁释放位于未保护的 `finally`：
-
-- MCP：[nl2agent_mcp_service.py:152](/home/sil/nexent/backend/services/nl2agent_mcp_service.py:152)
-- Skill：[nl2agent_catalog_service.py:448](/home/sil/nexent/backend/services/nl2agent_catalog_service.py:448)
-
-如果 Redis 在 release 阶段失败：
-
-- 成功安装可能被报告成失败
-- 原始异常可能被 release 异常覆盖
-
-MCP 安装有 heartbeat；Skill 使用相同的五分钟锁 TTL，却没有续约机制。长时间安装超过 TTL 后，另一请求可以重新获取锁并重复执行。
-
-10. **Catalog Snapshot 只有创建和读取，没有垃圾回收**
-
-Snapshot 使用内容哈希去重，但扫描未发现删除或 GC 路径：
-
-- Snapshot 模型：[db_models.py:486](/home/sil/nexent/backend/database/db_models.py:486)
-- Session 外键没有 cascade：[db_models.py:502](/home/sil/nexent/backend/database/db_models.py:502)
-
-Session 清理是软删除，外键引用仍然存在，因此 abandoned/completed session 会永久固定 snapshot。租户目录持续变化时，该表只增不减。
-
-11. **默认 Builder seed 存在 check-then-create 并发竞争**
-
-Seed 先按名称查询，再创建 agent，没有数据库锁、upsert 或 `(tenant_id, name, version_no)` 唯一约束：
-
-- [nl2agent_seed_service.py:253](/home/sil/nexent/backend/services/nl2agent_seed_service.py:253)
-- AgentInfo 当前只有 `(agent_id, version_no)` 主键：[db_models.py:433](/home/sil/nexent/backend/database/db_models.py:433)
-
-多个 config 实例同时启动时可能创建重复 Builder；后续 `.first()` 会任意选择其中一个。
-
-## P3：可维护性和工程坏味道
-
-12. **生产模块暴露仅供测试使用的全局 API**
-
-`clear_session_cache()` 会扫描并删除全部 NL2Agent cache key，文档明确写着供测试使用，但它仍位于生产模块并被导出：
-
-- [nl2agent_session_store.py:475](/home/sil/nexent/backend/agents/nl2agent_session_store.py:475)
-
-`record_trusted_search_batch()` 同样只有测试调用，并绕过生产使用的阶段校验入口。这类测试 seam 应避免成为生产公共 API。
-
-13. **前端错误类型不统一**
-
-服务层定义了 `Nl2AgentRequestError`，但大部分方法仍抛出：
-
-```typescript
-new Error(await response.text())
-```
-
-见 [nl2agentService.ts:27](/home/sil/nexent/frontend/services/nl2agentService.ts:27) 和 [nl2agentService.ts:119](/home/sil/nexent/frontend/services/nl2agentService.ts:119)。
-
-这会丢失 HTTP status/error code，且可能把原始 JSON 文本直接展示给用户，使冲突、认证和可重试错误无法统一处理。
-
-14. **模块和依赖对象继续膨胀**
-
-静态扫描结果：
-
-- `nl2agent_session_catalog.py`：约 1230 行
-- `nl2agent_service.py`：约 951 行
-- 生产代码共 **39 个 PLR0913** “参数过多”命中
-- `McpInstallationDependencies`、`PublicationDependencies` 均达到约 16 个依赖字段
-
-不过 `C901`、`PLR0912`、`PLR0915` 没有命中，因此问题主要是职责聚集和依赖耦合，而不是单个函数的高圈复杂度。
-
-15. **NL2Agent 边界入口没有完全通过前端格式门禁**
-
-专用 NL2Agent components/service/chat 集成 lint 通过，但包括 Builder 两个入口后，Prettier 检查失败：
-
-- [AgentManageComp.tsx:51](</home/sil/nexent/frontend/app/[locale]/agents/components/AgentManageComp.tsx:51>)
-- [AgentSelectorHeader.tsx:213](</home/sil/nexent/frontend/app/[locale]/agents/components/AgentSelectorHeader.tsx:213>)
-
-没有把入口文件里的全部旧 lint 问题归因于该 feature；可以确认的是本次 NL2Agent 集成行本身仍未满足格式门禁。
-
-16. **Python 测试依赖“每个文件独立子进程”**
-
-官方 runner 下 643 个测试全部通过，但把 18 个 NL2Agent 测试文件放入同一个标准 pytest 进程时出现 16 个 collection error。原因是测试模块向 `sys.modules` 注入 stub，污染后续测试导入。
-
-因此测试结果依赖 [run_all_test.py](/home/sil/nexent/test/run_all_test.py:1) 的逐文件子进程隔离，普通 `pytest <多个文件>` 不可靠。
-
-## 条件性风险
-
-Prompt 要求模型把 Observation JSON “原样”复制进三反引号卡片：
-
-- [nl2agent_system_prompt_en.yaml:64](/home/sil/nexent/backend/prompts/nl2agent_system_prompt_en.yaml:64)
-
-卡片解析器却使用第一个三反引号作为结束位置：
-
-- [nexent_agent.py:46](/home/sil/nexent/sdk/nexent/core/agents/nexent_agent.py:46)
-
-本地及在线目录的名称、描述、标签没有对反引号做转义。如果不可信 marketplace 描述包含 ` ``` `，模型按 prompt 原样输出时可能截断卡片或改变卡片边界。这更接近协议破坏/拒绝服务，不是权限绕过；尚未用恶意 marketplace 端到端样本验证，因此单列为条件性风险。
+1. 数据库 `workflow_revision` 是 workflow 的唯一权威版本；Redis 只是可丢弃投影。
+2. workflow 写入使用数据库 CAS，revision 每次只允许增加 1。
+3. terminal session 拒绝继续修改。
+4. session 创建先提交 durable snapshot，随后 best-effort 预热缓存。
+5. session discovery、draft ownership、conversation ownership 均按 tenant 和 user 隔离。
+6. active、abandoned、completed session 均有有界 retention 路径。
+7. catalog snapshot 只在没有非删除 session 引用时回收，并可按内容哈希恢复。
+8. MCP/Skill 安装锁按 ownership token 释放和续租，release 失败不改变业务结果。
 
 ## 验证结果
 
-通过：
+### Backend
 
-- Python NL2Agent 测试：18 个文件，**643/643**
-- 两个 Python 调用入口均通过，但最终解析到同一个 Python 3.11 解释器，因此不能算独立运行时覆盖
-- Frontend Vitest：8 个文件，**64/64**
-- Frontend type-check
-- NL2Agent contracts check
-- 专用 NL2Agent lint
-- Python Ruff 默认规则
-- SQL migration/init 一致性测试
-- `git diff --check`
+- backend `.venv` + `deploy/env/.env`：17 个相关文件同一 pytest 进程，**454/454 passed**。
+- conda `nexent` + `deploy/env/.env`：同一组测试，**454/454 passed**。
+- 两种入口当前解析到同一 Python 3.11 环境，因此属于调用入口复核，不视为两个独立运行时。
+- 第 3 阶段持久化/生命周期专项：**52/52 passed**。
+- 第 4 阶段容量/目录/锁专项：**99/99 passed**。
+- Python Ruff 默认规则：本次修改的生产 NL2AGENT 文件通过。
 
-安全路径中未发现明显问题：
+### SDK
 
-- Agent Run 在副作用前校验 runner、draft owner、tenant 和 conversation
-- MCP URL 拒绝凭据、非 HTTP(S)、私有/保留地址，并限制跨 host/port redirect
-- marketplace secret metadata 有脱敏
-- Workflow 使用数据库 revision CAS，terminal session 会拒绝继续修改
+- `test/sdk/core/agents/test_nexent_agent.py`：**116/116 passed**。
+- 包含 marketplace 内联三反引号的 card parser 回归通过。
 
-工作区最终 `git status --short` 为空。**未修改任何文件。**
+### Frontend
+
+- TypeScript type-check：通过。
+- NL2AGENT Vitest：**7 files，61/61 passed**。
+- NL2AGENT service、chat、两个 Builder 入口及相关 components ESLint：0 warning / 0 error。
+- 对应文件 Prettier：通过。
+
+### Repository
+
+- `git diff --check`：通过。
+- Builder 唯一索引在 ORM、增量迁移与 `deploy/sql/init.sql` 中一致。
+- 未使用容器；测试仅使用 backend Python 环境、conda `nexent` 入口和 `deploy/env/.env` 环境变量。
+
+## 修复提交
+
+- `516dcaef` `🐛 Fix: Harden NL2AGENT tenant and auth boundaries`
+- `9455aa21` `🐛 Fix: Make NL2AGENT session lifecycle authoritative`
+- `38c16834` `🐛 Fix: Make NL2AGENT persistence database authoritative`
+- `971d1d3b` `🐛 Fix: Bound NL2AGENT resources and installation races`
+- `fab591f0` `♻️ Refactor: Isolate NL2AGENT responsibilities and tests`
+
+## 剩余建议
+
+后续只需继续处理第 14 条低严重度结构性债务：
+
+1. 将 `nl2agent_session_catalog.py` 按 requirements、local recommendation、online installation、card delivery 拆成独立状态域模块。
+2. 将 `nl2agent_service.py` 保持为薄 facade，把依赖组装下沉到 composition root。
+3. 将长参数内部函数逐步改为不可变 command/value object；HTTP request model 不直接充当业务 command。
+4. 为拆分设置循环依赖和文件规模门禁，避免只移动代码、不降低耦合。
