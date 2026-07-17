@@ -106,7 +106,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     setRegistrationError(undefined);
     setRegistrationRetryable(true);
     try {
-      await execute(
+      const result = await execute(
         () =>
           registerLocalResourceRecommendations(agentId, {
             recommendation_batch_id: recommendationBatchId,
@@ -116,7 +116,6 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           onSuccess: async (result) => {
             setToolParameterSchemas(result.tool_parameter_schemas ?? {});
             await onRegistered?.("local_resources", recommendationBatchId);
-            setRegistered(true);
           },
           notifyStateChanged: true,
           blockInput: true,
@@ -124,6 +123,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             !isNl2AgentWorkflowConflict(error),
         }
       );
+      if (result) setRegistered(true);
     } catch (error) {
       const retryable = !isNl2AgentWorkflowConflict(error);
       setRegistrationRetryable(retryable);
@@ -456,7 +456,11 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           message={registrationError}
           action={
             registrationRetryable ? (
-              <Button onClick={() => void register()}>
+              <Button
+                onClick={() => void register()}
+                loading={pending}
+                disabled={pending}
+              >
                 Retry registration
               </Button>
             ) : undefined
@@ -472,6 +476,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           disabled={
             !recommendationBatchId ||
             !registered ||
+            pending ||
             applied ||
             skipped ||
             (selectedToolIds.length === 0 && selectedSkillIds.length === 0)
@@ -495,7 +500,13 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           size="small"
           onClick={handleSkip}
           loading={pending}
-          disabled={!recommendationBatchId || !registered || applied || skipped}
+          disabled={
+            !recommendationBatchId ||
+            !registered ||
+            pending ||
+            applied ||
+            skipped
+          }
         >
           {skipped
             ? t("nl2agent.localResources.skippedShort", "Skipped")

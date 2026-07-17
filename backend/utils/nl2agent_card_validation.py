@@ -14,6 +14,7 @@ _CARD_OPENING_PATTERN = re.compile(
     r"```(nl2agent-[^\s`]+)[^\S\r\n]*\r?\n",
     re.IGNORECASE,
 )
+_CARD_CLOSING_PATTERN = re.compile(r"^```[ \t]*\r?$", re.MULTILINE)
 _LANGUAGE_TO_TYPE = {
     "nl2agent-requirements-summary": "requirements_summary",
     "nl2agent-model-selection": "model_selection",
@@ -80,8 +81,9 @@ def message_contains_valid_card(
     position = 0
     while match := _CARD_OPENING_PATTERN.search(message, position):
         resolved_type = _LANGUAGE_TO_TYPE.get(match.group(1).lower())
-        closing_index = message.find("```", match.end())
-        position = len(message) if closing_index < 0 else closing_index + 3
+        closing_match = _CARD_CLOSING_PATTERN.search(message, match.end())
+        closing_index = closing_match.start() if closing_match else -1
+        position = len(message) if closing_match is None else closing_match.end()
         if resolved_type != card_type:
             continue
         target_count += 1

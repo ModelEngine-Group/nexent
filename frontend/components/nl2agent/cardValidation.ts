@@ -271,11 +271,14 @@ export const validateNl2AgentCards = (
     if (!isNl2AgentCardLanguage(language)) continue;
     const cardType = LANGUAGE_TO_TYPE[language];
     const bodyStart = opening.lastIndex;
-    const closingIndex = content.indexOf("```", bodyStart);
-    if (closingIndex < 0) {
+    const closing = /^```[ \t]*\r?$/gm;
+    closing.lastIndex = bodyStart;
+    const closingMatch = closing.exec(content);
+    if (!closingMatch) {
       return { cards, failure: { cardType, reason: "truncated_fence" } };
     }
-    opening.lastIndex = closingIndex + 3;
+    const closingIndex = closingMatch.index;
+    opening.lastIndex = closing.lastIndex;
     const parsed = parseNl2AgentCard(
       language,
       content.slice(bodyStart, closingIndex),

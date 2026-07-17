@@ -45,7 +45,7 @@ def _tool_name(tool_obj: Any) -> str:
 
 # Matches fenced NL2AGENT card blocks such as ```nl2agent-local-resources ... ```
 _NL2AGENT_CARD_PATTERN = re.compile(
-    r"^```(nl2agent-[\w-]+)[ \t]*\r?\n(.*?)^```[ \t]*$",
+    r"^```(nl2agent-[\w-]+)[ \t]*\r?\n(.*?)^```[ \t]*\r?$",
     re.DOTALL | re.MULTILINE,
 )
 

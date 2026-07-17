@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -21,7 +22,9 @@ vi.mock("@/services/nl2agentService", async (importOriginal) => ({
   registerLocalResourceRecommendations: vi.fn(),
 }));
 
-const renderCard = () =>
+const renderCard = (
+  onRegistered: () => Promise<void> = vi.fn(async () => undefined)
+) =>
   render(
     <Nl2AgentWorkflowProvider
       enabled
@@ -39,7 +42,7 @@ const renderCard = () =>
           },
         ]}
         skills={[]}
-        onRegistered={vi.fn(async () => undefined)}
+        onRegistered={onRegistered}
       />
     </Nl2AgentWorkflowProvider>
   );
@@ -148,5 +151,28 @@ describe("local Tool configuration", () => {
       202,
       expect.objectContaining({ tool_config_values: {} })
     );
+  });
+
+  it("enables actions only after registration lifecycle completion", async () => {
+    let resolveReceipt: (() => void) | undefined;
+    const onRegistered = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveReceipt = resolve;
+        })
+    );
+    renderCard(onRegistered);
+
+    await waitFor(() => expect(onRegistered).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: /Applying/ })).toBeDisabled();
+
+    await act(async () => resolveReceipt?.());
+    const applyButton = await screen.findByRole("button", {
+      name: /Apply All/,
+    });
+    await waitFor(() => expect(applyButton).not.toBeDisabled());
+    fireEvent.click(applyButton);
+
+    await waitFor(() => expect(applyLocalResources).toHaveBeenCalledOnce());
   });
 });

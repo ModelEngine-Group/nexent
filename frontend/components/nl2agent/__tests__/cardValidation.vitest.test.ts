@@ -86,4 +86,32 @@ describe("canonical NL2AGENT card validation", () => {
       "invalid_schema"
     );
   });
+
+  it("accepts inline fence text inside a JSON string", () => {
+    const content = `\`\`\`nl2agent-local-resources
+${JSON.stringify({
+  recommendation_batch_id: "local_1",
+  tools: [{ tool_id: 1, name: "Untrusted ``` marker" }],
+  skills: [],
+})}
+\`\`\``;
+
+    const result = validateNl2AgentCards(content, 202);
+
+    expect(result.failure).toBeUndefined();
+    expect(result.cards).toHaveLength(1);
+    expect(result.cards[0].payload).toEqual(
+      expect.objectContaining({ recommendation_batch_id: "local_1" })
+    );
+  });
+
+  it("accepts CRLF card fences", () => {
+    const result = validateNl2AgentCards(
+      '```nl2agent-model-selection\r\n{"agent_id":202}\r\n```\r\n',
+      202
+    );
+
+    expect(result.failure).toBeUndefined();
+    expect(result.cards).toHaveLength(1);
+  });
 });

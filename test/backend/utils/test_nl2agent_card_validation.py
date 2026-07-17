@@ -81,3 +81,34 @@ def test_message_rejects_missing_malformed_or_mismatched_card(
 def test_message_rejects_duplicate_card_type():
     card = _fence("nl2agent-model-selection", {"agent_id": 202})
     assert not message_contains_valid_card(f"{card}\n{card}", "model_selection", 202, None)
+
+
+def test_message_accepts_inline_fence_text_inside_json_string():
+    payload = {
+        "agent_id": 202,
+        "recommendation_batch_id": "local_1",
+        "tools": [{"tool_id": 1, "name": "Untrusted ``` marker"}],
+        "skills": [],
+    }
+
+    assert message_contains_valid_card(
+        _fence("nl2agent-local-resources", payload),
+        "local_resources",
+        202,
+        "local_1",
+    )
+
+
+def test_message_accepts_crlf_fences():
+    content = '```nl2agent-model-selection\r\n{"agent_id": 202}\r\n```\r\n'
+
+    assert message_contains_valid_card(content, "model_selection", 202, None)
+
+
+def test_message_rejects_inline_fence_without_line_anchored_closing_fence():
+    content = (
+        '```nl2agent-model-selection\n{"agent_id": 202, '
+        '"description": "inline ``` only"}'
+    )
+
+    assert not message_contains_valid_card(content, "model_selection", 202, None)

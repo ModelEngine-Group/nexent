@@ -1470,6 +1470,21 @@ def test_extract_nl2agent_observations_ignores_inline_fence_in_json_string():
     )
 
 
+def test_extract_nl2agent_observations_accepts_crlf_fences():
+    content = (
+        "```nl2agent-web-mcps\r\n"
+        '{"items":[{"name":"safe"}]}\r\n'
+        "```\r\n"
+    )
+
+    observations = nexent_agent._extract_nl2agent_observations(content)
+
+    assert observations == (
+        "Previous tool result (nl2agent-web-mcps):\n"
+        '{"items":[{"name":"safe"}]}'
+    )
+
+
 def test_add_history_to_agent_sets_observations_for_nl2agent_cards(nexent_agent_instance, mock_core_agent):
     """Assistant history containing NL2AGENT cards replays them as observations."""
     nexent_agent_instance.agent = mock_core_agent
