@@ -794,10 +794,10 @@ export default function AgentTasksPage() {
                     size="small"
                     danger
                     icon={<Trash2 size={14} />}
+                    aria-label={t("agentAutomation.page.deleteRun")}
+                    title={t("agentAutomation.page.deleteRun")}
                     onClick={() => confirmDeleteRun(run)}
-                  >
-                    {t("agentAutomation.page.deleteRun")}
-                  </Button>
+                  />
                 );
               },
             },
