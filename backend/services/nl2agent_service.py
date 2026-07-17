@@ -30,6 +30,7 @@ from agents.nl2agent_session_catalog import (
     complete_recommendation_batch_apply,
     complete_online_configuration as complete_online_configuration_state,
     complete_mcp_binding_operation,
+    complete_online_installation,
     confirm_requirements_summary,
     confirm_agent_identity,
     delete_nl2agent_session_catalogs,
@@ -43,11 +44,13 @@ from agents.nl2agent_session_catalog import (
     record_card_delivery,
     release_mcp_installation_lock,
     release_mcp_binding_operation,
+    release_online_installation,
     release_recommendation_batch_apply,
     renew_mcp_installation_lock,
     resolve_recommendation_batch,
     reserve_recommendation_batch_apply,
     reserve_mcp_binding_operation,
+    reserve_online_installation,
     set_nl2agent_session_catalogs,
     set_model_selection_confirmed,
     summarize_workflow_state,
@@ -1008,6 +1011,11 @@ def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependenc
         install_by_id=install_skills_for_tenant,
         get_installed_by_name=get_tenant_skill_by_name,
         bind_skill=create_or_update_skill_by_skill_info,
+        acquire_installation_lock=acquire_mcp_installation_lock,
+        release_installation_lock=release_mcp_installation_lock,
+        reserve_installation=reserve_online_installation,
+        complete_installation=complete_online_installation,
+        release_installation=release_online_installation,
     )
 
 

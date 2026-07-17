@@ -233,8 +233,25 @@ def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
     nl2agent_session_catalog.confirm_requirements_summary(tenant_id, draft_agent_id, review["fingerprint"])
 
 
-def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
+def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     _confirm_requirements(tenant_id, draft_agent_id)
+    nl2agent_session_catalog.set_model_selection_confirmed(
+        tenant_id, draft_agent_id, True
+    )
+    nl2agent_session_catalog.record_trusted_search_batch(
+        tenant_id,
+        draft_agent_id,
+        recommendation_batch_id="local_empty",
+        resource_type="local",
+        tool_ids=[],
+        skill_ids=[],
+    )
+    nl2agent_session_catalog.register_recommendation_batch(
+        tenant_id, draft_agent_id, "local_empty", [], []
+    )
+    nl2agent_session_catalog.resolve_recommendation_batch(
+        tenant_id, draft_agent_id, "local_empty", "skipped"
+    )
     nl2agent_session_catalog.record_trusted_search_batch(
         tenant_id,
         draft_agent_id,
@@ -253,6 +270,10 @@ def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
     nl2agent_session_catalog.register_online_recommendation_batch(
         tenant_id, draft_agent_id, "online_skill", "skill", []
     )
+
+
+def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
+    _prepare_required_online_review(tenant_id, draft_agent_id)
     nl2agent_session_catalog.complete_online_configuration(tenant_id, draft_agent_id)
 
 
@@ -2332,6 +2353,7 @@ async def test_install_community_container_merges_card_secret_without_persisting
 
 @pytest.mark.asyncio
 async def test_install_web_skill_installs_by_skill_name(monkeypatch):
+    _prepare_required_online_review()
     install_from_zip = MagicMock(return_value=["search-web-tavily"])
     bind_skill = MagicMock()
     monkeypatch.setattr(
@@ -2396,15 +2418,135 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     assert skill_request.enabled is True
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
         {
+            "skill_id": 12,
+            "skill_name": "search-web-tavily",
+            "status": "installed",
+        },
+        {
             "skill_id": 13,
             "skill_name": "code-review",
             "status": "installable",
         }
     ]
 
+    retried = await nl2agent_service.install_web_skill(
+        agent_id=202,
+        skill_id=0,
+        skill_name="search-web-tavily",
+        tenant_id="tenant_1",
+        user_id="user_1",
+        locale="en",
+    )
+    assert retried == result
+    install_from_zip.assert_called_once()
+    bind_skill.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_install_web_skill_reconciles_after_workflow_completion_failure(
+    monkeypatch,
+):
+    _prepare_required_online_review()
+    install_from_zip = MagicMock(return_value=["search-web-tavily"])
+    bind_skill = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            return_value={
+                "agent_id": 202,
+                "name": "draft_test",
+                "created_by": "user_1",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "install_skills_from_zip_for_tenant",
+        install_from_zip,
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_tenant_skill_by_name",
+        MagicMock(
+            return_value={
+                "skill_id": 112,
+                "skill_name": "search-web-tavily",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_or_update_skill_by_skill_info",
+        bind_skill,
+    )
+    nl2agent_session_catalog.set_nl2agent_session_catalogs(
+        "tenant_1",
+        202,
+        {
+            **_EXPECTED_SESSION_CATALOGS,
+            "official_skills": [
+                {
+                    "skill_id": 12,
+                    "skill_name": "search-web-tavily",
+                    "status": "installable",
+                }
+            ],
+        },
+    )
+    real_complete = nl2agent_service.complete_online_installation
+    attempts = 0
+
+    def flaky_complete(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise nl2agent_session_catalog.Nl2AgentSessionCatalogError(
+                "redis unavailable"
+            )
+        return real_complete(*args, **kwargs)
+
+    monkeypatch.setattr(
+        nl2agent_service,
+        "complete_online_installation",
+        flaky_complete,
+    )
+
+    with pytest.raises(Nl2AgentOperationError, match="Retry installation"):
+        await nl2agent_service.install_web_skill(
+            agent_id=202,
+            skill_id=12,
+            skill_name="search-web-tavily",
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert next(iter(state["online_installations"].values()))["status"] == "installing"
+    with pytest.raises(
+        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
+        match="Skill installation",
+    ):
+        nl2agent_session_catalog.complete_online_configuration("tenant_1", 202)
+
+    result = await nl2agent_service.install_web_skill(
+        agent_id=202,
+        skill_id=12,
+        skill_name="search-web-tavily",
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["skill_id"] == 112
+    assert install_from_zip.call_count == 2
+    assert bind_skill.call_count == 2
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert next(iter(state["online_installations"].values()))["status"] == "completed"
+
 
 @pytest.mark.asyncio
 async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
+    _prepare_required_online_review()
     install_by_id = MagicMock(return_value=[107])
     bind_skill = MagicMock()
     monkeypatch.setattr(
@@ -2450,12 +2592,14 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
     }
     assert bind_skill.call_args.kwargs["skill_info"].skill_id == 107
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
+        {"skill_id": 77, "skill_name": "legacy-source", "status": "installed"},
         {"skill_id": 88, "skill_name": "keep-me", "status": "installable"}
     ]
 
 
 @pytest.mark.asyncio
 async def test_install_web_skill_keeps_recommendation_when_binding_fails(monkeypatch):
+    _prepare_required_online_review()
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
@@ -2503,6 +2647,7 @@ async def test_install_web_skill_keeps_recommendation_when_binding_fails(monkeyp
 
 @pytest.mark.asyncio
 async def test_install_web_skill_rejects_empty_install_result(monkeypatch):
+    _prepare_required_online_review()
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
@@ -4036,6 +4181,7 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     public_workflow = result["resource_review"]["mcp_workflows"]["registry:github"]
     assert public_workflow["status"] == "connected"
     assert "binding_operation_id" not in public_workflow
+    assert "online_installations" not in result["resource_review"]
 
 
 @pytest.mark.asyncio

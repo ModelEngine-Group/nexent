@@ -5,9 +5,12 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents.nl2agent_workflow import (
+    CardDelivery,
     CardType,
-    Nl2AgentWorkflowState,
+    OnlineRecommendationBatch,
+    RecommendationBatch,
     RequirementsReview,
+    TrustedSearchBatch,
 )
 
 
@@ -177,9 +180,25 @@ class Nl2AgentMcpWorkflowResponse(Nl2AgentResponse):
     error: Optional[str] = None
 
 
-class Nl2AgentWorkflowStateResponse(Nl2AgentWorkflowState):
+class Nl2AgentWorkflowStateResponse(Nl2AgentResponse):
+    schema_version: Literal[2] = 2
+    revision: int = 0
+    conversation_id: int
     requirements_review: Nl2AgentRequirementsReviewResponse
+    model_selection_confirmed: bool = False
+    trusted_search_batches: Dict[str, TrustedSearchBatch] = Field(
+        default_factory=dict
+    )
+    recommendation_batches: Dict[str, RecommendationBatch] = Field(
+        default_factory=dict
+    )
+    identity_confirmed: bool = False
     mcp_workflows: Dict[str, Nl2AgentMcpWorkflowResponse]
+    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
+        default_factory=dict
+    )
+    online_configuration_confirmed: bool = False
+    card_delivery: Dict[CardType, CardDelivery] = Field(default_factory=dict)
 
 
 class Nl2AgentPersistedModel(Nl2AgentResponse):

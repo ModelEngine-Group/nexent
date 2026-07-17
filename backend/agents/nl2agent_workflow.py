@@ -60,6 +60,16 @@ class OnlineRecommendationBatch(BaseModel):
     status: Literal["recommendations_ready", "completed"]
 
 
+class OnlineInstallation(BaseModel):
+    """Internal reservation for one online resource installation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["installing", "completed"]
+    operation_id: str
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+
 class TrustedSearchBatch(BaseModel):
     """Backend-recorded proof that an SDK search produced one result batch."""
 
@@ -123,6 +133,7 @@ class Nl2AgentWorkflowState(BaseModel):
     online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
         default_factory=dict
     )
+    online_installations: Dict[str, OnlineInstallation] = Field(default_factory=dict)
     online_configuration_confirmed: bool = False
     card_delivery: Dict[CardType, CardDelivery] = Field(default_factory=dict)
 

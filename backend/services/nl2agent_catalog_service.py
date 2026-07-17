@@ -1,6 +1,7 @@
 """Catalog loading and sanitization for NL2AGENT sessions."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -52,6 +53,11 @@ class SkillInstallationDependencies:
     install_by_id: Callable[..., List[int]]
     get_installed_by_name: Callable[[str, str], Optional[CatalogItem]]
     bind_skill: Callable[..., Any]
+    acquire_installation_lock: Callable[..., Optional[str]]
+    release_installation_lock: Callable[..., Any]
+    reserve_installation: Callable[..., Dict[str, Any]]
+    complete_installation: Callable[..., Dict[str, Any]]
+    release_installation: Callable[..., Any]
 
 
 async def _load_marketplace_pages(
@@ -297,7 +303,7 @@ def _require_installable_skill(
         matches_name = not normalized_name or item_name == normalized_name
         if not matches_id or not matches_name:
             continue
-        if item.get("status") == "installable":
+        if item.get("status") in {"installable", "installed"}:
             return item
         break
     raise AgentRunException(
@@ -306,7 +312,7 @@ def _require_installable_skill(
     )
 
 
-def _remove_installed_skill(
+def _mark_installed_skill(
     dependencies: SkillInstallationDependencies,
     *,
     agent_id: int,
@@ -318,8 +324,7 @@ def _remove_installed_skill(
     removed_ids = {int(value) for value in [skill_id, *(installed_ids or [])] if value}
     normalized_name = _normalized_skill_name(skill_name)
 
-    def remove(catalogs: SessionCatalogs) -> None:
-        retained = []
+    def mark_installed(catalogs: SessionCatalogs) -> None:
         for item in catalogs.get("official_skills", []):
             item_id = item.get("skill_id")
             try:
@@ -329,13 +334,19 @@ def _remove_installed_skill(
             item_name = _normalized_skill_name(
                 item.get("skill_name") or item.get("name")
             )
-            if not matches_id and not (
-                normalized_name and item_name == normalized_name
-            ):
-                retained.append(item)
-        catalogs["official_skills"] = retained
+            if matches_id or (normalized_name and item_name == normalized_name):
+                item["status"] = "installed"
 
-    dependencies.mutate_session_catalogs(tenant_id, agent_id, remove)
+    dependencies.mutate_session_catalogs(tenant_id, agent_id, mark_installed)
+
+
+def _skill_installation_keys(
+    canonical_id: Optional[int],
+    canonical_name: str,
+) -> tuple[str, str]:
+    identity = f"{canonical_id or ''}:{_normalized_skill_name(canonical_name)}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"skill:{digest}", f"install-skill:{digest}"
 
 
 def _bind_installed_skill(
@@ -389,30 +400,102 @@ async def install_web_skill(
     canonical_name = str(
         canonical.get("skill_name") or canonical.get("name") or ""
     ).strip()
-    if skill_name:
-        return _install_skill_by_name(
+    installation_key, operation_id = _skill_installation_keys(
+        canonical_id,
+        canonical_name,
+    )
+    lock_token = dependencies.acquire_installation_lock(
+        tenant_id,
+        agent_id,
+        installation_key,
+    )
+    if not lock_token:
+        raise AgentRunException(
+            "This Skill installation is already in progress. Retry after it completes."
+        )
+    operation_committed = False
+    try:
+        reservation = dependencies.reserve_installation(
+            tenant_id,
+            agent_id,
+            installation_key,
+            operation_id,
+        )
+        if reservation.get("status") == "completed":
+            result = deepcopy(reservation.get("result") or {})
+            _refresh_installed_skill_catalog(
+                dependencies,
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                skill_id=canonical_id,
+                skill_name=canonical_name,
+                installed_ids=result.get("installed_ids"),
+            )
+            return result
+        if skill_name:
+            result = _install_skill_by_name(
+                dependencies,
+                agent_id=agent_id,
+                canonical_name=canonical_name,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                locale=locale,
+            )
+        else:
+            result = _install_skill_by_id(
+                dependencies,
+                agent_id=agent_id,
+                canonical_id=canonical_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+        operation_committed = True
+        try:
+            dependencies.complete_installation(
+                tenant_id,
+                agent_id,
+                installation_key,
+                operation_id,
+                result,
+            )
+        except Exception as exc:
+            raise Nl2AgentOperationError(
+                "The Skill was installed, but workflow state could not be reconciled. Retry installation."
+            ) from exc
+        _refresh_installed_skill_catalog(
             dependencies,
             agent_id=agent_id,
-            canonical_id=canonical_id,
-            canonical_name=canonical_name,
             tenant_id=tenant_id,
-            user_id=user_id,
-            locale=locale,
+            skill_id=canonical_id,
+            skill_name=canonical_name,
+            installed_ids=result.get("installed_ids"),
         )
-    return _install_skill_by_id(
-        dependencies,
-        agent_id=agent_id,
-        canonical_id=canonical_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+        return result
+    except Exception:
+        if not operation_committed:
+            try:
+                dependencies.release_installation(
+                    tenant_id,
+                    agent_id,
+                    installation_key,
+                    operation_id,
+                )
+            except Exception:
+                logger.exception("Failed to release online Skill installation")
+        raise
+    finally:
+        dependencies.release_installation_lock(
+            tenant_id,
+            agent_id,
+            installation_key,
+            lock_token,
+        )
 
 
 def _install_skill_by_name(
     dependencies: SkillInstallationDependencies,
     *,
     agent_id: int,
-    canonical_id: Optional[int],
     canonical_name: str,
     tenant_id: str,
     user_id: str,
@@ -451,13 +534,6 @@ def _install_skill_by_name(
         tenant_id=tenant_id,
         user_id=user_id,
         skill_label=canonical_name,
-    )
-    _refresh_installed_skill_catalog(
-        dependencies,
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        skill_id=canonical_id,
-        skill_name=canonical_name,
     )
     return {
         "skill_id": bound_skill_id,
@@ -503,13 +579,6 @@ def _install_skill_by_id(
         user_id=user_id,
         skill_label=canonical_id,
     )
-    _refresh_installed_skill_catalog(
-        dependencies,
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        skill_id=canonical_id,
-        installed_ids=installed_ids,
-    )
     return {
         "skill_id": installed_skill_id,
         "installed": True,
@@ -528,7 +597,7 @@ def _refresh_installed_skill_catalog(
     installed_ids: Optional[List[int]] = None,
 ) -> None:
     try:
-        _remove_installed_skill(
+        _mark_installed_skill(
             dependencies,
             agent_id=agent_id,
             tenant_id=tenant_id,

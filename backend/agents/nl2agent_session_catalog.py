@@ -20,6 +20,7 @@ from consts.exceptions import (
 from agents.nl2agent_workflow import (
     CardDelivery,
     McpWorkflow,
+    OnlineInstallation,
     OnlineRecommendationBatch,
     RecommendationBatch,
     RequirementsReview,
@@ -724,12 +725,95 @@ def complete_online_configuration(tenant_id: Optional[str], draft_agent_id: Opti
             raise Nl2AgentSessionCatalogError(
                 "Bind discovered MCP tools or explicitly skip tool binding before completing online configuration."
             )
+        if any(
+            installation.status == "installing"
+            for installation in state.online_installations.values()
+        ):
+            raise Nl2AgentSessionCatalogError(
+                "Wait for every online Skill installation to finish before completing online configuration."
+            )
         for batch in batches.values():
             batch.status = "completed"
         state.online_configuration_confirmed = True
         return sorted(batches)
 
     return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def reserve_online_installation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+    operation_id: str,
+) -> Dict[str, Any]:
+    """Reserve one online installation inside the workflow CAS."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        _ensure_workflow_action_allowed(
+            evaluate_workflow(state).model_dump(mode="json"),
+            "configure_online_resources",
+        )
+        existing = state.online_installations.get(installation_key)
+        if existing is not None:
+            if existing.operation_id == operation_id:
+                return existing.model_dump(mode="json")
+            raise Nl2AgentSessionCatalogError(
+                "Online resource installation is owned by another operation."
+            )
+        state.online_installations[installation_key] = OnlineInstallation(
+            status="installing",
+            operation_id=operation_id,
+        )
+        return state.online_installations[installation_key].model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def complete_online_installation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+    operation_id: str,
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Complete only the operation that owns an online installation."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        installation = state.online_installations.get(installation_key)
+        if installation is None or installation.operation_id != operation_id:
+            raise Nl2AgentSessionCatalogError(
+                "Online installation reservation is no longer owned by this operation."
+            )
+        if installation.status == "completed":
+            return installation.model_dump(mode="json")
+        installation.status = "completed"
+        installation.result = deepcopy(result)
+        return installation.model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
+def release_online_installation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+    operation_id: str,
+) -> None:
+    """Release a failed online installation if the operation still owns it."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> None:
+        installation = state.online_installations.get(installation_key)
+        if (
+            installation is not None
+            and installation.status == "installing"
+            and installation.operation_id == operation_id
+        ):
+            del state.online_installations[installation_key]
+
+    _mutate_session_state(tenant, draft_id, mutate)
 
 
 def assert_online_configuration_complete(tenant_id: str, draft_agent_id: int) -> None:

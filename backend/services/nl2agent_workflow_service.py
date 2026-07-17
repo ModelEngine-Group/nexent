@@ -282,6 +282,7 @@ async def get_session_state(
     )
     workflow_state = deepcopy(dependencies.get_session_state(tenant_id, agent_id))
     workflow_summary = dependencies.summarize_workflow_state(workflow_state)
+    workflow_state.pop("online_installations", None)
     for batch in workflow_state.get("recommendation_batches", {}).values():
         batch.pop("operation_id", None)
         if batch.get("status") == "applying":

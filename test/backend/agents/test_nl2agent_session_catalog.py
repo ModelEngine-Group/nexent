@@ -67,6 +67,30 @@ def _register_online_batch(batch_id, resource_type, item_keys):
     )
 
 
+def _prepare_online_review():
+    review = catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Build an agent",
+            "audience_or_scenario": "Operators",
+            "primary_input": "Requests",
+            "expected_output": "Actions",
+            "key_constraints": "Use trusted resources",
+        },
+    )
+    catalog_module.confirm_requirements_summary(
+        "tenant_1", 202, review["fingerprint"]
+    )
+    catalog_module.set_model_selection_confirmed("tenant_1", 202, True)
+    _register_local_batch("local_empty", [], [])
+    catalog_module.resolve_recommendation_batch(
+        "tenant_1", 202, "local_empty", "skipped"
+    )
+    _register_online_batch("online_mcp", "mcp", [])
+    _register_online_batch("online_skill", "skill", ["skill:12"])
+
+
 def test_catalogs_round_trip_through_shared_redis(fake_redis, monkeypatch):
     catalog_module.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
 
@@ -457,6 +481,43 @@ def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
 
     catalog_module.update_mcp_workflow("tenant_1", 202, "registry:github", status="failed")
     catalog_module.complete_online_configuration("tenant_1", 202)
+
+
+def test_online_completion_blocks_active_skill_installation(fake_redis):
+    _prepare_online_review()
+    catalog_module.reserve_online_installation(
+        "tenant_1", 202, "skill:12", "install-skill:12"
+    )
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="Skill installation",
+    ):
+        catalog_module.complete_online_configuration("tenant_1", 202)
+
+    catalog_module.complete_online_installation(
+        "tenant_1",
+        202,
+        "skill:12",
+        "install-skill:12",
+        {"skill_id": 12, "installed": True},
+    )
+    catalog_module.complete_online_configuration("tenant_1", 202)
+
+
+def test_online_installation_reservation_rejects_another_operation(fake_redis):
+    _prepare_online_review()
+    catalog_module.reserve_online_installation(
+        "tenant_1", 202, "skill:12", "install-skill:12"
+    )
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="another operation",
+    ):
+        catalog_module.reserve_online_installation(
+            "tenant_1", 202, "skill:12", "different-operation"
+        )
 
 
 def test_online_completion_requires_both_catalogs(fake_redis):
