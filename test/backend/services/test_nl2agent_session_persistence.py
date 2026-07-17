@@ -105,7 +105,19 @@ def test_workflow_mutation_persists_database_revision_before_cache(
 ):
     catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     persist = MagicMock(return_value=True)
+    committed = state_to_dict(Nl2AgentWorkflowState(conversation_id=902, revision=1))
     monkeypatch.setattr(session_store, "persist_workflow_state", persist)
+    monkeypatch.setattr(
+        session_store,
+        "load_durable_session",
+        MagicMock(
+            side_effect=[
+                _snapshot(),
+                _snapshot(state=committed),
+                _snapshot(state=committed),
+            ]
+        ),
+    )
 
     catalog.register_requirements_summary(
         "tenant_1",
@@ -143,8 +155,12 @@ def test_committed_workflow_mutation_survives_redis_write_failure(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
-    monkeypatch.setattr(session_store, "persist_workflow_state", MagicMock(return_value=True))
-    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=_snapshot()))
+    monkeypatch.setattr(
+        session_store, "persist_workflow_state", MagicMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        session_store, "load_durable_session", MagicMock(return_value=_snapshot())
+    )
 
     result = catalog.set_model_selection_confirmed("tenant_1", 202, True)
 
@@ -172,7 +188,12 @@ def test_committed_mutation_survives_reconciliation_read_failure(monkeypatch):
     monkeypatch.setattr(
         session_store,
         "load_durable_session",
-        MagicMock(side_effect=RuntimeError("database temporarily unavailable")),
+        MagicMock(
+            side_effect=[
+                _snapshot(),
+                RuntimeError("database temporarily unavailable"),
+            ]
+        ),
     )
 
     result = catalog.set_model_selection_confirmed("tenant_1", 202, True)
@@ -185,13 +206,29 @@ def test_database_conflict_recovers_and_retries_from_latest_revision(
 ):
     catalog.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     latest = state_to_dict(Nl2AgentWorkflowState(conversation_id=902, revision=1))
+    committed = state_to_dict(Nl2AgentWorkflowState(conversation_id=902, revision=2))
     persist = MagicMock(side_effect=[False, True])
     monkeypatch.setattr(session_store, "persist_workflow_state", persist)
-    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=_snapshot(state=latest)))
+    monkeypatch.setattr(
+        session_store,
+        "load_durable_session",
+        MagicMock(
+            side_effect=[
+                _snapshot(),
+                _snapshot(state=latest),
+                _snapshot(state=latest),
+                _snapshot(state=committed),
+                _snapshot(state=committed),
+            ]
+        ),
+    )
 
     catalog.set_model_selection_confirmed("tenant_1", 202, True)
 
-    assert [call.kwargs["expected_revision"] for call in persist.call_args_list] == [0, 1]
+    assert [call.kwargs["expected_revision"] for call in persist.call_args_list] == [
+        0,
+        1,
+    ]
     assert catalog.get_nl2agent_session_state("tenant_1", 202)["revision"] == 2
 
 
@@ -203,12 +240,51 @@ def test_terminal_session_rejects_mutation_without_exhausting_retries(
     terminal = _snapshot()
     terminal["status"] = "completed"
     monkeypatch.setattr(session_store, "persist_workflow_state", persist)
-    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=terminal))
+    monkeypatch.setattr(
+        session_store, "load_durable_session", MagicMock(return_value=terminal)
+    )
 
     with pytest.raises(catalog.Nl2AgentSessionCatalogError, match="no longer active"):
         catalog.set_model_selection_confirmed("tenant_1", 202, True)
 
-    persist.assert_called_once()
+    persist.assert_not_called()
+
+
+def test_stale_workflow_cache_cannot_override_database_revision(
+    durable_cache, monkeypatch
+):
+    stale = state_to_dict(Nl2AgentWorkflowState(conversation_id=902))
+    latest = state_to_dict(Nl2AgentWorkflowState(conversation_id=902, revision=2))
+    durable_cache.set(catalog._state_key("tenant_1", 202), json.dumps(stale))
+    monkeypatch.setattr(
+        session_store,
+        "load_durable_session",
+        MagicMock(return_value=_snapshot(state=latest)),
+    )
+
+    assert catalog.get_nl2agent_session_state("tenant_1", 202)["revision"] == 2
+    assert (
+        json.loads(durable_cache.get(catalog._state_key("tenant_1", 202)))["revision"]
+        == 2
+    )
+
+
+def test_initialization_succeeds_when_redis_is_unavailable(monkeypatch):
+    client = MagicMock()
+    client.set.side_effect = redis.ConnectionError("redis unavailable")
+    client.pipeline.side_effect = redis.ConnectionError("redis unavailable")
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
+
+    state = catalog.initialize_nl2agent_session_state(
+        "tenant_1", 202, conversation_id=902
+    )
+    catalog.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
+
+    assert state["conversation_id"] == 902
 
 
 def test_catalog_cache_uses_shared_content_addressed_snapshot(durable_cache):
@@ -272,6 +348,40 @@ async def test_start_session_creates_snapshot_in_draft_transaction():
         session_catalogs=_catalogs(),
         db_session=db_session,
     )
+
+
+@pytest.mark.asyncio
+async def test_start_session_survives_catalog_cache_warm_failure():
+    db_session = MagicMock()
+    dependencies = SessionInitializationDependencies(
+        search_agent_id_by_name=MagicMock(return_value=101),
+        provision_builder=MagicMock(),
+        search_agent_info_by_id=MagicMock(return_value={"agent_id": 101}),
+        ensure_builder_ready=MagicMock(),
+        load_session_catalogs=AsyncMock(return_value=(_catalogs(), [])),
+        get_db_session=MagicMock(return_value=_database_transaction(db_session)),
+        create_agent=MagicMock(return_value={"agent_id": 202}),
+        create_conversation=MagicMock(return_value={"conversation_id": 902}),
+        create_session_snapshot=MagicMock(),
+        initialize_session_state=MagicMock(
+            return_value={"schema_version": 2, "revision": 0}
+        ),
+        set_session_catalogs=MagicMock(side_effect=RuntimeError("redis unavailable")),
+        delete_session_catalogs=MagicMock(),
+        new_uuid=MagicMock(return_value=MagicMock(hex="abcdef123456")),
+        builder_agent_name="nl2agent",
+        draft_name_prefix="draft_",
+    )
+
+    result = await start_session(
+        dependencies,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        language="en",
+    )
+
+    assert result["draft_agent_id"] == 202
+    dependencies.create_session_snapshot.assert_called_once()
 
 
 def test_finalize_updates_agent_and_session_lifecycle_in_one_transaction():

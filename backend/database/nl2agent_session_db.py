@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database.client import as_dict, get_db_session
@@ -27,6 +27,43 @@ NL2AGENT_SESSION_COMPLETED = "completed"
 NL2AGENT_SESSION_ABANDONED = "abandoned"
 
 
+def _delete_orphan_catalog_snapshots(session, records: List[Nl2AgentSession]) -> int:
+    """Soft-delete candidate snapshots that no live session still references."""
+    candidates = {(record.tenant_id, record.catalog_snapshot_id) for record in records}
+    if not candidates:
+        return 0
+    candidate_filter = or_(
+        *(
+            and_(
+                Nl2AgentCatalogSnapshot.tenant_id == tenant_id,
+                Nl2AgentCatalogSnapshot.snapshot_id == snapshot_id,
+            )
+            for tenant_id, snapshot_id in candidates
+        )
+    )
+    live_reference = (
+        session.query(Nl2AgentSession.session_id)
+        .filter(
+            Nl2AgentSession.tenant_id == Nl2AgentCatalogSnapshot.tenant_id,
+            Nl2AgentSession.catalog_snapshot_id == Nl2AgentCatalogSnapshot.snapshot_id,
+            Nl2AgentSession.delete_flag != "Y",
+        )
+        .exists()
+    )
+    return (
+        session.query(Nl2AgentCatalogSnapshot)
+        .filter(
+            candidate_filter,
+            ~live_reference,
+            Nl2AgentCatalogSnapshot.delete_flag != "Y",
+        )
+        .update(
+            {"delete_flag": "Y", "updated_by": "nl2agent_cleanup"},
+            synchronize_session=False,
+        )
+    )
+
+
 def create_nl2agent_session(
     *,
     tenant_id: str,
@@ -39,22 +76,29 @@ def create_nl2agent_session(
     db_session=None,
 ) -> Dict[str, Any]:
     """Create the durable session row inside an optional caller transaction."""
-    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    session_context = (
+        get_db_session(db_session) if db_session is not None else get_db_session()
+    )
     with session_context as session:
         snapshot_id = catalog_snapshot_id(session_catalogs)
+        snapshot_insert = pg_insert(Nl2AgentCatalogSnapshot).values(
+            tenant_id=tenant_id,
+            snapshot_id=snapshot_id,
+            schema_version=1,
+            catalogs=session_catalogs,
+            created_by=user_id,
+            updated_by=user_id,
+            delete_flag="N",
+        )
         session.execute(
-            pg_insert(Nl2AgentCatalogSnapshot)
-            .values(
-                tenant_id=tenant_id,
-                snapshot_id=snapshot_id,
-                schema_version=1,
-                catalogs=session_catalogs,
-                created_by=user_id,
-                updated_by=user_id,
-                delete_flag="N",
-            )
-            .on_conflict_do_nothing(
-                index_elements=["tenant_id", "snapshot_id"]
+            snapshot_insert.on_conflict_do_update(
+                index_elements=["tenant_id", "snapshot_id"],
+                set_={
+                    "schema_version": snapshot_insert.excluded.schema_version,
+                    "catalogs": snapshot_insert.excluded.catalogs,
+                    "updated_by": user_id,
+                    "delete_flag": "N",
+                },
             )
         )
         record = Nl2AgentSession(
@@ -277,6 +321,60 @@ def cleanup_abandoned_nl2agent_sessions(
         for record in records:
             record.delete_flag = "Y"
             record.updated_by = "nl2agent_cleanup"
+        session.flush()
+        _delete_orphan_catalog_snapshots(session, records)
+        return len(records)
+
+
+def abandon_stale_active_nl2agent_sessions(
+    *, active_before: datetime, limit: int
+) -> int:
+    """Move a bounded batch of inactive active sessions to abandoned."""
+    bounded_limit = max(1, min(500, int(limit)))
+    with get_db_session() as session:
+        records = (
+            session.query(Nl2AgentSession)
+            .filter(
+                Nl2AgentSession.status == NL2AGENT_SESSION_ACTIVE,
+                Nl2AgentSession.update_time < active_before,
+                Nl2AgentSession.delete_flag != "Y",
+            )
+            .order_by(Nl2AgentSession.update_time.asc())
+            .with_for_update(skip_locked=True)
+            .limit(bounded_limit)
+            .all()
+        )
+        for record in records:
+            record.status = NL2AGENT_SESSION_ABANDONED
+            record.updated_by = "nl2agent_cleanup"
+        return len(records)
+
+
+def cleanup_completed_nl2agent_sessions(
+    *, completed_before: datetime, limit: int
+) -> int:
+    """Prune completed workflow rows and release unreferenced catalog snapshots."""
+    bounded_limit = max(1, min(500, int(limit)))
+    with get_db_session() as session:
+        records = (
+            session.query(Nl2AgentSession)
+            .filter(
+                Nl2AgentSession.status == NL2AGENT_SESSION_COMPLETED,
+                Nl2AgentSession.update_time < completed_before,
+                Nl2AgentSession.delete_flag != "Y",
+            )
+            .order_by(Nl2AgentSession.update_time.asc())
+            .with_for_update(skip_locked=True)
+            .limit(bounded_limit)
+            .all()
+        )
+        if not records:
+            return 0
+        for record in records:
+            record.delete_flag = "Y"
+            record.updated_by = "nl2agent_cleanup"
+        session.flush()
+        _delete_orphan_catalog_snapshots(session, records)
         return len(records)
 
 
@@ -291,7 +389,9 @@ def update_nl2agent_session_status(
     """Move an active session to one terminal lifecycle state."""
     if status not in {NL2AGENT_SESSION_COMPLETED, NL2AGENT_SESSION_ABANDONED}:
         raise ValueError("NL2AGENT session status must be terminal")
-    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    session_context = (
+        get_db_session(db_session) if db_session is not None else get_db_session()
+    )
     with session_context as session:
         updated = (
             session.query(Nl2AgentSession)

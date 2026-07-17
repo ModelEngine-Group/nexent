@@ -6,13 +6,17 @@ from typing import Any, Dict, List
 
 from agents.nl2agent_session_catalog import delete_nl2agent_session_catalogs
 from consts.const import (
+    NL2AGENT_ACTIVE_RETENTION_DAYS,
     NL2AGENT_ABANDONED_RETENTION_DAYS,
     NL2AGENT_CLEANUP_BATCH_SIZE,
+    NL2AGENT_COMPLETED_RETENTION_DAYS,
 )
 from consts.exceptions import Nl2AgentDraftNotFoundError, Nl2AgentValidationError
 from database.nl2agent_session_db import (
     NL2AGENT_SESSION_ABANDONED,
+    abandon_stale_active_nl2agent_sessions,
     cleanup_abandoned_nl2agent_sessions,
+    cleanup_completed_nl2agent_sessions,
     get_nl2agent_session,
     get_nl2agent_session_by_conversation,
     list_nl2agent_sessions,
@@ -129,11 +133,21 @@ def _abandon_record(
     }
 
 
-def cleanup_expired_abandoned_sessions(*, now: datetime | None = None) -> int:
-    """Clean one bounded retention batch; safe to invoke opportunistically."""
+def cleanup_expired_sessions(*, now: datetime | None = None) -> int:
+    """Apply bounded active and terminal retention; safe to invoke opportunistically."""
     reference_time = now or datetime.now()
-    return cleanup_abandoned_nl2agent_sessions(
+    abandon_stale_active_nl2agent_sessions(
+        active_before=reference_time - timedelta(days=NL2AGENT_ACTIVE_RETENTION_DAYS),
+        limit=NL2AGENT_CLEANUP_BATCH_SIZE,
+    )
+    abandoned = cleanup_abandoned_nl2agent_sessions(
         abandoned_before=reference_time
         - timedelta(days=NL2AGENT_ABANDONED_RETENTION_DAYS),
         limit=NL2AGENT_CLEANUP_BATCH_SIZE,
     )
+    completed = cleanup_completed_nl2agent_sessions(
+        completed_before=reference_time
+        - timedelta(days=NL2AGENT_COMPLETED_RETENTION_DAYS),
+        limit=NL2AGENT_CLEANUP_BATCH_SIZE,
+    )
+    return abandoned + completed

@@ -97,11 +97,6 @@ async def start_session(
                 draft_agent_id,
                 conversation_id=conversation_id,
             )
-            dependencies.set_session_catalogs(
-                tenant_id,
-                draft_agent_id,
-                session_catalogs,
-            )
             dependencies.create_session_snapshot(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -124,9 +119,22 @@ async def start_session(
             "Failed to initialize NL2AGENT session for tenant_id=%s",
             tenant_id,
         )
-        raise Nl2AgentOperationError(
-            "Failed to initialize NL2AGENT session."
-        ) from exc
+        raise Nl2AgentOperationError("Failed to initialize NL2AGENT session.") from exc
+
+    try:
+        dependencies.set_session_catalogs(
+            tenant_id,
+            draft_agent_id,
+            session_catalogs,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to warm disposable NL2AGENT catalogs after durable creation: "
+            "tenant_id=%s draft_agent_id=%s",
+            tenant_id,
+            draft_agent_id,
+            exc_info=True,
+        )
 
     if resource_missing_names:
         logger.warning(

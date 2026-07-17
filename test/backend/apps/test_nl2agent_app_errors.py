@@ -96,7 +96,9 @@ def test_session_error_preserves_domain_exception() -> None:
     assert _session_http_error(error) is error
 
 
-def test_session_error_converts_legacy_workflow_failure_without_message_matching() -> None:
+def test_session_error_converts_legacy_workflow_failure_without_message_matching() -> (
+    None
+):
     converted = _session_http_error(AgentRunException("A new workflow message."))
 
     assert converted.error_code == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
@@ -156,17 +158,14 @@ async def test_start_session_api_maps_workflow_conflict(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         nl2agent_app,
-        "cleanup_expired_abandoned_sessions",
+        "cleanup_expired_sessions",
         MagicMock(return_value=0),
     )
 
     with pytest.raises(AppException) as exc_info:
         await nl2agent_app.start_session_api(MagicMock(), None)
 
-    assert (
-        exc_info.value.error_code
-        == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
-    )
+    assert exc_info.value.error_code == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
 
 
 @pytest.mark.asyncio
@@ -263,10 +262,7 @@ async def test_local_registration_api_maps_workflow_conflict(monkeypatch) -> Non
             None,
         )
 
-    assert (
-        exc_info.value.error_code
-        == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
-    )
+    assert exc_info.value.error_code == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
     register_local.assert_awaited_once_with(
         202,
         "batch",

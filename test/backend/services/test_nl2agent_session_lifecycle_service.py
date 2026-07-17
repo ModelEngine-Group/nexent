@@ -162,14 +162,34 @@ def test_abandon_session_by_conversation_ignores_normal_conversation(monkeypatch
 
 
 def test_cleanup_uses_configured_retention_and_batch(monkeypatch):
-    cleanup = MagicMock(return_value=4)
-    monkeypatch.setattr(lifecycle, "cleanup_abandoned_nl2agent_sessions", cleanup)
+    abandon_stale = MagicMock(return_value=2)
+    cleanup_abandoned = MagicMock(return_value=4)
+    cleanup_completed = MagicMock(return_value=3)
+    monkeypatch.setattr(
+        lifecycle, "abandon_stale_active_nl2agent_sessions", abandon_stale
+    )
+    monkeypatch.setattr(
+        lifecycle, "cleanup_abandoned_nl2agent_sessions", cleanup_abandoned
+    )
+    monkeypatch.setattr(
+        lifecycle, "cleanup_completed_nl2agent_sessions", cleanup_completed
+    )
+    monkeypatch.setattr(lifecycle, "NL2AGENT_ACTIVE_RETENTION_DAYS", 14)
     monkeypatch.setattr(lifecycle, "NL2AGENT_ABANDONED_RETENTION_DAYS", 30)
+    monkeypatch.setattr(lifecycle, "NL2AGENT_COMPLETED_RETENTION_DAYS", 60)
     monkeypatch.setattr(lifecycle, "NL2AGENT_CLEANUP_BATCH_SIZE", 25)
 
     now = datetime(2026, 7, 17, 12, 0, 0)
-    assert lifecycle.cleanup_expired_abandoned_sessions(now=now) == 4
-    cleanup.assert_called_once_with(
+    assert lifecycle.cleanup_expired_sessions(now=now) == 7
+    abandon_stale.assert_called_once_with(
+        active_before=datetime(2026, 7, 3, 12, 0, 0),
+        limit=25,
+    )
+    cleanup_abandoned.assert_called_once_with(
         abandoned_before=datetime(2026, 6, 17, 12, 0, 0),
+        limit=25,
+    )
+    cleanup_completed.assert_called_once_with(
+        completed_before=datetime(2026, 5, 18, 12, 0, 0),
         limit=25,
     )

@@ -5,8 +5,8 @@ import logging
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
-import redis
 from pydantic import ValidationError
+from redis import RedisError
 
 from agents.nl2agent_workflow import (
     WORKFLOW_SCHEMA_VERSION,
@@ -169,30 +169,9 @@ def validate_identifiers(
 def initialize_session_state(
     tenant_id: Optional[str], draft_agent_id: Optional[int], conversation_id: int
 ) -> Dict[str, Any]:
-    """Create a workflow state exactly once for a new draft session."""
-    tenant, draft_id = validate_identifiers(tenant_id, draft_agent_id)
+    """Build the initial workflow state; the database transaction persists it."""
+    validate_identifiers(tenant_id, draft_agent_id)
     state = Nl2AgentWorkflowState(conversation_id=int(conversation_id))
-    try:
-        created = get_redis_service().client.set(
-            state_key(tenant, draft_id),
-            json.dumps(state_to_dict(state), ensure_ascii=False),
-            ex=CACHE_TTL_SECONDS,
-            nx=True,
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to initialize NL2AGENT session state: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"Failed to initialize NL2AGENT session state for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
-    if not created:
-        raise Nl2AgentSessionCatalogError(
-            "NL2AGENT session state already exists for this draft."
-        )
     return state_to_dict(state)
 
 
@@ -231,25 +210,9 @@ def parse_session_state(
 def get_session_state(
     tenant_id: Optional[str], draft_agent_id: Optional[int]
 ) -> Dict[str, Any]:
-    """Load one tenant-scoped workflow state."""
+    """Load the authoritative database workflow and repair its cache projection."""
     tenant, draft_id = validate_identifiers(tenant_id, draft_agent_id)
     try:
-        raw = get_redis_service().client.get(state_key(tenant, draft_id))
-        if raw is None:
-            snapshot = recover_durable_session(tenant, draft_id)
-            raw = (
-                json.dumps(snapshot["workflow_state"], ensure_ascii=False)
-                if snapshot is not None
-                else None
-            )
-    except redis.RedisError:
-        logger.warning(
-            "NL2AGENT state cache is unavailable; loading durable snapshot: "
-            "tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-            exc_info=True,
-        )
         snapshot = load_durable_session(tenant, draft_id)
         raw = (
             json.dumps(snapshot["workflow_state"], ensure_ascii=False)
@@ -266,11 +229,13 @@ def get_session_state(
         raise Nl2AgentSessionCatalogError(
             f"Failed to load NL2AGENT session state for tenant={tenant}, draft_agent_id={draft_id}."
         ) from exc
-    return state_to_dict(parse_session_state(raw, tenant, draft_id))
+    state = state_to_dict(parse_session_state(raw, tenant, draft_id))
+    refresh_cache_best_effort(snapshot)
+    return state
 
 
 def _recover_active_session_after_conflict(tenant_id: str, draft_agent_id: int) -> None:
-    snapshot = recover_durable_session(tenant_id, draft_agent_id)
+    snapshot = load_durable_session(tenant_id, draft_agent_id)
     if snapshot is None:
         raise Nl2AgentSessionCatalogError("NL2AGENT durable session is missing.")
     if snapshot.get("status") != "active":
@@ -282,62 +247,37 @@ def mutate_session_state(
     draft_agent_id: int,
     mutator: Callable[[Nl2AgentWorkflowState], MutationResult],
 ) -> MutationResult:
-    """Atomically mutate one workflow state with bounded optimistic retries."""
-    key = state_key(tenant_id, draft_agent_id)
-    client = get_redis_service().client
+    """Atomically mutate durable workflow state with bounded database CAS retries."""
     for _attempt in range(CAS_MAX_RETRIES):
-        pipe = client.pipeline()
-        durable_committed = False
-        result: Any = None
-        try:
-            pipe.watch(key)
-            raw_state = pipe.get(key)
-            if raw_state is None:
-                pipe.unwatch()
-                if recover_durable_session(tenant_id, draft_agent_id) is None:
-                    raise Nl2AgentSessionCatalogError(
-                        f"NL2AGENT session state is missing for tenant={tenant_id}, "
-                        f"draft_agent_id={draft_agent_id}."
-                    )
-                continue
-            state = parse_session_state(raw_state, tenant_id, draft_agent_id)
-            original_state = state_to_dict(state)
-            result = mutator(state)
-            if state_to_dict(state) == original_state:
-                pipe.unwatch()
-                return deepcopy(result)
-            state.revision += 1
-            persisted_state = state_to_dict(state)
-            if not persist_workflow_state(
-                tenant_id,
-                draft_agent_id,
-                expected_revision=int(original_state["revision"]),
-                workflow_state=persisted_state,
-            ):
-                pipe.unwatch()
-                _recover_active_session_after_conflict(tenant_id, draft_agent_id)
-                continue
-            durable_committed = True
-            pipe.multi()
-            pipe.setex(
-                key,
-                CACHE_TTL_SECONDS,
-                json.dumps(persisted_state, ensure_ascii=False),
+        snapshot = load_durable_session(tenant_id, draft_agent_id)
+        if snapshot is None:
+            raise Nl2AgentSessionCatalogError(
+                f"NL2AGENT session state is missing for tenant={tenant_id}, "
+                f"draft_agent_id={draft_agent_id}."
             )
-            pipe.execute()
+        if snapshot.get("status") != "active":
+            raise Nl2AgentSessionCatalogError("NL2AGENT session is no longer active.")
+        state = parse_session_state(
+            json.dumps(snapshot["workflow_state"], ensure_ascii=False),
+            tenant_id,
+            draft_agent_id,
+        )
+        original_state = state_to_dict(state)
+        result = mutator(state)
+        if state_to_dict(state) == original_state:
             return deepcopy(result)
-        except redis.WatchError:
-            if durable_committed:
-                recover_committed_cache_best_effort(tenant_id, draft_agent_id)
-                return deepcopy(result)
+        state.revision += 1
+        persisted_state = state_to_dict(state)
+        if not persist_workflow_state(
+            tenant_id,
+            draft_agent_id,
+            expected_revision=int(original_state["revision"]),
+            workflow_state=persisted_state,
+        ):
+            _recover_active_session_after_conflict(tenant_id, draft_agent_id)
             continue
-        except redis.RedisError:
-            if durable_committed:
-                recover_committed_cache_best_effort(tenant_id, draft_agent_id)
-                return deepcopy(result)
-            raise
-        finally:
-            pipe.reset()
+        recover_committed_cache_best_effort(tenant_id, draft_agent_id)
+        return deepcopy(result)
     raise Nl2AgentStateConflictError(
         f"NL2AGENT session state changed concurrently for tenant={tenant_id}, draft_agent_id={draft_agent_id}."
     )
@@ -381,16 +321,14 @@ def set_session_catalogs(
             json.dumps({"snapshot_id": snapshot_id}),
         )
         pipe.execute()
-    except Exception as exc:
-        logger.error(
-            "Failed to persist NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
+    except Exception:
+        logger.warning(
+            "NL2AGENT catalog cache is unavailable during initialization; "
+            "the durable transaction remains authoritative: tenant_id=%s draft_agent_id=%s",
             tenant,
             draft_id,
             exc_info=True,
         )
-        raise Nl2AgentSessionCatalogError(
-            f"Failed to persist NL2AGENT catalogs for tenant={tenant}, draft_agent_id={draft_id}."
-        ) from exc
 
 
 def get_session_catalogs(
@@ -434,7 +372,9 @@ def get_session_catalogs(
                 if snapshot is not None
                 else None
             )
-    except redis.RedisError:
+    except Exception as exc:
+        if not isinstance(exc, RedisError):
+            raise
         logger.warning(
             "NL2AGENT catalog cache is unavailable; loading durable snapshot: "
             "tenant_id=%s draft_agent_id=%s",

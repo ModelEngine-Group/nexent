@@ -78,7 +78,7 @@ from services.nl2agent_service import (
 )
 from services.nl2agent_session_lifecycle_service import (
     abandon_session,
-    cleanup_expired_abandoned_sessions,
+    cleanup_expired_sessions,
     list_active_sessions,
     resolve_active_session,
 )
@@ -305,7 +305,7 @@ async def start_session_api(
 
     try:
         try:
-            cleanup_expired_abandoned_sessions()
+            cleanup_expired_sessions()
         except Exception:
             logger.warning(
                 "Failed to clean expired NL2AGENT sessions before start",
@@ -528,7 +528,9 @@ async def save_agent_identity_api(
 ):
     user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return await save_agent_identity(agent_id, payload.display_name, tenant_id, user_id)
+        return await save_agent_identity(
+            agent_id, payload.display_name, tenant_id, user_id
+        )
     except Exception as exc:
         raise _session_http_error(exc) from exc
 

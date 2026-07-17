@@ -53,6 +53,7 @@ def test_create_session_uses_caller_transaction(monkeypatch):
     session.add.assert_called_once()
     session.flush.assert_called_once()
     session.execute.assert_called_once()
+    assert "DO UPDATE" in str(session.execute.call_args.args[0])
 
 
 def test_get_session_can_enforce_owner(monkeypatch):
@@ -67,7 +68,9 @@ def test_get_session_can_enforce_owner(monkeypatch):
         "get_db_session",
         lambda: _session_context(session),
     )
-    monkeypatch.setattr(nl2agent_session_db, "as_dict", lambda value: {"session_id": value.session_id})
+    monkeypatch.setattr(
+        nl2agent_session_db, "as_dict", lambda value: {"session_id": value.session_id}
+    )
 
     assert nl2agent_session_db.get_nl2agent_session(
         "tenant-a", 11, user_id="user-a"
@@ -233,8 +236,20 @@ def test_status_update_only_accepts_terminal_states(monkeypatch):
 
 def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
     records = [
-        SimpleNamespace(draft_agent_id=11, conversation_id=21, delete_flag="N"),
-        SimpleNamespace(draft_agent_id=12, conversation_id=22, delete_flag="N"),
+        SimpleNamespace(
+            tenant_id="tenant-a",
+            draft_agent_id=11,
+            conversation_id=21,
+            catalog_snapshot_id="digest-a",
+            delete_flag="N",
+        ),
+        SimpleNamespace(
+            tenant_id="tenant-a",
+            draft_agent_id=12,
+            conversation_id=22,
+            catalog_snapshot_id="digest-b",
+            delete_flag="N",
+        ),
     ]
     session_query = MagicMock()
     for method_name in ("filter", "order_by", "with_for_update", "limit"):
@@ -243,8 +258,19 @@ def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
     mutation_queries = [MagicMock() for _ in range(9)]
     for query in mutation_queries:
         query.filter.return_value = query
+    live_reference_query = MagicMock()
+    live_reference_query.filter.return_value = live_reference_query
+    live_reference_query.exists.return_value = True
+    snapshot_query = MagicMock()
+    snapshot_query.filter.return_value = snapshot_query
+    snapshot_query.update.return_value = 2
     session = MagicMock()
-    session.query.side_effect = [session_query, *mutation_queries]
+    session.query.side_effect = [
+        session_query,
+        *mutation_queries,
+        live_reference_query,
+        snapshot_query,
+    ]
     monkeypatch.setattr(
         nl2agent_session_db,
         "get_db_session",
@@ -261,6 +287,73 @@ def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
     session_query.limit.assert_called_once_with(20)
     assert all(query.update.call_count == 1 for query in mutation_queries)
     assert all(record.delete_flag == "Y" for record in records)
+    session.flush.assert_called_once()
+    snapshot_query.update.assert_called_once()
+
+
+def test_stale_active_sessions_are_abandoned_in_a_bounded_batch(monkeypatch):
+    records = [SimpleNamespace(status="active", updated_by="user-a")]
+    query = MagicMock()
+    for method_name in ("filter", "order_by", "with_for_update", "limit"):
+        getattr(query, method_name).return_value = query
+    query.all.return_value = records
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+
+    count = nl2agent_session_db.abandon_stale_active_nl2agent_sessions(
+        active_before=datetime(2026, 6, 1),
+        limit=1000,
+    )
+
+    assert count == 1
+    assert records[0].status == nl2agent_session_db.NL2AGENT_SESSION_ABANDONED
+    assert records[0].updated_by == "nl2agent_cleanup"
+    query.limit.assert_called_once_with(500)
+
+
+def test_completed_cleanup_releases_only_orphan_snapshot_candidates(monkeypatch):
+    record = SimpleNamespace(
+        tenant_id="tenant-a",
+        catalog_snapshot_id="digest",
+        delete_flag="N",
+        updated_by="user-a",
+    )
+    session_query = MagicMock()
+    for method_name in ("filter", "order_by", "with_for_update", "limit"):
+        getattr(session_query, method_name).return_value = session_query
+    session_query.all.return_value = [record]
+    live_reference_query = MagicMock()
+    live_reference_query.filter.return_value = live_reference_query
+    live_reference_query.exists.return_value = True
+    snapshot_query = MagicMock()
+    snapshot_query.filter.return_value = snapshot_query
+    snapshot_query.update.return_value = 1
+    session = MagicMock()
+    session.query.side_effect = [
+        session_query,
+        live_reference_query,
+        snapshot_query,
+    ]
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+
+    count = nl2agent_session_db.cleanup_completed_nl2agent_sessions(
+        completed_before=datetime(2026, 6, 1),
+        limit=20,
+    )
+
+    assert count == 1
+    assert record.delete_flag == "Y"
+    session.flush.assert_called_once()
+    snapshot_query.update.assert_called_once()
 
 
 def test_model_and_fresh_init_match_incremental_migration():
@@ -270,8 +363,7 @@ def test_model_and_fresh_init_match_incremental_migration():
         root / "deploy/sql/migrations/v2.3.0_0716_add_nl2agent_session.sql"
     ).read_text(encoding="utf-8")
     catalog_migration = (
-        root
-        / "deploy/sql/migrations/v2.3.0_0717_share_nl2agent_catalog_snapshots.sql"
+        root / "deploy/sql/migrations/v2.3.0_0717_share_nl2agent_catalog_snapshots.sql"
     ).read_text(encoding="utf-8")
     fresh_init = (root / "deploy/sql/init.sql").read_text(encoding="utf-8")
     for sql in (session_migration + catalog_migration, fresh_init):
