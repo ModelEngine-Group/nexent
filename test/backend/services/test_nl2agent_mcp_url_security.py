@@ -1,6 +1,7 @@
 """Security policy tests for NL2AGENT remote MCP destinations."""
 
 import socket
+import ssl
 from unittest.mock import AsyncMock
 
 import pytest
@@ -120,4 +121,18 @@ async def test_pinned_factory_resolves_even_when_private_networks_are_allowed():
     assert client._transport._pool._network_backend._target.addresses == (
         "10.0.0.5",
     )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_pinned_factory_preserves_tls_certificate_verification():
+    factory = build_pinned_httpx_client_factory(
+        "https://mcp.example/service",
+        resolver=_resolver("93.184.216.34"),
+    )
+    client = factory()
+    ssl_context = client._transport._pool._ssl_context
+
+    assert ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert ssl_context.check_hostname is True
     await client.aclose()

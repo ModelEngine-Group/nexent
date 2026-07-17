@@ -135,10 +135,8 @@ class _PinnedAsyncHttpTransport(httpx.AsyncHTTPTransport):
     """HTTPX transport that preserves Host/SNI while replacing DNS resolution."""
 
     def __init__(self, target: ResolvedMcpTarget):
-        super().__init__(verify=False, trust_env=False)
+        super().__init__(verify=True, trust_env=False)
         ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
         self._pool = httpcore.AsyncConnectionPool(
             ssl_context=ssl_context,
             network_backend=_PinnedNetworkBackend(target),
