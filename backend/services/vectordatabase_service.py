@@ -29,19 +29,20 @@ from nexent.vector_database.datamate_core import DataMateCore
 from nexent.vector_database.qdrant_core import QdrantCore
 
 from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    CAN_EDIT_ALL_USER_ROLES,
     DATAMATE_URL,
     ES_API_KEY,
     ES_HOST,
+    IS_SPEED_MODE,
     LANGUAGE,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
     QDRANT_API_KEY,
     QDRANT_TIMEOUT,
     QDRANT_URL,
     VECTOR_DATABASE_TYPE,
     VectorDatabaseType,
-    IS_SPEED_MODE,
-    PERMISSION_EDIT,
-    PERMISSION_READ,
-    ASSET_OWNER_TENANT_ID,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file, file_exists, get_file_stream
@@ -517,6 +518,102 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
 
 
 class ElasticSearchService:
+    CREATOR_PERMISSION = "CREATOR"
+
+    @staticmethod
+    def resolve_knowledge_base_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Resolve the current user's permission for one knowledge base."""
+        record = get_knowledge_record({"index_name": index_name})
+        if not record:
+            raise ValueError(f"Knowledge base '{index_name}' not found")
+
+        if record.get("knowledge_sources") == "datamate":
+            return PERMISSION_READ
+
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant and not IS_SPEED_MODE:
+            return None
+
+        user_role = (user_tenant or {}).get("user_role")
+        user_tenant_id = str((user_tenant or {}).get("tenant_id") or tenant_id or "")
+        effective_user_role = user_role
+        if user_id == user_tenant_id:
+            effective_user_role = "ADMIN"
+            logger.info(f"User {user_id} identified as legacy admin")
+        elif IS_SPEED_MODE:
+            effective_user_role = "SPEED"
+            logger.info("User under SPEED version is treated as admin")
+
+        role = (effective_user_role or "").upper()
+        record_tenant_id = str(record.get("tenant_id") or "")
+        is_asset_owner_record = record_tenant_id == ASSET_OWNER_TENANT_ID
+
+        if is_asset_owner_record:
+            if role == "ASSET_OWNER":
+                return PERMISSION_EDIT
+            if role in {"SU", "ADMIN", "SPEED", "DEV"}:
+                return PERMISSION_READ
+            return None
+
+        if record_tenant_id and user_tenant_id and record_tenant_id != user_tenant_id:
+            return None
+
+        if role in CAN_EDIT_ALL_USER_ROLES:
+            return PERMISSION_EDIT
+
+        if role in {"USER", "DEV"}:
+            kb_group_ids_str = record.get("group_ids")
+            kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
+            user_group_ids = query_group_ids_by_user(user_id)
+
+            kb_groups_empty = (
+                kb_group_ids_str is None
+                or (isinstance(kb_group_ids_str, str) and kb_group_ids_str.strip() == "")
+                or len(kb_group_ids) == 0
+            )
+            user_groups_empty = len(user_group_ids) == 0
+
+            has_group_intersection = (
+                True
+                if kb_groups_empty and user_groups_empty
+                else bool(set(user_group_ids) & set(kb_group_ids))
+            )
+            if not has_group_intersection:
+                return None
+
+            if str(record.get("created_by")) == str(user_id):
+                return ElasticSearchService.CREATOR_PERMISSION
+
+            ingroup_permission = record.get("ingroup_permission") or PERMISSION_READ
+            if ingroup_permission == PERMISSION_EDIT:
+                return PERMISSION_EDIT
+            if ingroup_permission == PERMISSION_READ:
+                return PERMISSION_READ
+            if ingroup_permission == "PRIVATE":
+                return None
+
+        return None
+
+    @staticmethod
+    def require_knowledge_base_edit_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> str:
+        """Raise when the current user cannot modify the knowledge base."""
+        permission = ElasticSearchService.resolve_knowledge_base_permission(
+            index_name=index_name,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if permission not in {PERMISSION_EDIT, ElasticSearchService.CREATOR_PERMISSION}:
+            raise PermissionError("No permission to modify this knowledge base")
+        return permission
+
     @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
         """

@@ -10,7 +10,7 @@ from http import HTTPStatus
 from pydantic import BaseModel, Field
 
 from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
-from consts.exceptions import SkillException, UnauthorizedError
+from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
 from services.skill_service import (
     SkillService,
     skill_creation_task_manager,
@@ -25,6 +25,7 @@ from services.asset_owner_visibility import can_view_skill
 ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 
 logger = logging.getLogger(__name__)
+_NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
@@ -35,6 +36,25 @@ def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], ten
     if skill and not can_view_skill(tenant_id, skill.get("tenant_id")):
         return JSONResponse(content=ASSET_OWNER_SKILL_VIEW_DENIED)
     return None
+
+
+def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
+    update_data: Dict[str, Any] = {}
+    for field_name in (
+        "name",
+        "description",
+        "content",
+        "tags",
+        "source",
+        "config_schemas",
+        "config_values",
+    ):
+        value = getattr(request, field_name)
+        if value is not None:
+            update_data[field_name] = value
+    if request.files is not None:
+        update_data["files"] = [f.model_dump() for f in request.files]
+    return update_data
 
 
 # List routes first (no path parameters)
@@ -169,7 +189,7 @@ async def create_skill_from_file(
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     skill_name: Optional[str] = Form(
         None, description="Optional skill name override"),
-    source: Optional[str] = Form("自定义", description="Skill source"),
+    source: Optional[str] = Form("custom", description="Skill source"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create a skill from file upload.
@@ -323,7 +343,7 @@ async def update_skill_from_file(
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
-        if "not found" in str(e).lower():
+        if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -496,6 +516,72 @@ async def scan_and_update_skill(authorization: Optional[str] = Header(None)):
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update skill")
 
 
+@router.get("/{skill_id:int}")
+async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(None)) -> JSONResponse:
+    """Get a specific skill by ID."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        service = SkillService(tenant_id=tenant_id)
+        skill = service.get_skill_by_id(skill_id, tenant_id=tenant_id)
+        if not skill:
+            raise HTTPException(
+                status_code=404, detail=f"Skill not found: {skill_id}")
+        return JSONResponse(content=skill)
+    except HTTPException:
+        raise
+    except SkillException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.exception("Error getting skill by ID %s", skill_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.put(
+    "/{skill_id:int}",
+    responses={
+        400: {"description": "No fields to update or invalid skill data"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Not authorized to update this skill"},
+        404: {"description": "Skill not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def update_skill_by_id(
+    skill_id: int,
+    request: SkillUpdateRequest,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """Update an existing skill by ID."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        service = SkillService(tenant_id=tenant_id)
+        update_data = _build_skill_update_data(request)
+
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        skill = service.update_skill_by_id(
+            skill_id,
+            update_data,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(content=skill)
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except SkillException as e:
+        if _NOT_FOUND_TEXT in str(e).lower():
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error updating skill by ID %s", skill_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/{skill_name}")
 async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)) -> JSONResponse:
     """Get a specific skill by name."""
@@ -558,7 +644,7 @@ async def update_skill(
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
-        if "not found" in str(e).lower():
+        if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:

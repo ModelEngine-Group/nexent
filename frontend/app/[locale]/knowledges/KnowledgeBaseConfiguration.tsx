@@ -756,6 +756,10 @@ function DataConfig({ isActive }: DataConfigProps) {
   const handleDeleteDocument = (docId: string) => {
     const kbId = kbState.activeKnowledgeBase?.id;
     if (!kbId) return;
+    if (kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+      message.error(t("errorCode.000202", "Access forbidden."));
+      return;
+    }
 
     confirm({
       title: t("document.modal.deleteConfirm.title"),
@@ -776,6 +780,10 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle file upload - in creation mode create knowledge base first then upload, in normal mode upload directly
   const handleFileUpload = async () => {
+    if (!isCreatingMode && kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+      message.error(t("errorCode.000202", "Access forbidden."));
+      return;
+    }
     if (!uploadFiles.length) {
       message.warning(t("document.message.noFiles"));
       return;

@@ -24,6 +24,7 @@ from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
+from apps.permission_utils import require_knowledge_base_edit_permission
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -125,9 +126,12 @@ async def delete_index(
     logger.debug(f"Received request to delete knowledge base: {index_name}")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
@@ -147,6 +151,7 @@ async def update_index(
         user_id, auth_tenant_id = get_current_user_id(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         tenant_id = request.get("tenant_id") or auth_tenant_id
+        require_knowledge_base_edit_permission(index_name, user_id, auth_tenant_id)
 
         # Extract update fields
         knowledge_name = request.get("knowledge_name")
@@ -197,6 +202,7 @@ async def update_summary_frequency_endpoint(
     """Update the auto-summary frequency for a knowledge base."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         summary_frequency = request.get("summary_frequency")
 
         valid_frequencies = VALID_SUMMARY_FREQUENCIES
@@ -337,6 +343,7 @@ def update_embedding_model(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
 
         model_id = request.get("model_id")
         if not model_id:
@@ -456,6 +463,7 @@ def create_index_documents(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
 
         # Get the knowledge base record to retrieve the saved embedding model
         knowledge_record = get_knowledge_record({'index_name': index_name})
@@ -477,6 +485,8 @@ def create_index_documents(
             large_mode=large_mode,
             model_id=saved_embedding_model_id,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -519,10 +529,13 @@ async def delete_documents(
                 "full: delete ES documents, MinIO source, and Redis task records"
             ),
         ),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        authorization: Optional[str] = Header(None),
 ):
     """Delete a document by scope: source file only or full removal from the index."""
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = await ElasticSearchService.delete_document_by_scope(
             index_name, path_or_url, scope, vdb_core
         )
@@ -567,6 +580,8 @@ async def delete_documents(
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -701,6 +716,7 @@ def create_chunk(
     """Create a manual chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = ElasticSearchService.create_chunk(
             index_name=index_name,
             chunk_request=payload,
@@ -714,6 +730,8 @@ def create_chunk(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
             "Error creating chunk for index %s: %s", index_name, exc, exc_info=True
@@ -736,6 +754,7 @@ def update_chunk(
     """Update an existing chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = ElasticSearchService.update_chunk(
             index_name=index_name,
             chunk_id=chunk_id,
@@ -750,6 +769,8 @@ def update_chunk(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
             "Error updating chunk %s for index %s: %s",
@@ -773,7 +794,8 @@ def delete_chunk(
 ):
     """Delete a chunk."""
     try:
-        get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         result = ElasticSearchService.delete_chunk(
             index_name=index_name,
             chunk_id=chunk_id,
@@ -785,6 +807,8 @@ def delete_chunk(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
             "Error deleting chunk %s for index %s: %s",

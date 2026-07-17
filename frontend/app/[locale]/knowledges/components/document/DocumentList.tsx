@@ -1052,18 +1052,20 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                             >
                               {t("common.preview")}
                             </button>
-                            <button
-                              onClick={() => onDelete(doc.id)}
-                              className={LAYOUT.ACTION_TEXT}
-                              title={
-                                doc.status === DOCUMENT_STATUS.PROCESSING ||
-                                doc.status === DOCUMENT_STATUS.FORWARDING
-                                  ? t("document.delete.terminateTask")
-                                  : undefined
-                              }
-                            >
-                              {t("common.delete")}
-                            </button>
+                            {!isReadOnlyMode && (
+                              <button
+                                onClick={() => onDelete(doc.id)}
+                                className={LAYOUT.ACTION_TEXT}
+                                title={
+                                  doc.status === DOCUMENT_STATUS.PROCESSING ||
+                                  doc.status === DOCUMENT_STATUS.FORWARDING
+                                    ? t("document.delete.terminateTask")
+                                    : undefined
+                                }
+                              >
+                                {t("common.delete")}
+                              </button>
+                            )}
                           </div>
                         </td>
                       )}
@@ -1103,7 +1105,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              disabled={!isCreatingMode && !knowledgeBaseId}
+              disabled={isReadOnlyMode || (!isCreatingMode && !knowledgeBaseId)}
               componentHeight={uploadHeight}
               isCreatingMode={isCreatingMode}
               // Use internal ID for backend operations; fall back to name in creation mode

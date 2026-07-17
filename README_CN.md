@@ -20,11 +20,7 @@ Nexent 是一个基于 **Harness Engineering** 原则打造的零代码智能体
 
 > ⭐ 在您开始使用前，请您顺手在 [GitHub](https://github.com/ModelEngine-Group/nexent) 为我们点个 Star，您的支持是我们前进的动力！
 
-## 方式一：使用官方体验环境
-
-无需安装，直接访问我们的 **[在线体验环境](http://60.204.251.153:3000/zh)**，快速体验 Nexent 的强大功能。
-
-## 方式二：自行部署
+## 自行部署
 
 如果需要在本地或私有环境中部署 Nexent，我们提供两种部署方式：
 
