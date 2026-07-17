@@ -20,6 +20,10 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
+elasticsearch_module = types.ModuleType("elasticsearch")
+elasticsearch_module.Elasticsearch = MagicMock()
+elasticsearch_module.__spec__ = importlib.machinery.ModuleSpec("elasticsearch", loader=None)
+sys.modules['elasticsearch'] = elasticsearch_module
 # Pre-mock nexent module hierarchy to prevent deep SDK import chain
 nexent_mod = types.ModuleType("nexent")
 nexent_mod.__path__ = []
@@ -133,6 +137,8 @@ from backend.services.remote_mcp_service import (
     upload_and_start_mcp_image,
     attach_mcp_container_permissions,
     refresh_mcp_service_tool_count,
+    _format_mcp_connection_error,
+    _mcp_protocol_health_check,
 )
 # Patch exception classes to ensure tests use correct exceptions
 import backend.services.remote_mcp_service as remote_service
@@ -165,6 +171,73 @@ class MockMCPUpdateRequest:
         self.new_mcp_url = new_mcp_url
         self.new_authorization_token = new_authorization_token
         self.custom_headers = custom_headers
+
+
+# ============================================================================
+# MCP connection error normalization
+# ============================================================================
+
+class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
+    """Test user-facing MCP connection error categories."""
+
+    def test_timeout_error_is_normalized(self):
+        result = _format_mcp_connection_error(TimeoutError("request timed out after 10s"))
+        self.assertEqual(result, "MCP connection timeout")
+
+    def test_empty_timeout_error_is_normalized_by_type(self):
+        result = _format_mcp_connection_error(TimeoutError())
+        self.assertEqual(result, "MCP connection timeout")
+
+    def test_chained_timeout_error_is_normalized(self):
+        error = RuntimeError("Client failed to connect: All connection attempts failed")
+        error.__cause__ = TimeoutError()
+
+        result = _format_mcp_connection_error(error)
+
+        self.assertEqual(result, "MCP connection timeout")
+
+    def test_refused_error_is_normalized(self):
+        result = _format_mcp_connection_error(ConnectionError("Connection refused by host"))
+        self.assertEqual(result, "MCP connection refused")
+
+    def test_auth_error_is_normalized(self):
+        result = _format_mcp_connection_error(Exception("HTTP 401 Unauthorized"))
+        self.assertEqual(result, "MCP authentication failed")
+
+    def test_endpoint_error_is_normalized(self):
+        result = _format_mcp_connection_error(Exception("404 endpoint not found"))
+        self.assertEqual(result, "MCP endpoint not found")
+
+    def test_protocol_error_is_normalized(self):
+        result = _format_mcp_connection_error(Exception("server does not support MCP protocol"))
+        self.assertEqual(result, "MCP protocol or endpoint invalid")
+
+    def test_dns_error_is_normalized(self):
+        result = _format_mcp_connection_error(Exception("getaddrinfo ENOTFOUND example.invalid"))
+        self.assertEqual(result, "MCP address unreachable")
+
+    def test_unknown_error_uses_safe_fallback(self):
+        result = _format_mcp_connection_error(Exception("fastmcp internal stack detail"))
+        self.assertEqual(result, "MCP connection failed")
+
+    async def test_connection_handshake_timeout_is_normalized(self):
+        class SlowConnectClient:
+            async def __aenter__(self):
+                await asyncio.sleep(0.05)
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def list_tools(self):
+                return []
+
+        with patch("backend.services.remote_mcp_service.Client", return_value=SlowConnectClient()), \
+             patch("backend.services.remote_mcp_service.MCP_HEALTH_CHECK_TIMEOUT_SECONDS", 0.001):
+            with self.assertRaises(MCPConnectionError) as context:
+                await _mcp_protocol_health_check("http://example.com/mcp", {})
+
+        self.assertEqual(str(context.exception), "MCP connection timeout")
 
 
 # ============================================================================
@@ -254,6 +327,18 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_client_cls.return_value = mock_client
 
         with self.assertRaises(MCPConnectionError):
+            await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_exception_uses_normalized_error_message(self, mock_client_cls):
+        """Raw SDK errors are converted to safe connection categories."""
+        from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.list_tools = AsyncMock(side_effect=Exception("HTTP 401 Unauthorized: token rejected"))
+        mock_client_cls.return_value = mock_client
+
+        with self.assertRaisesRegex(MCPConnectionError, "MCP authentication failed"):
             await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
     @patch('backend.services.remote_mcp_service.Client')
@@ -852,7 +937,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test list_mcp_service_tools_by_id uses custom_headers from record."""
 
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     async def test_tools_with_custom_headers(self, mock_get, mock_get_tools):
         """Test list_mcp_service_tools_by_id passes custom_headers to tool retrieval."""
@@ -877,7 +962,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             custom_headers={"X-Tools-Custom": "tools-value"},
         )
 
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     async def test_tools_without_custom_headers(self, mock_get, mock_get_tools):
         """Test list_mcp_service_tools_by_id when custom_headers is None."""
