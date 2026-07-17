@@ -69,6 +69,7 @@ def stub_consts(monkeypatch):
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
     fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
     fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
+    fake_consts_const.MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET = "mock-extracted-images-bucket"
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
     return fake_consts_const
@@ -573,6 +574,13 @@ def test_store_chunks_in_redis_no_url_returns_false(monkeypatch):
 
 def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
+    from PIL import Image
+    import io
+
+    img = Image.new('RGB', (200, 200), color='red')
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    valid_png_bytes = img_bytes.getvalue()
 
     class CoreWithImages:
         def file_process(self, *a, **k):
@@ -580,7 +588,7 @@ def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
                 [{"content": "text", "metadata": {}}],
                 [
                     {
-                        "image_bytes": b"img",
+                        "image_bytes": valid_png_bytes,
                         "image_format": "png",
                         "position": {"page_number": 1},
                     }
@@ -588,11 +596,11 @@ def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
             )
 
     monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithImages)
-    monkeypatch.setattr(
-        ray_actors,
-        "upload_fileobj",
-        lambda file_obj, file_name, prefix=None: {"object_name": f"{prefix}/{file_name}"},
-    )
+    
+    def mock_upload_fileobj(file_obj, file_name, prefix=None, bucket=None):
+        return {"success": True, "object_name": f"{prefix}/{file_name}"}
+    
+    monkeypatch.setattr(ray_actors, "upload_fileobj", mock_upload_fileobj)
     monkeypatch.setattr(
         ray_actors,
         "build_s3_url",

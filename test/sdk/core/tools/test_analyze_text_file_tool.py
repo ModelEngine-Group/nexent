@@ -1,6 +1,25 @@
 from unittest.mock import MagicMock, patch
+import io
+import sys
+import types
+import zipfile
 
 import pytest
+
+for module_name in [
+    "nexent",
+    "nexent.core",
+    "nexent.core.agents",
+    "nexent.core.agents.agent_model",
+    "nexent.data_process",
+    "nexent.data_process.core",
+]:
+    if isinstance(sys.modules.get(module_name), MagicMock):
+        del sys.modules[module_name]
+
+terminal_stub = types.ModuleType("sdk.nexent.core.tools.terminal_tool")
+terminal_stub.TerminalTool = MagicMock()
+sys.modules.setdefault("sdk.nexent.core.tools.terminal_tool", terminal_stub)
 
 import sdk.nexent.core.tools.analyze_text_file_tool as module
 from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool, ProcessType
@@ -111,6 +130,18 @@ class TestAnalyzeTextFileTool:
 
         assert result == ["LLM failed"]
 
+    def test_forward_impl_without_observer(self, llm_model, http_client_manager):
+        tool = AnalyzeTextFileTool(
+            storage_client=MagicMock(),
+            observer=None,
+            data_process_service_url="http://data-process",  # NOSONAR
+            llm_model=llm_model,
+        )
+        tool.process_text_file = MagicMock(return_value="text")
+        tool.analyze_file = MagicMock(return_value=("answer", 0.0))
+
+        assert tool._forward_impl([b"x"], "prompt") == ["answer"]
+
     def test_process_text_file_success(self, tool):
         mock_response = MagicMock(status_code=200)
         mock_response.json.return_value = {"text": "converted"}
@@ -120,6 +151,35 @@ class TestAnalyzeTextFileTool:
 
         assert result == "converted"
         tool._mock_http_client.post.assert_called_once()
+
+    def test_process_text_file_emits_image_messages(self, tool):
+        mock_response = MagicMock(status_code=200)
+        mock_response.json.return_value = {
+            "text": "converted",
+            "images_info": (
+                ["s3://bucket/image.png"],
+                [{
+                    "filename": "doc.pdf",
+                    "image_url": "s3://bucket/image.png",
+                    "content": "image metadata",
+                    "source_type": "minio",
+                    "page": 4,
+                }],
+            ),
+        }
+        tool._mock_http_client.post.return_value = mock_response
+
+        result = tool.process_text_file("doc.pdf", b"bytes")
+
+        assert result == "converted"
+        tool.observer.add_message.assert_any_call(
+            "", ProcessType.PICTURE_WEB, '{"images_url": ["s3://bucket/image.png"]}'
+        )
+        search_call = [
+            call for call in tool.observer.add_message.call_args_list
+            if call.args[1] == ProcessType.SEARCH_CONTENT
+        ][0]
+        assert "image metadata" in search_call.args[2]
 
     def test_process_text_file_http_error_json_detail(self, tool):
         mock_response = MagicMock(status_code=400)
@@ -171,6 +231,63 @@ class TestAnalyzeTextFileTool:
         assert result == ("analysis", 0)
         mock_get_template.assert_called_once_with(
             template_type="analyze_file", language="en")
+
+    def test_detect_file_type_pdf_and_zip_office_formats(self, tool):
+        assert tool.detect_file_type(b"%PDF-1.7") == "pdf"
+
+        for marker, expected in [
+            ("word/document.xml", "docx"),
+            ("xl/workbook.xml", "xlsx"),
+            ("ppt/presentation.xml", "pptx"),
+        ]:
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as zf:
+                zf.writestr(marker, "<xml />")
+            assert tool.detect_file_type(stream.getvalue()) == expected
+
+    def test_detect_file_type_ole_streams_and_errors(self, tool, monkeypatch):
+        class OleFileError(Exception):
+            pass
+
+        class FakeOle:
+            # Keep this empty __init__ method. 
+            # The code under test instantiates this class with arguments (e.g., OleFileIO(data)).
+            # Removing it would fall back to the default parameterless constructor, 
+            # causing a TypeError during instantiation. 
+            # The underscore (_) acts as a placeholder to accept and ignore the passed data.
+            def __init__(self, _):
+                pass
+
+            def exists(self, stream_name):
+                return stream_name == "Workbook"
+
+        monkeypatch.setattr(module.olefile, "OleFileIO", FakeOle)
+        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1data") == "xls"
+
+        def raise_ole_error(_):
+            raise module.olefile.OleFileError("bad ole")
+
+        monkeypatch.setattr(module.olefile, "OleFileError", OleFileError, raising=False)
+        monkeypatch.setattr(module.olefile, "OleFileIO", raise_ole_error)
+        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1bad") == "txt"
+
+    def test_build_search_results_defaults_and_cite_index(self, tool):
+        results = tool._build_search_results([
+            {
+                "filename": "doc.pdf",
+                "image_url": "s3://bucket/one.png",
+                "content": "first",
+                "source_type": "minio",
+                "page": 3,
+            },
+            {},
+        ])
+
+        assert len(results) == 2
+        assert results[0]["title"] == "doc.pdf"
+        assert results[0]["cite_index"] == 1
+        assert results[1]["cite_index"] == 2
+        assert results[1]["search_type"] == tool.name
 
 
 class TestAnalyzeTextFileToolValidateUrlAccess:

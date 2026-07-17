@@ -158,6 +158,7 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
     apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
         libreoffice \
+        pandoc \
         fontconfig \
         fonts-noto-cjk && \
     fc-cache -fv && \

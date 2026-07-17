@@ -204,7 +204,7 @@ class DataProcessCore:
 
         extract_image = None
         model_type = params.get("model_type")
-        if model_type == "multi_embedding" and file_extension in self.EXTRACT_IMAGE_EXTENSIONS:
+        if model_type in ["multi_embedding", "vlm"] and file_extension in self.EXTRACT_IMAGE_EXTENSIONS:
             extract_image = "UniversalImageExtractor"
         if file_extension in self.EXCEL_EXTENSIONS:
             return "OpenPyxl", extract_image
