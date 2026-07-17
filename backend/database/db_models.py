@@ -483,6 +483,47 @@ class AgentInfo(TableBase):
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
 
 
+class Nl2AgentSession(TableBase):
+    """Durable workflow snapshot for one NL2AGENT draft session."""
+
+    __tablename__ = "nl2agent_session_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "draft_agent_id", name="uq_nl2agent_session_tenant_draft"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "conversation_id",
+            name="uq_nl2agent_session_tenant_conversation",
+        ),
+        Index(
+            "idx_nl2agent_session_owner_status",
+            "tenant_id",
+            "user_id",
+            "status",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    session_id = Column(
+        BigInteger,
+        Sequence("nl2agent_session_t_session_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Session ID",
+    )
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="Owning user ID")
+    draft_agent_id = Column(Integer, nullable=False, doc="Draft agent ID")
+    conversation_id = Column(Integer, nullable=False, doc="Conversation ID")
+    status = Column(String(20), nullable=False, default="active", doc="Session lifecycle status")
+    workflow_schema_version = Column(Integer, nullable=False, doc="Workflow payload schema version")
+    workflow_revision = Column(Integer, nullable=False, default=0, doc="Workflow optimistic-lock revision")
+    catalog_revision = Column(Integer, nullable=False, default=0, doc="Catalog optimistic-lock revision")
+    workflow_state = Column(JSONB, nullable=False, doc="Authoritative workflow state snapshot")
+    session_catalogs = Column(JSONB, nullable=False, doc="Authoritative immutable-source catalogs")
+
+
 class PromptTemplate(TableBase):
     """
     Prompt template table for user-defined prompt generation templates.

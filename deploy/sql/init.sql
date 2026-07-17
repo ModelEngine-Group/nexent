@@ -4,6 +4,31 @@ CREATE SCHEMA IF NOT EXISTS nexent;
 -- 2. Switch to the Schema (subsequent operations default to this Schema)
 SET search_path TO nexent;
 
+CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
+  "session_id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" varchar(100) NOT NULL,
+  "user_id" varchar(100) NOT NULL,
+  "draft_agent_id" int4 NOT NULL,
+  "conversation_id" int4 NOT NULL,
+  "status" varchar(20) NOT NULL DEFAULT 'active',
+  "workflow_schema_version" int4 NOT NULL,
+  "workflow_revision" int4 NOT NULL DEFAULT 0,
+  "catalog_revision" int4 NOT NULL DEFAULT 0,
+  "workflow_state" jsonb NOT NULL,
+  "session_catalogs" jsonb NOT NULL,
+  "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
+  "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
+  "created_by" varchar(100),
+  "updated_by" varchar(100),
+  "delete_flag" varchar(1) DEFAULT 'N',
+  CONSTRAINT "uq_nl2agent_session_tenant_draft" UNIQUE ("tenant_id", "draft_agent_id"),
+  CONSTRAINT "uq_nl2agent_session_tenant_conversation" UNIQUE ("tenant_id", "conversation_id"),
+  CONSTRAINT "ck_nl2agent_session_status" CHECK ("status" IN ('active', 'completed', 'abandoned'))
+);
+CREATE INDEX IF NOT EXISTS "idx_nl2agent_session_owner_status"
+ON "nl2agent_session_t" ("tenant_id", "user_id", "status");
+COMMENT ON TABLE "nl2agent_session_t" IS 'Durable NL2AGENT workflow session snapshots';
+
 CREATE TABLE IF NOT EXISTS "conversation_message_t" (
   "message_id" SERIAL,
   "conversation_id" int4,
