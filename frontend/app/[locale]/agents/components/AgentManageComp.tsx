@@ -10,7 +10,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   parseAgentImportFile,
   selectFile,
@@ -19,7 +19,6 @@ import {
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { startNl2AgentSession } from "@/services/nl2agentService";
 import { useRouter, useParams } from "next/navigation";
-
 
 export default function AgentManageComp() {
   const { t } = useTranslation("common");
@@ -37,7 +36,9 @@ export default function AgentManageComp() {
     useState<ImportAgentData | null>(null);
 
   // Always resolve tenant from auth on the agent dev page (matches published_list; avoids stale/wrong tenant_id query params)
-  const { agents: agentList, isLoading: loading, refetch } = useAgentList("");
+  const { agents: agentList, refetch } = useAgentList("");
+  const [agentBuilderLoading, setAgentBuilderLoading] = useState(false);
+  const agentBuilderRequestRef = useRef(false);
 
   const router = useRouter();
   const params = useParams<{ locale: string }>();
@@ -45,17 +46,32 @@ export default function AgentManageComp() {
 
   // Start NL2AGENT conversational builder session, then navigate to chat
   const handleStartAgentBuilder = async () => {
+    if (agentBuilderRequestRef.current) return;
+    agentBuilderRequestRef.current = true;
+    setAgentBuilderLoading(true);
     try {
       const res = await startNl2AgentSession();
       if (res?.nl2agent_agent_id != null && res?.draft_agent_id != null) {
-        sessionStorage.setItem("selectedAgentId", String(res.nl2agent_agent_id));
-        sessionStorage.setItem("nl2agent_draft_agent_id", String(res.draft_agent_id));
-        sessionStorage.setItem("nl2agent_conversation_id", String(res.conversation_id));
+        sessionStorage.setItem(
+          "selectedAgentId",
+          String(res.nl2agent_agent_id)
+        );
+        sessionStorage.setItem(
+          "nl2agent_draft_agent_id",
+          String(res.draft_agent_id)
+        );
+        sessionStorage.setItem(
+          "nl2agent_conversation_id",
+          String(res.conversation_id)
+        );
         router.push(`/${locale}/chat`);
       }
     } catch (error) {
       log.error("Failed to start NL2AGENT session:", error);
       message.error(t("subAgentPool.message.agentBuilderStartFailed"));
+    } finally {
+      agentBuilderRequestRef.current = false;
+      setAgentBuilderLoading(false);
     }
   };
 
@@ -189,7 +205,12 @@ export default function AgentManageComp() {
           <Col xs={24} sm={12}>
             <Tooltip title={t("subAgentPool.tooltip.agentBuilder")}>
               <div
-                className="rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-purple-50 hover:shadow-sm"
+                className={`rounded-md p-3 transition-all duration-200 bg-white ${
+                  agentBuilderLoading
+                    ? "cursor-wait opacity-60"
+                    : "cursor-pointer hover:bg-purple-50 hover:shadow-sm"
+                }`}
+                aria-disabled={agentBuilderLoading}
                 onClick={() => void handleStartAgentBuilder()}
               >
                 <Flex align="center" gap={12} className="text-purple-600">

@@ -478,16 +478,26 @@ class TestConversationManagementService(unittest.TestCase):
         mock_rename_conversation.assert_called_once_with(
             123, "Updated Title", self.user_id)
 
+    @patch('backend.services.conversation_management_service.abandon_session_by_conversation')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_conversation_service(self, mock_delete_conversation):
+    def test_delete_conversation_service(
+        self,
+        mock_delete_conversation,
+        mock_abandon_session,
+    ):
         # Setup
         mock_delete_conversation.return_value = True
 
         # Execute
-        delete_conversation_service(123, self.user_id)
+        delete_conversation_service(123, self.user_id, self.tenant_id)
 
         # Assert
         mock_delete_conversation.assert_called_once_with(123, self.user_id)
+        mock_abandon_session.assert_called_once_with(
+            conversation_id=123,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+        )
 
     @patch('backend.services.conversation_management_service.get_conversation_history')
     def test_get_conversation_history_service(self, mock_get_conversation_history):
@@ -1038,37 +1048,45 @@ class TestDeleteConversationService(unittest.TestCase):
     """Test delete_conversation_service function."""
 
     @patch('backend.services.conversation_management_service.agent_run_manager')
+    @patch('backend.services.conversation_management_service.abandon_session_by_conversation')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_not_found_raises(self, mock_delete, mock_mgr):
+    def test_delete_not_found_raises(self, mock_delete, mock_abandon, mock_mgr):
         """Should raise exception when conversation not found."""
         mock_delete.return_value = False
         from backend.services.conversation_management_service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            delete_conversation_service(123, "user-1", "tenant-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
     @patch('backend.services.conversation_management_service.agent_run_manager')
+    @patch('backend.services.conversation_management_service.abandon_session_by_conversation')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_clears_context_manager(self, mock_delete, mock_mgr):
+    def test_delete_clears_context_manager(self, mock_delete, mock_abandon, mock_mgr):
         """Should call clear_conversation_context_manager after successful delete."""
         mock_delete.return_value = True
         from backend.services.conversation_management_service import delete_conversation_service
 
-        result = delete_conversation_service(123, "user-1")
+        result = delete_conversation_service(123, "user-1", "tenant-1")
 
         self.assertTrue(result)
+        mock_abandon.assert_called_once_with(
+            conversation_id=123,
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
         mock_mgr.clear_conversation_context_manager.assert_called_once_with(123)
 
     @patch('backend.services.conversation_management_service.agent_run_manager')
+    @patch('backend.services.conversation_management_service.abandon_session_by_conversation')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_exception(self, mock_delete, mock_mgr):
+    def test_delete_exception(self, mock_delete, mock_abandon, mock_mgr):
         """Should re-raise exception from database layer."""
         mock_delete.side_effect = Exception("DB error")
         from backend.services.conversation_management_service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            delete_conversation_service(123, "user-1", "tenant-1")
         self.assertIn("DB error", str(ctx.exception))
 
 

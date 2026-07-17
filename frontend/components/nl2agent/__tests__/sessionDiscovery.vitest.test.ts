@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchWithAuth } from "@/lib/auth";
 import {
-  abandonNl2AgentSession,
-  listActiveNl2AgentSessions,
+  Nl2AgentRequestError,
   resolveNl2AgentSessionByConversation,
+  startNl2AgentSession,
 } from "@/services/nl2agentService";
 
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
@@ -41,24 +41,49 @@ describe("NL2AGENT durable session discovery", () => {
     await expect(resolveNl2AgentSessionByConversation(902)).resolves.toBeNull();
   });
 
-  it("lists active sessions from the typed response envelope", async () => {
+  it("preserves structured status, code, and details on discovery failure", async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue(
-      new Response(JSON.stringify({ sessions: [session] }), { status: 200 })
+      new Response(
+        JSON.stringify({
+          code: "100401",
+          message: "Session state is unavailable.",
+          details: { retryable: true },
+        }),
+        { status: 503 }
+      )
     );
 
-    await expect(listActiveNl2AgentSessions()).resolves.toEqual([session]);
+    const error = await resolveNl2AgentSessionByConversation(902).catch(
+      (caught: unknown) => caught
+    );
+
+    expect(error).toBeInstanceOf(Nl2AgentRequestError);
+    expect(error).toMatchObject({
+      message: "Session state is unavailable.",
+      status: 503,
+      code: "100401",
+      details: { retryable: true },
+    });
   });
 
-  it("abandons a session explicitly", async () => {
-    const abandoned = { ...session, status: "abandoned" as const };
+  it("coalesces concurrent session starts into one backend request", async () => {
+    const started = {
+      nl2agent_agent_id: 101,
+      draft_agent_id: 202,
+      conversation_id: 902,
+      draft_name: "draft_abc",
+    };
     vi.mocked(fetchWithAuth).mockResolvedValue(
-      new Response(JSON.stringify(abandoned), { status: 200 })
+      new Response(JSON.stringify(started), { status: 200 })
     );
 
-    await expect(abandonNl2AgentSession(202)).resolves.toEqual(abandoned);
-    expect(fetchWithAuth).toHaveBeenCalledWith(
-      expect.stringContaining("/nl2agent/session/202/abandon"),
-      { method: "POST" }
-    );
+    const [first, second] = await Promise.all([
+      startNl2AgentSession(),
+      startNl2AgentSession(),
+    ]);
+
+    expect(first).toEqual(started);
+    expect(second).toEqual(started);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
   });
 });

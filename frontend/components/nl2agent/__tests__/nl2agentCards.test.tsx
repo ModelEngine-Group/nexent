@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import React from "react";
 import {
-  parseNl2AgentDraftMap,
   resolveNl2AgentCardAgentId,
   resolveNl2AgentDraftAgentId,
 } from "@/lib/chat/nl2agentDraftContext";
@@ -68,20 +67,6 @@ const readyMcpOption = {
   supported: true,
   status: "ready" as const,
 };
-
-describe("parseNl2AgentDraftMap", () => {
-  it("rejects non-object JSON and keeps only positive integer mappings", () => {
-    assert.deepEqual(parseNl2AgentDraftMap("null"), {});
-    assert.deepEqual(parseNl2AgentDraftMap("[]"), {});
-    assert.deepEqual(parseNl2AgentDraftMap("invalid"), {});
-    assert.deepEqual(
-      parseNl2AgentDraftMap(
-        JSON.stringify({ 10: 20, bad: 30, 40: -1, 50: "60" })
-      ),
-      { 10: 20, 50: 60 }
-    );
-  });
-});
 
 describe("tryRenderNl2AgentCard", () => {
   it("exposes the effective verification configuration in final review", () => {

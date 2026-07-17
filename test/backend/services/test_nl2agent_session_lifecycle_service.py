@@ -115,6 +115,52 @@ def test_abandon_session_rejects_terminal_session(monkeypatch):
         )
 
 
+def test_abandon_session_by_conversation_is_owner_scoped(monkeypatch):
+    lookup = MagicMock(return_value=_record())
+    update = MagicMock(return_value=True)
+    evict = MagicMock()
+    monkeypatch.setattr(lifecycle, "get_nl2agent_session_by_conversation", lookup)
+    monkeypatch.setattr(lifecycle, "update_nl2agent_session_status", update)
+    monkeypatch.setattr(lifecycle, "delete_nl2agent_session_catalogs", evict)
+
+    result = lifecycle.abandon_session_by_conversation(
+        conversation_id=902,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result is not None
+    assert result["status"] == "abandoned"
+    lookup.assert_called_once_with("tenant-a", "user-a", 902)
+    update.assert_called_once_with(
+        tenant_id="tenant-a",
+        draft_agent_id=202,
+        status="abandoned",
+        user_id="user-a",
+    )
+    evict.assert_called_once_with("tenant-a", 202)
+
+
+def test_abandon_session_by_conversation_ignores_normal_conversation(monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "get_nl2agent_session_by_conversation",
+        MagicMock(return_value=None),
+    )
+    update = MagicMock()
+    monkeypatch.setattr(lifecycle, "update_nl2agent_session_status", update)
+
+    assert (
+        lifecycle.abandon_session_by_conversation(
+            conversation_id=902,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+        is None
+    )
+    update.assert_not_called()
+
+
 def test_cleanup_uses_configured_retention_and_batch(monkeypatch):
     cleanup = MagicMock(return_value=4)
     monkeypatch.setattr(lifecycle, "cleanup_abandoned_nl2agent_sessions", cleanup)

@@ -82,6 +82,29 @@ def abandon_session(
     )
     if record is None or record.get("status") != "active":
         raise Nl2AgentDraftNotFoundError()
+    return _abandon_record(record, tenant_id=tenant_id, user_id=user_id)
+
+
+def abandon_session_by_conversation(
+    *, conversation_id: int, tenant_id: str, user_id: str
+) -> Dict[str, Any] | None:
+    """Abandon an owned active builder session before deleting its Conversation."""
+    conversation_id = _positive_identifier(conversation_id, "conversation_id")
+    record = get_nl2agent_session_by_conversation(
+        tenant_id,
+        user_id,
+        conversation_id,
+    )
+    if record is None:
+        return None
+    return _abandon_record(record, tenant_id=tenant_id, user_id=user_id)
+
+
+def _abandon_record(
+    record: Dict[str, Any], *, tenant_id: str, user_id: str
+) -> Dict[str, Any]:
+    """Apply the shared active-to-abandoned transition and cache eviction."""
+    draft_agent_id = int(record["draft_agent_id"])
     changed = update_nl2agent_session_status(
         tenant_id=tenant_id,
         draft_agent_id=draft_agent_id,

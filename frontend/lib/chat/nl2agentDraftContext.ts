@@ -3,30 +3,6 @@ const asPositiveInteger = (value: unknown): number | null => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-export const parseNl2AgentDraftMap = (
-  value: string | null
-): Record<string, number> => {
-  if (!value) return {};
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).flatMap(([conversationId, draftAgentId]) => {
-        const normalizedConversationId = asPositiveInteger(conversationId);
-        const normalizedDraftAgentId = asPositiveInteger(draftAgentId);
-        return normalizedConversationId != null &&
-          normalizedDraftAgentId != null
-          ? [[String(normalizedConversationId), normalizedDraftAgentId]]
-          : [];
-      })
-    );
-  } catch {
-    return {};
-  }
-};
-
 export const resolveNl2AgentCardAgentId = (
   wrapperAgentId: unknown,
   itemAgentIds: unknown[],

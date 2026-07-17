@@ -40,10 +40,7 @@ import {
   StreamingMessage,
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
-import {
-  parseNl2AgentDraftMap,
-  resolveNl2AgentDraftAgentId,
-} from "@/lib/chat/nl2agentDraftContext";
+import { resolveNl2AgentDraftAgentId } from "@/lib/chat/nl2agentDraftContext";
 import { Nl2AgentWorkflowProvider } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
   isNl2AgentAutoContinueText,
@@ -58,7 +55,6 @@ import log from "@/lib/logger";
 const stepIdCounter = { current: 0 };
 const NL2AGENT_DRAFT_AGENT_ID_KEY = "nl2agent_draft_agent_id";
 const NL2AGENT_CONVERSATION_ID_KEY = "nl2agent_conversation_id";
-const NL2AGENT_DRAFT_MAP_KEY = "nl2agent_draft_by_conversation";
 type RunAgentParams = Parameters<typeof conversationService.runAgent>[0];
 type ConversationDetailWithStreaming = ApiConversationDetail & {
   streaming_message?: StreamingMessage;
@@ -68,28 +64,6 @@ const parseStoredNumber = (value: string | null): number | null => {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-};
-
-const readNl2AgentDraftMap = (): Record<string, number> => {
-  if (typeof window === "undefined") return {};
-  return parseNl2AgentDraftMap(localStorage.getItem(NL2AGENT_DRAFT_MAP_KEY));
-};
-
-const persistNl2AgentDraftForConversation = (
-  conversationId: number,
-  draftAgentId: number
-) => {
-  if (typeof window === "undefined") return;
-  const draftMap = readNl2AgentDraftMap();
-  draftMap[String(conversationId)] = draftAgentId;
-  localStorage.setItem(NL2AGENT_DRAFT_MAP_KEY, JSON.stringify(draftMap));
-};
-
-const getNl2AgentDraftForConversation = (
-  conversationId: number | null
-): number | null => {
-  if (conversationId == null) return null;
-  return readNl2AgentDraftMap()[String(conversationId)] ?? null;
 };
 
 export function ChatInterface() {
@@ -176,9 +150,12 @@ export function ChatInterface() {
   const [nl2agentConversationId, setNl2agentConversationId] = useState<
     number | null
   >(null);
+  const [verifiedNl2AgentDrafts, setVerifiedNl2AgentDrafts] = useState<
+    Record<string, number>
+  >({});
   const activeNl2AgentDraftAgentId = resolveNl2AgentDraftAgentId(
     conversationManagement.selectedConversationId,
-    readNl2AgentDraftMap(),
+    verifiedNl2AgentDrafts,
     nl2agentConversationId,
     nl2agentDraftAgentId
   );
@@ -191,30 +168,35 @@ export function ChatInterface() {
 
   const resolvePersistedDraftAgentId = useCallback(
     async (conversationId: number): Promise<number | null> => {
-      const localDraftAgentId = getNl2AgentDraftForConversation(conversationId);
-      if (localDraftAgentId !== null) return localDraftAgentId;
       if (nonNl2AgentConversationIdsRef.current.has(conversationId))
         return null;
-      try {
-        const session =
-          await resolveNl2AgentSessionByConversation(conversationId);
-        if (session === null) {
-          nonNl2AgentConversationIdsRef.current.add(conversationId);
-          return null;
-        }
-        persistNl2AgentDraftForConversation(
-          conversationId,
-          session.draft_agent_id
-        );
+      const session =
+        await resolveNl2AgentSessionByConversation(conversationId);
+      if (session === null) {
+        nonNl2AgentConversationIdsRef.current.add(conversationId);
+        setVerifiedNl2AgentDrafts((current) => {
+          const key = String(conversationId);
+          if (!(key in current)) return current;
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
         if (activeConversationIdRef.current === conversationId) {
-          setNl2agentConversationId(conversationId);
-          setNl2agentDraftAgentId(session.draft_agent_id);
+          setNl2agentConversationId(null);
+          setNl2agentDraftAgentId(null);
         }
-        return session.draft_agent_id;
-      } catch (error) {
-        log.warn("Failed to resolve persisted NL2AGENT session", error);
         return null;
       }
+      nonNl2AgentConversationIdsRef.current.delete(conversationId);
+      setVerifiedNl2AgentDrafts((current) => ({
+        ...current,
+        [String(conversationId)]: session.draft_agent_id,
+      }));
+      if (activeConversationIdRef.current === conversationId) {
+        setNl2agentConversationId(null);
+        setNl2agentDraftAgentId(null);
+      }
+      return session.draft_agent_id;
     },
     []
   );
@@ -222,7 +204,9 @@ export function ChatInterface() {
   useEffect(() => {
     const conversationId = conversationManagement.selectedConversationId;
     if (conversationId !== null) {
-      void resolvePersistedDraftAgentId(conversationId);
+      void resolvePersistedDraftAgentId(conversationId).catch((error) => {
+        log.warn("Failed to resolve persisted NL2AGENT session", error);
+      });
     }
   }, [
     conversationManagement.selectedConversationId,
@@ -317,7 +301,11 @@ export function ChatInterface() {
       sessionStorage.removeItem(NL2AGENT_CONVERSATION_ID_KEY);
 
       if (draftAgentId != null) {
-        persistNl2AgentDraftForConversation(conversationId, draftAgentId);
+        nonNl2AgentConversationIdsRef.current.delete(conversationId);
+        setVerifiedNl2AgentDrafts((current) => ({
+          ...current,
+          [String(conversationId)]: draftAgentId,
+        }));
       }
 
       conversationManagement
@@ -782,7 +770,7 @@ export function ChatInterface() {
       const draftAgentIdForRun =
         resolveNl2AgentDraftAgentId(
           id,
-          readNl2AgentDraftMap(),
+          {},
           nl2agentConversationId,
           nl2agentDraftAgentId
         ) ?? (await resolvePersistedDraftAgentId(id));
