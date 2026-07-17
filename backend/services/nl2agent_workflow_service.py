@@ -43,7 +43,7 @@ class WorkflowDependencies:
     register_requirements_summary: Callable[..., Dict[str, Any]]
     confirm_requirements_summary: Callable[..., Dict[str, Any]]
     apply_requirements_revision_text: Callable[..., Dict[str, Any]]
-    search_agent_info_by_agent_id: Callable[..., Optional[Dict[str, Any]]]
+    find_agent_info_by_agent_id: Callable[..., Optional[Dict[str, Any]]]
     query_enabled_tool_instances: Callable[..., List[Dict[str, Any]]]
     query_enabled_skill_instances: Callable[..., List[Dict[str, Any]]]
     resolve_model_summaries: Callable[
@@ -209,7 +209,7 @@ def process_requirements_revision_text(
     text: str,
 ) -> Dict[str, Any]:
     """Process textual requirement revisions only for the seeded runner."""
-    runner = dependencies.search_agent_info_by_agent_id(
+    runner = dependencies.find_agent_info_by_agent_id(
         agent_id=runner_agent_id,
         tenant_id=tenant_id,
     )

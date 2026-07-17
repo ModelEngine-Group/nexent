@@ -18,11 +18,15 @@ import {
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import type { Nl2AgentCardType } from "./cardValidation";
+import {
+  toRequirementsSummaryRequest,
+  type RequirementsSummaryCardPayload,
+} from "./cardPayloadTypes";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface RequirementsSummaryCardProps {
   agentId: number;
-  summary: Nl2AgentRequirementsSummary;
+  summary: RequirementsSummaryCardPayload;
   onRegistered?: (
     cardType: Nl2AgentCardType,
     cardKey?: string
@@ -68,15 +72,19 @@ export const RequirementsSummaryCard: React.FC<
     useState<RequirementsRegistrationState>();
   const [registrationError, setRegistrationError] = useState<string>();
   const [confirmationError, setConfirmationError] = useState<string>();
-  const serializedSummary = useMemo(() => JSON.stringify(summary), [summary]);
+  const registrationFailedMessage = t(
+    "nl2agent.requirements.registrationFailed",
+    "Failed to register the requirements summary."
+  );
   const summaryPayload = useMemo(
-    () => JSON.parse(serializedSummary) as Nl2AgentRequirementsSummary,
-    [serializedSummary]
+    () => toRequirementsSummaryRequest(summary),
+    [summary]
   );
   const blockerKey = `requirements-summary:${agentId}`;
   const { active, setInputBlocked, stateVersion } = workflow;
   const { execute, pending } = lifecycle;
   const lastStateVersionRef = useRef(stateVersion);
+  const ignoreNextStateVersionRef = useRef(false);
 
   const register = useCallback(
     async (notify = true) => {
@@ -96,6 +104,7 @@ export const RequirementsSummaryCard: React.FC<
                 fingerprint: result.fingerprint,
                 isCurrent: result.is_current,
               });
+              ignoreNextStateVersionRef.current = notify;
               setInputBlocked(blockerKey, false);
               await onRegistered?.("requirements_summary", result.fingerprint);
             },
@@ -107,10 +116,7 @@ export const RequirementsSummaryCard: React.FC<
         setRegistrationError(
           registrationError instanceof Error
             ? registrationError.message
-            : t(
-                "nl2agent.requirements.registrationFailed",
-                "Failed to register the requirements summary."
-              )
+            : registrationFailedMessage
         );
         setInputBlocked(blockerKey, true);
       } finally {
@@ -124,9 +130,9 @@ export const RequirementsSummaryCard: React.FC<
       execute,
       onRegistered,
       registrationEnabled,
+      registrationFailedMessage,
       setInputBlocked,
       summaryPayload,
-      t,
     ]
   );
 
@@ -173,6 +179,10 @@ export const RequirementsSummaryCard: React.FC<
   useEffect(() => {
     if (stateVersion === lastStateVersionRef.current) return;
     lastStateVersionRef.current = stateVersion;
+    if (ignoreNextStateVersionRef.current) {
+      ignoreNextStateVersionRef.current = false;
+      return;
+    }
     void register(false);
   }, [register, stateVersion]);
 

@@ -975,7 +975,7 @@ def test_process_requirements_revision_text_updates_nl2agent_draft(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_info_by_agent_id",
+        "find_agent_info_by_agent_id",
         MagicMock(return_value={"agent_id": 1, "name": "nl2agent"}),
     )
     monkeypatch.setattr(
@@ -995,12 +995,24 @@ def test_process_requirements_revision_text_updates_nl2agent_draft(monkeypatch):
 def test_process_requirements_revision_ignores_non_nl2agent_runner(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_info_by_agent_id",
+        "find_agent_info_by_agent_id",
         MagicMock(return_value={"agent_id": 1, "name": "other_agent"}),
     )
 
     assert nl2agent_service.process_requirements_revision_text(
         1, 202, "tenant_1", "user_1", "confirm requirements"
+    ) == {"intent": "not_applicable"}
+
+
+def test_process_requirements_revision_ignores_missing_runner(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "find_agent_info_by_agent_id",
+        MagicMock(return_value=None),
+    )
+
+    assert nl2agent_service.process_requirements_revision_text(
+        999, 202, "tenant_1", "user_1", "confirm requirements"
     ) == {"intent": "not_applicable"}
 
 

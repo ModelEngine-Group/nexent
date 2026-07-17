@@ -70,6 +70,8 @@ from consts.model import (
 )
 from database.agent_db import (
     create_agent,
+    find_agent_id_by_agent_name,
+    find_agent_info_by_agent_id,
     query_all_agent_info_by_tenant_id,
     search_agent_id_by_agent_name,
     search_agent_info_by_agent_id,
@@ -230,12 +232,7 @@ def _generate_internal_agent_name(
     if not candidate or not re.match(r"^[A-Za-z_]", candidate):
         candidate = f"agent_{agent_id}"
     candidate = candidate[:50].rstrip("_") or f"agent_{agent_id}"
-    try:
-        existing_id = search_agent_id_by_agent_name(candidate, tenant_id)
-    except ValueError as exc:
-        if str(exc) != "agent not found":
-            raise
-        existing_id = None
+    existing_id = find_agent_id_by_agent_name(candidate, tenant_id)
     if existing_id not in (None, agent_id):
         suffix = f"_{agent_id}"
         candidate = f"{candidate[: 50 - len(suffix)].rstrip('_')}{suffix}"
@@ -702,7 +699,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         register_requirements_summary=register_requirements_summary,
         confirm_requirements_summary=confirm_requirements_summary,
         apply_requirements_revision_text=apply_requirements_revision_text,
-        search_agent_info_by_agent_id=search_agent_info_by_agent_id,
+        find_agent_info_by_agent_id=find_agent_info_by_agent_id,
         query_enabled_tool_instances=query_all_enabled_tool_instances,
         query_enabled_skill_instances=query_enabled_skill_instances,
         resolve_model_summaries=_resolve_model_summaries,

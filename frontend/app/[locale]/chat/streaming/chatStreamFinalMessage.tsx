@@ -106,7 +106,14 @@ function ChatStreamFinalMessageInner({
   const [manualCardRetryText, setManualCardRetryText] = useState<string>();
   const [cardDeliveryError, setCardDeliveryError] = useState<string>();
   const [cardDeliveryRetryNonce, setCardDeliveryRetryNonce] = useState(0);
-  const workflow = useNl2AgentWorkflow();
+  const {
+    active: workflowActive,
+    claimCardDelivery,
+    completeCardDelivery,
+    failCardDelivery,
+    notifyStateChanged,
+    continueWithText,
+  } = useNl2AgentWorkflow();
   const sawActiveStreamRef = useRef(false);
   const finalCardValidation = useMemo(
     () =>
@@ -123,7 +130,7 @@ function ChatStreamFinalMessageInner({
       cardKey?: string
     ) => {
       if (
-        !workflow.active ||
+        !workflowActive ||
         readOnly ||
         !isLatestMessage ||
         (!sawActiveStreamRef.current && !enableNl2AgentCardRecovery) ||
@@ -134,7 +141,7 @@ function ChatStreamFinalMessageInner({
       const messageId = message.message_id;
       if (typeof messageId !== "number") return;
       const deliveryKey = `${nl2AgentDraftAgentId}:${messageId}:${cardType}:rendered:${cardKey ?? ""}`;
-      if (!workflow.claimCardDelivery(deliveryKey)) return;
+      if (!claimCardDelivery(deliveryKey)) return;
       try {
         await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
           message_id: messageId,
@@ -142,9 +149,9 @@ function ChatStreamFinalMessageInner({
           status: "rendered",
           card_key: cardKey,
         });
-        workflow.completeCardDelivery(deliveryKey);
+        completeCardDelivery(deliveryKey);
       } catch (error) {
-        workflow.failCardDelivery(deliveryKey);
+        failCardDelivery(deliveryKey);
         throw error;
       }
     },
@@ -153,7 +160,10 @@ function ChatStreamFinalMessageInner({
       message.message_id,
       nl2AgentDraftAgentId,
       readOnly,
-      workflow.active,
+      workflowActive,
+      claimCardDelivery,
+      completeCardDelivery,
+      failCardDelivery,
       enableNl2AgentCardRecovery,
     ]
   );
@@ -164,7 +174,7 @@ function ChatStreamFinalMessageInner({
 
   useEffect(() => {
     if (
-      !workflow.active ||
+      !workflowActive ||
       readOnly ||
       !isLatestMessage ||
       isStreaming ||
@@ -185,16 +195,16 @@ function ChatStreamFinalMessageInner({
         setCardDeliveryError(undefined);
         for (const card of immediatelyRendered) {
           const deliveryKey = `${nl2AgentDraftAgentId}:${messageId}:${card.cardType}:rendered:${card.cardKey ?? ""}`;
-          if (!workflow.claimCardDelivery(deliveryKey)) continue;
+          if (!claimCardDelivery(deliveryKey)) continue;
           await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
             message_id: messageId,
             card_type: card.cardType,
             status: "rendered",
             card_key: card.cardKey,
           }).then(
-            () => workflow.completeCardDelivery(deliveryKey),
+            () => completeCardDelivery(deliveryKey),
             (error) => {
-              workflow.failCardDelivery(deliveryKey);
+              failCardDelivery(deliveryKey);
               throw error;
             }
           );
@@ -214,7 +224,7 @@ function ChatStreamFinalMessageInner({
         }
         if (!failure) return;
         const failureKey = `${nl2AgentDraftAgentId}:${messageId}:${failure.cardType}:failed:${failure.cardKey ?? ""}`;
-        if (!workflow.claimCardDelivery(failureKey)) return;
+        if (!claimCardDelivery(failureKey)) return;
         const result = await reportNl2AgentCardDelivery(nl2AgentDraftAgentId, {
           message_id: messageId,
           card_type: failure.cardType,
@@ -223,17 +233,17 @@ function ChatStreamFinalMessageInner({
           reason: failure.reason,
         }).then(
           (response) => {
-            workflow.completeCardDelivery(failureKey);
+            completeCardDelivery(failureKey);
             return response;
           },
           (error) => {
-            workflow.failCardDelivery(failureKey);
+            failCardDelivery(failureKey);
             throw error;
           }
         );
-        workflow.notifyStateChanged();
+        notifyStateChanged();
         if (result.auto_retry_allowed && result.chat_injection_text) {
-          await workflow.continueWithText(result.chat_injection_text);
+          await continueWithText(result.chat_injection_text);
         } else {
           setManualCardRetryText(result.chat_injection_text ?? undefined);
         }
@@ -253,7 +263,12 @@ function ChatStreamFinalMessageInner({
     message.message_id,
     nl2AgentDraftAgentId,
     readOnly,
-    workflow,
+    workflowActive,
+    claimCardDelivery,
+    completeCardDelivery,
+    failCardDelivery,
+    notifyStateChanged,
+    continueWithText,
     enableNl2AgentCardRecovery,
     cardDeliveryRetryNonce,
   ]);
@@ -568,7 +583,7 @@ function ChatStreamFinalMessageInner({
                       <Button
                         size="small"
                         onClick={() =>
-                          void workflow.continueWithText(manualCardRetryText)
+                          void continueWithText(manualCardRetryText)
                         }
                       >
                         {t("nl2agent.cardDelivery.regenerate", {

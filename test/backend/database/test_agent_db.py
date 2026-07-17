@@ -89,6 +89,8 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 # 现在可以安全地导入被测试的模块
 from backend.database.agent_db import (
+    find_agent_id_by_agent_name,
+    find_agent_info_by_agent_id,
     search_agent_info_by_agent_id,
     search_agent_id_by_agent_name,
     search_blank_sub_agent_by_main_agent_id,
@@ -192,6 +194,21 @@ def test_search_agent_info_by_agent_id_not_found(monkeypatch, mock_session):
     with pytest.raises(ValueError, match="agent not found"):
         search_agent_info_by_agent_id(999, "tenant1")
 
+    mock_ctx.__exit__.assert_called_once_with(None, None, None)
+
+
+def test_find_agent_info_by_agent_id_returns_none(monkeypatch, mock_session):
+    session, query = mock_session
+    query.filter.return_value.first.return_value = None
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    assert find_agent_info_by_agent_id(999, "tenant1") is None
+    mock_ctx.__exit__.assert_called_once_with(None, None, None)
+
 def test_search_agent_id_by_agent_name_success(monkeypatch, mock_session):
     """测试成功通过agent名称搜索agent ID"""
     session, query = mock_session
@@ -212,6 +229,20 @@ def test_search_agent_id_by_agent_name_success(monkeypatch, mock_session):
 
     assert result == 1
 
+
+def test_find_agent_id_by_agent_name_returns_none(monkeypatch, mock_session):
+    session, query = mock_session
+    query.filter.return_value.first.return_value = None
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    assert find_agent_id_by_agent_name("available_agent", "tenant1") is None
+    mock_ctx.__exit__.assert_called_once_with(None, None, None)
+
+
 def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
     """测试通过不存在的agent名称搜索"""
     session, query = mock_session
@@ -228,6 +259,8 @@ def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
 
     with pytest.raises(ValueError, match="agent not found"):
         search_agent_id_by_agent_name("nonexistent_agent", "tenant1")
+
+    mock_ctx.__exit__.assert_called_once_with(None, None, None)
 
 def test_search_blank_sub_agent_by_main_agent_id_found(monkeypatch, mock_session):
     """测试成功搜索空白子agent"""

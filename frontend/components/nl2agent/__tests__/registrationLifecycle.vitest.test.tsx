@@ -4,17 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Nl2AgentRequestError,
+  registerRequirementsSummary,
   registerLocalResourceRecommendations,
   registerOnlineResourceRecommendations,
 } from "@/services/nl2agentService";
 import { Nl2AgentWorkflowProvider } from "../Nl2AgentWorkflowContext";
 import { OnlineRecommendationGroup } from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
+import { RequirementsSummaryCard } from "../RequirementsSummaryCard";
 
 vi.mock("@/services/nl2agentService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/nl2agentService")>()),
   registerLocalResourceRecommendations: vi.fn(),
   registerOnlineResourceRecommendations: vi.fn(),
+  registerRequirementsSummary: vi.fn(),
 }));
 
 const renderGroup = (onRegistered: () => Promise<void>) =>
@@ -45,6 +48,75 @@ describe("online recommendation registration lifecycle", () => {
     vi.mocked(registerLocalResourceRecommendations).mockReset();
     vi.mocked(registerLocalResourceRecommendations).mockResolvedValue(
       {} as never
+    );
+    vi.mocked(registerRequirementsSummary).mockReset();
+    vi.mocked(registerRequirementsSummary).mockResolvedValue({
+      status: "awaiting_confirmation",
+      fingerprint: "a".repeat(64),
+      is_current: true,
+    } as never);
+  });
+
+  it("omits the card agent ID from the requirements registration body", async () => {
+    render(
+      <Nl2AgentWorkflowProvider
+        enabled
+        scopeKey="conversation:1:draft:202"
+        onContinue={vi.fn(async () => undefined)}
+      >
+        <RequirementsSummaryCard
+          agentId={202}
+          summary={{
+            agent_id: 202,
+            goal: "Build presentations",
+            audience_or_scenario: "Office users",
+            primary_input: "DOCX files",
+            expected_output: "PPT files",
+            key_constraints: "Preserve source facts",
+          }}
+        />
+      </Nl2AgentWorkflowProvider>
+    );
+
+    await waitFor(() =>
+      expect(registerRequirementsSummary).toHaveBeenCalledOnce()
+    );
+    expect(registerRequirementsSummary).toHaveBeenCalledWith(202, {
+      goal: "Build presentations",
+      audience_or_scenario: "Office users",
+      primary_input: "DOCX files",
+      expected_output: "PPT files",
+      key_constraints: "Preserve source facts",
+    });
+  });
+
+  it("does not automatically retry a failed requirements registration", async () => {
+    vi.mocked(registerRequirementsSummary).mockRejectedValue(
+      new Nl2AgentRequestError("invalid requirements payload", 422)
+    );
+    render(
+      <Nl2AgentWorkflowProvider
+        enabled
+        scopeKey="conversation:1:draft:202"
+        onContinue={vi.fn(async () => undefined)}
+      >
+        <RequirementsSummaryCard
+          agentId={202}
+          summary={{
+            agent_id: 202,
+            goal: "Build presentations",
+            audience_or_scenario: "Office users",
+            primary_input: "DOCX files",
+            expected_output: "PPT files",
+            key_constraints: "Preserve source facts",
+          }}
+        />
+      </Nl2AgentWorkflowProvider>
+    );
+
+    await screen.findByText("invalid requirements payload");
+    await waitFor(() =>
+      expect(registerRequirementsSummary).toHaveBeenCalledOnce()
     );
   });
 

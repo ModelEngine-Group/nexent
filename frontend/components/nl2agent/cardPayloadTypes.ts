@@ -9,6 +9,16 @@ export type RequirementsSummaryCardPayload =
   Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"] &
     WithOptionalAgentId;
 
+export const toRequirementsSummaryRequest = (
+  payload: RequirementsSummaryCardPayload
+): Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"] => ({
+  goal: payload.goal,
+  audience_or_scenario: payload.audience_or_scenario,
+  primary_input: payload.primary_input,
+  expected_output: payload.expected_output,
+  key_constraints: payload.key_constraints,
+});
+
 export type ModelSelectionCardPayload = WithOptionalAgentId;
 
 export interface LocalToolCardItem {

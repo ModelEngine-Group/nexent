@@ -33,7 +33,7 @@ async def test_finalize_uses_persisted_resources(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "search_agent_id_by_agent_name", MagicMock(return_value=None)
+        nl2agent_service, "find_agent_id_by_agent_name", MagicMock(return_value=None)
     )
     update = MagicMock()
     bind_tool = MagicMock()
@@ -359,8 +359,8 @@ async def test_finalize_requires_both_online_catalogs(
 def test_generate_internal_agent_name(display_name, expected, monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
-        MagicMock(side_effect=ValueError("agent not found")),
+        "find_agent_id_by_agent_name",
+        MagicMock(return_value=None),
     )
     assert (
         nl2agent_service._generate_internal_agent_name(display_name, 202, "tenant_1")
@@ -370,7 +370,7 @@ def test_generate_internal_agent_name(display_name, expected, monkeypatch):
 
 def test_generate_internal_agent_name_appends_agent_id_for_duplicate(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service, "search_agent_id_by_agent_name", MagicMock(return_value=99)
+        nl2agent_service, "find_agent_id_by_agent_name", MagicMock(return_value=99)
     )
     assert (
         nl2agent_service._generate_internal_agent_name(
@@ -383,7 +383,7 @@ def test_generate_internal_agent_name_appends_agent_id_for_duplicate(monkeypatch
 def test_generate_internal_agent_name_preserves_unexpected_database_error(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
+        "find_agent_id_by_agent_name",
         MagicMock(side_effect=RuntimeError("database unavailable")),
     )
     with pytest.raises(RuntimeError, match="database unavailable"):
@@ -395,7 +395,7 @@ def test_generate_internal_agent_name_preserves_unexpected_database_error(monkey
 def test_generate_internal_agent_name_preserves_unexpected_value_error(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
+        "find_agent_id_by_agent_name",
         MagicMock(side_effect=ValueError("invalid query")),
     )
     with pytest.raises(ValueError, match="invalid query"):
@@ -418,8 +418,8 @@ async def test_save_agent_identity_persists_display_name_and_confirmation(monkey
     monkeypatch.setattr(nl2agent_service, "update_agent", update)
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
-        MagicMock(side_effect=ValueError("agent not found")),
+        "find_agent_id_by_agent_name",
+        MagicMock(return_value=None),
     )
 
     result = await nl2agent_service.save_agent_identity(
@@ -465,8 +465,8 @@ async def test_save_agent_identity_retries_confirmation_after_redis_failure(
     monkeypatch.setattr(nl2agent_service, "update_agent", update)
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
-        MagicMock(side_effect=ValueError("agent not found")),
+        "find_agent_id_by_agent_name",
+        MagicMock(return_value=None),
     )
     real_confirm = nl2agent_service.confirm_agent_identity
     attempts = 0
@@ -672,8 +672,8 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
-        MagicMock(side_effect=ValueError("agent not found")),
+        "find_agent_id_by_agent_name",
+        MagicMock(return_value=None),
     )
     monkeypatch.setattr(
         nl2agent_service,
@@ -760,8 +760,8 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
-        MagicMock(side_effect=ValueError("agent not found")),
+        "find_agent_id_by_agent_name",
+        MagicMock(return_value=None),
     )
     monkeypatch.setattr(
         nl2agent_service,
@@ -848,8 +848,8 @@ async def test_get_session_state_reports_invalid_persisted_references(monkeypatc
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "search_agent_id_by_agent_name",
-        MagicMock(side_effect=ValueError("agent not found")),
+        "find_agent_id_by_agent_name",
+        MagicMock(return_value=None),
     )
     monkeypatch.setattr(
         nl2agent_service, "get_model_records", MagicMock(return_value=[])

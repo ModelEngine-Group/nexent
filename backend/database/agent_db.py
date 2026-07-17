@@ -11,9 +11,11 @@ from utils.str_utils import convert_list_to_string
 logger = logging.getLogger("agent_db")
 
 
-def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
+def find_agent_info_by_agent_id(
+    agent_id: int, tenant_id: str, version_no: int = 0
+) -> Optional[dict]:
     """
-    Search agent info by agent_id.
+    Find agent info by agent_id, returning ``None`` when it does not exist.
     Default version_no=0 queries the draft version.
 
     Args:
@@ -32,12 +34,29 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
             AgentInfo.delete_flag != 'Y',
         ).first()
 
-        if not agent:
-            raise ValueError("agent not found")
+        return as_dict(agent) if agent else None
 
-        agent_dict = as_dict(agent)
 
-        return agent_dict
+def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
+    """Search agent info by ID and raise when no matching record exists."""
+    agent = find_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+    if agent is None:
+        raise ValueError("agent not found")
+    return agent
+
+
+def find_agent_id_by_agent_name(
+    agent_name: str, tenant_id: str, version_no: int = 0
+) -> Optional[int]:
+    """Return an agent ID by name, or ``None`` when the name is available."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.name == agent_name,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != 'Y',
+        ).first()
+        return agent.agent_id if agent else None
 
 
 def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: int = 0):
@@ -50,15 +69,10 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         tenant_id: Tenant ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
-    with get_db_session() as session:
-        agent = session.query(AgentInfo).filter(
-            AgentInfo.name == agent_name,
-            AgentInfo.tenant_id == tenant_id,
-            AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y').first()
-        if not agent:
-            raise ValueError("agent not found")
-        return agent.agent_id
+    agent_id = find_agent_id_by_agent_name(agent_name, tenant_id, version_no)
+    if agent_id is None:
+        raise ValueError("agent not found")
+    return agent_id
 
 
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):

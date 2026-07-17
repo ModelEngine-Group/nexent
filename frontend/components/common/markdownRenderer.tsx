@@ -67,6 +67,35 @@ interface MarkdownRendererProps {
   nl2AgentCards?: readonly ValidatedNl2AgentCard[];
 }
 
+class MarkdownErrorBoundary extends React.Component<
+  { children: React.ReactNode; rawContent: string },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; rawContent: string }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {}
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="markdown-body">
+          <pre className="whitespace-pre-wrap break-words text-sm">
+            {this.props.rawContent}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children as React.ReactElement;
+  }
+}
+
 const getSessionCachedValue = (key: string): string | null => {
   if (!isBrowserEnvironment) {
     return null;
@@ -930,7 +959,7 @@ export const CodeBlock: React.FC<{
   );
 };
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+const MarkdownRendererComponent: React.FC<MarkdownRendererProps> = ({
   content,
   className,
   searchResults = [],
@@ -1146,36 +1175,13 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
   };
 
-  class MarkdownErrorBoundary extends React.Component<
-    { children: React.ReactNode; rawContent: string },
-    { hasError: boolean }
-  > {
-    constructor(props: { children: React.ReactNode; rawContent: string }) {
-      super(props);
-      this.state = { hasError: false };
-    }
-    static getDerivedStateFromError() {
-      return { hasError: true };
-    }
-    componentDidCatch(error: unknown) {}
-    render() {
-      if (this.state.hasError) {
-        return (
-          <div className="markdown-body">
-            <pre className="whitespace-pre-wrap break-words text-sm">
-              {this.props.rawContent}
-            </pre>
-          </div>
-        );
-      }
-      return this.props.children as React.ReactElement;
-    }
-  }
-
   return (
     <>
       <div className={`markdown-body ${className || ""}`}>
-        <MarkdownErrorBoundary rawContent={processedContent}>
+        <MarkdownErrorBoundary
+          key={processedContent}
+          rawContent={processedContent}
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath] as any}
             rehypePlugins={
@@ -1393,3 +1399,6 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     </>
   );
 };
+
+export const MarkdownRenderer = React.memo(MarkdownRendererComponent);
+MarkdownRenderer.displayName = "MarkdownRenderer";
