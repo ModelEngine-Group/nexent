@@ -65,6 +65,10 @@ const stepIdCounter = { current: 0 };
 const NL2AGENT_DRAFT_AGENT_ID_KEY = "nl2agent_draft_agent_id";
 const NL2AGENT_CONVERSATION_ID_KEY = "nl2agent_conversation_id";
 const NL2AGENT_DRAFT_MAP_KEY = "nl2agent_draft_by_conversation";
+type RunAgentParams = Parameters<typeof conversationService.runAgent>[0];
+type ConversationDetailWithStreaming = ApiConversationDetail & {
+  streaming_message?: StreamingMessage;
+};
 
 const parseStoredNumber = (value: string | null): number | null => {
   if (!value) return null;
@@ -440,7 +444,7 @@ export function ChatInterface() {
     }
 
     // Flag to track if we should reset button states in finally block
-    let shouldResetButtonStates = true;
+    const shouldResetButtonStates = true;
 
     // If in new conversation state, switch to conversation state after sending message
     // Save the value to local variable before state update for title generation logic
@@ -692,7 +696,7 @@ export function ChatInterface() {
       }
 
       // Send request to backend API, add signal parameter
-      const runAgentParams: any = {
+      const runAgentParams: RunAgentParams = {
         query: finalQuery, // Use preprocessed query or original query
         conversation_id: id,
         history: currentMessages
@@ -1106,7 +1110,7 @@ export function ChatInterface() {
 
       try {
         const draftAgentId = getNl2AgentDraftForConversation(conversationId);
-        const runAgentParams: any = {
+        const runAgentParams: RunAgentParams = {
           query: "",
           conversation_id: conversationId,
           history: [],
@@ -1277,8 +1281,9 @@ export function ChatInterface() {
             );
 
             // Check if this conversation has an in-progress streaming message
-            const streamingMessage = (conversationData as any)
-              .streaming_message as StreamingMessage | undefined;
+            const streamingMessage = (
+              conversationData as ConversationDetailWithStreaming
+            ).streaming_message;
             if (streamingMessage && streamingMessage.status === "streaming") {
               // Resume streaming - wait for state to update first
               setTimeout(() => {
@@ -1400,8 +1405,9 @@ export function ChatInterface() {
           );
 
           // Check if this conversation has an in-progress streaming message
-          const streamingMessage = (conversationData as any)
-            .streaming_message as StreamingMessage | undefined;
+          const streamingMessage = (
+            conversationData as ConversationDetailWithStreaming
+          ).streaming_message;
           if (streamingMessage && streamingMessage.status === "streaming") {
             // Resume streaming - wait for state to update first
             setTimeout(() => {
