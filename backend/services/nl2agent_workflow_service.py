@@ -36,6 +36,7 @@ class WorkflowDependencies:
     get_session_state: Callable[..., Dict[str, Any]]
     summarize_workflow_state: Callable[[Dict[str, Any]], Dict[str, Any]]
     get_message: Callable[..., Optional[Dict[str, Any]]]
+    get_completed_final_answer: Callable[[int], str]
     get_latest_assistant_message_id: Callable[..., Optional[int]]
     message_contains_valid_card: Callable[..., bool]
     record_card_delivery: Callable[..., Dict[str, Any]]
@@ -114,15 +115,30 @@ async def report_card_delivery(
         or latest_message_id != message_id
     ):
         raise Nl2AgentStaleCardError()
-    if status == "rendered" and not dependencies.message_contains_valid_card(
-        str(message.get("message_content") or ""),
-        card_type,
-        agent_id,
-        card_key,
-    ):
-        raise Nl2AgentStaleCardError(
-            "The persisted assistant message does not contain the reported valid NL2AGENT card."
+    if status == "rendered":
+        parent_content = str(message.get("message_content") or "")
+        contains_valid_card = dependencies.message_contains_valid_card(
+            parent_content, card_type, agent_id, card_key
         )
+        if not contains_valid_card:
+            recovered_content = dependencies.get_completed_final_answer(message_id)
+            contains_valid_card = bool(
+                recovered_content
+            ) and dependencies.message_contains_valid_card(
+                recovered_content, card_type, agent_id, card_key
+            )
+            if contains_valid_card:
+                logger.warning(
+                    "Validated NL2AGENT card delivery from completed message units "
+                    "after parent content mismatch: agent_id=%s message_id=%s card_type=%s",
+                    agent_id,
+                    message_id,
+                    card_type,
+                )
+        if not contains_valid_card:
+            raise Nl2AgentStaleCardError(
+                "The persisted assistant message does not contain the reported valid NL2AGENT card."
+            )
 
     summary = dependencies.summarize_workflow_state(state)
     if card_type not in summary["expected_card_types"]:

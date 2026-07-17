@@ -880,7 +880,7 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    captured_final_answer = None
+    final_answer_parts: list[str] = []
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
@@ -967,7 +967,7 @@ async def _stream_agent_chunks(
                 continue
 
             if chunk_type == "final_answer":
-                captured_final_answer = chunk_content
+                final_answer_parts.append(chunk_content)
 
             should_parse_skill_file = (
                 chunk_type in {"execution_logs", "parse"}
@@ -1041,15 +1041,6 @@ async def _stream_agent_chunks(
                             update_unit_status,
                             current_unit["unit_id"],
                             "completed",
-                            user_id,
-                        )
-
-                    # Special-case: final_answer also updates message_content
-                    if chunk_type == "final_answer":
-                        submit(
-                            update_message_content,
-                            streaming_message_id,
-                            chunk_content,
                             user_id,
                         )
 
@@ -1167,6 +1158,8 @@ async def _stream_agent_chunks(
         await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
+        captured_final_answer = "".join(final_answer_parts)
+        terminal_status = "completed" if stream_completed_normally else "failed"
         # Finalize any in-flight unit and transition the parent message to its
         # terminal status before releasing the agent run slot.
         if streaming_message_id is not None:
@@ -1191,7 +1184,18 @@ async def _stream_agent_chunks(
                 except Exception:
                     logger.exception("Failed to mark last unit as completed")
 
-            terminal_status = "completed" if stream_completed_normally else "failed"
+            if terminal_status == "completed" and captured_final_answer:
+                try:
+                    # The delivery endpoint only accepts completed messages. Persist
+                    # the complete answer first so it can never observe stale content.
+                    update_message_content(
+                        streaming_message_id,
+                        captured_final_answer,
+                        user_id,
+                    )
+                except Exception:
+                    terminal_status = "failed"
+                    logger.exception("Failed to persist assistant message content")
             try:
                 update_message_status(
                     streaming_message_id,
@@ -1206,7 +1210,6 @@ async def _stream_agent_chunks(
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
-            terminal_status = 'completed' if stream_completed_normally else 'failed'
             await streaming_channel_manager.complete_channel(
                 conversation_id=agent_request.conversation_id,
                 user_id=user_id,

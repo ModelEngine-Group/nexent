@@ -106,6 +106,69 @@ async def test_card_delivery_accepts_valid_card_in_persisted_message(monkeypatch
     assert result["message_id"] == 10
 
 
+async def test_card_delivery_accepts_valid_card_from_completed_message_units(
+    monkeypatch,
+):
+    _confirm_requirements()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 10,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": "",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message_units",
+        MagicMock(
+            return_value=[
+                {
+                    "unit_type": "final_answer",
+                    "unit_status": "completed",
+                    "unit_content": "```nl2agent-model-selection\n",
+                },
+                {
+                    "unit_type": "final_answer",
+                    "unit_status": "completed",
+                    "unit_content": '{"agent_id": 202}\n```',
+                },
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=10),
+    )
+
+    result = await nl2agent_service.report_card_delivery(
+        agent_id=202,
+        message_id=10,
+        card_type="model_selection",
+        status="rendered",
+        card_key=None,
+        reason=None,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["status"] == "rendered"
+    assert result["message_id"] == 10
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "message_content",
@@ -144,6 +207,19 @@ async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
         nl2agent_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=10),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message_units",
+        MagicMock(
+            return_value=[
+                {
+                    "unit_type": "final_answer",
+                    "unit_status": "streaming",
+                    "unit_content": '```nl2agent-model-selection\n{"agent_id": 202}\n```',
+                }
+            ]
+        ),
     )
 
     with pytest.raises(

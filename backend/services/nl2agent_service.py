@@ -82,6 +82,7 @@ from database.conversation_db import (
     get_conversation,
     get_latest_assistant_message_id,
     get_message,
+    get_message_units,
 )
 from database.client import get_db_session
 from database.model_management_db import get_model_records
@@ -684,6 +685,16 @@ async def skip_local_resource_recommendations(
     )
 
 
+def _get_completed_final_answer(message_id: int) -> str:
+    """Rebuild the persisted final answer without exposing unit rows to the workflow."""
+    return "".join(
+        str(unit.get("unit_content") or "")
+        for unit in get_message_units(message_id)
+        if unit.get("unit_type") == "final_answer"
+        and unit.get("unit_status") == "completed"
+    )
+
+
 def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
     """Build workflow dependencies from facade-level operations."""
     return WorkflowDependencies(
@@ -692,6 +703,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         get_session_state=get_nl2agent_session_state,
         summarize_workflow_state=summarize_workflow_state,
         get_message=get_message,
+        get_completed_final_answer=_get_completed_final_answer,
         get_latest_assistant_message_id=get_latest_assistant_message_id,
         message_contains_valid_card=message_contains_valid_card,
         record_card_delivery=record_card_delivery,

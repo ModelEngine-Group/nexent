@@ -4637,7 +4637,16 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkeypatch):
+@pytest.mark.parametrize(
+    ("content_error", "expected_status"),
+    [
+        pytest.param(None, "completed", id="content-persisted"),
+        pytest.param(RuntimeError("write failed"), "failed", id="content-write-failed"),
+    ],
+)
+async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(
+    monkeypatch, content_error, expected_status
+):
     """Final answer should be captured and appended to memory via add_memory_in_levels."""
     agent_request = AgentRequest(
         agent_id=3,
@@ -4650,6 +4659,7 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
 
     async def yield_final_answer(*_, **__):
         yield json.dumps({"type": "token", "content": "hi"}, ensure_ascii=False)
+        yield json.dumps({"type": "final_answer", "content": "good"}, ensure_ascii=False)
         yield json.dumps({"type": "final_answer", "content": "bye"}, ensure_ascii=False)
 
     monkeypatch.setattr(
@@ -4668,9 +4678,11 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
         MagicMock(return_value=42),
         raising=False,
     )
+    persistence = MagicMock()
+    persistence.update_message_content.side_effect = content_error
     monkeypatch.setattr(
         "backend.services.agent_service.update_message_content",
-        MagicMock(),
+        persistence.update_message_content,
         raising=False,
     )
     monkeypatch.setattr(
@@ -4680,8 +4692,13 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
     )
     monkeypatch.setattr(
         "backend.services.agent_service.update_message_status",
-        MagicMock(),
+        persistence.update_message_status,
         raising=False,
+    )
+    complete_channel = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.complete_channel",
+        complete_channel,
     )
 
     class _FakeFuture:
@@ -4745,8 +4762,20 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
     assert add_calls["called"] is True
     assert add_calls["args"]["messages"] == [
         {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "bye"},
+        {"role": "assistant", "content": "goodbye"},
     ]
+    persistence.update_message_content.assert_called_once_with(9001, "goodbye", "u")
+    persistence.update_message_status.assert_called_once_with(9001, expected_status, "u")
+    complete_channel.assert_awaited_once_with(
+        conversation_id=3003,
+        user_id="u",
+        status=expected_status,
+    )
+    assert persistence.mock_calls.index(
+        call.update_message_content(9001, "goodbye", "u")
+    ) < persistence.mock_calls.index(
+        call.update_message_status(9001, expected_status, "u")
+    )
     assert set(add_calls["args"]["memory_levels"]) == {"agent", "user_agent"}
     assert add_calls["args"]["memory_config"] == {"cfg": 1}
     assert add_calls["args"]["tenant_id"] == "t"
