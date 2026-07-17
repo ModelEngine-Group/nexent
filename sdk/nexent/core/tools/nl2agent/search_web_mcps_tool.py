@@ -30,10 +30,7 @@ def _field_type(spec: Dict[str, Any], name: str) -> str:
 
 def _normalize_fields(value: Any, category: str) -> List[Dict[str, Any]]:
     if isinstance(value, dict):
-        entries = [
-            (str(name), spec if isinstance(spec, dict) else {"value": spec})
-            for name, spec in value.items()
-        ]
+        entries = [(str(name), spec if isinstance(spec, dict) else {"value": spec}) for name, spec in value.items()]
     elif isinstance(value, list):
         entries = [
             (str(spec.get("name") or f"{category}_{index + 1}"), spec)
@@ -73,9 +70,7 @@ def _normalize_arguments(value: Any, category: str) -> List[Dict[str, Any]]:
     fields = _normalize_fields(value, category)
     raw_items = value if isinstance(value, list) else []
     for field, raw_item in zip(fields, raw_items):
-        field["argument_type"] = (
-            "named" if str(raw_item.get("type") or "").lower() == "named" else "positional"
-        )
+        field["argument_type"] = "named" if str(raw_item.get("type") or "").lower() == "named" else "positional"
         field["argument_name"] = raw_item.get("name")
         field["repeated"] = bool(raw_item.get("isRepeated"))
     return fields
@@ -94,26 +89,162 @@ def _container_environment_fields(config_json: Any) -> List[Dict[str, Any]]:
     specs = []
     for name, value in environment.items():
         secret = bool(re.search(r"token|secret|password|api[_-]?key|authorization", str(name), re.I))
-        specs.append({
-            "name": str(name),
-            "label": str(name),
-            "description": f"Environment variable {name}.",
-            "isRequired": secret or value in (None, ""),
-            "isSecret": secret,
-            "value": value,
-        })
+        specs.append(
+            {
+                "name": str(name),
+                "label": str(name),
+                "description": f"Environment variable {name}.",
+                "isRequired": secret or value in (None, ""),
+                "isSecret": secret,
+                "value": value,
+            }
+        )
     return _normalize_fields(specs, "environment")
+
+
+def _add_community_and_fallback_options(
+    source: str,
+    raw: Dict[str, Any],
+    remotes: List[Any],
+    install_options: List[Dict[str, Any]],
+) -> None:
+    community_server_url = raw.get("serverUrl") or raw.get("server_url")
+    community_transport = str(raw.get("transportType") or raw.get("transport_type") or "").lower()
+    config_json = raw.get("configJson") or raw.get("config_json")
+    if source == "community" and community_transport != "container":
+        remote_metadata = next((remote for remote in remotes if isinstance(remote, dict)), {})
+        fields = _normalize_fields(remote_metadata.get("variables"), "variable")
+        fields += _normalize_fields(remote_metadata.get("headers"), "header")
+        if not community_server_url:
+            fields.insert(
+                0,
+                {
+                    "key": "remote:server_url:0",
+                    "name": "server_url",
+                    "label": "Server URL",
+                    "description": "MCP server URL.",
+                    "type": "url",
+                    "required": True,
+                    "secret": False,
+                    "default": None,
+                    "placeholder": "https://...",
+                    "choices": [],
+                    "category": "remote",
+                },
+            )
+        install_options.insert(
+            0,
+            {
+                "option_id": "community-remote",
+                "type": "remote",
+                "label": "Community remote server",
+                "transport": community_transport or "http",
+                "server_url_template": community_server_url,
+                "description": "Connect to the community MCP endpoint.",
+                "requires_configuration": bool(fields),
+                "fields": fields,
+                "supported": True,
+                "status": "configuration_required" if fields else "ready",
+            },
+        )
+    if source == "community" and community_transport == "container":
+        fields = [
+            {
+                "key": "container:port:0",
+                "name": "port",
+                "label": "Container port",
+                "description": "Local port exposed by the MCP container.",
+                "type": "number",
+                "required": True,
+                "secret": False,
+                "default": None,
+                "placeholder": "",
+                "choices": [],
+                "category": "container",
+            }
+        ]
+        fields += _container_environment_fields(config_json)
+        if not isinstance(config_json, dict):
+            fields.append(
+                {
+                    "key": "container:config_json:0",
+                    "name": "config_json",
+                    "label": "Container configuration",
+                    "description": "MCP container configuration JSON.",
+                    "type": "json",
+                    "required": True,
+                    "secret": False,
+                    "default": None,
+                    "placeholder": "",
+                    "choices": [],
+                    "category": "container",
+                }
+            )
+        install_options.insert(
+            0,
+            {
+                "option_id": "community-container",
+                "type": "container",
+                "label": "Community container",
+                "transport": "container",
+                "requires_configuration": True,
+                "fields": fields,
+                "supported": True,
+                "description": "Run the community MCP container configuration.",
+                "status": "configuration_required",
+            },
+        )
+    _ensure_fallback_install_option(install_options, config_json)
+
+
+def _ensure_fallback_install_option(install_options: List[Dict[str, Any]], config_json: Any) -> None:
+    if not install_options and isinstance(config_json, dict):
+        install_options.append(
+            {
+                "option_id": "container",
+                "type": "container",
+                "label": "Container configuration",
+                "transport": "container",
+                "requires_configuration": True,
+                "fields": [
+                    {
+                        "key": "container:port:0",
+                        "name": "port",
+                        "label": "Container port",
+                        "description": "Local port exposed by the MCP container.",
+                        "type": "number",
+                        "required": True,
+                        "secret": False,
+                        "default": None,
+                        "placeholder": "",
+                        "choices": [],
+                        "category": "container",
+                    }
+                ],
+                "supported": True,
+                "status": "configuration_required",
+            }
+        )
+    if not install_options:
+        install_options.append(
+            {
+                "option_id": "unsupported",
+                "type": "unsupported",
+                "label": "Unsupported",
+                "requires_configuration": False,
+                "fields": [],
+                "supported": False,
+                "status": "unsupported",
+                "unsupported_reason": ("Marketplace metadata does not define a usable remote or container option."),
+            }
+        )
 
 
 def normalize_mcp_candidate(source: str, raw: Dict[str, Any]) -> Dict[str, Any]:
     """Return the safe card/install fields for a marketplace record."""
     registry_json = raw.get("registryJson") or raw.get("registry_json")
     registry_root = registry_json if isinstance(registry_json, dict) else raw
-    server = (
-        registry_root.get("server")
-        if isinstance(registry_root.get("server"), dict)
-        else registry_root
-    )
+    server = registry_root.get("server") if isinstance(registry_root.get("server"), dict) else registry_root
     identity = (
         server.get("name") or server.get("id")
         if source == "registry"
@@ -126,18 +257,20 @@ def normalize_mcp_candidate(source: str, raw: Dict[str, Any]) -> Dict[str, Any]:
             continue
         fields = _normalize_fields(remote.get("variables"), "variable")
         fields += _normalize_fields(remote.get("headers"), "header")
-        install_options.append({
-            "option_id": f"remote-{index}",
-            "type": "remote",
-            "label": f"{remote.get('type') or 'HTTP'} - {remote.get('url')}",
-            "description": str(remote.get("description") or "Connect to the declared remote MCP endpoint."),
-            "transport": remote.get("type") or "http",
-            "server_url_template": remote.get("url"),
-            "requires_configuration": bool(fields),
-            "fields": fields,
-            "supported": True,
-            "status": "configuration_required" if fields else "ready",
-        })
+        install_options.append(
+            {
+                "option_id": f"remote-{index}",
+                "type": "remote",
+                "label": f"{remote.get('type') or 'HTTP'} - {remote.get('url')}",
+                "description": str(remote.get("description") or "Connect to the declared remote MCP endpoint."),
+                "transport": remote.get("type") or "http",
+                "server_url_template": remote.get("url"),
+                "requires_configuration": bool(fields),
+                "fields": fields,
+                "supported": True,
+                "status": "configuration_required" if fields else "ready",
+            }
+        )
     for index, package in enumerate(server.get("packages") or []):
         if not isinstance(package, dict) or not package.get("identifier"):
             continue
@@ -149,18 +282,24 @@ def normalize_mcp_candidate(source: str, raw: Dict[str, Any]) -> Dict[str, Any]:
         transport_fields += _normalize_fields(transport.get("headers"), "header")
         transport_url = transport.get("url")
         is_remote_package = bool(transport_url and str(transport.get("type") or "").lower() != "stdio")
-        fields = (
-            transport_fields
-            if is_remote_package
-            else environment_fields + runtime_fields + package_fields
-        )
+        fields = transport_fields if is_remote_package else environment_fields + runtime_fields + package_fields
         if not is_remote_package:
-            fields.insert(0, {
-                "key": "container:port:0", "name": "port", "label": "Container port",
-                "description": "Local port exposed by the MCP container.", "type": "number",
-                "required": True, "secret": False, "default": None, "placeholder": "", "choices": [],
-                "category": "container",
-            })
+            fields.insert(
+                0,
+                {
+                    "key": "container:port:0",
+                    "name": "port",
+                    "label": "Container port",
+                    "description": "Local port exposed by the MCP container.",
+                    "type": "number",
+                    "required": True,
+                    "secret": False,
+                    "default": None,
+                    "placeholder": "",
+                    "choices": [],
+                    "category": "container",
+                },
+            )
         install_options.append(
             {
                 "option_id": f"package-{index}",
@@ -175,74 +314,12 @@ def normalize_mcp_candidate(source: str, raw: Dict[str, Any]) -> Dict[str, Any]:
                 "runtime_hint": package.get("runtimeHint"),
                 "fields": fields,
                 "supported": str(package.get("registryType") or package.get("runtimeHint") or "").lower()
-                in {"npm", "npx", "pypi", "uvx"} or is_remote_package,
+                in {"npm", "npx", "pypi", "uvx"}
+                or is_remote_package,
                 "status": "configuration_required" if fields else "ready",
             }
         )
-    community_server_url = raw.get("serverUrl") or raw.get("server_url")
-    community_transport = str(raw.get("transportType") or raw.get("transport_type") or "").lower()
-    config_json = raw.get("configJson") or raw.get("config_json")
-    if source == "community" and community_transport != "container":
-        remote_metadata = next(
-            (remote for remote in remotes if isinstance(remote, dict)), {}
-        )
-        fields = _normalize_fields(remote_metadata.get("variables"), "variable")
-        fields += _normalize_fields(remote_metadata.get("headers"), "header")
-        if not community_server_url:
-            fields.insert(0, {
-                "key": "remote:server_url:0", "name": "server_url", "label": "Server URL",
-                "description": "MCP server URL.", "type": "url", "required": True, "secret": False,
-                "default": None, "placeholder": "https://...", "choices": [], "category": "remote",
-            })
-        install_options.insert(0, {
-            "option_id": "community-remote", "type": "remote", "label": "Community remote server",
-            "transport": community_transport or "http", "server_url_template": community_server_url,
-            "description": "Connect to the community MCP endpoint.",
-            "requires_configuration": bool(fields), "fields": fields, "supported": True,
-            "status": "configuration_required" if fields else "ready",
-        })
-    if source == "community" and community_transport == "container":
-        fields = [{
-            "key": "container:port:0", "name": "port", "label": "Container port",
-            "description": "Local port exposed by the MCP container.", "type": "number", "required": True,
-            "secret": False, "default": None, "placeholder": "", "choices": [], "category": "container",
-        }]
-        fields += _container_environment_fields(config_json)
-        if not isinstance(config_json, dict):
-            fields.append({
-                "key": "container:config_json:0", "name": "config_json", "label": "Container configuration",
-                "description": "MCP container configuration JSON.", "type": "json", "required": True,
-                "secret": False, "default": None, "placeholder": "", "choices": [], "category": "container",
-            })
-        install_options.insert(0, {
-            "option_id": "community-container", "type": "container", "label": "Community container",
-            "transport": "container", "requires_configuration": True, "fields": fields, "supported": True,
-            "description": "Run the community MCP container configuration.",
-            "status": "configuration_required",
-        })
-    if not install_options and isinstance(config_json, dict):
-        install_options.append({
-            "option_id": "container",
-            "type": "container",
-            "label": "Container configuration",
-            "transport": "container",
-            "requires_configuration": True,
-            "fields": [{
-                "key": "container:port:0", "name": "port", "label": "Container port",
-                "description": "Local port exposed by the MCP container.", "type": "number",
-                "required": True, "secret": False, "default": None, "placeholder": "",
-                "choices": [], "category": "container",
-            }],
-            "supported": True,
-            "status": "configuration_required",
-        })
-    if not install_options:
-        install_options.append({
-            "option_id": "unsupported", "type": "unsupported", "label": "Unsupported",
-            "requires_configuration": False, "fields": [], "supported": False,
-            "status": "unsupported",
-            "unsupported_reason": "Marketplace metadata does not define a usable remote or container option.",
-        })
+    _add_community_and_fallback_options(source, raw, remotes, install_options)
     return {
         "recommendation_id": f"{source}:{identity}",
         "name": server.get("name") or raw.get("name") or "MCP server",
@@ -343,9 +420,7 @@ class NL2AgentSearchWebMcpsTool(Tool):
         if ctx.tenant_id is None:
             return error_response("NL2AGENT session context not initialized.")
         if not ctx.requirements_confirmed:
-            return error_response(
-                "NL2AGENT requirements are not confirmed for this draft."
-            )
+            return error_response("NL2AGENT requirements are not confirmed for this draft.")
         if ctx.registry_results is None and ctx.community_results is None:
             return error_response("MCP catalog not available in context")
 
