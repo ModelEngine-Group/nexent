@@ -1518,6 +1518,58 @@ def test_get_conversation_with_user_id_filter(monkeypatch, mock_session_ctx):
     assert result["conversation_id"] == 42
 
 
+def test_get_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    tenant_lookup = MagicMock(return_value={"user_id": "user-1", "tenant_id": "tenant-1"})
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        tenant_lookup,
+    )
+
+    result = get_conversation(42, user_id="user-1", tenant_id="tenant-1")
+
+    assert result is None
+    tenant_lookup.assert_called_once_with("user-1")
+    session.scalars.assert_called_once()
+
+
+def test_get_conversation_rejects_cross_tenant_identity(monkeypatch, mock_session_ctx):
+    session, _ = mock_session_ctx
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda user_id: {"user_id": user_id, "tenant_id": "tenant-2"},
+    )
+
+    assert get_conversation(42, user_id="user-1", tenant_id="tenant-1") is None
+    session.scalars.assert_not_called()
+
+
+def test_get_conversation_accepts_legacy_asset_owner_tenant(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = MagicMock()
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "", "user_role": "ASSET_OWNER"},
+    )
+
+    result = get_conversation(
+        42,
+        user_id="asset-owner",
+        tenant_id="asset_owner_tenant_id",
+    )
+
+    assert result is not None
+    session.scalars.assert_called_once()
+
+
+def test_get_conversation_rejects_tenant_without_user():
+    with pytest.raises(ValueError, match="user_id is required"):
+        get_conversation(42, tenant_id="tenant-1")
+
+
 def test_get_message_with_user_id_filter(monkeypatch, mock_session_ctx):
     """get_message filters by user_id when provided."""
     session, ctx = mock_session_ctx

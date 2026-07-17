@@ -18,6 +18,22 @@ logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
 
 
+def _get_authorized_context_components(agent_run_info: AgentRunInfo):
+    """Return the run snapshot, falling back for direct SDK callers."""
+    context_input = getattr(agent_run_info, "context_input", None)
+    if context_input is not None:
+        return context_input.components
+    return getattr(agent_run_info.agent_config, "context_components", None)
+
+
+def _get_authorized_history(agent_run_info: AgentRunInfo):
+    """Return the run snapshot, falling back for direct SDK callers."""
+    context_input = getattr(agent_run_info, "context_input", None)
+    if context_input is not None:
+        return context_input.history
+    return agent_run_info.history
+
+
 def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
     snapshot = getattr(agent_run_info, "safe_input_budget_snapshot", None)
     if not isinstance(snapshot, dict):
@@ -56,7 +72,7 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
 
 
 def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo) -> None:
-    """Mount the reusable conversation-level ContextManager into the active runtime.
+    """Mount the run-scoped ContextManager into the active runtime.
 
     W3 made ``agent.context_runtime`` the execution authority for context
     assembly.  ``agent.context_manager`` is kept only as a compatibility and
@@ -74,7 +90,7 @@ def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo
         )
 
     context_runtime.context_manager = context_manager
-    context_components = getattr(agent_run_info.agent_config, "context_components", None)
+    context_components = _get_authorized_context_components(agent_run_info)
     replace_runtime_components = getattr(context_runtime, "replace_components", None)
     if callable(replace_runtime_components):
         replace_runtime_components(context_components or [])
@@ -167,7 +183,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
             _mount_conversation_context_manager(agent, agent_run_info)
 
-            nexent.add_history_to_agent(agent_run_info.history)
+            nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             nexent.agent_run_with_observer(
                 query=agent_run_info.query, reset=False)
         else:
@@ -187,7 +203,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
                 _mount_conversation_context_manager(agent, agent_run_info)
 
-                nexent.add_history_to_agent(agent_run_info.history)
+                nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 nexent.agent_run_with_observer(
                     query=agent_run_info.query, reset=False)
 

@@ -59,6 +59,17 @@ sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+context_input_mock = types.ModuleType("nexent.core.agents.context_input")
+
+
+class MockContextInput:
+    def __init__(self, components=(), history=()):
+        self.components = components
+        self.history = history
+
+
+context_input_mock.ContextInput = MockContextInput
+sys.modules['nexent.core.agents.context_input'] = context_input_mock
 
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
@@ -4241,6 +4252,9 @@ async def test_prepare_agent_run(
     """Test prepare_agent_run function."""
     # Setup
     mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_components = []
+    mock_run_info.agent_config.context_manager_config.enabled = False
+    mock_run_info.history = []
     mock_create_run_info.return_value = mock_run_info
     mock_memory_context = MagicMock()
     mock_build_memory_context.return_value = mock_memory_context
@@ -4274,6 +4288,8 @@ async def test_prepare_agent_run(
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
+    assert mock_run_info.context_input.components == ()
+    assert mock_run_info.context_input.history == ()
 
 
 @patch('backend.services.agent_service.submit')
@@ -4303,6 +4319,39 @@ def test_save_messages(mock_submit, mock_agent_request):
             tenant_id="t",
             messages=["test message"],
         )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_effects(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("user-a", "tenant-a", "en"),
+    )
+    access_lookup = MagicMock(return_value=None)
+    update_agent = MagicMock()
+    save_user_message = MagicMock()
+    reset_stream = AsyncMock()
+    monkeypatch.setattr(agent_service, "get_conversation_service", access_lookup)
+    monkeypatch.setattr(agent_service, "update_conversation_agent_id_service", update_agent)
+    monkeypatch.setattr(agent_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", reset_stream)
+
+    with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    access_lookup.assert_called_once_with(
+        conversation_id=mock_agent_request.conversation_id,
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+    update_agent.assert_not_called()
+    save_user_message.assert_not_called()
+    reset_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio

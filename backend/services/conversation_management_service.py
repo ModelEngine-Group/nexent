@@ -326,6 +326,19 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         raise Exception(str(e))
 
 
+def get_conversation_service(
+    conversation_id: int,
+    user_id: str,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a conversation only within the requesting user and tenant scope."""
+    return get_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
 def update_conversation_agent_id_service(conversation_id: int, agent_id: int, user_id: str) -> bool:
     """
     Update the latest agent associated with a conversation.

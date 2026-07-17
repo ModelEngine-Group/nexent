@@ -263,9 +263,12 @@ class AgentRunInfo(BaseModel):
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
     context_manager: Optional[Any] = Field(
-        description="Conversation-level reusable ContextManager instance. "
-                    "If provided, it will be attached to the CoreAgent instead of creating a new one.",
+        description="Run-scoped ContextManager created from authorized context input.",
         default=None
+    )
+    context_input: Optional[Any] = Field(
+        description="Immutable run-scoped context snapshot supplied by the application boundary.",
+        default=None,
     )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",

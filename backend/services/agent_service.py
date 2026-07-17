@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.context_input import ContextInput
 from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
@@ -24,7 +25,7 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
-from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
+from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -91,6 +92,7 @@ from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
     generate_conversation_title_service,
+    get_conversation_service,
     get_latest_assistant_message,
     get_last_unit_for_message,
     save_conversation_user,
@@ -2743,11 +2745,16 @@ async def prepare_agent_run(
         tool_params=agent_request.tool_params,
     )
 
-    # Mount conversation-level reusable ContextManager if enabled
+    agent_run_info.context_input = ContextInput(
+        components=tuple(agent_run_info.agent_config.context_components or ()),
+        history=tuple(agent_run_info.history or ()),
+    )
+
+    # Mount a run-scoped ContextManager if enabled.
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
     if cm_config and cm_config.enabled:
-        cm = agent_run_manager.get_or_create_context_manager(
+        cm = agent_run_manager.create_context_manager(
             conversation_id=str(agent_request.conversation_id),
             config=cm_config,
             max_steps=agent_run_info.agent_config.max_steps
@@ -3053,6 +3060,19 @@ async def run_agent_stream(
             agent_request.conversation_id,
             resolved_user_id,
         )
+
+    if (
+        not agent_request.is_debug
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+    ):
+        conversation = get_conversation_service(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+        )
+        if conversation is None:
+            raise ForbiddenError("Conversation is not accessible to the current identity")
 
     if (
         not agent_request.is_debug

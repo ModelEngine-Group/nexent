@@ -1520,7 +1520,10 @@ class TestPromptService(unittest.TestCase):
         mock_query_tool_instance.assert_called_once_with(
             agent_id=123, tool_id=1, tenant_id="tenant-abc"
         )
-        mock_get_knowledge_map.assert_called_once_with(["index-1", "index-2"])
+        mock_get_knowledge_map.assert_called_once_with(
+            ["index-1", "index-2"],
+            tenant_id="tenant-abc",
+        )
 
     @patch('backend.services.prompt_service.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_no_kb_tool(self, mock_query_tool_instance):
@@ -1677,7 +1680,10 @@ class TestPromptService(unittest.TestCase):
         # Assert - should deduplicate while preserving order
         self.assertEqual(result, ["redis", "kafka"])
         # Should be called with deduplicated list
-        mock_get_knowledge_map.assert_called_once_with(["index-1", "index-2"])
+        mock_get_knowledge_map.assert_called_once_with(
+            ["index-1", "index-2"],
+            tenant_id="tenant-abc",
+        )
 
     @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.prompt_service.query_tool_instances_by_id')
@@ -1715,7 +1721,10 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(result, ["kafka"])
         # Should have tried both tools
         self.assertEqual(mock_query_tool_instance.call_count, 2)
-        mock_get_knowledge_map.assert_called_once_with(["index-2"])
+        mock_get_knowledge_map.assert_called_once_with(
+            ["index-2"],
+            tenant_id="tenant-abc",
+        )
 
     @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_knowledge_base_flow(self, mock_generate_impl):

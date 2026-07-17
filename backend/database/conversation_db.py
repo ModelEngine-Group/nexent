@@ -53,6 +53,25 @@ class ConversationHistory(TypedDict):
     image_records: List[ImageRecord]
 
 
+def _get_user_tenant(user_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve tenant ownership lazily to keep database modules decoupled."""
+    from .user_tenant_db import get_user_tenant_by_user_id
+
+    return get_user_tenant_by_user_id(user_id)
+
+
+def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
+    """Resolve legacy empty tenant fields consistently with authentication."""
+    from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+
+    tenant_id = user_tenant.get("tenant_id")
+    if tenant_id:
+        return tenant_id
+    if (user_tenant.get("user_role") or "").upper() == ASSET_OWNER_ROLE:
+        return ASSET_OWNER_TENANT_ID
+    return DEFAULT_TENANT_ID
+
+
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -340,17 +359,29 @@ def update_message_unit_content(unit_id: int, content: str,
         )
 
 
-def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_conversation(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Get conversation details
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for created_by and updated_by fields
+        user_id: User that must own the conversation
+        tenant_id: Tenant that the owning user must currently belong to
 
     Returns:
         Optional[Dict[str, Any]]: Conversation details, or None if it doesn't exist
     """
+    if tenant_id and not user_id:
+        raise ValueError("user_id is required when tenant_id is provided")
+    if tenant_id:
+        user_tenant = _get_user_tenant(user_id)
+        if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+            return None
+
     with get_db_session() as session:
         # Ensure conversation_id is integer type
         conversation_id = int(conversation_id)
@@ -365,7 +396,6 @@ def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Opt
             stmt = stmt.where(
                 ConversationRecord.created_by == user_id
             )
-
         # Execute the query
         record = session.scalars(stmt).first()
         return None if record is None else as_dict(record)

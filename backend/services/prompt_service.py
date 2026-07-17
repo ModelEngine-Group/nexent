@@ -862,7 +862,9 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
 
     # Convert to display names
     knowledge_name_map = get_knowledge_name_map_by_index_names(
-        unique_index_names)
+        unique_index_names,
+        tenant_id=tenant_id,
+    )
 
     # Return list of display names (knowledge_name) for each configured index_name
     display_names = []

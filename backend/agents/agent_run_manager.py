@@ -1,6 +1,6 @@
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Dict, Union
+from typing import TYPE_CHECKING, Dict, Union
 
 from nexent.core.agents.agent_model import AgentRunInfo
 from services.runtime_state_service import runtime_state_service
@@ -27,10 +27,6 @@ class AgentRunManager:
         if not self._initialized:
             # user_id:conversation_id -> agent_run_info
             self.agent_runs: Dict[str, AgentRunInfo] = {}
-            # conversation_id -> ContextManager (conversation-level lifetime)
-            self._conversation_context_managers: Dict[str, Any] = {}
-            # conversation_id -> active run count for safe cleanup
-            self._conversation_run_counts: Dict[str, int] = {}
             self._initialized = True
 
     def _get_run_key(self, conversation_id: Union[int, str], user_id: str) -> str:
@@ -42,8 +38,6 @@ class AgentRunManager:
         with self._lock:
             run_key = self._get_run_key(conversation_id, user_id)
             self.agent_runs[run_key] = agent_run_info
-            conv_key = str(conversation_id)
-            self._conversation_run_counts[conv_key] = self._conversation_run_counts.get(conv_key, 0) + 1
             logger.info(
                 f"register agent run instance, user_id: {user_id}, conversation_id: {conversation_id}")
         runtime_state_service.register_run(user_id=user_id, conversation_id=conversation_id)
@@ -54,10 +48,6 @@ class AgentRunManager:
             run_key = self._get_run_key(conversation_id, user_id)
             if run_key in self.agent_runs:
                 del self.agent_runs[run_key]
-                conv_key = str(conversation_id)
-                self._conversation_run_counts[conv_key] = max(
-                    0, self._conversation_run_counts.get(conv_key, 0) - 1
-                )
                 logger.info(
                     f"unregister agent run instance, user_id: {user_id}, conversation_id: {conversation_id}")
             else:
@@ -84,34 +74,27 @@ class AgentRunManager:
             return True
         return remote_signal_set
 
-    def get_or_create_context_manager(
+    def create_context_manager(
         self,
         conversation_id: Union[int, str],
         config: "ContextManagerConfig",
         max_steps: int
     ) -> "ContextManager":
-        """Get or create a conversation-level ContextManager instance."""
+        """Create a ContextManager isolated to one agent run."""
         from nexent.core.agents.agent_context import ContextManager
 
-        conv_key = str(conversation_id)
-        with self._lock:
-            cm = self._conversation_context_managers.get(conv_key)
-            if cm is None:
-                cm = ContextManager(config=config, max_steps=max_steps)
-                self._conversation_context_managers[conv_key] = cm
-                logger.info(
-                    f"Created new ContextManager for conversation_id: {conv_key}")
-            return cm
+        logger.info(
+            "Created run-scoped ContextManager for conversation_id: %s",
+            conversation_id,
+        )
+        return ContextManager(config=config, max_steps=max_steps)
 
     def clear_conversation_context_manager(self, conversation_id: Union[int, str]):
-        """Explicitly clear the ContextManager for a conversation."""
-        conv_key = str(conversation_id)
-        with self._lock:
-            cm = self._conversation_context_managers.pop(conv_key, None)
-            self._conversation_run_counts.pop(conv_key, None)
-            if cm:
-                logger.info(
-                    f"Cleared ContextManager for conversation_id: {conv_key}")
+        """Compatibility no-op because ContextManagers are run-scoped."""
+        logger.debug(
+            "No cached ContextManager to clear for conversation_id: %s",
+            conversation_id,
+        )
 
 
 # create singleton instance

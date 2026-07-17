@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
-from consts.exceptions import SkillDuplicateError
+from consts.exceptions import ForbiddenError, SkillDuplicateError
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
@@ -70,6 +70,8 @@ async def agent_run_api(
             authorization=authorization,
             resume=resume,
         )
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -627,5 +629,4 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-
 

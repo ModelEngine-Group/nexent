@@ -810,7 +810,7 @@ def test_normalize_mcp_config_edge_cases():
 
 
 def test_mount_conversation_context_manager_updates_runtime_authority(basic_agent_run_info):
-    """Conversation-level ContextManager must replace the managed runtime CM."""
+    """Run-scoped ContextManager must replace the managed runtime CM."""
     factory_context_manager = MagicMock(name="factory_context_manager")
     conversation_context_manager = MagicMock(name="conversation_context_manager")
     context_runtime = types.SimpleNamespace(
@@ -823,6 +823,7 @@ def test_mount_conversation_context_manager_updates_runtime_authority(basic_agen
     )
     components = [MagicMock(name="component")]
     basic_agent_run_info.context_manager = conversation_context_manager
+    basic_agent_run_info.context_input = None
     basic_agent_run_info.agent_config.context_components = components
 
     run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
@@ -831,6 +832,46 @@ def test_mount_conversation_context_manager_updates_runtime_authority(basic_agen
     context_runtime.replace_components.assert_called_once_with(components)
     assert agent.context_runtime.context_manager is conversation_context_manager
     assert agent.context_manager is conversation_context_manager
+
+
+def test_mount_context_manager_uses_authorized_snapshot(basic_agent_run_info):
+    """Run-local authorized components override mutable AgentConfig data."""
+    from nexent.core.agents.context_input import ContextInput
+
+    context_manager = MagicMock(name="context_manager")
+    context_runtime = types.SimpleNamespace(
+        context_manager=MagicMock(),
+        replace_components=MagicMock(),
+    )
+    agent = types.SimpleNamespace(context_runtime=context_runtime, context_manager=None)
+    authorized_component = MagicMock(name="authorized_component")
+    basic_agent_run_info.context_manager = context_manager
+    basic_agent_run_info.context_input = ContextInput(components=(authorized_component,))
+    basic_agent_run_info.agent_config.context_components = [MagicMock(name="stale_component")]
+
+    run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
+
+    context_runtime.replace_components.assert_called_once_with((authorized_component,))
+
+
+def test_authorized_history_snapshot_overrides_mutable_run_history(basic_agent_run_info):
+    """History consumed by the SDK must come from the authorized run snapshot."""
+    from nexent.core.agents.context_input import ContextInput
+
+    authorized_history = MagicMock(name="authorized_history")
+    basic_agent_run_info.context_input = ContextInput(history=(authorized_history,))
+    basic_agent_run_info.history = [MagicMock(name="stale_history")]
+
+    assert run_agent._get_authorized_history(basic_agent_run_info) == (authorized_history,)
+
+
+def test_authorized_history_keeps_direct_sdk_compatibility(basic_agent_run_info):
+    """Direct SDK callers without ContextInput retain the existing behavior."""
+    basic_agent_run_info.context_input = None
+    history = [MagicMock(name="history")]
+    basic_agent_run_info.history = history
+
+    assert run_agent._get_authorized_history(basic_agent_run_info) is history
 
 
 def test_mount_conversation_context_manager_rejects_legacy_runtime(basic_agent_run_info):

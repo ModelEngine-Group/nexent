@@ -439,13 +439,14 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
         raise e
 
 
-def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, str]:
+def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: str) -> Dict[str, str]:
     """
     Get a mapping from index_name to knowledge_name (display name) for the given index_names.
     Used to build user-friendly knowledge base summaries in prompts.
 
     Args:
         index_names: List of internal index names
+        tenant_id: Tenant that owns the knowledge bases
 
     Returns:
         Dict[str, str]: Mapping of index_name -> knowledge_name.
@@ -462,6 +463,7 @@ def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, s
                 KnowledgeRecord.knowledge_name
             ).filter(
                 KnowledgeRecord.index_name.in_(index_names),
+                KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
             ).all()
 

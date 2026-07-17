@@ -1118,7 +1118,7 @@ class TestCreateToolConfigList:
             # Verify that call uses tenant_id and first index_name
             mock_embedding.assert_called_once_with("tenant_1", "idx_a")
             mock_rerank.assert_called_once_with(tenant_id="tenant_1", model_name="gte-rerank-v2")
-            mock_get_knowledge_map.assert_called_once_with(["idx_a"])
+            mock_get_knowledge_map.assert_called_once_with(["idx_a"], tenant_id="tenant_1")
 
             # Verify metadata contains required fields
             assert "vdb_core" in mock_tool_instance.metadata
@@ -4766,7 +4766,10 @@ class TestCreateToolConfigListWithDisplayNameMap:
 
             assert len(result) == 1
             # Verify get_knowledge_name_map_by_index_names was called
-            mock_get_knowledge_map.assert_called_once_with(["idx1", "idx2"])
+            mock_get_knowledge_map.assert_called_once_with(
+                ["idx1", "idx2"],
+                tenant_id="tenant_1",
+            )
             # Verify display_name_to_index_map contains reversed mapping
             assert result[0].metadata["display_name_to_index_map"] == {
                 "Knowledge Base 1": "idx1",

@@ -1068,7 +1068,10 @@ async def create_tool_config_list(
             display_name_to_index_map = {}
             index_name_to_display_map = {}
             if index_names:
-                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                knowledge_name_map = get_knowledge_name_map_by_index_names(
+                    index_names,
+                    tenant_id=tenant_id,
+                )
                 # Reverse the mapping: display_name (knowledge_name) -> index_name
                 for idx_name, kb_name in knowledge_name_map.items():
                     display_name_to_index_map[kb_name] = idx_name

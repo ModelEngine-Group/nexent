@@ -207,6 +207,7 @@ from backend.services.conversation_management_service import (
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
+        get_conversation_service,
         get_conversation_list_service,
         rename_conversation_service,
         delete_conversation_service,
@@ -524,6 +525,19 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result[0]["conversation_id"], 1)
         self.assertEqual(result[1]["title"], "Chat 2")
         mock_get_conversation_list.assert_called_once_with(self.user_id)
+
+    @patch('backend.services.conversation_management_service.get_conversation')
+    def test_get_conversation_service_preserves_authorization_scope(self, mock_get_conversation):
+        mock_get_conversation.return_value = {"conversation_id": 123}
+
+        result = get_conversation_service(123, self.user_id, "tenant-1")
+
+        self.assertEqual(result, {"conversation_id": 123})
+        mock_get_conversation.assert_called_once_with(
+            conversation_id=123,
+            user_id=self.user_id,
+            tenant_id="tenant-1",
+        )
 
     @patch('backend.services.conversation_management_service.rename_conversation')
     def test_rename_conversation_service(self, mock_rename_conversation):
