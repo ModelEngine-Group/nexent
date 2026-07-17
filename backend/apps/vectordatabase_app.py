@@ -90,12 +90,14 @@ def create_new_index(
         embedding_model_name: Optional[str] = None
         is_multimodal: Optional[bool] = None
         preserve_source_file: Optional[bool] = None
+        quota_limit_bytes: Optional[int] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
             embedding_model_name = request.get("embeddingModel")
             is_multimodal = request.get("is_multimodal")
             preserve_source_file = request.get("preserve_source_file")
+            quota_limit_bytes = request.get("quota_limit_bytes")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -109,6 +111,7 @@ def create_new_index(
             embedding_model_name=embedding_model_name,
             is_multimodal=is_multimodal,
             preserve_source_file=preserve_source_file,
+            quota_limit_bytes=quota_limit_bytes,
         )
     except Exception as e:
         raise HTTPException(
@@ -152,6 +155,7 @@ async def update_index(
         knowledge_name = request.get("knowledge_name")
         ingroup_permission = request.get("ingroup_permission")
         group_ids = request.get("group_ids")
+        quota_limit_bytes = request.get("quota_limit_bytes")
 
         # Call service layer to update knowledge base
         result = ElasticSearchService.update_knowledge_base(
@@ -161,6 +165,7 @@ async def update_index(
             group_ids=group_ids,
             tenant_id=tenant_id,
             user_id=user_id,
+            quota_limit_bytes=quota_limit_bytes,
         )
 
         if result:

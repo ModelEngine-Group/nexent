@@ -258,6 +258,16 @@ class SkillException(Exception):
     pass
 
 
+class QuotaExceededError(Exception):
+    """Raised when tenant storage hard limit is exceeded during file upload."""
+
+    def __init__(self, message: str, usage_bytes: int = 0, hard_limit_bytes: int = 0, exceeded_by_bytes: int = 0):
+        super().__init__(message)
+        self.usage_bytes = usage_bytes
+        self.hard_limit_bytes = hard_limit_bytes
+        self.exceeded_by_bytes = exceeded_by_bytes
+
+
 class OAuthProviderError(Exception):
     """Raised when OAuth provider configuration is invalid or provider returns an error."""
 

@@ -577,6 +577,10 @@ class KnowledgeRecord(TableBase):
         default=True,
         doc="Whether to preserve uploaded source documents after vectorization",
     )
+    quota_limit_bytes = Column(
+        BigInteger, nullable=True,
+        doc="Per-KB soft storage quota in bytes. NULL means no per-KB limit (shares tenant pool freely)."
+    )
 
 
 class TenantConfig(TableBase):
