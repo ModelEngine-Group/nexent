@@ -37,7 +37,6 @@ from agents.nl2agent_session_catalog import (
     get_nl2agent_session_catalogs,
     get_nl2agent_session_state,
     initialize_nl2agent_session_state,
-    mutate_nl2agent_session_catalogs,
     register_recommendation_batch,
     register_online_recommendation_batch,
     register_requirements_summary,
@@ -655,7 +654,6 @@ def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
         get_mcp_record=get_mcp_record_by_id_and_tenant,
         discover_tools=get_tool_from_remote_mcp_server,
         upsert_discovered_tools=upsert_discovered_mcp_tools,
-        mutate_session_catalogs=mutate_nl2agent_session_catalogs,
         recommendation_id=_recommendation_id,
         validate_remote_url=validate_nl2agent_remote_mcp_url,
     )
@@ -1011,7 +1009,6 @@ def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependenc
     return SkillInstallationDependencies(
         get_owned_draft=_owned_draft_reader(user_id),
         get_session_catalogs=get_nl2agent_session_catalogs,
-        mutate_session_catalogs=mutate_nl2agent_session_catalogs,
         install_by_name=install_skills_from_zip_for_tenant,
         install_by_id=install_skills_for_tenant,
         get_installed_by_name=get_tenant_skill_by_name,

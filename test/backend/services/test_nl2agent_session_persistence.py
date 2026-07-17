@@ -30,8 +30,9 @@ def _catalogs():
     }
 
 
-def _snapshot(*, state=None, catalog_revision=0):
+def _snapshot(*, state=None):
     workflow_state = state or state_to_dict(Nl2AgentWorkflowState(conversation_id=902))
+    snapshot_id = catalog.catalog_snapshot_id(_catalogs())
     return {
         "tenant_id": "tenant_1",
         "user_id": "user_1",
@@ -39,9 +40,9 @@ def _snapshot(*, state=None, catalog_revision=0):
         "conversation_id": 902,
         "status": "active",
         "workflow_revision": workflow_state["revision"],
-        "catalog_revision": catalog_revision,
+        "catalog_snapshot_id": snapshot_id,
         "workflow_state": deepcopy(workflow_state),
-        "session_catalogs": _catalogs(),
+        "catalog_snapshot": _catalogs(),
     }
 
 
@@ -59,14 +60,15 @@ def durable_cache(monkeypatch):
 def test_cache_miss_recovers_workflow_and_catalogs_from_database(
     durable_cache, monkeypatch
 ):
-    load = MagicMock(return_value=_snapshot(catalog_revision=4))
+    load = MagicMock(return_value=_snapshot())
     monkeypatch.setattr(catalog, "_load_durable_session", load)
 
     assert catalog.get_nl2agent_session_state("tenant_1", 202)["conversation_id"] == 902
     assert catalog.get_nl2agent_session_catalogs("tenant_1", 202) == _catalogs()
     assert durable_cache.exists(catalog._state_key("tenant_1", 202))
     assert durable_cache.exists(catalog._cache_key("tenant_1", 202))
-    assert durable_cache.get(catalog._catalog_revision_key("tenant_1", 202)) == "4"
+    snapshot_id = catalog.catalog_snapshot_id(_catalogs())
+    assert durable_cache.exists(catalog._catalog_snapshot_key("tenant_1", snapshot_id))
     load.assert_called_once_with("tenant_1", 202)
 
 
@@ -78,7 +80,7 @@ def test_reads_fall_back_to_database_when_redis_is_unavailable(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
-    load = MagicMock(return_value=_snapshot(catalog_revision=3))
+    load = MagicMock(return_value=_snapshot())
     monkeypatch.setattr(catalog, "_load_durable_session", load)
 
     assert catalog.get_nl2agent_session_state("tenant_1", 202)["revision"] == 0
@@ -163,26 +165,18 @@ def test_terminal_session_rejects_mutation_without_exhausting_retries(
     persist.assert_called_once()
 
 
-def test_catalog_mutation_persists_independent_revision(
-    durable_cache, monkeypatch
-):
+def test_catalog_cache_uses_shared_content_addressed_snapshot(durable_cache):
     catalog.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
-    persist = MagicMock(return_value=True)
-    monkeypatch.setattr(catalog, "_persist_session_catalogs", persist)
+    catalog.set_nl2agent_session_catalogs("tenant_1", 203, _catalogs())
 
-    catalog.mutate_nl2agent_session_catalogs(
-        "tenant_1",
-        202,
-        lambda catalogs: catalogs["tool_catalog"].append({"tool_id": 2}),
+    snapshot_id = catalog.catalog_snapshot_id(_catalogs())
+    assert durable_cache.exists(catalog._catalog_snapshot_key("tenant_1", snapshot_id))
+    assert durable_cache.get(catalog._cache_key("tenant_1", 202)) == json.dumps(
+        {"snapshot_id": snapshot_id}
     )
-
-    call = persist.call_args
-    assert call.kwargs["expected_revision"] == 0
-    assert call.kwargs["catalogs"]["tool_catalog"] == [
-        {"tool_id": 1},
-        {"tool_id": 2},
-    ]
-    assert durable_cache.get(catalog._catalog_revision_key("tenant_1", 202)) == "1"
+    assert durable_cache.get(catalog._cache_key("tenant_1", 203)) == json.dumps(
+        {"snapshot_id": snapshot_id}
+    )
 
 
 @contextmanager

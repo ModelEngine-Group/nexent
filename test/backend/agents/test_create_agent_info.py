@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 
+from backend.utils import nl2agent_catalog_snapshot
 from test.common.test_mocks import bootstrap_test_env
 
 env_state = bootstrap_test_env()
@@ -155,6 +156,7 @@ utils_mock.context_utils.build_context_components = MagicMock(return_value=[])
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 sys.modules['utils.context_utils'] = utils_mock.context_utils
+sys.modules['utils.nl2agent_catalog_snapshot'] = nl2agent_catalog_snapshot
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -2254,7 +2256,7 @@ class TestCreateAgentConfig:
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
                 patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_nl2agent_session_catalogs', return_value=session_catalogs) as mock_get_catalogs, \
+                patch('backend.agents.create_agent_info.get_nl2agent_search_catalogs', return_value=session_catalogs) as mock_get_catalogs, \
                 patch('backend.agents.create_agent_info.record_stage_validated_search_batch') as mock_record_search, \
                 patch('backend.agents.create_agent_info.get_nl2agent_session_state', return_value={
                     "conversation_id": 300,
@@ -2306,7 +2308,7 @@ class TestCreateAgentConfig:
             )
 
             mock_get_model_by_id.assert_called_once_with(77, tenant_id="tenant_1")
-            mock_get_catalogs.assert_called_once_with("tenant_1", 202)
+            mock_get_catalogs.assert_called_once_with("tenant_1", 202, ANY)
             record_search_result = search_tool.metadata.pop("record_search_result")
             assert callable(record_search_result)
             record_search_result(

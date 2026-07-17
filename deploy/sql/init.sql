@@ -4,6 +4,19 @@ CREATE SCHEMA IF NOT EXISTS nexent;
 -- 2. Switch to the Schema (subsequent operations default to this Schema)
 SET search_path TO nexent;
 
+CREATE TABLE IF NOT EXISTS "nl2agent_catalog_snapshot_t" (
+  "tenant_id" varchar(100) NOT NULL,
+  "snapshot_id" varchar(64) NOT NULL,
+  "schema_version" int4 NOT NULL DEFAULT 1,
+  "catalogs" jsonb NOT NULL,
+  "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
+  "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
+  "created_by" varchar(100),
+  "updated_by" varchar(100),
+  "delete_flag" varchar(1) DEFAULT 'N',
+  CONSTRAINT "nl2agent_catalog_snapshot_t_pk" PRIMARY KEY ("tenant_id", "snapshot_id")
+);
+
 CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
   "session_id" BIGSERIAL PRIMARY KEY,
   "tenant_id" varchar(100) NOT NULL,
@@ -13,14 +26,16 @@ CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
   "status" varchar(20) NOT NULL DEFAULT 'active',
   "workflow_schema_version" int4 NOT NULL,
   "workflow_revision" int4 NOT NULL DEFAULT 0,
-  "catalog_revision" int4 NOT NULL DEFAULT 0,
+  "catalog_snapshot_id" varchar(64) NOT NULL,
   "workflow_state" jsonb NOT NULL,
-  "session_catalogs" jsonb NOT NULL,
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "created_by" varchar(100),
   "updated_by" varchar(100),
   "delete_flag" varchar(1) DEFAULT 'N',
+  CONSTRAINT "fk_nl2agent_session_catalog_snapshot"
+    FOREIGN KEY ("tenant_id", "catalog_snapshot_id")
+    REFERENCES "nl2agent_catalog_snapshot_t" ("tenant_id", "snapshot_id"),
   CONSTRAINT "uq_nl2agent_session_tenant_draft" UNIQUE ("tenant_id", "draft_agent_id"),
   CONSTRAINT "uq_nl2agent_session_tenant_conversation" UNIQUE ("tenant_id", "conversation_id"),
   CONSTRAINT "ck_nl2agent_session_status" CHECK ("status" IN ('active', 'completed', 'abandoned'))

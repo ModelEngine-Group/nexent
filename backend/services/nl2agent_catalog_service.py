@@ -18,6 +18,7 @@ from consts.exceptions import (
     Nl2AgentValidationError,
 )
 from consts.model import SkillInstanceInfoRequest
+from utils.nl2agent_catalog_snapshot import mcp_recommendation_id
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,6 @@ class SkillInstallationDependencies:
 
     get_owned_draft: Callable[..., Dict[str, Any]]
     get_session_catalogs: Callable[..., SessionCatalogs]
-    mutate_session_catalogs: Callable[..., Any]
     install_by_name: Callable[..., List[str]]
     install_by_id: Callable[..., List[int]]
     get_installed_by_name: Callable[[str, str], Optional[CatalogItem]]
@@ -136,14 +136,7 @@ async def _load_marketplace_pages(
 
 def recommendation_id(source: str, item: CatalogItem) -> str:
     """Build the stable recommendation identifier shared with MCP installation."""
-    if source == "registry":
-        server = item.get("server") if isinstance(item.get("server"), dict) else item
-        identity = server.get("name") or server.get("id")
-    else:
-        identity = (
-            item.get("communityId") or item.get("community_id") or item.get("name")
-        )
-    return f"{source}:{identity}"
+    return mcp_recommendation_id(source, item)
 
 
 def redact_mcp_marketplace_metadata(value: Any, parent_key: str = "") -> Any:
@@ -312,34 +305,6 @@ def _require_installable_skill(
     )
 
 
-def _mark_installed_skill(
-    dependencies: SkillInstallationDependencies,
-    *,
-    agent_id: int,
-    tenant_id: str,
-    skill_id: Optional[int],
-    skill_name: Optional[str],
-    installed_ids: Optional[List[int]] = None,
-) -> None:
-    removed_ids = {int(value) for value in [skill_id, *(installed_ids or [])] if value}
-    normalized_name = _normalized_skill_name(skill_name)
-
-    def mark_installed(catalogs: SessionCatalogs) -> None:
-        for item in catalogs.get("official_skills", []):
-            item_id = item.get("skill_id")
-            try:
-                matches_id = item_id is not None and int(item_id) in removed_ids
-            except (TypeError, ValueError):
-                matches_id = False
-            item_name = _normalized_skill_name(
-                item.get("skill_name") or item.get("name")
-            )
-            if matches_id or (normalized_name and item_name == normalized_name):
-                item["status"] = "installed"
-
-    dependencies.mutate_session_catalogs(tenant_id, agent_id, mark_installed)
-
-
 def _skill_installation_keys(
     canonical_id: Optional[int],
     canonical_name: str,
@@ -347,6 +312,15 @@ def _skill_installation_keys(
     identity = f"{canonical_id or ''}:{_normalized_skill_name(canonical_name)}"
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     return f"skill:{digest}", f"install-skill:{digest}"
+
+
+def _public_skill_install_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove workflow-only recommendation provenance from an API result."""
+    return {
+        key: deepcopy(value)
+        for key, value in result.items()
+        if not key.startswith("_source_")
+    }
 
 
 def _bind_installed_skill(
@@ -422,16 +396,7 @@ async def install_web_skill(
             operation_id,
         )
         if reservation.get("status") == "completed":
-            result = deepcopy(reservation.get("result") or {})
-            _refresh_installed_skill_catalog(
-                dependencies,
-                agent_id=agent_id,
-                tenant_id=tenant_id,
-                skill_id=canonical_id,
-                skill_name=canonical_name,
-                installed_ids=result.get("installed_ids"),
-            )
-            return result
+            return _public_skill_install_result(reservation.get("result") or {})
         if skill_name:
             result = _install_skill_by_name(
                 dependencies,
@@ -451,25 +416,22 @@ async def install_web_skill(
             )
         operation_committed = True
         try:
+            workflow_result = {
+                **deepcopy(result),
+                "_source_skill_id": canonical_id,
+                "_source_skill_name": canonical_name,
+            }
             dependencies.complete_installation(
                 tenant_id,
                 agent_id,
                 installation_key,
                 operation_id,
-                result,
+                workflow_result,
             )
         except Exception as exc:
             raise Nl2AgentOperationError(
                 "The Skill was installed, but workflow state could not be reconciled. Retry installation."
             ) from exc
-        _refresh_installed_skill_catalog(
-            dependencies,
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            skill_id=canonical_id,
-            skill_name=canonical_name,
-            installed_ids=result.get("installed_ids"),
-        )
         return result
     except Exception:
         if not operation_committed:
@@ -585,31 +547,3 @@ def _install_skill_by_id(
         "bound": True,
         "installed_ids": installed_ids,
     }
-
-
-def _refresh_installed_skill_catalog(
-    dependencies: SkillInstallationDependencies,
-    *,
-    agent_id: int,
-    tenant_id: str,
-    skill_id: Optional[int],
-    skill_name: Optional[str] = None,
-    installed_ids: Optional[List[int]] = None,
-) -> None:
-    try:
-        _mark_installed_skill(
-            dependencies,
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            skill_id=skill_id,
-            skill_name=skill_name,
-            installed_ids=installed_ids,
-        )
-    except Exception:
-        logger.exception(
-            "Failed to refresh NL2AGENT Skill catalog after installation: "
-            "tenant_id=%s draft_agent_id=%s skill=%s",
-            tenant_id,
-            agent_id,
-            skill_name or skill_id,
-        )

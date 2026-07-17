@@ -593,11 +593,6 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "_persist_workflow_state",
         MagicMock(return_value=True),
     )
-    monkeypatch.setattr(
-        nl2agent_session_catalog,
-        "_persist_session_catalogs",
-        MagicMock(return_value=True),
-    )
     transaction = MagicMock()
     transaction.__enter__.return_value = MagicMock()
     transaction.__exit__.return_value = None
@@ -1937,7 +1932,10 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
     )
     assert add_mcp.call_args.kwargs["server_url"] == "https://acme.example/eu/sse"
     assert add_mcp.call_args.kwargs["authorization_token"] == "secret-token"
-    assert get_nl2agent_session_catalogs("tenant_1", 202)["registry_results"] == []
+    assert len(get_nl2agent_session_catalogs("tenant_1", 202)["registry_results"]) == 1
+    assert nl2agent_session_catalog.get_nl2agent_search_catalogs(
+        "tenant_1", 202
+    )["registry_results"] == []
 
 
 @pytest.mark.asyncio
@@ -2448,7 +2446,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         {
             "skill_id": 12,
             "skill_name": "search-web-tavily",
-            "status": "installed",
+            "status": "installable",
         },
         {
             "skill_id": 13,
@@ -2456,6 +2454,9 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
             "status": "installable",
         }
     ]
+    assert nl2agent_session_catalog.get_nl2agent_search_catalogs(
+        "tenant_1", 202
+    )["official_skills"][0]["status"] == "installed"
 
     retried = await nl2agent_service.install_web_skill(
         agent_id=202,
@@ -2620,9 +2621,12 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
     }
     assert bind_skill.call_args.kwargs["skill_info"].skill_id == 107
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
-        {"skill_id": 77, "skill_name": "legacy-source", "status": "installed"},
+        {"skill_id": 77, "skill_name": "legacy-source", "status": "installable"},
         {"skill_id": 88, "skill_name": "keep-me", "status": "installable"}
     ]
+    assert nl2agent_session_catalog.get_nl2agent_search_catalogs(
+        "tenant_1", 202
+    )["official_skills"][0]["status"] == "installed"
 
 
 @pytest.mark.asyncio

@@ -41,7 +41,6 @@ class McpInstallationDependencies:
     get_mcp_record: Callable[..., Optional[Dict[str, Any]]]
     discover_tools: Callable[..., Awaitable[List[Any]]]
     upsert_discovered_tools: Callable[..., List[Dict[str, Any]]]
-    mutate_session_catalogs: Callable[..., Any]
     recommendation_id: Callable[[str, Dict[str, Any]], str]
     validate_remote_url: Callable[[str], str]
 
@@ -717,22 +716,6 @@ async def _discover_and_complete(
         discovered_tool_ids=[int(tool["tool_id"]) for tool in tools],
         bound_tool_ids=[],
         error=None,
-    )
-    catalog_key = "registry_results" if source == "registry" else "community_results"
-
-    def remove_installed_recommendation(
-        current: Dict[str, List[Dict[str, Any]]],
-    ) -> None:
-        current[catalog_key] = [
-            item
-            for item in current.get(catalog_key, [])
-            if dependencies.recommendation_id(source, item) != recommendation_id
-        ]
-
-    dependencies.mutate_session_catalogs(
-        tenant_id,
-        agent_id,
-        remove_installed_recommendation,
     )
     return {
         "agent_id": agent_id,

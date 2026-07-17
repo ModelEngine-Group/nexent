@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import BigInteger, Boolean, Column, ForeignKeyConstraint, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -483,11 +483,31 @@ class AgentInfo(TableBase):
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
 
 
+class Nl2AgentCatalogSnapshot(TableBase):
+    """Tenant-scoped immutable provider catalog snapshot."""
+
+    __tablename__ = "nl2agent_catalog_snapshot_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id = Column(String(100), primary_key=True, nullable=False, doc="Tenant ID")
+    snapshot_id = Column(String(64), primary_key=True, nullable=False, doc="Content digest")
+    schema_version = Column(Integer, nullable=False, default=1, doc="Catalog schema version")
+    catalogs = Column(JSONB, nullable=False, doc="Immutable provider catalog payload")
+
+
 class Nl2AgentSession(TableBase):
     """Durable workflow snapshot for one NL2AGENT draft session."""
 
     __tablename__ = "nl2agent_session_t"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "catalog_snapshot_id"],
+            [
+                f"{SCHEMA}.nl2agent_catalog_snapshot_t.tenant_id",
+                f"{SCHEMA}.nl2agent_catalog_snapshot_t.snapshot_id",
+            ],
+            name="fk_nl2agent_session_catalog_snapshot",
+        ),
         UniqueConstraint(
             "tenant_id", "draft_agent_id", name="uq_nl2agent_session_tenant_draft"
         ),
@@ -524,9 +544,8 @@ class Nl2AgentSession(TableBase):
     status = Column(String(20), nullable=False, default="active", doc="Session lifecycle status")
     workflow_schema_version = Column(Integer, nullable=False, doc="Workflow payload schema version")
     workflow_revision = Column(Integer, nullable=False, default=0, doc="Workflow optimistic-lock revision")
-    catalog_revision = Column(Integer, nullable=False, default=0, doc="Catalog optimistic-lock revision")
+    catalog_snapshot_id = Column(String(64), nullable=False, doc="Immutable catalog snapshot digest")
     workflow_state = Column(JSONB, nullable=False, doc="Authoritative workflow state snapshot")
-    session_catalogs = Column(JSONB, nullable=False, doc="Authoritative immutable-source catalogs")
 
 
 class PromptTemplate(TableBase):

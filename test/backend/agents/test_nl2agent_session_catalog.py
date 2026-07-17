@@ -18,7 +18,6 @@ def fake_redis(monkeypatch):
     )
     monkeypatch.setattr(catalog_module, "_load_durable_session", MagicMock(return_value=None))
     monkeypatch.setattr(catalog_module, "_persist_workflow_state", MagicMock(return_value=True))
-    monkeypatch.setattr(catalog_module, "_persist_session_catalogs", MagicMock(return_value=True))
     catalog_module.initialize_nl2agent_session_state("tenant_1", 202, conversation_id=902)
     return client
 
@@ -106,6 +105,47 @@ def test_catalogs_round_trip_through_shared_redis(fake_redis, monkeypatch):
     )
 
     assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == _catalogs()
+
+
+def test_search_projection_hides_installed_mcp_and_marks_installed_skill(
+    fake_redis,
+):
+    catalogs = {
+        **_catalogs(),
+        "registry_results": [{"server": {"name": "github"}}],
+        "community_results": [{"communityId": 55, "name": "browser"}],
+        "official_skills": [
+            {
+                "skill_id": 12,
+                "skill_name": "code-review",
+                "status": "installable",
+            }
+        ],
+    }
+    catalog_module.set_nl2agent_session_catalogs("tenant_1", 202, catalogs)
+    workflow_state = {
+        "mcp_workflows": {
+            "registry:github": {"status": "tools_bound"},
+        },
+        "online_installations": {
+            "skill:12": {
+                "status": "completed",
+                "result": {
+                    "skill_id": 112,
+                    "skill_name": "code-review",
+                },
+            }
+        },
+    }
+
+    projected = catalog_module.get_nl2agent_search_catalogs(
+        "tenant_1", 202, workflow_state
+    )
+
+    assert projected["registry_results"] == []
+    assert projected["community_results"] == catalogs["community_results"]
+    assert projected["official_skills"][0]["status"] == "installed"
+    assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == catalogs
 
 
 def test_missing_catalogs_raise_contextual_error(fake_redis, caplog):

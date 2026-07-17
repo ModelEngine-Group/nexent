@@ -62,7 +62,7 @@ from utils.prompt_template_utils import (
 )
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from .nl2agent_session_catalog import (
-    get_nl2agent_session_catalogs,
+    get_nl2agent_search_catalogs,
     get_nl2agent_session_state,
     record_stage_validated_search_batch,
 )
@@ -1079,7 +1079,15 @@ async def create_agent_config(
         "NL2AgentSearchWebMcpsTool",
         "NL2AgentSearchWebSkillsTool",
     }
-    nl2agent_catalogs = get_nl2agent_session_catalogs(tenant_id, draft_agent_id) if draft_agent_id is not None else {}
+    nl2agent_catalogs = (
+        get_nl2agent_search_catalogs(
+            tenant_id,
+            draft_agent_id,
+            nl2agent_workflow_state,
+        )
+        if draft_agent_id is not None
+        else {}
+    )
     for tool_cfg in tool_list:
         try:
             class_name = tool_cfg.class_name

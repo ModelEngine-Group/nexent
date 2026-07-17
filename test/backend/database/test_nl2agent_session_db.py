@@ -52,6 +52,7 @@ def test_create_session_uses_caller_transaction(monkeypatch):
     }
     session.add.assert_called_once()
     session.flush.assert_called_once()
+    session.execute.assert_called_once()
 
 
 def test_get_session_can_enforce_owner(monkeypatch):
@@ -72,6 +73,41 @@ def test_get_session_can_enforce_owner(monkeypatch):
         "tenant-a", 11, user_id="user-a"
     ) == {"session_id": 1}
     assert query.filter.call_count == 2
+
+
+def test_get_session_snapshot_hydrates_shared_catalog(monkeypatch):
+    record = SimpleNamespace(
+        session_id=1,
+        catalog_snapshot_id="digest",
+    )
+    snapshot = SimpleNamespace(catalogs={"tool_catalog": [{"tool_id": 1}]})
+    session_query = MagicMock()
+    session_query.filter.return_value = session_query
+    session_query.first.return_value = record
+    snapshot_query = MagicMock()
+    snapshot_query.filter.return_value = snapshot_query
+    snapshot_query.first.return_value = snapshot
+    session = MagicMock()
+    session.query.side_effect = [session_query, snapshot_query]
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "as_dict",
+        lambda value: vars(value),
+    )
+
+    result = nl2agent_session_db.get_nl2agent_session_snapshot("tenant-a", 11)
+
+    assert result == {
+        "session_id": 1,
+        "catalog_snapshot_id": "digest",
+        "catalog_snapshot": {"tool_catalog": [{"tool_id": 1}]},
+    }
+    assert session.query.call_count == 2
 
 
 def test_get_session_by_conversation_is_owner_and_status_scoped(monkeypatch):
@@ -168,29 +204,6 @@ def test_workflow_update_rejects_revision_jump():
         )
 
 
-def test_catalog_update_advances_independent_revision(monkeypatch):
-    query = MagicMock()
-    query.filter.return_value = query
-    query.update.return_value = 1
-    session = MagicMock()
-    session.query.return_value = query
-    monkeypatch.setattr(
-        nl2agent_session_db,
-        "get_db_session",
-        lambda: _session_context(session),
-    )
-
-    assert nl2agent_session_db.update_nl2agent_session_catalogs(
-        tenant_id="tenant-a",
-        draft_agent_id=11,
-        expected_revision=7,
-        session_catalogs={"tool_catalog": []},
-        user_id="user-a",
-    )
-    values = query.update.call_args.args[0]
-    assert values["catalog_revision"] == 8
-
-
 def test_status_update_only_accepts_terminal_states(monkeypatch):
     with pytest.raises(ValueError, match="must be terminal"):
         nl2agent_session_db.update_nl2agent_session_status(
@@ -253,13 +266,18 @@ def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
 def test_model_and_fresh_init_match_incremental_migration():
     assert Nl2AgentSession.__table__.schema == "nexent"
     root = Path(__file__).resolve().parents[3]
-    migration = (
+    session_migration = (
         root / "deploy/sql/migrations/v2.3.0_0716_add_nl2agent_session.sql"
     ).read_text(encoding="utf-8")
+    catalog_migration = (
+        root
+        / "deploy/sql/migrations/v2.3.0_0717_share_nl2agent_catalog_snapshots.sql"
+    ).read_text(encoding="utf-8")
     fresh_init = (root / "deploy/sql/init.sql").read_text(encoding="utf-8")
-    for sql in (migration, fresh_init):
+    for sql in (session_migration + catalog_migration, fresh_init):
         assert "nl2agent_session_t" in sql
         assert "workflow_state" in sql
-        assert "session_catalogs" in sql
+        assert "catalog_snapshot_id" in sql
+        assert "nl2agent_catalog_snapshot_t" in sql
+        assert "fk_nl2agent_session_catalog_snapshot" in sql
         assert "workflow_revision" in sql
-        assert "catalog_revision" in sql

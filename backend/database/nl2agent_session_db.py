@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database.client import as_dict, get_db_session
 from database.db_models import (
@@ -14,10 +15,12 @@ from database.db_models import (
     ConversationRecord,
     ConversationSourceImage,
     ConversationSourceSearch,
+    Nl2AgentCatalogSnapshot,
     Nl2AgentSession,
     SkillInstance,
     ToolInstance,
 )
+from utils.nl2agent_catalog_snapshot import catalog_snapshot_id
 
 NL2AGENT_SESSION_ACTIVE = "active"
 NL2AGENT_SESSION_COMPLETED = "completed"
@@ -38,6 +41,22 @@ def create_nl2agent_session(
     """Create the durable session row inside an optional caller transaction."""
     session_context = get_db_session(db_session) if db_session is not None else get_db_session()
     with session_context as session:
+        snapshot_id = catalog_snapshot_id(session_catalogs)
+        session.execute(
+            pg_insert(Nl2AgentCatalogSnapshot)
+            .values(
+                tenant_id=tenant_id,
+                snapshot_id=snapshot_id,
+                schema_version=1,
+                catalogs=session_catalogs,
+                created_by=user_id,
+                updated_by=user_id,
+                delete_flag="N",
+            )
+            .on_conflict_do_nothing(
+                index_elements=["tenant_id", "snapshot_id"]
+            )
+        )
         record = Nl2AgentSession(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -46,15 +65,47 @@ def create_nl2agent_session(
             status=NL2AGENT_SESSION_ACTIVE,
             workflow_schema_version=workflow_schema_version,
             workflow_revision=int(workflow_state.get("revision", 0)),
-            catalog_revision=0,
+            catalog_snapshot_id=snapshot_id,
             workflow_state=workflow_state,
-            session_catalogs=session_catalogs,
             created_by=user_id,
             updated_by=user_id,
         )
         session.add(record)
         session.flush()
         return as_dict(record)
+
+
+def get_nl2agent_session_snapshot(
+    tenant_id: str,
+    draft_agent_id: int,
+) -> Optional[Dict[str, Any]]:
+    """Load a session together with its shared immutable catalog payload."""
+    with get_db_session() as session:
+        record = (
+            session.query(Nl2AgentSession)
+            .filter(
+                Nl2AgentSession.tenant_id == tenant_id,
+                Nl2AgentSession.draft_agent_id == draft_agent_id,
+                Nl2AgentSession.delete_flag != "Y",
+            )
+            .first()
+        )
+        if record is None:
+            return None
+        snapshot = (
+            session.query(Nl2AgentCatalogSnapshot)
+            .filter(
+                Nl2AgentCatalogSnapshot.tenant_id == tenant_id,
+                Nl2AgentCatalogSnapshot.snapshot_id == record.catalog_snapshot_id,
+                Nl2AgentCatalogSnapshot.delete_flag != "Y",
+            )
+            .first()
+        )
+        if snapshot is None:
+            return None
+        result = as_dict(record)
+        result["catalog_snapshot"] = as_dict(snapshot)["catalogs"]
+        return result
 
 
 def get_nl2agent_session(
@@ -227,36 +278,6 @@ def cleanup_abandoned_nl2agent_sessions(
             record.delete_flag = "Y"
             record.updated_by = "nl2agent_cleanup"
         return len(records)
-
-
-def update_nl2agent_session_catalogs(
-    *,
-    tenant_id: str,
-    draft_agent_id: int,
-    expected_revision: int,
-    session_catalogs: Dict[str, Any],
-    user_id: Optional[str] = None,
-) -> bool:
-    """Replace catalogs iff the active row still has the expected revision."""
-    with get_db_session() as session:
-        values = {
-            "catalog_revision": expected_revision + 1,
-            "session_catalogs": session_catalogs,
-        }
-        if user_id is not None:
-            values["updated_by"] = user_id
-        updated = (
-            session.query(Nl2AgentSession)
-            .filter(
-                Nl2AgentSession.tenant_id == tenant_id,
-                Nl2AgentSession.draft_agent_id == draft_agent_id,
-                Nl2AgentSession.status == NL2AGENT_SESSION_ACTIVE,
-                Nl2AgentSession.catalog_revision == expected_revision,
-                Nl2AgentSession.delete_flag != "Y",
-            )
-            .update(values, synchronize_session=False)
-        )
-        return updated == 1
 
 
 def update_nl2agent_session_status(
