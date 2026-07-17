@@ -37,7 +37,7 @@ const convertToMarkdownCodeFences = (content: string): string => {
   return content;
 };
 import { Alert, Button, Tooltip } from "antd";
-import { ChatMessageType, MaxStepsInfo } from "@/types/chat";
+import { ChatMessageType } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
@@ -53,6 +53,7 @@ import {
   reportNl2AgentCardDelivery,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
+import { resolveNl2AgentCardPresentation } from "@/components/nl2agent/finalMessageCardDelivery";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -123,6 +124,15 @@ function ChatStreamFinalMessageInner({
       ),
     [message.content, message.finalAnswer, nl2AgentDraftAgentId]
   );
+  const nl2AgentCardPresentation = resolveNl2AgentCardPresentation({
+    isComplete: Boolean(message.isComplete),
+    isStreaming,
+    hasMessageId: typeof message.message_id === "number",
+    hasValidationFailure: Boolean(finalCardValidation.failure),
+    isLatestMessage,
+    readOnly,
+    recoveryEnabled: enableNl2AgentCardRecovery,
+  });
 
   const handleCardRegistered = useCallback(
     async (
@@ -403,7 +413,7 @@ function ChatStreamFinalMessageInner({
           base_url: modelConfig?.tts?.apiConfig?.modelUrl,
         }
       );
-    } catch (error) {
+    } catch {
       setTtsStatus(chatConfig.ttsStatus.ERROR);
       setTimeout(() => setTtsStatus(chatConfig.ttsStatus.IDLE), 2000);
     }
@@ -541,16 +551,10 @@ function ChatStreamFinalMessageInner({
                 onCitationHover={onCitationHover}
                 nl2AgentDraftAgentId={nl2AgentDraftAgentId}
                 nl2AgentCards={finalCardValidation.cards}
-                nl2AgentCardRenderMode={
-                  message.isComplete && !finalCardValidation.failure
-                    ? isLatestMessage
-                      ? "interactive"
-                      : "readonly"
-                    : "placeholder"
-                }
+                nl2AgentCardRenderMode={nl2AgentCardPresentation.renderMode}
                 onNl2AgentCardRegistered={handleCardRegistered}
                 nl2AgentCardRegistrationEnabled={
-                  enableNl2AgentCardRecovery && isLatestMessage
+                  nl2AgentCardPresentation.registrationEnabled
                 }
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
@@ -757,7 +761,10 @@ function areEqualFinalMessage(
     prev.readOnly === next.readOnly &&
     prev.index === next.index &&
     prev.currentConversationId === next.currentConversationId &&
-    prev.nl2AgentDraftAgentId === next.nl2AgentDraftAgentId
+    prev.nl2AgentDraftAgentId === next.nl2AgentDraftAgentId &&
+    prev.isLatestMessage === next.isLatestMessage &&
+    prev.isStreaming === next.isStreaming &&
+    prev.enableNl2AgentCardRecovery === next.enableNl2AgentCardRecovery
     // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally
     // excluded: they do not affect rendered output and will be stabilized with useCallback (Phase 1.2).
   );
