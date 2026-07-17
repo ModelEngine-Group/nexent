@@ -32,7 +32,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ..core.models.embedding_model import OpenAICompatibleEmbedding
-from .embedding_registry import EmbeddingModelInfo
+from .embedding_model import EmbeddingModelInfo
 from .models import (
     MemoryLayer,
     MemoryRecord,

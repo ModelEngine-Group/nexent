@@ -39,6 +39,8 @@ from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
 from apps.aidp_app import router as aidp_router
 from apps.cas_app import router as cas_router
+from apps.memory_config_app import router as memory_config_router
+from apps.memory_record_app import router as memory_record_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
 
@@ -102,3 +104,5 @@ app.include_router(haotian_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
 app.include_router(aidp_router)
+app.include_router(memory_config_router)
+app.include_router(memory_record_router)

@@ -421,6 +421,7 @@ lark-cli docs +update \
 | 用 `node_token` 而不是 `doc_token` 调用 `docs +update` | `"ok": false, "error": "invalid doc"` | 确认使用 `wiki +node-create` 返回的 `obj_token` |
 | `--content @` 使用绝对路径 | `--file must be a relative path within the current directory` | 先 `cd` 到文件所在目录，再使用相对路径 |
 | 对已存在页面用 `append` | 页面出现重复内容 | 用 `overwrite` 替换（republish 场景） |
+| 对空页面（新 node-create 无内容）用 `append` | API 返回 badluck 或内容消失 | 改用 `block_insert_after`，在目标 block_id 前插入（block_id 可以是任意合法 id，即使块为空） |
 | `needs_refresh` auth 状态 | 担心写操作失败 | 不需要干预，lark-cli 会自动刷新，所有写操作实际成功 |
 | for 循环中变量传入 python heredoc | 变量为空 | 放弃 bash 循环，每个 doc 单独写一个命令 |
 | 生成的 XML 超过 lark-cli 单次容量 | 上传失败 | 拆分为 ≤ 15 KB 的小块后多次 append |

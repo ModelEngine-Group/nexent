@@ -743,6 +743,27 @@ async def create_agent_config(
                 "agent_id": memory_context.agent_id,
             }
 
+            # Wire the SDK ``MemoryService`` facade to the
+            # backend services via the adapter. The facade handles policy
+            # enforcement, embedding lookup, and idempotency on its own
+            # and dispatches persistence/retrieval to
+            # ``services.memory_record_service`` /
+            # ``services.memory_retrieval_service``.
+            try:
+                from services.memory_backend_adapter import build_memory_service_for_agent
+                memory_metadata["memory_service"] = (
+                    build_memory_service_for_agent(
+                        tenant_id=memory_context.tenant_id,
+                        user_id=memory_context.user_id,
+                        agent_id=str(memory_context.agent_id or ""),
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to build MemoryService for agent: %s. "
+                    "Memory tools will fall back to legacy path.", exc
+                )
+
             memory_tool_names = {"store_memory", "search_memory"}
             tool_list = [t for t in tool_list if t.name not in memory_tool_names]
 

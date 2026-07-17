@@ -321,25 +321,16 @@ W_EXTERNAL = float(os.getenv("W_EXTERNAL", "0.8"))
 # Token budget selection
 MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
 
-# Dreaming scheduling
-DREAMING_CRON_EXPR = os.getenv("DREAMING_CRON_EXPR", "0 3 * * *")
+# Dreaming promotion thresholds
 LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
 RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
-DREAMING_RUN_TIMEOUT_SECONDS = int(
-    os.getenv("DREAMING_RUN_TIMEOUT_SECONDS", "1800")
-)
-DREAMING_HEARTBEAT_SECONDS = int(os.getenv("DREAMING_HEARTBEAT_SECONDS", "60"))
-DREAMING_LOCK_WATCHDOG_INTERVAL_SECONDS = int(
-    os.getenv("DREAMING_LOCK_WATCHDOG_INTERVAL_SECONDS", "300")
-)
-ALLOW_DREAMING_WITHOUT_LOCK = (
-    os.getenv("ALLOW_DREAMING_WITHOUT_LOCK", "false").lower() == "true"
-)
-
-# Dreaming promotion thresholds
 MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
 MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
 MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
+# Scheduling/cron constants are intentionally not defined here: the
+# background Dreaming scheduler is not part of Phase 2 (an agent-driven
+# timer will be added in a later phase, at which point the cron expression
+# and heartbeat can be reintroduced).
 
 # External provider retry / timeout
 PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))
