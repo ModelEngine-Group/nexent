@@ -140,9 +140,7 @@ def refresh_cache_best_effort(snapshot: Optional[Dict[str, Any]]) -> None:
         )
 
 
-def recover_committed_cache_best_effort(
-    tenant_id: str, draft_agent_id: int
-) -> None:
+def recover_committed_cache_best_effort(tenant_id: str, draft_agent_id: int) -> None:
     """Reconcile cache after commit without changing the committed outcome."""
     try:
         snapshot = load_durable_session(tenant_id, draft_agent_id)
@@ -271,6 +269,14 @@ def get_session_state(
     return state_to_dict(parse_session_state(raw, tenant, draft_id))
 
 
+def _recover_active_session_after_conflict(tenant_id: str, draft_agent_id: int) -> None:
+    snapshot = recover_durable_session(tenant_id, draft_agent_id)
+    if snapshot is None:
+        raise Nl2AgentSessionCatalogError("NL2AGENT durable session is missing.")
+    if snapshot.get("status") != "active":
+        raise Nl2AgentSessionCatalogError("NL2AGENT session is no longer active.")
+
+
 def mutate_session_state(
     tenant_id: str,
     draft_agent_id: int,
@@ -309,15 +315,7 @@ def mutate_session_state(
                 workflow_state=persisted_state,
             ):
                 pipe.unwatch()
-                snapshot = recover_durable_session(tenant_id, draft_agent_id)
-                if snapshot is None:
-                    raise Nl2AgentSessionCatalogError(
-                        "NL2AGENT durable session is missing."
-                    )
-                if snapshot.get("status") != "active":
-                    raise Nl2AgentSessionCatalogError(
-                        "NL2AGENT session is no longer active."
-                    )
+                _recover_active_session_after_conflict(tenant_id, draft_agent_id)
                 continue
             durable_committed = True
             pipe.multi()
@@ -415,7 +413,11 @@ def get_session_catalogs(
                         catalogs = validate_catalogs(json.loads(raw_snapshot))
                 else:
                     catalogs = validate_catalogs(reference)
-            except (json.JSONDecodeError, TypeError, Nl2AgentSessionCatalogError) as exc:
+            except (
+                json.JSONDecodeError,
+                TypeError,
+                Nl2AgentSessionCatalogError,
+            ) as exc:
                 logger.error(
                     "Malformed NL2AGENT catalogs: tenant_id=%s draft_agent_id=%s",
                     tenant,

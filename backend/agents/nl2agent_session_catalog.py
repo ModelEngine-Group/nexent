@@ -132,7 +132,9 @@ def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def get_workflow_summary(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> Dict[str, Any]:
+def get_workflow_summary(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> Dict[str, Any]:
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     return summarize_workflow_state(state)
 
@@ -180,18 +182,27 @@ def register_requirements_summary(
     """Register one rendered requirements summary for explicit card confirmation."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     normalized_summary = {
-        field_name: _normalize_requirement_text(summary.get(field_name)) for field_name in _REQUIREMENTS_FIELDS
+        field_name: _normalize_requirement_text(summary.get(field_name))
+        for field_name in _REQUIREMENTS_FIELDS
     }
-    missing_fields = [field_name for field_name, field_value in normalized_summary.items() if not field_value]
+    missing_fields = [
+        field_name
+        for field_name, field_value in normalized_summary.items()
+        if not field_value
+    ]
     if missing_fields:
-        raise Nl2AgentSessionCatalogError("Requirements summary fields cannot be empty: " + ", ".join(missing_fields))
+        raise Nl2AgentSessionCatalogError(
+            "Requirements summary fields cannot be empty: " + ", ".join(missing_fields)
+        )
     fingerprint = _requirements_fingerprint(normalized_summary)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         review = state.requirements_review
         existing_fingerprint = review.fingerprint
         is_current = False
-        if not existing_fingerprint or (review.status == "collecting" and existing_fingerprint != fingerprint):
+        if not existing_fingerprint or (
+            review.status == "collecting" and existing_fingerprint != fingerprint
+        ):
             review = RequirementsReview(
                 status="awaiting_confirmation",
                 summary=normalized_summary,
@@ -225,7 +236,10 @@ def classify_requirements_message_intent(text: str) -> str:
         return "confirmation_requires_button"
     if normalized in _CONFIRMATION_PHRASES:
         return "confirmation_requires_button"
-    if any(phrase in normalized for phrase in _CONFIRMATION_PHRASES - _SHORT_CONFIRMATION_PHRASES):
+    if any(
+        phrase in normalized
+        for phrase in _CONFIRMATION_PHRASES - _SHORT_CONFIRMATION_PHRASES
+    ):
         tokens = normalized.split()
         if len(tokens) <= 6:
             return "confirmation_requires_button"
@@ -273,7 +287,9 @@ def confirm_requirements_summary(
         if review.status == "awaiting_confirmation":
             review.status = "confirmed"
         elif review.status != "confirmed":
-            raise Nl2AgentSessionCatalogError("The requirements summary is not awaiting confirmation.")
+            raise Nl2AgentSessionCatalogError(
+                "The requirements summary is not awaiting confirmation."
+            )
         return review.model_dump(mode="json")
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -285,7 +301,9 @@ def assert_requirements_confirmed(
     """Reject protected workflow actions until requirements are confirmed."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     if state["requirements_review"].get("status") != "confirmed":
-        raise Nl2AgentSessionCatalogError("Confirm the requirements summary before continuing configuration.")
+        raise Nl2AgentSessionCatalogError(
+            "Confirm the requirements summary before continuing configuration."
+        )
     return state
 
 
@@ -331,7 +349,9 @@ def record_card_delivery(
         ):
             return existing.model_dump(mode="json")
         retry_count = (
-            int(existing.retry_count) + 1 if status == "failed" and existing is not None else int(status == "failed")
+            int(existing.retry_count) + 1
+            if status == "failed" and existing is not None
+            else int(status == "failed")
         )
         delivery = CardDelivery(
             message_id=message_id,
@@ -347,7 +367,9 @@ def record_card_delivery(
     return _mutate_session_state(tenant, draft_id, mutate)
 
 
-def confirm_agent_identity(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> Dict[str, Any]:
+def confirm_agent_identity(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> Dict[str, Any]:
     """Record that the user explicitly saved the draft display name."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
@@ -362,7 +384,9 @@ def assert_identity_confirmed(tenant_id: str, draft_agent_id: int) -> None:
     """Reject finalization until the user explicitly saves the identity card."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     if not state.get("identity_confirmed"):
-        raise Nl2AgentSessionCatalogError("Save the agent display name before finalizing.")
+        raise Nl2AgentSessionCatalogError(
+            "Save the agent display name before finalizing."
+        )
 
 
 def update_mcp_workflow(
@@ -385,7 +409,9 @@ def update_mcp_workflow(
     }
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        workflow = state.mcp_workflows.setdefault(recommendation_id, McpWorkflow(recommendation_id=recommendation_id))
+        workflow = state.mcp_workflows.setdefault(
+            recommendation_id, McpWorkflow(recommendation_id=recommendation_id)
+        )
         updated = {
             **workflow.model_dump(mode="python"),
             **{key: deepcopy(value) for key, value in values.items() if key in allowed},
@@ -396,7 +422,9 @@ def update_mcp_workflow(
     return _mutate_session_state(tenant, draft_id, mutate)
 
 
-def find_mcp_workflow_by_id(tenant_id: str, draft_agent_id: int, mcp_id: int) -> tuple[str, Dict[str, Any]]:
+def find_mcp_workflow_by_id(
+    tenant_id: str, draft_agent_id: int, mcp_id: int
+) -> tuple[str, Dict[str, Any]]:
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     for recommendation_id, workflow in state["mcp_workflows"].items():
         if workflow.get("mcp_id") == int(mcp_id):
@@ -425,9 +453,7 @@ def reserve_mcp_binding_operation(
             None,
         )
         if match is None:
-            raise Nl2AgentSessionCatalogError(
-                "Installed MCP workflow was not found."
-            )
+            raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
         if not set(selected_tool_ids).issubset(set(match.discovered_tool_ids)):
             raise Nl2AgentSessionCatalogError(
                 "Selected MCP tools were not discovered by this installation."
@@ -447,13 +473,9 @@ def reserve_mcp_binding_operation(
                 and match.bound_tool_ids == selected_tool_ids
             ):
                 return match.model_dump(mode="json")
-            raise Nl2AgentSessionCatalogError(
-                "MCP tool binding is already resolved."
-            )
+            raise Nl2AgentSessionCatalogError("MCP tool binding is already resolved.")
         if match.status != "connected":
-            raise Nl2AgentSessionCatalogError(
-                "MCP tool binding is already resolved."
-            )
+            raise Nl2AgentSessionCatalogError("MCP tool binding is already resolved.")
         match.status = "binding"
         match.binding_operation_id = operation_id
         match.bound_tool_ids = selected_tool_ids
@@ -477,12 +499,13 @@ def complete_mcp_binding_operation(
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         workflow = state.mcp_workflows.get(recommendation_id)
         if workflow is None:
-            raise Nl2AgentSessionCatalogError(
-                "Installed MCP workflow was not found."
-            )
+            raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
         if workflow.status == status and workflow.binding_operation_id == operation_id:
             return workflow.model_dump(mode="json")
-        if workflow.status != "binding" or workflow.binding_operation_id != operation_id:
+        if (
+            workflow.status != "binding"
+            or workflow.binding_operation_id != operation_id
+        ):
             raise Nl2AgentSessionCatalogError(
                 "MCP binding reservation is no longer owned by this operation."
             )
@@ -506,10 +529,11 @@ def release_mcp_binding_operation(
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         workflow = state.mcp_workflows.get(recommendation_id)
         if workflow is None:
-            raise Nl2AgentSessionCatalogError(
-                "Installed MCP workflow was not found."
-            )
-        if workflow.status == "binding" and workflow.binding_operation_id == operation_id:
+            raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
+        if (
+            workflow.status == "binding"
+            and workflow.binding_operation_id == operation_id
+        ):
             workflow.status = "connected"
             workflow.binding_operation_id = None
             workflow.bound_tool_ids = []
@@ -544,7 +568,9 @@ def register_online_recommendation_batch(
         raise Nl2AgentSessionCatalogError("Invalid online resource type.")
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    normalized_keys = sorted({str(key).strip() for key in item_keys if str(key).strip()})
+    normalized_keys = sorted(
+        {str(key).strip() for key in item_keys if str(key).strip()}
+    )
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         trusted = state.trusted_search_batches.get(recommendation_batch_id)
@@ -565,14 +591,21 @@ def register_online_recommendation_batch(
                 status="recommendations_ready",
             )
             state.online_configuration_confirmed = False
-        elif existing.resource_type != resource_type or existing.item_keys != normalized_keys:
-            raise Nl2AgentSessionCatalogError("Online recommendation batch contents do not match the registered card.")
+        elif (
+            existing.resource_type != resource_type
+            or existing.item_keys != normalized_keys
+        ):
+            raise Nl2AgentSessionCatalogError(
+                "Online recommendation batch contents do not match the registered card."
+            )
         return batches[recommendation_batch_id].model_dump(mode="json")
 
     return _mutate_session_state(tenant, draft_id, mutate)
 
 
-def complete_online_configuration(tenant_id: Optional[str], draft_agent_id: Optional[int]) -> List[str]:
+def complete_online_configuration(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> List[str]:
     """Complete all rendered online recommendation batches for one draft."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
@@ -583,7 +616,10 @@ def complete_online_configuration(tenant_id: Optional[str], draft_agent_id: Opti
             raise Nl2AgentSessionCatalogError(
                 "Show online resource recommendations for both MCP and Skill before completing configuration."
             )
-        if any(workflow.status in {"installing", "connected", "binding"} for workflow in state.mcp_workflows.values()):
+        if any(
+            workflow.status in {"installing", "connected", "binding"}
+            for workflow in state.mcp_workflows.values()
+        ):
             raise Nl2AgentSessionCatalogError(
                 "Bind discovered MCP tools or explicitly skip tool binding before completing online configuration."
             )
@@ -690,7 +726,9 @@ def assert_online_configuration_complete(tenant_id: str, draft_agent_id: int) ->
     if not state.get("online_configuration_confirmed") or any(
         batch.get("status") != "completed" for batch in batches.values()
     ):
-        raise Nl2AgentSessionCatalogError("Complete the online resource configuration before finalizing.")
+        raise Nl2AgentSessionCatalogError(
+            "Complete the online resource configuration before finalizing."
+        )
 
 
 def register_recommendation_batch(
@@ -726,8 +764,13 @@ def register_recommendation_batch(
                 tool_ids=normalized_tool_ids,
                 skill_ids=normalized_skill_ids,
             )
-        elif existing.tool_ids != normalized_tool_ids or existing.skill_ids != normalized_skill_ids:
-            raise Nl2AgentSessionCatalogError("Recommendation batch contents do not match the registered card.")
+        elif (
+            existing.tool_ids != normalized_tool_ids
+            or existing.skill_ids != normalized_skill_ids
+        ):
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch contents do not match the registered card."
+            )
         return _recommendation_batch_response(batches[recommendation_batch_id])
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -823,7 +866,9 @@ def _record_trusted_search_batch(
         resource_type=resource_type,
         tool_ids=sorted(set(map(int, tool_ids or []))),
         skill_ids=sorted(set(map(int, skill_ids or []))),
-        item_keys=sorted({str(key).strip() for key in item_keys or [] if str(key).strip()}),
+        item_keys=sorted(
+            {str(key).strip() for key in item_keys or [] if str(key).strip()}
+        ),
     )
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
@@ -869,7 +914,9 @@ def resolve_recommendation_batch(
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendation_batches.get(recommendation_batch_id)
         if batch is None:
-            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch was not registered."
+            )
         if batch.status == "skipped":
             return _recommendation_batch_response(batch)
         if batch.status != "recommendations_ready":
@@ -898,7 +945,9 @@ def reserve_recommendation_batch_apply(
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendation_batches.get(recommendation_batch_id)
         if batch is None:
-            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch was not registered."
+            )
         if not set(selected_tool_ids).issubset(set(batch.tool_ids)) or not set(
             selected_skill_ids
         ).issubset(set(batch.skill_ids)):
@@ -950,7 +999,9 @@ def complete_recommendation_batch_apply(
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendation_batches.get(recommendation_batch_id)
         if batch is None:
-            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch was not registered."
+            )
         if batch.status == "applied" and batch.operation_id == operation_id:
             return _recommendation_batch_response(batch)
         if batch.status != "applying" or batch.operation_id != operation_id:
@@ -975,7 +1026,9 @@ def release_recommendation_batch_apply(
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendation_batches.get(recommendation_batch_id)
         if batch is None:
-            raise Nl2AgentSessionCatalogError("Recommendation batch was not registered.")
+            raise Nl2AgentSessionCatalogError(
+                "Recommendation batch was not registered."
+            )
         if batch.status == "applying" and batch.operation_id == operation_id:
             batch.status = "recommendations_ready"
             batch.operation_id = None
@@ -990,9 +1043,66 @@ def assert_resource_review_complete(tenant_id: str, draft_agent_id: int) -> None
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
     batches = state["recommendation_batches"]
     if not batches:
-        raise Nl2AgentSessionCatalogError("Show the local resource recommendation card before finalizing.")
-    if any(batch.get("status") in {"recommendations_ready", "applying"} for batch in batches.values()):
-        raise Nl2AgentSessionCatalogError("Apply or skip every shown local resource recommendation before finalizing.")
+        raise Nl2AgentSessionCatalogError(
+            "Show the local resource recommendation card before finalizing."
+        )
+    if any(
+        batch.get("status") in {"recommendations_ready", "applying"}
+        for batch in batches.values()
+    ):
+        raise Nl2AgentSessionCatalogError(
+            "Apply or skip every shown local resource recommendation before finalizing."
+        )
+
+
+def _installed_skill_references(
+    installations: Dict[str, Any],
+) -> tuple[set[int], set[str]]:
+    installed_ids: set[int] = set()
+    installed_names: set[str] = set()
+    for installation in installations.values():
+        if installation.get("status") != "completed":
+            continue
+        result = installation.get("result") or {}
+        candidate_ids = (
+            result.get("_source_skill_id"),
+            result.get("skill_id"),
+            *(result.get("installed_ids") or []),
+        )
+        for value in candidate_ids:
+            try:
+                if value is not None:
+                    installed_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        candidate_names = (
+            result.get("_source_skill_name"),
+            result.get("skill_name"),
+            *(result.get("installed_names") or []),
+        )
+        installed_names.update(
+            str(value).casefold().strip() for value in candidate_names if value
+        )
+    return installed_ids, installed_names
+
+
+def _mark_installed_official_skills(
+    official_skills: List[Dict[str, Any]],
+    installed_ids: set[int],
+    installed_names: set[str],
+) -> None:
+    for item in official_skills:
+        item_name = (
+            str(item.get("skill_name") or item.get("name") or "").casefold().strip()
+        )
+        try:
+            item_id = (
+                int(item["skill_id"]) if item.get("skill_id") is not None else None
+            )
+        except (TypeError, ValueError):
+            item_id = None
+        if item_id in installed_ids or item_name in installed_names:
+            item["status"] = "installed"
 
 
 def get_nl2agent_search_catalogs(
@@ -1020,39 +1130,14 @@ def get_nl2agent_search_catalogs(
             if mcp_recommendation_id(source, item) not in installed_mcp_ids
         ]
 
-    installed_skill_ids = set()
-    installed_skill_names = set()
-    for installation in state.get("online_installations", {}).values():
-        if installation.get("status") != "completed":
-            continue
-        result = installation.get("result") or {}
-        for value in [
-            result.get("_source_skill_id"),
-            result.get("skill_id"),
-            *(result.get("installed_ids") or []),
-        ]:
-            if value is not None:
-                try:
-                    installed_skill_ids.add(int(value))
-                except (TypeError, ValueError):
-                    pass
-        for value in [
-            result.get("_source_skill_name"),
-            result.get("skill_name"),
-            *(result.get("installed_names") or []),
-        ]:
-            if value:
-                installed_skill_names.add(str(value).casefold().strip())
-    for item in catalogs["official_skills"]:
-        item_name = str(
-            item.get("skill_name") or item.get("name") or ""
-        ).casefold().strip()
-        try:
-            item_id = int(item["skill_id"]) if item.get("skill_id") is not None else None
-        except (TypeError, ValueError):
-            item_id = None
-        if item_id in installed_skill_ids or item_name in installed_skill_names:
-            item["status"] = "installed"
+    installed_skill_ids, installed_skill_names = _installed_skill_references(
+        state.get("online_installations", {})
+    )
+    _mark_installed_official_skills(
+        catalogs["official_skills"],
+        installed_skill_ids,
+        installed_skill_names,
+    )
     return catalogs
 
 
@@ -1067,9 +1152,7 @@ def delete_nl2agent_session_catalogs(
         _state_key(tenant, draft_id),
     ]
     keys.extend(
-        client.scan_iter(
-            match=f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:*"
-        )
+        client.scan_iter(match=f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:*")
     )
     client.delete(*keys)
 

@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 _TOOL_VALUE_TYPE_CHECKS: Dict[str, Callable[[Any], bool]] = {
     "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
-    "number": lambda item: isinstance(item, (int, float))
-    and not isinstance(item, bool),
+    "number": lambda item: (
+        isinstance(item, (int, float)) and not isinstance(item, bool)
+    ),
     "boolean": lambda item: isinstance(item, bool),
     "string": lambda item: isinstance(item, str),
     "array": lambda item: isinstance(item, list),
@@ -39,8 +40,10 @@ def redact_tool_parameter_defaults(params: Any) -> List[Dict[str, Any]]:
         if not isinstance(field, dict):
             continue
         name = str(field.get("name") or "")
-        if field.get("isSecret") or field.get("is_secret") or re.search(
-            r"password|authorization|api[_-]?key|secret|token", name, re.I
+        if (
+            field.get("isSecret")
+            or field.get("is_secret")
+            or re.search(r"password|authorization|api[_-]?key|secret|token", name, re.I)
         ):
             field["default"] = None
     return sanitized
@@ -134,6 +137,24 @@ class LocalResourceDependencies:
     continuation_text: str
 
 
+def _load_selected_records(
+    selected_ids: List[int],
+    query_records: Callable[[List[int], str], List[Dict[str, Any]]],
+    *,
+    id_key: str,
+    tenant_id: str,
+    missing_message: str,
+) -> Dict[int, Dict[str, Any]]:
+    records = query_records(selected_ids, tenant_id) if selected_ids else []
+    records_by_id = {int(item[id_key]): item for item in records}
+    missing_ids = [
+        resource_id for resource_id in selected_ids if resource_id not in records_by_id
+    ]
+    if missing_ids:
+        raise AgentRunException(missing_message + ", ".join(map(str, missing_ids)))
+    return records_by_id
+
+
 async def apply_local_resources(
     dependencies: LocalResourceDependencies,
     *,
@@ -166,41 +187,29 @@ async def apply_local_resources(
     selected_tool_ids = list(dict.fromkeys(map(int, tool_ids or [])))
     selected_skill_ids = list(dict.fromkeys(map(int, skill_ids or [])))
     submitted_config = {
-        int(tool_id): values
-        for tool_id, values in (tool_config_values or {}).items()
+        int(tool_id): values for tool_id, values in (tool_config_values or {}).items()
     }
     unexpected_config_ids = sorted(set(submitted_config) - set(selected_tool_ids))
     if unexpected_config_ids:
         raise Nl2AgentValidationError(
             "Tool configuration was submitted for an unselected tool."
         )
-    tool_records = (
-        dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
-        if selected_tool_ids
-        else []
+    tools_by_id = _load_selected_records(
+        selected_tool_ids,
+        dependencies.query_tools_by_ids,
+        id_key="tool_id",
+        tenant_id=tenant_id,
+        missing_message="Local resource binding failed because tools no longer exist: ",
     )
-    tools_by_id = {int(item["tool_id"]): item for item in tool_records}
-    missing_tool_ids = [
-        tool_id for tool_id in selected_tool_ids if tool_id not in tools_by_id
-    ]
-    if missing_tool_ids:
-        raise AgentRunException(
-            "Local resource binding failed because tools no longer exist: "
-            + ", ".join(map(str, missing_tool_ids))
-        )
-
-    skill_records = (
-        dependencies.query_skills_by_ids(selected_skill_ids, tenant_id)
-        if selected_skill_ids
-        else []
-    )
-    existing_skill_ids = {int(item["skill_id"]) for item in skill_records}
-    missing_skill_ids = sorted(set(selected_skill_ids) - existing_skill_ids)
-    if missing_skill_ids:
-        raise AgentRunException(
+    _load_selected_records(
+        selected_skill_ids,
+        dependencies.query_skills_by_ids,
+        id_key="skill_id",
+        tenant_id=tenant_id,
+        missing_message=(
             "Local resource binding failed because tenant skills no longer exist: "
-            + ", ".join(map(str, missing_skill_ids))
-        )
+        ),
+    )
 
     resolved_tool_params = {
         tool_id: _resolve_tool_config_values(

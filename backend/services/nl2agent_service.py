@@ -67,7 +67,6 @@ from consts.exceptions import (
 )
 from consts.model import (
     AgentInfoRequest,
-    ModelConnectStatusEnum,
 )
 from database.agent_db import (
     create_agent,
@@ -149,9 +148,14 @@ from services.nl2agent_seed_service import (
     NL2AGENT_VERIFICATION_CONFIG,
     SeedDependencies,
     ensure_builder_ready,
-    is_llm_model_type,
     normalize_model_ids,
     seed_default_agent,
+)
+from services.nl2agent_summary_service import (
+    raise_for_invalid_resource_references,
+    resolve_model_summaries,
+    resolve_resource_summaries,
+    validate_available_llm_ids,
 )
 from services.nl2agent_workflow_service import (
     WorkflowDependencies,
@@ -209,6 +213,7 @@ NL2AGENT_CARD_RETRY_INJECTION_TEXT = (
     "Current Session state and generate only the card required by the first "
     "incomplete stage. Do not claim the previous card is still valid."
 )
+
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
@@ -443,103 +448,18 @@ def _validate_available_llm_ids(
     finalizing: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
     """Validate IDs against the tenant's platform LLM inventory."""
-    records = get_model_records(None, tenant_id) or []
-    records_by_id = {int(record["model_id"]): record for record in records}
-    validated_models: Dict[int, Dict[str, Any]] = {}
-    for model_id in model_ids:
-        record = records_by_id.get(int(model_id))
-        if record is None:
-            reason = f"Model {model_id} does not exist in this tenant."
-        elif not is_llm_model_type(record.get("model_type")):
-            reason = f"Model {model_id} is not an LLM."
-        elif (
-            ModelConnectStatusEnum.get_value(record.get("connect_status"))
-            != ModelConnectStatusEnum.AVAILABLE.value
-        ):
-            reason = f"Model {model_id} is currently unavailable."
-        else:
-            display_name = str(
-                record.get("display_name") or record.get("model_name") or ""
-            ).strip()
-            if display_name:
-                validated_models[int(model_id)] = {
-                    **record,
-                    "display_name": display_name,
-                }
-                continue
-            reason = f"Model {model_id} has no display name."
-        if finalizing:
-            reason += " Reopen the model-selection card and choose an available LLM."
-        raise Nl2AgentValidationError(reason)
-    return validated_models
+    return validate_available_llm_ids(
+        get_model_records(None, tenant_id) or [],
+        model_ids,
+        finalizing=finalizing,
+    )
 
 
 def _resolve_model_summaries(
     draft: Dict[str, Any], tenant_id: str
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Resolve persisted model IDs into display-ready summaries without raising."""
-    primary_model_id = draft.get("business_logic_model_id")
-    model_ids = normalize_model_ids(draft.get("model_ids"))
-    ordered_ids = list(model_ids)
-    if primary_model_id:
-        primary_model_id = int(primary_model_id)
-        if primary_model_id not in ordered_ids:
-            ordered_ids.insert(0, primary_model_id)
-
-    records = get_model_records(None, tenant_id) or []
-    records_by_id = {int(record["model_id"]): record for record in records}
-    summaries: List[Dict[str, Any]] = []
-    invalid_references: List[Dict[str, Any]] = []
-    for model_id in ordered_ids:
-        record = records_by_id.get(model_id)
-        reason: Optional[str] = None
-        display_name: Optional[str] = None
-        if record is None:
-            reason = "not_found"
-        else:
-            display_name = (
-                str(
-                    record.get("display_name") or record.get("model_name") or ""
-                ).strip()
-                or None
-            )
-            if not is_llm_model_type(record.get("model_type")):
-                reason = "not_llm"
-            elif (
-                ModelConnectStatusEnum.get_value(record.get("connect_status"))
-                != ModelConnectStatusEnum.AVAILABLE.value
-            ):
-                reason = "unavailable"
-            elif not display_name:
-                reason = "name_missing"
-
-        is_primary = model_id == primary_model_id
-        summaries.append(
-            {
-                "model_id": model_id,
-                "display_name": display_name,
-                "role": "primary" if is_primary else "fallback",
-                "valid": reason is None,
-            }
-        )
-        if reason:
-            invalid_references.append(
-                {
-                    "reference_type": "model",
-                    "reference_id": model_id,
-                    "reason": reason,
-                }
-            )
-
-    if primary_model_id and primary_model_id not in model_ids:
-        invalid_references.append(
-            {
-                "reference_type": "model",
-                "reference_id": primary_model_id,
-                "reason": "primary_not_in_runtime_models",
-            }
-        )
-    return summaries, invalid_references
+    return resolve_model_summaries(draft, get_model_records(None, tenant_id) or [])
 
 
 def _resolve_resource_summaries(
@@ -550,84 +470,19 @@ def _resolve_resource_summaries(
     """Enrich persisted resource instances and report dangling references."""
     tool_ids = [int(row["tool_id"]) for row in tool_instances]
     skill_ids = [int(row["skill_id"]) for row in skill_instances]
-    tool_info_by_id = {
-        int(row["tool_id"]): row
-        for row in (
-            query_tools_by_ids_for_tenant(tool_ids, tenant_id) if tool_ids else []
-        )
-    }
-    skill_info_by_id = {
-        int(row["skill_id"]): row
-        for row in (query_skills_by_ids(skill_ids, tenant_id) if skill_ids else [])
-    }
-
-    tools: List[Dict[str, Any]] = []
-    skills: List[Dict[str, Any]] = []
-    invalid_references: List[Dict[str, Any]] = []
-    for instance in tool_instances:
-        tool_id = int(instance["tool_id"])
-        info = tool_info_by_id.get(tool_id)
-        name = str(
-            (info or {}).get("origin_name") or (info or {}).get("name") or ""
-        ).strip()
-        if not info or not name:
-            invalid_references.append(
-                {
-                    "reference_type": "tool",
-                    "reference_id": tool_id,
-                    "reason": "not_found" if not info else "name_missing",
-                }
-            )
-            continue
-        source = str(info.get("source") or "").lower()
-        tools.append(
-            {
-                **instance,
-                "name": name,
-                "source": source,
-                "origin": "online" if source == "mcp" else "local",
-            }
-        )
-
-    for instance in skill_instances:
-        skill_id = int(instance["skill_id"])
-        info = skill_info_by_id.get(skill_id)
-        name = str((info or {}).get("name") or "").strip()
-        if not info or not name:
-            invalid_references.append(
-                {
-                    "reference_type": "skill",
-                    "reference_id": skill_id,
-                    "reason": "not_found" if not info else "name_missing",
-                }
-            )
-            continue
-        source = str(info.get("source") or "").lower()
-        skills.append(
-            {
-                **instance,
-                "name": name,
-                "source": source,
-                "origin": "online" if source == "official" else "local",
-            }
-        )
-
-    return tools, skills, invalid_references
+    return resolve_resource_summaries(
+        tool_instances,
+        skill_instances,
+        query_tools_by_ids_for_tenant(tool_ids, tenant_id) if tool_ids else [],
+        query_skills_by_ids(skill_ids, tenant_id) if skill_ids else [],
+    )
 
 
 def _raise_for_invalid_resource_references(
     invalid_references: List[Dict[str, Any]],
 ) -> None:
     """Block publication when a persisted resource no longer resolves."""
-    if not invalid_references:
-        return
-    references = ", ".join(
-        f"{item['reference_type']} {item['reference_id']} ({item['reason']})"
-        for item in invalid_references
-    )
-    raise AgentRunException(
-        f"One or more selected resources are no longer valid: {references}. Reconfigure the draft before finalizing."
-    )
+    raise_for_invalid_resource_references(invalid_references)
 
 
 def _mcp_installation_key(
