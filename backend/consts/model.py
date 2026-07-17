@@ -1156,6 +1156,10 @@ class ManageTenantModelHealthcheckRequest(BaseModel):
     """Request model for checking model connectivity in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to check model connectivity")
     display_name: str = Field(..., description="Display name of the model to check")
+    model_type: Optional[str] = Field(
+        None,
+        description="Model type to disambiguate models with the same display name",
+    )
 
 
 class ManageBatchCreateModelsRequest(BaseModel):
