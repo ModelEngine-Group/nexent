@@ -505,6 +505,16 @@ export const API_ENDPOINTS = {
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
   },
+  // Quota management endpoints
+  quota: {
+    // Tenant-level quota
+    config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
+    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    // Platform-level quota (SU/ASSET_OWNER only)
+    platformOverview: `${API_BASE_URL}/platform/quota/overview`,
+    platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
+    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+  },
   users: {
     list: `${API_BASE_URL}/users/list`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,

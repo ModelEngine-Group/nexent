@@ -24,6 +24,7 @@ interface UploadAreaProps {
   onUpload?: () => void;
   isUploading?: boolean;
   disabled?: boolean;
+  disabledMessage?: string;
   componentHeight?: string;
   isCreatingMode?: boolean;
   indexName?: string;
@@ -42,6 +43,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       onUpload,
       isUploading = false,
       disabled = false,
+      disabledMessage,
       componentHeight = "100%",
       isCreatingMode = false,
       indexName = "",
@@ -265,6 +267,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
         nameStatus={nameStatus}
         isUploading={isUploading}
         disabled={disabled}
+        disabledMessage={disabledMessage}
         componentHeight={componentHeight}
         newKnowledgeBaseName={newKnowledgeBaseName}
         selectedFiles={selectedFiles}
@@ -274,4 +277,4 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
   }
 );
 
-export default UploadArea; 
+export default UploadArea;

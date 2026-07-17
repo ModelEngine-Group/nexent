@@ -7,7 +7,8 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Input, Button, App, Select } from "antd";
+import { Input, InputNumber, Button, App, Select, Segmented, Space } from "antd";
+import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
 const { TextArea } = Input;
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
@@ -91,6 +92,8 @@ interface DocumentListProps {
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
   isMultimodal?: boolean;
+  quotaLimitBytes?: number | null;
+  onQuotaLimitBytesChange?: (value: number | null) => void;
   onMultimodalChange?: (value: boolean) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
   preserveSourceFile?: boolean;
@@ -146,7 +149,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       permission,
       preserveSourceFile = true,
       onPreserveSourceFileChange,
-
+      quotaLimitBytes = null,
+      onQuotaLimitBytesChange,
       // Auto-summary frequency
       summaryFrequency,
       onSummaryFrequencyChange,
@@ -168,6 +172,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const { modelConfig } = useConfig();
     const { user } = useAuthorizationContext();
     const tenantId = user?.tenantId || null;
+    const storageQuota = useStorageQuotaBlocked(tenantId);
 
     // Fetch groups for group selection
     const { data: groupData } = useGroupList(tenantId);
@@ -180,6 +185,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     }));
 
     // Preview drawer state
+    const [quotaUnit, setQuotaUnit] = useState<"GB" | "MB">("GB");
+
     const [selectedFile, setSelectedFile] = useState<{
       objectName: string;
       fileName: string;
@@ -688,6 +695,39 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         ]}
                       />
                     )}
+                    {onQuotaLimitBytesChange && (
+                      <Space size={4}>
+                        <InputNumber
+                          value={
+                            quotaLimitBytes != null
+                              ? quotaUnit === "GB"
+                                ? Math.round(quotaLimitBytes / (1024 * 1024 * 1024))
+                                : Math.round(quotaLimitBytes / (1024 * 1024))
+                              : null
+                          }
+                          onChange={(v) => {
+                            if (v == null) {
+                              onQuotaLimitBytesChange(null);
+                            } else if (quotaUnit === "GB") {
+                              onQuotaLimitBytesChange(v * 1024 * 1024 * 1024);
+                            } else {
+                              onQuotaLimitBytesChange(v * 1024 * 1024);
+                            }
+                          }}
+                          addonAfter={quotaUnit}
+                          placeholder={t("quota.unlimited", "无限制")}
+                          min={0}
+                          precision={0}
+                          style={{ width: 130 }}
+                        />
+                        <Segmented
+                          size="small"
+                          options={["GB", "MB"]}
+                          value={quotaUnit}
+                          onChange={(val) => setQuotaUnit(val as "GB" | "MB")}
+                        />
+                      </Space>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -1100,7 +1140,15 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              disabled={!isCreatingMode && !knowledgeBaseId}
+              disabled={
+                storageQuota.isBlocked || (!isCreatingMode && !knowledgeBaseId)
+              }
+              disabledMessage={
+                storageQuota.isBlocked
+                  ? storageQuota.message ||
+                    t("quota.uploadBlocked", "Uploads are blocked - storage limit reached")
+                  : undefined
+              }
               componentHeight={uploadHeight}
               isCreatingMode={isCreatingMode}
               // Use internal ID for backend operations; fall back to name in creation mode
