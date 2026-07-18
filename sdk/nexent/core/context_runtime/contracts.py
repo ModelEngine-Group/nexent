@@ -40,9 +40,15 @@ class ContextEvidence:
     prefix_change_reasons: tuple[str, ...] = ()
     excluded_item_ids: tuple[str, ...] = ()
     selection_reason_codes: tuple[str, ...] = ()
-    policy_version: str | None = None
     policy_fingerprint: str | None = None
     selection_decision_fingerprint: str | None = None
+    embedding_mode: str = "none"
+    embedding_provider_fingerprint: str | None = None
+    embedding_failures: tuple[str, ...] = ()
+    representation_cache_hits: int = 0
+    representation_cache_misses: int = 0
+    model_call_count: int = 0
+    loop_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +99,9 @@ class ContextRuntime(Protocol):
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:
         """Return display-only messages without triggering compression."""
 
+    def finalize_evidence(self, *, status: str) -> ContextEvidence:
+        """Finalize and emit the single evidence record for this agent loop."""
+
     def compression_stats(self) -> dict[str, object]:
         """Return this step's compression metrics in the common shape."""
 
@@ -142,6 +151,9 @@ class UnconfiguredContextRuntime:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
+
+    def finalize_evidence(self, *, status: str) -> ContextEvidence:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def compression_stats(self) -> dict[str, object]:

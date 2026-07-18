@@ -6,7 +6,14 @@ from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
-from nexent.core.agents.context import ContextManagerConfig
+from nexent.core.agents.context import (
+    ContextManagerConfig,
+    ContextProcessingMode,
+    CpuEmbeddingProvider,
+    ExternalEmbeddingProvider,
+    PolicyLayers,
+    resolve_policy,
+)
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
@@ -28,6 +35,7 @@ from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
+    get_embedding_model,
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
@@ -942,17 +950,31 @@ async def create_agent_config(
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
+    policy_layers = PolicyLayers.model_validate({
+        "tenant": tenant_config_manager.get_context_policy(tenant_id),
+        "agent": agent_info.get("context_policy"),
+        "request": request_context_policy,
+    })
+    effective_policy = resolve_policy(policy_layers)
+    external_embedding_provider = None
+    cpu_embedding_provider = None
+    if effective_policy.processing_mode == ContextProcessingMode.REDUCE_THEN_COMPRESS:
+        embedding_model, _ = get_embedding_model(tenant_id)
+        if embedding_model is not None:
+            external_embedding_provider = ExternalEmbeddingProvider(embedding_model)
+        cpu_model_path = tenant_config_manager.get_context_cpu_embedding_model_path(tenant_id)
+        if cpu_model_path:
+            cpu_embedding_provider = CpuEmbeddingProvider(cpu_model_path)
+
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
-        policy_layers={
-            "tenant": tenant_config_manager.get_context_policy(tenant_id),
-            "agent": agent_info.get("context_policy"),
-            "request": request_context_policy,
-        },
+        policy_layers=policy_layers,
         selection_query=last_user_query or "",
+        external_embedding_provider=external_embedding_provider,
+        cpu_embedding_provider=cpu_embedding_provider,
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],

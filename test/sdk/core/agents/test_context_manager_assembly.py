@@ -1,6 +1,8 @@
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
+import pytest
+
 from nexent.core.agents.context import ContextManager
 from nexent.core.agents.context import ContextItemInput
 from nexent.core.agents.context import ContextManagerConfig
@@ -19,6 +21,18 @@ def _message_text(message):
 def _text_item(item_id, text, role="system"):
     item_type = "system_prompt" if role == "system" else "history"
     return ContextItemInput(id=item_id, type=item_type, content={"text": text, "role": role})
+
+
+@pytest.fixture(autouse=True)
+def _system_prompt_step(monkeypatch):
+    class SystemPromptStep:
+        def __init__(self, system_prompt):
+            self.system_prompt = system_prompt
+
+        def to_messages(self):
+            return [{"role": "system", "content": [{"type": "text", "text": self.system_prompt}]}]
+
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", SystemPromptStep)
 
 
 class _Memory:
@@ -45,19 +59,20 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     ))
     memory = _Memory()
 
-    manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
     memory.steps.append(_Step("user", "current task"))
     final = manager.assemble_final_context(
         model=None,
         memory=memory,
         current_run_start_idx=0,
         tools=[{"name": "z"}, {"name": "a"}],
+        run_context=run_context,
     )
 
     assert [_message_text(message) for message in final.messages] == [
         "stable policy",
-        "memory fact",
         "kb fact",
+        "memory fact",
         "current task",
     ]
     assert final.evidence.stable_message_count == 1
@@ -67,12 +82,12 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
 
 
 def test_context_manager_owns_final_answer_assembly():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
+    manager = ContextManager(ContextManagerConfig(enabled=False, token_threshold=10000))
     manager.register_item(_text_item("system:policy", "stable policy"))
     manager.register_item(_text_item("history:memory", "memory fact", "user"))
     memory = _Memory()
 
-    manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
     memory.steps.append(_Step("assistant", "work trace"))
     final = manager.assemble_final_context(
         model=None,
@@ -86,6 +101,7 @@ def test_context_manager_owns_final_answer_assembly():
                 "post_messages": "answer task: {{ task }}",
             }
         },
+        run_context=run_context,
     )
 
     assert [message["role"] for message in final.messages] == [

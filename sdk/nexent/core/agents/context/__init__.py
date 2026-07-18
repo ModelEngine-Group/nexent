@@ -22,12 +22,17 @@ _EXPORTS = {
     "format_summary_output": (".budget", "format_summary_output"),
     "_is_context_length_error": (".budget", "_is_context_length_error"),
     "AuthorityTier": (".policy", "AuthorityTier"),
+    "ContextProcessingMode": (".policy", "ContextProcessingMode"),
     "ContextPolicy": (".policy", "ContextPolicy"),
     "PolicyLayers": (".policy", "PolicyLayers"),
     "resolve_policy": (".policy", "resolve_policy"),
     "ItemDecision": (".selection", "ItemDecision"),
     "SelectionDecision": (".selection", "SelectionDecision"),
     "select_context_items": (".selection", "select_context_items"),
+    "CpuEmbeddingProvider": (".scoring", "CpuEmbeddingProvider"),
+    "EmbeddingProviderChain": (".scoring", "EmbeddingProviderChain"),
+    "ExternalEmbeddingProvider": (".scoring", "ExternalEmbeddingProvider"),
+    "rank_by_mmr": (".scoring", "rank_by_mmr"),
 }
 
 

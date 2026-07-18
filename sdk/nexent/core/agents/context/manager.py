@@ -8,15 +8,12 @@ import hashlib
 import json
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
-
-
-if TYPE_CHECKING:
-    from ...context_runtime.contracts import FinalContext
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
 from smolagents.models import ChatMessage
 
+from ...context_runtime.contracts import ContextEvidence, FinalContext
 from ...utils.token_estimation import (
     estimate_tokens,
     estimate_tokens_for_steps,
@@ -35,8 +32,9 @@ from .budget import (
 from .config import ContextManagerConfig
 from .current_compression import CurrentCompressor
 from .llm_summary import LLMSummary
-from .policy import resolve_policy
+from .policy import ContextProcessingMode, resolve_policy
 from .previous_compression import PreviousCompressor
+from .scoring import EmbeddingProviderChain
 from .selection import select_context_items
 from .stats_export import (
     export_summary as _export_summary,
@@ -154,8 +152,12 @@ class ContextManager:
         original_messages: List[ChatMessage],
         current_run_start_idx,
         context_overhead_tokens: int = 0,
+        enabled_override: bool | None = None,
     ) -> List[ChatMessage]:
-        if not self.config.enabled:
+        compression_enabled = (
+            self.config.enabled if enabled_override is None else enabled_override
+        )
+        if not compression_enabled:
             return original_messages
 
         soft_input_budget_tokens = self._soft_input_budget_tokens()
@@ -438,14 +440,27 @@ class ContextManager:
             source_items,
             policy,
             query=query,
+            providers=EmbeddingProviderChain(
+                external=self.config.external_embedding_provider,
+                cpu=self.config.cpu_embedding_provider,
+            ),
+            mmr_lambda=self.config.mmr_lambda,
+            allow_reduction=policy.processing_mode == ContextProcessingMode.REDUCE_THEN_COMPRESS,
+            marginal_threshold=self.config.marginal_relevance_threshold,
+            optional_budget_tokens=(
+                self.config.optional_item_budget_tokens
+                or max(1, int(self._soft_input_budget_tokens() * 0.2))
+                if policy.processing_mode == ContextProcessingMode.REDUCE_THEN_COMPRESS
+                else None
+            ),
         )
         logger.info(
-            "Context policy decision: enabled=%s version=%s selected=%s excluded=%s "
+            "Context policy decision: mode=%s selected=%s excluded=%s embedding_mode=%s "
             "policy_fingerprint=%s decision_fingerprint=%s",
-            policy.enabled,
-            selection_decision.policy_version,
+            policy.processing_mode.value,
             list(selection_decision.selected_item_ids),
             list(selection_decision.excluded_item_ids),
+            selection_decision.embedding_mode,
             selection_decision.policy_fingerprint,
             selection_decision.decision_fingerprint,
         )
@@ -514,6 +529,10 @@ class ContextManager:
             original_messages,
             current_run_start_idx,
             context_overhead_tokens=context_overhead_tokens,
+            enabled_override=(
+                resolve_policy(self.config.policy_layers).processing_mode
+                != ContextProcessingMode.PASSTHROUGH
+            ),
         )
         history_messages = self._without_leading_stable_messages(compressed_messages)
         messages = [
@@ -535,8 +554,6 @@ class ContextManager:
         self._previous_stable_fingerprint = fingerprint
         self._previous_stable_items = item_fingerprints
 
-        from ...context_runtime.contracts import ContextEvidence, FinalContext
-
         selection_decision = run_context.selection_decision
         return FinalContext(
             messages=messages,
@@ -556,10 +573,25 @@ class ContextManager:
                     tuple(decision.reason_code for decision in selection_decision.item_decisions)
                     if selection_decision else ()
                 ),
-                policy_version=(selection_decision.policy_version if selection_decision else None),
                 policy_fingerprint=(selection_decision.policy_fingerprint if selection_decision else None),
                 selection_decision_fingerprint=(
                     selection_decision.decision_fingerprint if selection_decision else None
+                ),
+                embedding_mode=(selection_decision.embedding_mode if selection_decision else "none"),
+                embedding_provider_fingerprint=(
+                    selection_decision.embedding_provider_fingerprint
+                    if selection_decision else None
+                ),
+                embedding_failures=(
+                    selection_decision.embedding_failures if selection_decision else ()
+                ),
+                representation_cache_hits=(
+                    selection_decision.representation_cache_hits
+                    if selection_decision else 0
+                ),
+                representation_cache_misses=(
+                    selection_decision.representation_cache_misses
+                    if selection_decision else 0
                 ),
             ),
         )
@@ -727,8 +759,8 @@ class ContextManager:
 
     @staticmethod
     def _ordered_items(items: Sequence[Any]) -> List[Any]:
-        """Preserve the Phase 2 full-strategy priority order without pruning."""
-        return sorted(items, key=lambda item: item.priority, reverse=True)
+        """Use the class-defined stable layout, independent of scoring order."""
+        return sorted(items, key=lambda item: item.layout_key)
 
     @staticmethod
     def _latest_user_text(items: Sequence[Any]) -> str:

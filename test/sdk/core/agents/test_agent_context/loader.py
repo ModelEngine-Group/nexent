@@ -246,8 +246,16 @@ def _load_file_module(full_name: str, filepath: str, package: str):
 
 _load_file_module("sdk.nexent.core.agents.summary_cache",
                    _agents_file("summary_cache.py"), "sdk.nexent.core.agents")
-_load_file_module("sdk.nexent.core.agents.agent_context.config",
-                   _ac_file("config.py"), "sdk.nexent.core.agents.agent_context")
+
+# Load the current context-domain dependencies under the historical test-only
+# package alias. This does not restore a production legacy runtime; it only
+# lets the isolated compression regression harness import current modules.
+for module_name in ("models", "policy", "scoring", "selection", "config"):
+    _load_file_module(
+        f"sdk.nexent.core.agents.agent_context.{module_name}",
+        _ac_file(f"{module_name}.py"),
+        "sdk.nexent.core.agents.agent_context",
+    )
 
 # Load context_runtime.contracts for manager.py's lazy import
 _load_file_module(f"{_CONTEXT_RUNTIME_PACKAGE}.contracts",

@@ -190,6 +190,13 @@ sys.modules['nexent.core.agents.context'] = _create_stub_module(
     "nexent.core.agents.context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
+    ContextProcessingMode=types.SimpleNamespace(REDUCE_THEN_COMPRESS="reduce_then_compress"),
+    CpuEmbeddingProvider=MagicMock(),
+    ExternalEmbeddingProvider=MagicMock(),
+    PolicyLayers=types.SimpleNamespace(model_validate=lambda value: value),
+    resolve_policy=lambda layers: types.SimpleNamespace(
+        processing_mode=(layers.get("request") or {}).get("processing_mode", "passthrough")
+    ),
 )
 sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
     "nexent.core.agents.summary_config",

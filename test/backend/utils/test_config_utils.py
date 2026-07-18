@@ -270,13 +270,22 @@ class TestTenantConfigManager:
     def test_get_context_policy_parses_tenant_json(self, mock_get_configs, config_manager):
         mock_get_configs.return_value = [{
             "config_key": CONTEXT_POLICY_KEY,
-            "config_value": '{"enabled": true, "version": "tenant-v1"}',
+            "config_value": '{"processing_mode": "semantic_compress"}',
         }]
 
         assert config_manager.get_context_policy("tenant1") == {
-            "enabled": True,
-            "version": "tenant-v1",
+            "processing_mode": "semantic_compress",
         }
+
+    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    def test_get_context_cpu_embedding_model_path(self, mock_get_configs, config_manager):
+        mock_get_configs.return_value = [{
+            "config_key": "context.cpu_embedding_model_path",
+            "config_value": "/models/local-embedding",
+        }]
+
+        assert config_manager.get_context_cpu_embedding_model_path("tenant1") == \
+            "/models/local-embedding"
 
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
     def test_get_context_policy_rejects_non_object_json(self, mock_get_configs, config_manager):

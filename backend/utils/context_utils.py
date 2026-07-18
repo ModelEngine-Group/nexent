@@ -328,7 +328,7 @@ def build_context_inputs(
         item_id: str,
         text: str,
         priority: int,
-        required: bool = False,
+        required: bool = True,
         authority: str = "agent",
     ) -> None:
         if text:
@@ -367,6 +367,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"skill:{name}", type=ContextItemType.SKILL, content=dict(skill),
                 source=(f"skill:{name}",), priority=70,
+                required=True,
                 metadata={"render_group": "skills", "language": language, "authority": "agent"},
             ))
 
@@ -389,6 +390,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"tool:{name}", type=ContextItemType.TOOL, content=payload,
                 source=(f"tool:{name}",), priority=50,
+                required=True,
                 metadata={
                     "render_group": "tools", "language": language,
                     "is_manager": is_manager, "authority": "agent",
@@ -419,6 +421,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"managed_agent:{name}", type=ContextItemType.MANAGED_AGENT, content=payload,
                 source=(f"managed_agent:{name}",), priority=45,
+                required=True,
                 metadata={"render_group": "managed_agents", "language": language, "authority": "agent"},
             ))
 
@@ -433,6 +436,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"external_agent:{payload['agent_id']}", type=ContextItemType.EXTERNAL_AGENT,
                 content=payload, source=(f"external_agent:{payload['agent_id']}",), priority=44,
+                required=True,
                 metadata={"render_group": "external_agents", "language": language, "authority": "agent"},
             ))
 
@@ -441,6 +445,7 @@ def build_context_inputs(
             id="system:agent_fallback", type=ContextItemType.SYSTEM_PROMPT,
             content={"template": "agent_fallback", "language": language},
             source=("agent_prompt:agent_fallback",), priority=5,
+            required=True,
             metadata={"authority": "platform"},
         ))
     if include_skills:

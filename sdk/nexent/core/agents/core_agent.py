@@ -617,9 +617,13 @@ You have been provided with these additional arguments, that you can access usin
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
-            return self._run_stream(task=self.task, max_steps=max_steps, images=images)
+            return self._run_stream_with_context_evidence(
+                task=self.task, max_steps=max_steps, images=images
+            )
         run_start_time = time.time()
-        steps = list(self._run_stream(task=self.task, max_steps=max_steps, images=images))
+        steps = list(self._run_stream_with_context_evidence(
+            task=self.task, max_steps=max_steps, images=images
+        ))
 
         # Outputs are returned only at the end. We only look at the last step.
         assert isinstance(steps[-1], FinalAnswerStep)
@@ -659,6 +663,22 @@ You have been provided with these additional arguments, that you can access usin
             )
 
         return output
+
+    def _run_stream_with_context_evidence(
+        self,
+        *,
+        task: str,
+        max_steps: int,
+        images: list["PIL.Image.Image"] | None = None,
+    ):
+        """Finalize exactly one context evidence record for a complete loop."""
+
+        status = "error"
+        try:
+            yield from self._run_stream(task=task, max_steps=max_steps, images=images)
+            status = "cancelled" if self.stop_event.is_set() else "completed"
+        finally:
+            self.context_runtime.finalize_evidence(status=status)
 
     def __call__(self, task: str, **kwargs):
         """Adds additional prompting for the managed agent, runs it, and wraps the output.

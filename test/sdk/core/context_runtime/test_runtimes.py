@@ -168,6 +168,10 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         ]
         assert final.messages == [{"role": "system", "content": "step"}]
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
+        evidence = runtime.finalize_evidence(status="completed")
+        assert evidence.model_call_count == 2
+        assert evidence.loop_status == "completed"
+        assert runtime.finalize_evidence(status="error") is evidence
     finally:
         _restore(snapshot)
 

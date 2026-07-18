@@ -1,9 +1,13 @@
 """Configuration for context management and compression."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping
+from typing import TYPE_CHECKING, Any, Dict, Mapping
 
 from .policy import PolicyLayers
+
+
+if TYPE_CHECKING:
+    from .scoring import EmbeddingProvider
 
 
 @dataclass
@@ -65,3 +69,8 @@ class ContextManagerConfig:
     # preserving Phase 4 behavior until a tenant, agent, or request opts in.
     policy_layers: PolicyLayers | Mapping[str, Any] = field(default_factory=PolicyLayers)
     selection_query: str = ""
+    external_embedding_provider: "EmbeddingProvider | None" = None
+    cpu_embedding_provider: "EmbeddingProvider | None" = None
+    mmr_lambda: float = 0.7
+    marginal_relevance_threshold: float = 0.0
+    optional_item_budget_tokens: int = 0

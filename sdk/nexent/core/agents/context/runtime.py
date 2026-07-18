@@ -11,7 +11,8 @@ from typing import Mapping
 from smolagents.memory import AgentMemory, MemoryStep
 from smolagents.models import ChatMessage, Model
 
-from ...context_runtime.contracts import FinalContext, ModelTool
+from ...context_runtime.contracts import ContextEvidence, FinalContext, ModelTool
+from .evidence import ContextEvidenceCollector
 from .manager import ContextManager
 from .models import ContextItem, ContextItemInput
 from .summary_step import ManagedRunContext
@@ -31,6 +32,7 @@ class ManagedContextRuntime:
         self.context_manager = context_manager
         self.items = list(items or ())
         self._run_context: ManagedRunContext | None = None
+        self._evidence = ContextEvidenceCollector()
 
     def replace_items(self, items: Sequence[ContextItemCandidate] | None) -> None:
         """Replace this runtime's run-local fine-grained item snapshot."""
@@ -38,6 +40,7 @@ class ManagedContextRuntime:
         self._run_context = None
 
     def prepare_run(self, *, memory: AgentMemory, fallback_system_prompt: str) -> None:
+        self._evidence.reset()
         self._run_context = self.context_manager.prepare_run_context(
             memory=memory,
             fallback_system_prompt=fallback_system_prompt,
@@ -61,7 +64,7 @@ class ManagedContextRuntime:
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
-        return self.context_manager.assemble_final_context(
+        final_context = self.context_manager.assemble_final_context(
             model=model,
             memory=memory,
             current_run_start_idx=current_run_start_idx,
@@ -69,6 +72,8 @@ class ManagedContextRuntime:
             purpose="step",
             run_context=self._ensure_run_context(memory),
         )
+        self._evidence.record_call(final_context.evidence)
+        return final_context
 
     def prepare_final_answer(
         self,
@@ -80,7 +85,7 @@ class ManagedContextRuntime:
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
-        return self.context_manager.assemble_final_context(
+        final_context = self.context_manager.assemble_final_context(
             model=model,
             memory=memory,
             current_run_start_idx=current_run_start_idx,
@@ -90,6 +95,8 @@ class ManagedContextRuntime:
             final_answer_templates=final_answer_templates,
             run_context=self._ensure_run_context(memory),
         )
+        self._evidence.record_call(final_context.evidence)
+        return final_context
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ChatMessage | dict[str, object]]:
         """Return display-only memory messages without compression side effects."""
@@ -109,6 +116,9 @@ class ManagedContextRuntime:
 
     def compression_stats(self) -> dict[str, object]:
         return self.context_manager.get_step_compression_stats()
+
+    def finalize_evidence(self, *, status: str) -> ContextEvidence:
+        return self._evidence.finalize(status=status)
 
     @property
     def chars_per_token(self) -> float:
