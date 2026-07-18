@@ -1,7 +1,9 @@
 """Configuration for context management and compression."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
+
+from .policy import PolicyLayers
 
 
 @dataclass
@@ -58,3 +60,8 @@ class ContextManagerConfig:
     # is True, so production callers that do not opt in see no behaviour
     # change.
     max_observation_length: int = 0
+
+    # Layered item-selection policy. The built-in effective policy is disabled,
+    # preserving Phase 4 behavior until a tenant, agent, or request opts in.
+    policy_layers: PolicyLayers | Mapping[str, Any] = field(default_factory=PolicyLayers)
+    selection_query: str = ""

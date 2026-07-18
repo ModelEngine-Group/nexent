@@ -324,7 +324,13 @@ def build_context_inputs(
     """Build an authorized, naturally granular SDK context input snapshot."""
     inputs: List[ContextItemInput] = []
 
-    def add_system(item_id: str, text: str, priority: int, required: bool = False) -> None:
+    def add_system(
+        item_id: str,
+        text: str,
+        priority: int,
+        required: bool = False,
+        authority: str = "agent",
+    ) -> None:
         if text:
             inputs.append(ContextItemInput(
                 id=f"system:{item_id}",
@@ -333,12 +339,13 @@ def build_context_inputs(
                 source=(f"agent_prompt:{item_id}",),
                 priority=priority,
                 required=required,
+                metadata={"authority": authority},
             ))
 
     if include_app_context and app_name and app_description and user_id:
         add_system("header", _build_header_text(
             app_name, app_description, user_id, language
-        ), 100, True)
+        ), 100, True, "tenant")
 
     if include_memory and memory_list:
         for index, memory in enumerate(memory_list):
@@ -348,7 +355,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"memory:{index}", type=ContextItemType.MEMORY, content=payload,
                 source=(f"memory:{memory_search_query or 'run'}",), priority=90,
-                metadata={"render_group": "memory", "language": language},
+                metadata={"render_group": "memory", "language": language, "authority": "retrieved"},
             ))
 
     if duty:
@@ -360,15 +367,15 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"skill:{name}", type=ContextItemType.SKILL, content=dict(skill),
                 source=(f"skill:{name}",), priority=70,
-                metadata={"render_group": "skills", "language": language},
+                metadata={"render_group": "skills", "language": language, "authority": "agent"},
             ))
 
     add_system("execution_flow", _build_execution_flow_text(
         None, language, is_manager
-    ), 60, True)
+    ), 60, True, "platform")
     add_system("available_resources_header", _build_available_resources_header_text(
         is_manager, language
-    ), 55, True)
+    ), 55, True, "platform")
 
     if include_tools and tools:
         for name, tool in tools.items():
@@ -382,7 +389,10 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"tool:{name}", type=ContextItemType.TOOL, content=payload,
                 source=(f"tool:{name}",), priority=50,
-                metadata={"render_group": "tools", "language": language, "is_manager": is_manager},
+                metadata={
+                    "render_group": "tools", "language": language,
+                    "is_manager": is_manager, "authority": "agent",
+                },
             ))
 
     if include_knowledge_base and knowledge_base_summary:
@@ -395,6 +405,7 @@ def build_context_inputs(
             id="knowledge_base:summary", type=ContextItemType.KNOWLEDGE_BASE,
             content={"text": guidance + knowledge_base_summary, "role": "user"},
             source=tuple(f"knowledge_base:{kb_id}" for kb_id in (kb_ids or ())), priority=10,
+            metadata={"authority": "retrieved"},
         ))
 
     if is_manager and include_managed_agents and managed_agents:
@@ -408,7 +419,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"managed_agent:{name}", type=ContextItemType.MANAGED_AGENT, content=payload,
                 source=(f"managed_agent:{name}",), priority=45,
-                metadata={"render_group": "managed_agents", "language": language},
+                metadata={"render_group": "managed_agents", "language": language, "authority": "agent"},
             ))
 
     if is_manager and include_external_agents and external_a2a_agents:
@@ -422,7 +433,7 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"external_agent:{payload['agent_id']}", type=ContextItemType.EXTERNAL_AGENT,
                 content=payload, source=(f"external_agent:{payload['agent_id']}",), priority=44,
-                metadata={"render_group": "external_agents", "language": language},
+                metadata={"render_group": "external_agents", "language": language, "authority": "agent"},
             ))
 
     if is_manager and not managed_agents and not external_a2a_agents:
@@ -430,6 +441,7 @@ def build_context_inputs(
             id="system:agent_fallback", type=ContextItemType.SYSTEM_PROMPT,
             content={"template": "agent_fallback", "language": language},
             source=("agent_prompt:agent_fallback",), priority=5,
+            metadata={"authority": "platform"},
         ))
     if include_skills:
         inputs.append(ContextItemInput(
@@ -439,10 +451,11 @@ def build_context_inputs(
                 "language": language, "is_manager": is_manager,
             },
             source=("agent_prompt:skills_usage",), priority=40, required=True,
+            metadata={"authority": "platform"},
         ))
     if constraint:
         add_system("constraint", _build_constraint_text(constraint, language), 30, True)
-    add_system("code_norms", _build_code_norms_text(language, is_manager), 20, True)
+    add_system("code_norms", _build_code_norms_text(language, is_manager), 20, True, "platform")
     if few_shots:
         add_system("footer", _build_footer_text(few_shots, language), 10, True)
     return inputs

@@ -38,6 +38,11 @@ class ContextEvidence:
     compression_records: tuple[object, ...] = ()
     stable_prefix_fingerprint: str | None = None
     prefix_change_reasons: tuple[str, ...] = ()
+    excluded_item_ids: tuple[str, ...] = ()
+    selection_reason_codes: tuple[str, ...] = ()
+    policy_version: str | None = None
+    policy_fingerprint: str | None = None
+    selection_decision_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)

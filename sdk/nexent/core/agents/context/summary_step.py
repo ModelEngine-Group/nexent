@@ -1,10 +1,14 @@
 """Context summary steps and managed run state."""
 
 from dataclasses import dataclass
-from typing import Any, Tuple
+from typing import TYPE_CHECKING, Any, Tuple
 
 from smolagents.memory import TaskStep
 from smolagents.models import ChatMessage, MessageRole
+
+
+if TYPE_CHECKING:
+    from .selection import SelectionDecision
 
 
 @dataclass
@@ -27,3 +31,4 @@ class ManagedRunContext:
     dynamic_messages: Tuple[dict, ...] = ()
     selected_item_types: Tuple[str, ...] = ()
     items: Tuple[Any, ...] = ()
+    selection_decision: "SelectionDecision | None" = None

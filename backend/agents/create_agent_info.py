@@ -666,6 +666,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    request_context_policy: Optional[Dict[str, Any]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -946,6 +947,12 @@ async def create_agent_config(
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
+        policy_layers={
+            "tenant": tenant_config_manager.get_context_policy(tenant_id),
+            "agent": agent_info.get("context_policy"),
+            "request": request_context_policy,
+        },
+        selection_query=last_user_query or "",
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
@@ -1384,6 +1391,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    context_policy: Optional[Dict[str, Any]] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1417,6 +1425,8 @@ async def create_agent_run_info(
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
+    if context_policy is not None:
+        create_config_kwargs["request_context_policy"] = context_policy
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 

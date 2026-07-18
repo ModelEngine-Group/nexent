@@ -4287,6 +4287,7 @@ async def test_prepare_agent_run(
         override_model_id=None,
         requested_output_tokens=4096,
         tool_params=None,
+        context_policy=None,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
@@ -12453,6 +12454,40 @@ async def test_process_skill_file_uploads_empty_absolute_path(mock_allowed):
 # ============================================================================
 # Tests for _stream_agent_chunks - error handling coverage
 # ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_accepts_none_history(monkeypatch):
+    """An omitted optional history must behave like an empty history."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = None
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", lambda *_, **__: 4242)
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "unregister_agent_run",
+        lambda *_, **__: None,
+    )
+
+    collected = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request, "u", "t", MagicMock(), MagicMock()
+        )
+    ]
+
+    assert collected
 
 
 @pytest.mark.asyncio

@@ -928,7 +928,7 @@ async def _stream_agent_chunks(
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
         user_role_count = sum(
-            1 for item in getattr(agent_request, "history", [])
+            1 for item in (getattr(agent_request, "history", None) or ())
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
@@ -1646,6 +1646,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
+                "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
@@ -2177,6 +2178,7 @@ async def export_agent_by_agent_id(
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
+                                          context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
                                               "duty_prompt"),
                                           constraint_prompt=agent_info.get(
@@ -2339,6 +2341,7 @@ async def import_agent_by_agent_id(
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
+                                         "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
@@ -2722,6 +2725,7 @@ def _build_authorized_context_input(agent_run_info) -> ContextInput:
             content={"role": entry.role, "text": entry.content},
             source=("conversation_history",),
             priority=50,
+            metadata={"authority": "user" if entry.role == "user" else "agent"},
         )
         for index, entry in enumerate(agent_run_info.history or ())
     )
@@ -2758,6 +2762,7 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        context_policy=agent_request.context_policy,
     )
 
     agent_run_info.context_input = _build_authorized_context_input(agent_run_info)

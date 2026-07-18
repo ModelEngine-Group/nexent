@@ -35,7 +35,9 @@ from .budget import (
 from .config import ContextManagerConfig
 from .current_compression import CurrentCompressor
 from .llm_summary import LLMSummary
+from .policy import resolve_policy
 from .previous_compression import PreviousCompressor
+from .selection import select_context_items
 from .stats_export import (
     export_summary as _export_summary,
 )
@@ -429,7 +431,24 @@ class ContextManager:
     ) -> ManagedRunContext:
         from smolagents.memory import SystemPromptStep
 
-        normalized_items = self._ordered_items(self._item_source(items))
+        source_items = self._item_source(items)
+        policy = resolve_policy(self.config.policy_layers)
+        query = self.config.selection_query or self._latest_user_text(source_items)
+        normalized_items, selection_decision = select_context_items(
+            source_items,
+            policy,
+            query=query,
+        )
+        logger.info(
+            "Context policy decision: enabled=%s version=%s selected=%s excluded=%s "
+            "policy_fingerprint=%s decision_fingerprint=%s",
+            policy.enabled,
+            selection_decision.policy_version,
+            list(selection_decision.selected_item_ids),
+            list(selection_decision.excluded_item_ids),
+            selection_decision.policy_fingerprint,
+            selection_decision.decision_fingerprint,
+        )
         item_messages = self.build_context_messages(items=normalized_items)
         stable_messages = [
             message for message in item_messages
@@ -455,6 +474,7 @@ class ContextManager:
             dynamic_messages=tuple(dynamic_messages),
             selected_item_types=selected_item_types,
             items=tuple(normalized_items),
+            selection_decision=selection_decision,
         )
 
     def assemble_final_context(
@@ -517,6 +537,7 @@ class ContextManager:
 
         from ...context_runtime.contracts import ContextEvidence, FinalContext
 
+        selection_decision = run_context.selection_decision
         return FinalContext(
             messages=messages,
             tools=tools,
@@ -528,6 +549,18 @@ class ContextManager:
                 compression_records=tuple(self._step_local_log or ()),
                 stable_prefix_fingerprint=fingerprint,
                 prefix_change_reasons=tuple(reasons),
+                excluded_item_ids=(
+                    selection_decision.excluded_item_ids if selection_decision else ()
+                ),
+                selection_reason_codes=(
+                    tuple(decision.reason_code for decision in selection_decision.item_decisions)
+                    if selection_decision else ()
+                ),
+                policy_version=(selection_decision.policy_version if selection_decision else None),
+                policy_fingerprint=(selection_decision.policy_fingerprint if selection_decision else None),
+                selection_decision_fingerprint=(
+                    selection_decision.decision_fingerprint if selection_decision else None
+                ),
             ),
         )
 
@@ -696,6 +729,14 @@ class ContextManager:
     def _ordered_items(items: Sequence[Any]) -> List[Any]:
         """Preserve the Phase 2 full-strategy priority order without pruning."""
         return sorted(items, key=lambda item: item.priority, reverse=True)
+
+    @staticmethod
+    def _latest_user_text(items: Sequence[Any]) -> str:
+        """Return the latest authorized user history text for relevance scoring."""
+        for item in reversed(items):
+            if item.type.value == "history" and item.content.get("role") == "user":
+                return item.content.get("text", "")
+        return ""
 
     # ============================================================
     #  Context Item Management
