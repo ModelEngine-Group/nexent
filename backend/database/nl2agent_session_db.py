@@ -68,6 +68,7 @@ def create_nl2agent_session(
     *,
     tenant_id: str,
     user_id: str,
+    runner_agent_id: int,
     draft_agent_id: int,
     conversation_id: int,
     workflow_schema_version: int,
@@ -104,6 +105,7 @@ def create_nl2agent_session(
         record = Nl2AgentSession(
             tenant_id=tenant_id,
             user_id=user_id,
+            runner_agent_id=runner_agent_id,
             draft_agent_id=draft_agent_id,
             conversation_id=conversation_id,
             status=NL2AGENT_SESSION_ACTIVE,

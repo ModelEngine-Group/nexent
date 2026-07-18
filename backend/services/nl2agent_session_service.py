@@ -100,6 +100,7 @@ async def start_session(
             dependencies.create_session_snapshot(
                 tenant_id=tenant_id,
                 user_id=user_id,
+                runner_agent_id=builder_agent_id,
                 draft_agent_id=draft_agent_id,
                 conversation_id=conversation_id,
                 workflow_schema_version=workflow_state["schema_version"],

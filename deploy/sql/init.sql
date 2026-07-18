@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
   "session_id" BIGSERIAL PRIMARY KEY,
   "tenant_id" varchar(100) NOT NULL,
   "user_id" varchar(100) NOT NULL,
+  "runner_agent_id" int4 NOT NULL,
   "draft_agent_id" int4 NOT NULL,
   "conversation_id" int4 NOT NULL,
   "status" varchar(20) NOT NULL DEFAULT 'active',

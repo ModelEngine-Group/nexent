@@ -35,6 +35,7 @@ def _positive_identifier(value: int, field_name: str) -> int:
 def _public_session(record: Dict[str, Any]) -> Dict[str, Any]:
     """Project a database row without exposing workflow or catalog payloads."""
     return {
+        "nl2agent_agent_id": int(record["runner_agent_id"]),
         "draft_agent_id": int(record["draft_agent_id"]),
         "conversation_id": int(record["conversation_id"]),
         "status": str(record["status"]),
@@ -56,6 +57,27 @@ def resolve_active_session(
     if record is None:
         raise Nl2AgentDraftNotFoundError()
     return _public_session(record)
+
+
+def require_active_session(
+    *,
+    draft_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    conversation_id: int | None = None,
+) -> Dict[str, Any]:
+    """Authorize an active session using its durable owner binding."""
+    draft_agent_id = _positive_identifier(draft_agent_id, "draft_agent_id")
+    record = get_nl2agent_session(
+        tenant_id,
+        draft_agent_id,
+        user_id=user_id,
+    )
+    if record is None or record.get("status") != "active":
+        raise Nl2AgentDraftNotFoundError()
+    if conversation_id is not None and int(record["conversation_id"]) != conversation_id:
+        raise Nl2AgentDraftNotFoundError()
+    return record
 
 
 def list_active_sessions(

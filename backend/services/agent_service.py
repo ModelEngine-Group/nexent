@@ -2954,13 +2954,15 @@ async def run_agent_stream(
     if isinstance(draft_agent_id, int):
         from services.nl2agent_service import validate_nl2agent_run_context
 
-        validate_nl2agent_run_context(
+        resolved_runner_id = validate_nl2agent_run_context(
             runner_agent_id=agent_request.agent_id,
             draft_agent_id=draft_agent_id,
             conversation_id=agent_request.conversation_id,
             tenant_id=resolved_tenant_id,
             user_id=resolved_user_id,
         )
+        if isinstance(resolved_runner_id, int):
+            agent_request.agent_id = resolved_runner_id
 
     # Resume mode: check for existing streaming message
     if resume:

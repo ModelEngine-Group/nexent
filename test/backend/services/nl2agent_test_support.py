@@ -43,6 +43,23 @@ from services.nl2agent_resource_service import (
 from services.nl2agent_seed_service import NL2AGENT_VERIFICATION_CONFIG
 
 
+@pytest.fixture(autouse=True)
+def _active_nl2agent_session(monkeypatch):
+    """Keep workflow unit tests focused beyond the session authorization boundary."""
+    monkeypatch.setattr(
+        nl2agent_service,
+        "require_active_session",
+        MagicMock(
+            return_value={
+                "runner_agent_id": 101,
+                "draft_agent_id": 202,
+                "conversation_id": 902,
+                "status": "active",
+            }
+        ),
+    )
+
+
 class _FixedUuid:
     hex = "abcdef1234567890"
 

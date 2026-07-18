@@ -87,9 +87,7 @@ from database.conversation_db import (
 from database.client import get_db_session
 from database.model_management_db import get_model_records
 from database.nl2agent_session_db import (
-    NL2AGENT_SESSION_ACTIVE,
     create_nl2agent_session,
-    get_nl2agent_session_by_conversation,
     update_nl2agent_session_status,
 )
 from database.skill_db import (
@@ -157,6 +155,7 @@ from services.nl2agent_session_service import (
     SessionInitializationDependencies,
     start_session as initialize_session,
 )
+from services.nl2agent_session_lifecycle_service import require_active_session
 from services.nl2agent_seed_service import (
     SeedDependencies,
     ensure_builder_ready,
@@ -323,18 +322,24 @@ def _get_owned_draft(
 ) -> Dict[str, Any]:
     """Resolve one user-owned NL2AGENT draft."""
     _validate_draft_agent_id(agent_id)
+    require_active_session(
+        draft_agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return _get_draft_configuration(agent_id, tenant_id)
+
+
+def _get_draft_configuration(agent_id: int, tenant_id: str) -> Dict[str, Any]:
+    """Load the config-owned projection for an authorized draft session."""
     try:
         agent = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
     except ValueError as exc:
         if str(exc) != "agent not found":
             raise
-        raise Nl2AgentDraftNotFoundError() from exc
-    if (
-        not agent
-        or not _is_draft_agent_name(agent.get("name") or "")
-        or str(agent.get("created_by") or "") != str(user_id)
-    ):
-        raise Nl2AgentDraftNotFoundError()
+        raise Nl2AgentOperationError(
+            "NL2AGENT draft configuration is unavailable for an active session."
+        ) from exc
     return agent
 
 
@@ -344,26 +349,24 @@ def _require_active_run_session(
     conversation_id: Optional[int],
     tenant_id: str,
     user_id: str,
-) -> None:
+) -> Dict[str, Any]:
     """Require one active owner-scoped session and its live Conversation."""
     if not isinstance(conversation_id, int) or conversation_id <= 0:
         raise Nl2AgentValidationError(
             "A positive conversation_id is required for an NL2AGENT run."
         )
-    session = get_nl2agent_session_by_conversation(
-        tenant_id,
-        user_id,
-        conversation_id,
-        status=NL2AGENT_SESSION_ACTIVE,
+    session = require_active_session(
+        draft_agent_id=draft_agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
     )
     if (
-        session is None
-        or session.get("status") != NL2AGENT_SESSION_ACTIVE
-        or int(session.get("draft_agent_id") or 0) != draft_agent_id
-        or int(session.get("conversation_id") or 0) != conversation_id
+        int(session.get("draft_agent_id") or 0) != draft_agent_id
         or not get_conversation(conversation_id, user_id=user_id)
     ):
         raise Nl2AgentDraftNotFoundError()
+    return session
 
 
 def _owned_draft_reader(user_id: str):
@@ -825,11 +828,26 @@ def validate_nl2agent_run_context(
     conversation_id: Optional[int],
     tenant_id: str,
     user_id: str,
-) -> None:
+) -> int:
     """Authorize the runner, draft owner, and Conversation before any run effect."""
+    session = _require_active_run_session(
+        draft_agent_id=draft_agent_id,
+        conversation_id=conversation_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    persisted_runner_id = int(session.get("runner_agent_id") or 0)
+    if persisted_runner_id <= 0:
+        raise Nl2AgentOperationError(
+            "NL2AGENT runner is missing from the active session."
+        )
+    if runner_agent_id is not None and runner_agent_id != persisted_runner_id:
+        raise Nl2AgentValidationError(
+            "draft_agent_id is only valid when running the NL2AGENT builder."
+        )
     try:
         runner = search_agent_info_by_agent_id(
-            agent_id=runner_agent_id,
+            agent_id=persisted_runner_id,
             tenant_id=tenant_id,
         )
     except ValueError as exc:
@@ -840,17 +858,8 @@ def validate_nl2agent_run_context(
         raise Nl2AgentValidationError(
             "draft_agent_id is only valid when running the NL2AGENT builder."
         )
-    _get_owned_draft(
-        draft_agent_id,
-        tenant_id,
-        user_id=user_id,
-    )
-    _require_active_run_session(
-        draft_agent_id=draft_agent_id,
-        conversation_id=conversation_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    _get_draft_configuration(draft_agent_id, tenant_id)
+    return persisted_runner_id
 
 
 async def confirm_requirements_review(

@@ -34,6 +34,7 @@ class Nl2AgentSessionStartResponse(Nl2AgentResponse):
 
 
 class Nl2AgentSessionSummaryResponse(Nl2AgentResponse):
+    nl2agent_agent_id: int
     draft_agent_id: int
     conversation_id: int
     status: Literal["active", "completed", "abandoned"]

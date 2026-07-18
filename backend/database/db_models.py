@@ -547,6 +547,7 @@ class Nl2AgentSession(TableBase):
     )
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
     user_id = Column(String(100), nullable=False, doc="Owning user ID")
+    runner_agent_id = Column(Integer, nullable=True, doc="NL2AGENT runner agent ID")
     draft_agent_id = Column(Integer, nullable=False, doc="Draft agent ID")
     conversation_id = Column(Integer, nullable=False, doc="Conversation ID")
     status = Column(String(20), nullable=False, default="active", doc="Session lifecycle status")

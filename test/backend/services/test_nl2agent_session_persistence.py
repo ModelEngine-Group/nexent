@@ -344,6 +344,7 @@ async def test_start_session_creates_snapshot_in_draft_transaction():
     create_snapshot.assert_called_once_with(
         tenant_id="tenant_1",
         user_id="user_1",
+        runner_agent_id=101,
         draft_agent_id=202,
         conversation_id=902,
         workflow_schema_version=2,

@@ -37,6 +37,7 @@ def test_create_session_uses_caller_transaction(monkeypatch):
     result = nl2agent_session_db.create_nl2agent_session(
         tenant_id="tenant-a",
         user_id="user-a",
+        runner_agent_id=7,
         draft_agent_id=11,
         conversation_id=22,
         workflow_schema_version=2,
@@ -51,6 +52,7 @@ def test_create_session_uses_caller_transaction(monkeypatch):
         "workflow_revision": 0,
     }
     session.add.assert_called_once()
+    assert session.add.call_args.args[0].runner_agent_id == 7
     session.flush.assert_called_once()
     session.execute.assert_called_once()
     assert "DO UPDATE" in str(session.execute.call_args.args[0])

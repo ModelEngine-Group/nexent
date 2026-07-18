@@ -4048,9 +4048,11 @@ async def test_run_agent_stream_processes_requirement_revisions_before_generatio
     mock_process_requirements = MagicMock(
         side_effect=lambda **kwargs: events.append("requirements")
     )
-    mock_validate_context = MagicMock(
-        side_effect=lambda **kwargs: events.append("authorization")
-    )
+    def validate_context(**kwargs):
+        events.append("authorization")
+        return 101
+
+    mock_validate_context = MagicMock(side_effect=validate_context)
     nl2agent_service_module = types.ModuleType("services.nl2agent_service")
     nl2agent_service_module.validate_nl2agent_run_context = mock_validate_context
     nl2agent_service_module.process_requirements_revision_text = (
@@ -4083,13 +4085,14 @@ async def test_run_agent_stream_processes_requirement_revisions_before_generatio
         user_id="user_1",
     )
     mock_process_requirements.assert_called_once_with(
-        runner_agent_id=1,
+        runner_agent_id=101,
         draft_agent_id=202,
         tenant_id="tenant_1",
         user_id="user_1",
         text="change the expected output",
     )
     assert events[:3] == ["authorization", "requirements", "generation"]
+    assert mock_agent_request.agent_id == 101
 
 
 @pytest.mark.asyncio

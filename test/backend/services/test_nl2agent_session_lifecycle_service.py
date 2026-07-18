@@ -11,6 +11,7 @@ from services import nl2agent_session_lifecycle_service as lifecycle
 
 def _record(**overrides):
     return {
+        "runner_agent_id": 101,
         "draft_agent_id": 202,
         "conversation_id": 902,
         "status": "active",
@@ -31,6 +32,7 @@ def test_resolve_active_session_uses_tenant_user_and_conversation(monkeypatch):
     )
 
     assert result["draft_agent_id"] == 202
+    assert result["nl2agent_agent_id"] == 101
     assert "workflow_state" not in result
     lookup.assert_called_once_with("tenant-a", "user-a", 902)
 
@@ -49,6 +51,43 @@ def test_resolve_active_session_does_not_disclose_missing_or_foreign_session(
             conversation_id=902,
             tenant_id="tenant-a",
             user_id="user-a",
+        )
+
+
+def test_require_active_session_authorizes_owner_and_conversation(monkeypatch):
+    lookup = MagicMock(return_value=_record())
+    monkeypatch.setattr(lifecycle, "get_nl2agent_session", lookup)
+
+    result = lifecycle.require_active_session(
+        draft_agent_id=202,
+        tenant_id="tenant-a",
+        user_id="user-a",
+        conversation_id=902,
+    )
+
+    assert result["runner_agent_id"] == 101
+    lookup.assert_called_once_with("tenant-a", 202, user_id="user-a")
+
+
+@pytest.mark.parametrize(
+    "record,conversation_id",
+    [(None, 902), (_record(status="completed"), 902), (_record(), 903)],
+)
+def test_require_active_session_rejects_missing_terminal_or_mismatched_session(
+    monkeypatch, record, conversation_id
+):
+    monkeypatch.setattr(
+        lifecycle,
+        "get_nl2agent_session",
+        MagicMock(return_value=record),
+    )
+
+    with pytest.raises(Nl2AgentDraftNotFoundError):
+        lifecycle.require_active_session(
+            draft_agent_id=202,
+            tenant_id="tenant-a",
+            user_id="user-a",
+            conversation_id=conversation_id,
         )
 
 
