@@ -4,7 +4,7 @@ Unit tests for ContextManager fingerprinting, normalization, and change detectio
 Covers the largest untested blocks in manager.py:
 - _normalize_for_fingerprint (lines 605-626)
 - _fingerprint (lines 631-638)
-- _stable_component_fingerprints (lines 645-658)
+- _stable_item_fingerprints
 - _change_reasons (lines 663-682)
 - _purpose_messages (lines 541-555)
 - _messages_from_memory (lines 562-567)
@@ -21,6 +21,7 @@ from loader import (
     AgentMemory, ChatMessage, MessageRole, SystemPromptStep,
     SummaryTaskStep, extract_message_text, message_role,
 )
+from sdk.nexent.core.agents.context import ContextItemInput
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -182,35 +183,35 @@ class TestChangeReasons:
     def test_no_change_when_fingerprint_matches(self):
         cm = ContextManager()
         cm._previous_stable_fingerprint = "abc"
-        cm._previous_stable_components = {}
+        cm._previous_stable_items = {}
         reasons = cm._change_reasons("abc", {})
         assert reasons == []
 
     def test_tool_schema_version_change(self):
         cm = ContextManager()
         cm._previous_stable_fingerprint = "old"
-        cm._previous_stable_components = {"tools": "fp1"}
+        cm._previous_stable_items = {"tools": "fp1"}
         reasons = cm._change_reasons("new", {"tools": "fp2"})
         assert "tool_schema_version" in reasons
 
     def test_context_purpose_change(self):
         cm = ContextManager()
         cm._previous_stable_fingerprint = "old"
-        cm._previous_stable_components = {"purpose": "fp1"}
+        cm._previous_stable_items = {"purpose": "fp1"}
         reasons = cm._change_reasons("new", {"purpose": "fp2"})
         assert "context_purpose" in reasons
 
     def test_system_prompt_version_change(self):
         cm = ContextManager()
         cm._previous_stable_fingerprint = "old"
-        cm._previous_stable_components = {"system_prompt": "fp1"}
+        cm._previous_stable_items = {"system_prompt": "fp1"}
         reasons = cm._change_reasons("new", {"system_prompt": "fp2"})
         assert "system_prompt_version" in reasons
 
     def test_unexpected_nondeterminism_when_only_fingerprint_diffs(self):
         cm = ContextManager()
         cm._previous_stable_fingerprint = "old"
-        cm._previous_stable_components = {"tools": "same_fp"}
+        cm._previous_stable_items = {"tools": "same_fp"}
         reasons = cm._change_reasons("new", {"tools": "same_fp"})
         assert reasons == ["unexpected_nondeterminism"]
 
@@ -362,42 +363,36 @@ class TestEstimateToolsTokens:
         assert result > 0
 
 
-# ── _stable_component_fingerprints ───────────────────────────
+# ── _stable_item_fingerprints ────────────────────────────────
 
-class TestStableComponentFingerprints:
-    def test_no_components(self):
+class TestStableItemFingerprints:
+    def test_no_items(self):
         cm = ContextManager()
-        result = cm._stable_component_fingerprints(components=[])
+        result = cm._stable_item_fingerprints(items=[])
         assert result == {}
 
-    def test_component_with_system_messages(self):
+    def test_item_with_system_message(self):
         cm = ContextManager()
-        comp = MockComponent(component_type="system_prompt", content="sys text")
-        result = cm._stable_component_fingerprints(components=[comp])
-        assert "system_prompt" in result
-        assert isinstance(result["system_prompt"], str)
+        item = ContextItemInput(id="system:policy", type="system_prompt", content={"text": "sys text"})
+        result = cm._stable_item_fingerprints(items=[item])
+        assert "system:policy" in result
+        assert isinstance(result["system:policy"], str)
 
-    def test_component_without_stable_messages_skipped(self):
-        class DynComp:
-            component_type = "dynamic"
-            def to_messages(self):
-                return [{"role": "user", "content": "dynamic"}]
+    def test_item_without_stable_message_skipped(self):
         cm = ContextManager()
-        result = cm._stable_component_fingerprints(components=[DynComp()])
-        assert "dynamic" not in result
+        item = ContextItemInput(
+            id="history:dynamic",
+            type="history",
+            content={"role": "user", "text": "dynamic"},
+        )
+        result = cm._stable_item_fingerprints(items=[item])
+        assert "history:dynamic" not in result
 
     def test_purpose_stable_included(self):
         cm = ContextManager()
         purpose_stable = [{"role": "system", "content": "purpose"}]
-        result = cm._stable_component_fingerprints(purpose_stable=purpose_stable)
+        result = cm._stable_item_fingerprints(purpose_stable=purpose_stable)
         assert "purpose" in result
-
-    def test_component_without_to_messages_skipped(self):
-        class NoMsgComp:
-            component_type = "nomsg"
-        cm = ContextManager()
-        result = cm._stable_component_fingerprints(components=[NoMsgComp()])
-        assert "nomsg" not in result
 
 
 # ── build_compressed_snapshot ────────────────────────────────

@@ -4,7 +4,8 @@ from __future__ import annotations
 from threading import Event
 from unittest.mock import MagicMock, patch
 
-from sdk.nexent.core.agents.agent_model import AgentConfig, ModelConfig, SystemPromptComponent
+from sdk.nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from sdk.nexent.core.agents.context import ContextItemInput
 from sdk.nexent.core.agents.nexent_agent import NexentAgent
 from sdk.nexent.core.agents.summary_config import ContextManagerConfig
 from sdk.nexent.core.utils.observer import MessageObserver
@@ -25,16 +26,16 @@ def _factory() -> NexentAgent:
     )
 
 
-def test_create_single_agent_injects_managed_runtime_and_registers_components():
+def test_create_single_agent_injects_managed_runtime_and_run_items():
     factory = _factory()
-    component = SystemPromptComponent(content="stable policy")
+    item = ContextItemInput(id="system:policy", type="system_prompt", content={"text": "stable policy"})
     config = AgentConfig(
         name="agent",
         description="desc",
         model_name="main",
         tools=[],
         context_manager_config=ContextManagerConfig(enabled=True, token_threshold=1000),
-        context_components=[component],
+        context_items=[item],
     )
     captured = {}
 
@@ -48,8 +49,8 @@ def test_create_single_agent_injects_managed_runtime_and_registers_components():
 
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
-    assert runtime.components == [component]
-    assert runtime.context_manager.get_registered_components() == []
+    assert runtime.items == [item]
+    assert runtime.context_manager.get_registered_items() == []
 
 
 def test_create_single_agent_keeps_managed_runtime_when_compression_disabled():

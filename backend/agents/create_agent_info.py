@@ -48,9 +48,9 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.context_utils import build_context_components
+from utils.context_utils import build_context_inputs
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
-from consts.model import AgentToolParamsRequest, ToolParamsRequest
+from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
@@ -917,7 +917,7 @@ async def create_agent_config(
         model_info.get("model_name") if model_info else model_name,
     )
 
-    context_components = build_context_components(
+    context_items = build_context_inputs(
         duty=duty_prompt,
         constraint=constraint_prompt,
         few_shots=few_shots_prompt,
@@ -939,14 +939,13 @@ async def create_agent_config(
     logger.info(
         f"Agent {agent_id} context assembly: "
         f"skills_count={len(skills)}, "
-        f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
+        f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
-        strategy="full",
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
@@ -964,7 +963,7 @@ async def create_agent_config(
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
-        context_components=context_components,
+        context_items=context_items,
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),

@@ -11,26 +11,31 @@ from ...monitor import (
     set_monitoring_capacity_snapshot,
     set_monitoring_safe_input_budget_snapshot,
 )
-from .agent_model import AgentRunInfo
+from .agent_model import AgentHistory, AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
+
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
 
 
-def _get_authorized_context_components(agent_run_info: AgentRunInfo):
+def _get_authorized_context_items(agent_run_info: AgentRunInfo):
     """Return the run snapshot, falling back for direct SDK callers."""
     context_input = getattr(agent_run_info, "context_input", None)
     if context_input is not None:
-        return context_input.components
-    return getattr(agent_run_info.agent_config, "context_components", None)
+        return tuple(item for item in context_input.items if item.type.value != "history")
+    return getattr(agent_run_info.agent_config, "context_items", None)
 
 
 def _get_authorized_history(agent_run_info: AgentRunInfo):
     """Return the run snapshot, falling back for direct SDK callers."""
     context_input = getattr(agent_run_info, "context_input", None)
     if context_input is not None:
-        return context_input.history
+        return [
+            AgentHistory(role=item.content["role"], content=item.content["text"])
+            for item in context_input.items
+            if item.type.value == "history"
+        ]
     return agent_run_info.history
 
 
@@ -90,13 +95,13 @@ def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo
         )
 
     context_runtime.context_manager = context_manager
-    context_components = _get_authorized_context_components(agent_run_info)
-    replace_runtime_components = getattr(context_runtime, "replace_components", None)
-    if callable(replace_runtime_components):
-        replace_runtime_components(context_components or [])
+    context_items = _get_authorized_context_items(agent_run_info)
+    replace_runtime_items = getattr(context_runtime, "replace_items", None)
+    if callable(replace_runtime_items):
+        replace_runtime_items(context_items or [])
     else:
         raise RuntimeError(
-            "Managed context runtime does not support run-local component replacement"
+            "Managed context runtime does not support run-local item replacement"
         )
     agent.context_manager = context_manager
 

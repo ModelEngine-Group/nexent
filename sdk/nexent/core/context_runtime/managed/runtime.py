@@ -13,21 +13,21 @@ from ..contracts import FinalContext
 class ManagedContextRuntime:
     """Adapter for the ContextManager-owned managed path."""
 
-    def __init__(self, context_manager: Any, components: Sequence[Any] | None = None):
+    def __init__(self, context_manager: Any, items: Sequence[Any] | None = None):
         self.context_manager = context_manager
-        self.components = list(components or ())
+        self.items = list(items or ())
         self._run_context = None
 
-    def replace_components(self, components: Sequence[Any] | None) -> None:
-        """Replace this runtime's run-local component snapshot."""
-        self.components = list(components or ())
+    def replace_items(self, items: Sequence[Any] | None) -> None:
+        """Replace this runtime's run-local fine-grained item snapshot."""
+        self.items = list(items or ())
         self._run_context = None
 
     def prepare_run(self, *, memory: Any, fallback_system_prompt: str) -> None:
         self._run_context = self.context_manager.prepare_run_context(
             memory=memory,
             fallback_system_prompt=fallback_system_prompt,
-            components=self.components,
+            items=self.items,
         )
 
     def _ensure_run_context(self, memory: Any) -> Any:
@@ -35,7 +35,7 @@ class ManagedContextRuntime:
             self._run_context = self.context_manager.prepare_run_context(
                 memory=memory,
                 fallback_system_prompt="",
-                components=self.components,
+                items=self.items,
             )
         return self._run_context
 

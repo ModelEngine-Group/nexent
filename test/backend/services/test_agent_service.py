@@ -63,13 +63,15 @@ context_input_mock = types.ModuleType("nexent.core.agents.context_input")
 
 
 class MockContextInput:
-    def __init__(self, components=(), history=()):
-        self.components = components
-        self.history = history
+    def __init__(self, items=()):
+        self.items = items
 
 
 context_input_mock.ContextInput = MockContextInput
 sys.modules['nexent.core.agents.context_input'] = context_input_mock
+context_items_mock = types.ModuleType("nexent.core.agents.context")
+context_items_mock.ContextItemInput = MagicMock()
+sys.modules['nexent.core.agents.context'] = context_items_mock
 
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
@@ -4252,7 +4254,7 @@ async def test_prepare_agent_run(
     """Test prepare_agent_run function."""
     # Setup
     mock_run_info = MagicMock()
-    mock_run_info.agent_config.context_components = []
+    mock_run_info.agent_config.context_items = []
     mock_run_info.agent_config.context_manager_config.enabled = False
     mock_run_info.history = []
     mock_create_run_info.return_value = mock_run_info
@@ -4288,8 +4290,7 @@ async def test_prepare_agent_run(
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
-    assert mock_run_info.context_input.components == ()
-    assert mock_run_info.context_input.history == ()
+    assert mock_run_info.context_input.items == ()
 
 
 @patch('backend.services.agent_service.submit')

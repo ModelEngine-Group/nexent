@@ -3,7 +3,7 @@
 Shared utilities for building and running nexent agents in benchmarks.
 
 Provides:
-1. Context-component and non-context prompt-template construction
+1. Fine-grained context-item and prompt-template construction
 2. AgentRunInfo construction (standard and custom-prompt variants)
 3. Message-stream processing and statistics
 """
@@ -17,7 +17,7 @@ from typing import Callable, Optional
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 
 # ============ Environment Setup ============
@@ -26,19 +26,19 @@ from dotenv import load_dotenv
 # injects them into sys.path automatically — no manual path manipulation needed.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
-from utils.context_utils import build_context_components
-from utils.prompt_template_utils import get_agent_prompt_template
+from utils.context_utils import build_context_inputs  # noqa: E402
+from utils.prompt_template_utils import get_agent_prompt_template  # noqa: E402
 
-from nexent.core.agents.agent_context import ContextManagerConfig
-from nexent.core.agents.agent_model import (
+from nexent.core.agents.agent_context import ContextManagerConfig  # noqa: E402
+from nexent.core.agents.agent_model import (  # noqa: E402
     AgentConfig,
     AgentHistory,
     AgentRunInfo,
     ModelConfig,
-    SystemPromptComponent,
 )
-from nexent.core.agents.run_agent import agent_run
-from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.context import ContextItemInput  # noqa: E402
+from nexent.core.agents.run_agent import agent_run  # noqa: E402
+from nexent.core.utils.observer import MessageObserver  # noqa: E402
 
 
 logging.getLogger("smolagents").setLevel(logging.WARNING)
@@ -168,7 +168,7 @@ def build_agent_run_info(
         max_tokens=max_tokens,
     )
 
-    context_components = build_context_components(
+    context_items = build_context_inputs(
         duty=duty,
         constraint=constraint,
         few_shots=few_shots,
@@ -185,7 +185,9 @@ def build_agent_run_info(
         knowledge_base_summary="",
     )
     if fallback_prompt and not any((duty_prompt, constraint_prompt, few_shots_prompt)):
-        context_components = [SystemPromptComponent(content=fallback_prompt)]
+        context_items = [ContextItemInput(
+            id="system:fallback", type="system_prompt", content={"text": fallback_prompt}, required=True
+        )]
 
     prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
 
@@ -202,7 +204,7 @@ def build_agent_run_info(
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
         context_manager_config=cm_config,
-        context_components=context_components,
+        context_items=context_items,
     )
 
 
@@ -233,7 +235,7 @@ def build_agent_run_info_with_custom_prompt(
     context_manager_config: Optional[ContextManagerConfig] = None,
 ) -> AgentRunInfo:
     """
-    Build AgentRunInfo with a custom system component.
+    Build AgentRunInfo with a custom system context item.
 
     Args:
         query: User query
@@ -276,7 +278,9 @@ def build_agent_run_info_with_custom_prompt(
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
         context_manager_config=context_manager_config or ContextManagerConfig(enabled=False),
-        context_components=[SystemPromptComponent(content=system_prompt)],
+        context_items=[ContextItemInput(
+            id="system:custom", type="system_prompt", content={"text": system_prompt}, required=True
+        )],
     )
 
     import threading

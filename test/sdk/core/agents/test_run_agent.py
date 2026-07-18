@@ -815,56 +815,58 @@ def test_mount_conversation_context_manager_updates_runtime_authority(basic_agen
     conversation_context_manager = MagicMock(name="conversation_context_manager")
     context_runtime = types.SimpleNamespace(
         context_manager=factory_context_manager,
-        replace_components=MagicMock(name="replace_components"),
+        replace_items=MagicMock(name="replace_items"),
     )
     agent = types.SimpleNamespace(
         context_runtime=context_runtime,
         context_manager=factory_context_manager,
     )
-    components = [MagicMock(name="component")]
+    items = [MagicMock(name="item")]
     basic_agent_run_info.context_manager = conversation_context_manager
     basic_agent_run_info.context_input = None
-    basic_agent_run_info.agent_config.context_components = components
+    basic_agent_run_info.agent_config.context_items = items
 
     run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
 
-    conversation_context_manager.replace_components.assert_not_called()
-    context_runtime.replace_components.assert_called_once_with(components)
+    conversation_context_manager.replace_items.assert_not_called()
+    context_runtime.replace_items.assert_called_once_with(items)
     assert agent.context_runtime.context_manager is conversation_context_manager
     assert agent.context_manager is conversation_context_manager
 
 
 def test_mount_context_manager_uses_authorized_snapshot(basic_agent_run_info):
-    """Run-local authorized components override mutable AgentConfig data."""
+    """Run-local authorized items override mutable AgentConfig data."""
     context_manager = MagicMock(name="context_manager")
     context_runtime = types.SimpleNamespace(
         context_manager=MagicMock(),
-        replace_components=MagicMock(),
+        replace_items=MagicMock(),
     )
     agent = types.SimpleNamespace(context_runtime=context_runtime, context_manager=None)
-    authorized_component = MagicMock(name="authorized_component")
+    authorized_item = types.SimpleNamespace(type=types.SimpleNamespace(value="system_prompt"))
     basic_agent_run_info.context_manager = context_manager
     basic_agent_run_info.context_input = types.SimpleNamespace(
-        components=(authorized_component,),
-        history=(),
+        items=(authorized_item,),
     )
-    basic_agent_run_info.agent_config.context_components = [MagicMock(name="stale_component")]
+    basic_agent_run_info.agent_config.context_items = [MagicMock(name="stale_item")]
 
     run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
 
-    context_runtime.replace_components.assert_called_once_with((authorized_component,))
+    context_runtime.replace_items.assert_called_once_with((authorized_item,))
 
 
 def test_authorized_history_snapshot_overrides_mutable_run_history(basic_agent_run_info):
     """History consumed by the SDK must come from the authorized run snapshot."""
-    authorized_history = MagicMock(name="authorized_history")
+    authorized_history = types.SimpleNamespace(
+        type=types.SimpleNamespace(value="history"),
+        content={"role": "user", "text": "authorized history"},
+    )
     basic_agent_run_info.context_input = types.SimpleNamespace(
-        components=(),
-        history=(authorized_history,),
+        items=(authorized_history,),
     )
     basic_agent_run_info.history = [MagicMock(name="stale_history")]
 
-    assert run_agent._get_authorized_history(basic_agent_run_info) == (authorized_history,)
+    history = run_agent._get_authorized_history(basic_agent_run_info)
+    assert [(entry.role, entry.content) for entry in history] == [("user", "authorized history")]
 
 
 def test_authorized_history_keeps_direct_sdk_compatibility(basic_agent_run_info):
@@ -888,7 +890,7 @@ def test_mount_conversation_context_manager_rejects_runtime_without_manager(basi
     with pytest.raises(RuntimeError, match="managed context runtime"):
         run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
 
-    conversation_context_manager.replace_components.assert_not_called()
+    conversation_context_manager.replace_items.assert_not_called()
 
 
 @pytest.mark.asyncio

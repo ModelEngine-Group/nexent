@@ -1,6 +1,6 @@
-import json
 import functools
 import inspect
+import json
 import logging
 import re
 import time
@@ -12,13 +12,13 @@ from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
-
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
-from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
+from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -462,7 +462,7 @@ class NexentAgent:
             )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                components=getattr(agent_config, "context_components", None) or [],
+                items=getattr(agent_config, "context_items", None) or [],
             )
 
             # Create the agent

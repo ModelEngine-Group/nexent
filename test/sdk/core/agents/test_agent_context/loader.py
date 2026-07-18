@@ -201,68 +201,9 @@ def _register_stub_packages():
         m.__path__ = []
         sys.modules[_CONTEXT_RUNTIME_PACKAGE] = m
 
-    # Stub for agent_model classes used by manager.py (lazy imports).
-    # These classes are referenced inside manager._get_strategy() and
-    # manager.build_system_prompt(). Create minimal stubs so that the
-    # test harness can exercise those code paths.
+    # Stub agent_model because the isolated compression tests do not load the
+    # production agent DTO graph.
     _agent_model_stub = ModuleType("sdk.nexent.core.agents.agent_model")
-
-    class _BaseStrategy:
-        """Minimal strategy base that passes through all components."""
-        def select_components(self, components, budget, component_budgets):
-            return components
-
-    class _FullStrategy(_BaseStrategy):
-        @staticmethod
-        def get_strategy_name():
-            return "full"
-
-    class _TokenBudgetStrategy(_BaseStrategy):
-        @staticmethod
-        def get_strategy_name():
-            return "token_budget"
-
-    class _BufferedStrategy(_BaseStrategy):
-        def __init__(self, buffer_size=5):
-            self.buffer_size = buffer_size
-
-        @staticmethod
-        def get_strategy_name():
-            return "buffered"
-
-    class _PriorityWeightedStrategy(_BaseStrategy):
-        def __init__(self, relevance_threshold=0.5):
-            self.relevance_threshold = relevance_threshold
-
-        @staticmethod
-        def get_strategy_name():
-            return "priority"
-
-    _agent_model_stub.FullStrategy             = _FullStrategy
-    _agent_model_stub.TokenBudgetStrategy      = _TokenBudgetStrategy
-    _agent_model_stub.BufferedStrategy         = _BufferedStrategy
-    _agent_model_stub.PriorityWeightedStrategy = _PriorityWeightedStrategy
-    _agent_model_stub.ContextStrategy          = _BaseStrategy
-
-    # ContextComponent stubs used by build_system_prompt / tests
-    class _ContextComponent:
-        component_type: str = ""
-        priority: int = 10
-        token_estimate: int = 0
-        _content: str = ""
-        metadata: dict = {}
-
-    class _SystemPromptComponent(_ContextComponent):
-        pass
-
-    _agent_model_stub.ContextComponent      = _ContextComponent
-    _agent_model_stub.SystemPromptComponent = _SystemPromptComponent
-    _agent_model_stub.ToolsComponent         = _ContextComponent
-    _agent_model_stub.SkillsComponent        = _ContextComponent
-    _agent_model_stub.MemoryComponent        = _ContextComponent
-    _agent_model_stub.KnowledgeBaseComponent = _ContextComponent
-    _agent_model_stub.ManagedAgentsComponent = _ContextComponent
-    _agent_model_stub.ExternalAgentsComponent = _ContextComponent
 
     sys.modules["sdk.nexent.core.agents.agent_model"] = _agent_model_stub
 
@@ -411,21 +352,3 @@ from sdk.nexent.core.agents.agent_context.stats_export import (
 # module-level attributes stay valid for our own unit tests, which
 # never touch sys.modules['smolagents.*'] at runtime.
 restore_real_smolagents()
-
-# Re-export agent_model types (from stubs registered above)
-_agent_model_mod = sys.modules["sdk.nexent.core.agents.agent_model"]
-
-ContextComponent         = _agent_model_mod.ContextComponent
-SystemPromptComponent    = _agent_model_mod.SystemPromptComponent
-ToolsComponent           = _agent_model_mod.ToolsComponent
-SkillsComponent          = _agent_model_mod.SkillsComponent
-MemoryComponent          = _agent_model_mod.MemoryComponent
-KnowledgeBaseComponent   = _agent_model_mod.KnowledgeBaseComponent
-ManagedAgentsComponent   = _agent_model_mod.ManagedAgentsComponent
-ExternalAgentsComponent  = _agent_model_mod.ExternalAgentsComponent
-
-ContextStrategy          = _agent_model_mod.ContextStrategy
-FullStrategy             = _agent_model_mod.FullStrategy
-TokenBudgetStrategy      = _agent_model_mod.TokenBudgetStrategy
-BufferedStrategy         = _agent_model_mod.BufferedStrategy
-PriorityWeightedStrategy = _agent_model_mod.PriorityWeightedStrategy

@@ -1,8 +1,7 @@
 """ContextManager: the main orchestrator for agent context compression and managed context assembly.
 
-Owns sub-component instances (StepRenderer, LLMSummary, PreviousCompressor, CurrentCompressor)
-and delegates compression/rendering to them. W3 managed context and component management
-remain directly on ContextManager.
+Owns compression collaborators and delegates history compression/rendering to
+them. Fine-grained item assembly remains directly on ContextManager.
 """
 
 import hashlib
@@ -11,15 +10,13 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
 
+
 if TYPE_CHECKING:
-    from ..agent_model import ContextComponent, ContextStrategy
-    from ...context_runtime.contracts import ContextEvidence, FinalContext
+    from ...context_runtime.contracts import FinalContext
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
-from smolagents.models import ChatMessage, MessageRole
+from smolagents.models import ChatMessage
 
-from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from ..summary_config import ContextManagerConfig, StrategyType
 from ...utils.token_estimation import (
     estimate_tokens,
     estimate_tokens_for_steps,
@@ -27,30 +24,33 @@ from ...utils.token_estimation import (
     msg_char_count,
     msg_token_count,
 )
-
+from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
+from ..summary_config import ContextManagerConfig
 from .budget import (
-    action_content,
-    action_fingerprint,
     extract_message_text,
     extract_pairs,
     is_curr_cache_valid,
     is_prev_cache_valid,
     message_role,
-    pair_fingerprint,
-    trim_actions_to_budget,
-    trim_pairs_to_budget,
 )
 from .current_compression import CurrentCompressor
 from .llm_summary import LLMSummary
 from .previous_compression import PreviousCompressor
 from .stats_export import (
     export_summary as _export_summary,
+)
+from .stats_export import (
     get_all_compression_stats as _get_all_compression_stats,
+)
+from .stats_export import (
     get_step_compression_stats as _get_step_compression_stats,
+)
+from .stats_export import (
     get_token_counts as _get_token_counts,
 )
 from .step_renderer import StepRenderer
 from .summary_step import ManagedRunContext, SummaryTaskStep
+
 
 logger = logging.getLogger("agent_context")
 
@@ -74,16 +74,16 @@ class ContextManager:
         self._last_compressed_token_count: Optional[int] = None
 
         self._previous_stable_fingerprint: Optional[str] = None
-        self._previous_stable_components: Dict[str, str] = {}
+        self._previous_stable_items: Dict[str, str] = {}
 
         if self.config.max_summary_input_tokens <= 0:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
             self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
 
-        self._components: List = []
+        self._items: List = []
 
-        # Compose sub-components
+        # Compose compression collaborators.
         self._renderer = StepRenderer(self.config)
         self._llm = LLMSummary(self.config, self._renderer)
         self._prev_compressor = PreviousCompressor(self.config, self._renderer, self._llm)
@@ -425,17 +425,18 @@ class ContextManager:
         self,
         memory: AgentMemory,
         fallback_system_prompt: str,
-        components: Optional[Sequence[Any]] = None,
+        items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
         from smolagents.memory import SystemPromptStep
 
-        component_messages = self.build_context_messages(components=components)
+        normalized_items = self._ordered_items(self._item_source(items))
+        item_messages = self.build_context_messages(items=normalized_items)
         stable_messages = [
-            message for message in component_messages
+            message for message in item_messages
             if message_role(message) in {"system", "developer"}
         ]
         dynamic_messages = [
-            message for message in component_messages
+            message for message in item_messages
             if message_role(message) not in {"system", "developer"}
         ]
 
@@ -445,17 +446,15 @@ class ContextManager:
         memory.system_prompt = SystemPromptStep(
             system_prompt=stable_text or fallback_system_prompt
         )
-        source_components = tuple(self._component_source(components))
-        selected_component_types = tuple(
-            str(getattr(component, "component_type", "unknown"))
-            for component in source_components
+        selected_item_types = tuple(
+            item.type.value for item in normalized_items
         )
         return ManagedRunContext(
-            component_messages=tuple(component_messages),
+            item_messages=tuple(item_messages),
             stable_messages=tuple(stable_messages),
             dynamic_messages=tuple(dynamic_messages),
-            selected_component_types=selected_component_types,
-            components=source_components,
+            selected_item_types=selected_item_types,
+            items=tuple(normalized_items),
         )
 
     def assemble_final_context(
@@ -506,15 +505,15 @@ class ContextManager:
         self._last_compressed_token_count = self._msg_token_count(messages) + self._estimate_tools_tokens(tools)
 
         fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
-        component_fingerprints = self._stable_component_fingerprints(
+        item_fingerprints = self._stable_item_fingerprints(
             purpose_stable,
-            components=run_context.components,
+            items=run_context.items,
         )
         if tools:
-            component_fingerprints["tools"] = self._fingerprint(tools)
-        reasons = self._change_reasons(fingerprint, component_fingerprints)
+            item_fingerprints["tools"] = self._fingerprint(tools)
+        reasons = self._change_reasons(fingerprint, item_fingerprints)
         self._previous_stable_fingerprint = fingerprint
-        self._previous_stable_components = component_fingerprints
+        self._previous_stable_items = item_fingerprints
 
         from ...context_runtime.contracts import ContextEvidence, FinalContext
 
@@ -522,7 +521,8 @@ class ContextManager:
             messages=messages,
             tools=tools,
             evidence=ContextEvidence(
-                selected_component_types=run_context.selected_component_types,
+                selected_item_ids=tuple(item.id for item in run_context.items),
+                selected_item_types=run_context.selected_item_types,
                 stable_message_count=len(stable_messages),
                 dynamic_message_count=len(messages) - len(stable_messages),
                 compression_records=tuple(self._step_local_log or ()),
@@ -637,137 +637,95 @@ class ContextManager:
         )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-    def _stable_component_fingerprints(
+    def _stable_item_fingerprints(
         self,
         purpose_stable: Sequence[Any] = (),
-        components: Optional[Sequence[Any]] = None,
+        items: Optional[Sequence[Any]] = None,
     ) -> Dict[str, str]:
         result: Dict[str, str] = {}
-        for component in self._component_source(components):
-            to_messages = getattr(component, "to_messages", None)
-            if not callable(to_messages):
-                continue
-            stable = [
-                message for message in to_messages()
-                if message_role(message) in {"system", "developer"}
-            ]
+        from ..context import ContextItemRenderer
+        for item in self._item_source(items):
+            stable = [message for message in ContextItemRenderer().render([item])
+                      if message_role(message) in {"system", "developer"}]
             if stable:
-                result[str(getattr(component, "component_type", "unknown"))] = self._fingerprint(stable)
+                result[item.id] = self._fingerprint(stable)
         if purpose_stable:
             result["purpose"] = self._fingerprint(purpose_stable)
         return result
 
     def _change_reasons(
-        self, current: str, component_fingerprints: Dict[str, str]
+        self, current: str, item_fingerprints: Dict[str, str]
     ) -> List[str]:
         if self._previous_stable_fingerprint is None:
             return ["initial_request"]
         if self._previous_stable_fingerprint == current:
             return []
         reasons: List[str] = []
-        if self._previous_stable_components.get("tools") != component_fingerprints.get("tools"):
+        if self._previous_stable_items.get("tools") != item_fingerprints.get("tools"):
             reasons.append("tool_schema_version")
-        if self._previous_stable_components.get("purpose") != component_fingerprints.get("purpose"):
+        if self._previous_stable_items.get("purpose") != item_fingerprints.get("purpose"):
             reasons.append("context_purpose")
-        previous_components = {
-            key: value for key, value in self._previous_stable_components.items()
+        previous_items = {
+            key: value for key, value in self._previous_stable_items.items()
             if key not in {"tools", "purpose"}
         }
-        current_components = {
-            key: value for key, value in component_fingerprints.items()
+        current_items = {
+            key: value for key, value in item_fingerprints.items()
             if key not in {"tools", "purpose"}
         }
-        if previous_components != current_components:
+        if previous_items != current_items:
             reasons.append("system_prompt_version")
         return reasons or ["unexpected_nondeterminism"]
 
-    def _component_source(self, components: Optional[Sequence[Any]]) -> List[Any]:
-        return list(components) if components is not None else self.get_registered_components()
+    def _item_source(self, items: Optional[Sequence[Any]]) -> List[Any]:
+        from ..context.models import ContextItem, normalize_context_inputs
+        source = list(items) if items is not None else self.get_registered_items()
+        if not source:
+            return source
+        if all(isinstance(item, ContextItem) for item in source):
+            return source
+        if any(isinstance(item, ContextItem) for item in source):
+            raise TypeError("context items cannot mix public inputs and normalized items")
+        return normalize_context_inputs(source)
+
+    @staticmethod
+    def _ordered_items(items: Sequence[Any]) -> List[Any]:
+        """Preserve the Phase 2 full-strategy priority order without pruning."""
+        return sorted(items, key=lambda item: item.priority, reverse=True)
 
     # ============================================================
-    #  Context Component Management
+    #  Context Item Management
     # ============================================================
 
-    def register_component(self, component) -> None:
+    def register_item(self, item) -> None:
         with self._lock:
-            if component.token_estimate == 0:
-                component.token_estimate = component.estimate_tokens(
-                    self.config.chars_per_token
-                )
-            self._components.append(component)
+            current = self._item_source([item])[0]
+            if any(existing.id == current.id for existing in self._items):
+                raise ValueError(f"duplicate context item id: {current.id}")
+            self._items.append(current)
 
-    def clear_components(self) -> None:
+    def clear_items(self) -> None:
         with self._lock:
-            self._components.clear()
+            self._items.clear()
 
-    def get_registered_components(self) -> List:
+    def get_registered_items(self) -> List:
         with self._lock:
-            return list(self._components)
+            return list(self._items)
 
-    def replace_components(self, components: List) -> None:
+    def replace_items(self, items: List) -> None:
+        normalized = self._item_source(items)
         with self._lock:
-            self._components.clear()
-            for component in components:
-                if component.token_estimate == 0:
-                    component.token_estimate = component.estimate_tokens(
-                        self.config.chars_per_token
-                    )
-                self._components.append(component)
-
-    def _get_strategy(self):
-        from ..agent_model import (
-            FullStrategy, TokenBudgetStrategy, BufferedStrategy, PriorityWeightedStrategy
-        )
-        strategy_map = {
-            "full": FullStrategy,
-            "token_budget": TokenBudgetStrategy,
-            "buffered": BufferedStrategy,
-            "priority": PriorityWeightedStrategy,
-        }
-        strategy_class = strategy_map.get(self.config.strategy, FullStrategy)
-
-        if self.config.strategy == "buffered":
-            return strategy_class(buffer_size=self.config.buffer_size_per_component)
-        elif self.config.strategy == "priority":
-            return strategy_class(relevance_threshold=0.5)
-        return strategy_class()
+            self._items = normalized
 
     def build_context_messages(
         self,
-        token_budget: Optional[int] = None,
-        components: Optional[Sequence[Any]] = None,
+        items: Optional[Sequence[Any]] = None,
     ) -> List:
-        source_components = self._component_source(components)
-        if not source_components:
+        source_items = self._ordered_items(self._item_source(items))
+        if not source_items:
             return []
+        from ..context import ContextItemRenderer
+        return ContextItemRenderer().render(source_items)
 
-        from ..agent_model import SystemPromptComponent
-
-        budget = token_budget or self._calculate_component_budget()
-        strategy = self._get_strategy()
-        selected = strategy.select_components(
-            source_components, budget, self.config.component_budgets
-        )
-
-        messages = []
-        for comp in selected:
-            comp_messages = comp.to_messages()
-            for msg in comp_messages:
-                if not self._message_already_present(messages, msg):
-                    messages.append(msg)
-
-        return messages
-
-    def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
-        return self.build_context_messages(token_budget)
-
-    def _calculate_component_budget(self) -> int:
-        budgets = self.config.component_budgets
-        excluded = ["conversation_history"]
-        return sum(v for k, v in budgets.items() if k not in excluded)
-
-    def _message_already_present(self, messages: List, new_msg: dict) -> bool:
-        for existing in messages:
-            if existing.get("role") == new_msg.get("role") and existing.get("content") == new_msg.get("content"):
-                return True
-        return False
+    def build_system_prompt(self) -> List:
+        return self.build_context_messages()

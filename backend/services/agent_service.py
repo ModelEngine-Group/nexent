@@ -14,6 +14,7 @@ from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.agents.context_input import ContextInput
+from nexent.core.agents.context import ContextItemInput
 from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
@@ -38,7 +39,6 @@ from consts.model import (
     ExportAndImportDataFormat,
     MCPInfo,
     MessageRequest,
-    MessageUnit,
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
@@ -71,7 +71,7 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,
+    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -289,7 +289,7 @@ async def _process_skill_file_uploads(
                     absolute_path,
                     error_message,
                 )
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "[skill-file] failed to upload file file_name=%s absolute_path=%s",
                 file_name,
@@ -1069,9 +1069,7 @@ async def _stream_agent_chunks(
                     # loop is async but the DB operations are I/O-bound with network
                     # latency, synchronous writes here are acceptably fast and guarantee
                     # that each chunk is fully persisted before the next chunk arrives.
-                    old_len = len(current_unit["content"])
                     current_unit["content"] += chunk_content
-                    new_len = len(current_unit["content"])
                     update_unit_content(
                         current_unit["unit_id"],
                         current_unit["content"],
@@ -1263,7 +1261,7 @@ async def _stream_agent_chunks(
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
-            cleanup_task = asyncio.create_task(
+            asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
                     user_id=user_id
@@ -1797,7 +1795,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 tenant_id=tenant_id,
                 user_id=user_id
             )
-    except ValueError as e:
+    except ValueError:
         # Re-raise ValueError (circular dependency) as-is
         raise
     except Exception as e:
@@ -2715,6 +2713,23 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
+def _build_authorized_context_input(agent_run_info) -> ContextInput:
+    """Freeze configured context and authorized history into one item snapshot."""
+    history_items = tuple(
+        ContextItemInput(
+            id=f"history:{index}",
+            type="history",
+            content={"role": entry.role, "text": entry.content},
+            source=("conversation_history",),
+            priority=50,
+        )
+        for index, entry in enumerate(agent_run_info.history or ())
+    )
+    return ContextInput(
+        items=tuple(agent_run_info.agent_config.context_items or ()) + history_items,
+    )
+
+
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -2745,10 +2760,7 @@ async def prepare_agent_run(
         tool_params=agent_request.tool_params,
     )
 
-    agent_run_info.context_input = ContextInput(
-        components=tuple(agent_run_info.agent_config.context_components or ()),
-        history=tuple(agent_run_info.history or ()),
-    )
+    agent_run_info.context_input = _build_authorized_context_input(agent_run_info)
 
     # Mount a run-scoped ContextManager if enabled.
     cm_config = getattr(agent_run_info.agent_config,

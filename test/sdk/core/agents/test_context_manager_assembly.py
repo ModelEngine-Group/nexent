@@ -2,11 +2,7 @@
 from __future__ import annotations
 
 from nexent.core.agents.agent_context import ContextManager
-from nexent.core.agents.agent_model import (
-    KnowledgeBaseComponent,
-    MemoryComponent,
-    SystemPromptComponent,
-)
+from nexent.core.agents.context import ContextItemInput
 from nexent.core.agents.summary_config import ContextManagerConfig
 
 
@@ -18,6 +14,11 @@ def _message_text(message):
             part.get("text", "") for part in content if isinstance(part, dict)
         )
     return content
+
+
+def _text_item(item_id, text, role="system"):
+    item_type = "system_prompt" if role == "system" else "history"
+    return ContextItemInput(id=item_id, type=item_type, content={"text": text, "role": role})
 
 
 class _Memory:
@@ -37,9 +38,11 @@ class _Step:
 
 def test_context_manager_assembles_stable_dynamic_and_history_messages():
     manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
-    manager.register_component(MemoryComponent(formatted_content="memory fact"))
-    manager.register_component(KnowledgeBaseComponent(summary="kb fact"))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    manager.register_item(_text_item("history:memory", "memory fact", "user"))
+    manager.register_item(ContextItemInput(
+        id="kb:fact", type="knowledge_base", content={"text": "kb fact", "role": "user"}
+    ))
     memory = _Memory()
 
     manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
@@ -65,8 +68,8 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
 
 def test_context_manager_owns_final_answer_assembly():
     manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
-    manager.register_component(MemoryComponent(formatted_content="memory fact"))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    manager.register_item(_text_item("history:memory", "memory fact", "user"))
     memory = _Memory()
 
     manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
@@ -106,7 +109,7 @@ def test_context_manager_owns_final_answer_assembly():
 
 def test_context_manager_attributes_tool_schema_change():
     manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
+    manager.register_item(_text_item("system:policy", "stable policy"))
     memory = _Memory()
 
     manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
@@ -129,7 +132,7 @@ def test_context_manager_attributes_tool_schema_change():
 
 def test_context_manager_reports_multiple_stable_change_reasons():
     manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
-    manager.register_component(SystemPromptComponent(content="stable policy"))
+    manager.register_item(_text_item("system:policy", "stable policy"))
     memory = _Memory()
 
     run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
@@ -141,8 +144,8 @@ def test_context_manager_reports_multiple_stable_change_reasons():
         run_context=run_context,
     )
 
-    manager.clear_components()
-    manager.register_component(SystemPromptComponent(content="new stable policy"))
+    manager.clear_items()
+    manager.register_item(_text_item("system:policy", "new stable policy"))
     new_run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
     second = manager.assemble_final_context(
         model=None,

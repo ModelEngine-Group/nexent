@@ -108,16 +108,6 @@ def _create_stub_module(name: str, **attrs):
     return module
 
 
-def _create_stub_component_class(name: str):
-    class StubComponent:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-            self.component_type = name.lower().replace("component", "")
-    StubComponent.__name__ = name
-    return StubComponent
-
-
 # Configure required constants via shared bootstrap env
 consts_const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const.MINIO_ACCESS_KEY = "test_access_key"
@@ -140,7 +130,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
 utils_mock.context_utils = MagicMock()
-utils_mock.context_utils.build_context_components = MagicMock(return_value=[])
+utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
@@ -190,14 +180,6 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     AgentRunInfo=MagicMock(),
     AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
-    ContextComponent=_create_stub_component_class("ContextComponent"),
-    ToolsComponent=_create_stub_component_class("ToolsComponent"),
-    SkillsComponent=_create_stub_component_class("SkillsComponent"),
-    MemoryComponent=_create_stub_component_class("MemoryComponent"),
-    KnowledgeBaseComponent=_create_stub_component_class("KnowledgeBaseComponent"),
-    ManagedAgentsComponent=_create_stub_component_class("ManagedAgentsComponent"),
-    ExternalAgentsComponent=_create_stub_component_class("ExternalAgentsComponent"),
-    SystemPromptComponent=_create_stub_component_class("SystemPromptComponent"),
 )
 sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     "nexent.core.agents.agent_context",
@@ -1777,7 +1759,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
+                patch('backend.agents.create_agent_info.build_context_inputs') as mock_build_components, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
                 patch(
@@ -1828,7 +1810,7 @@ class TestCreateAgentConfig:
 
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
-        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
+        assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
 
     @pytest.mark.asyncio
@@ -1870,7 +1852,7 @@ class TestCreateAgentConfig:
 
         mocks["build_components"].assert_called_once()
         assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
-        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
+        assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
 
     @pytest.mark.asyncio
@@ -1929,7 +1911,7 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY,
+                context_items=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
                 verification_config=ANY
@@ -2004,7 +1986,7 @@ class TestCreateAgentConfig:
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
-                    context_components=ANY,
+                    context_items=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
                     verification_config=ANY
@@ -2266,7 +2248,7 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY,
+                context_items=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
                 verification_config=ANY
@@ -2747,7 +2729,7 @@ class TestCreateAgentConfig:
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
             mock_prepare_templates.assert_called_once()
-            assert create_agent_info_module.build_context_components.call_args.kwargs[
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ] == "**idx_a**: AAA\n\n"
 
@@ -2860,7 +2842,7 @@ class TestCreateAgentConfig:
 
             # Verify the SDK context component uses display names from metadata.
             mock_prepare_templates.assert_called_once()
-            knowledge_summary = create_agent_info_module.build_context_components.call_args.kwargs[
+            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ]
             assert "**Custom Name 1**" in knowledge_summary
@@ -2960,7 +2942,7 @@ class TestCreateAgentConfig:
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
             mock_prepare_templates.assert_called_once()
-            knowledge_summary = create_agent_info_module.build_context_components.call_args.kwargs[
+            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ]
             assert "**idx1**" in knowledge_summary
@@ -3041,7 +3023,7 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            assert create_agent_info_module.build_context_components.call_args.kwargs[
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ] == expected_message
 

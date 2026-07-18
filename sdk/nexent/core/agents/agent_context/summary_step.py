@@ -20,10 +20,10 @@ class SummaryTaskStep(TaskStep):
 
 @dataclass(frozen=True)
 class ManagedRunContext:
-    """Run-local component partition owned by ManagedContextRuntime."""
+    """Run-local fine-grained item partition owned by ManagedContextRuntime."""
 
-    component_messages: Tuple[dict, ...] = ()
+    item_messages: Tuple[dict, ...] = ()
     stable_messages: Tuple[dict, ...] = ()
     dynamic_messages: Tuple[dict, ...] = ()
-    selected_component_types: Tuple[str, ...] = ()
-    components: Tuple[Any, ...] = ()
+    selected_item_types: Tuple[str, ...] = ()
+    items: Tuple[Any, ...] = ()

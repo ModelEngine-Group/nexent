@@ -156,9 +156,9 @@ mock_sdk_nexent_monitor_monitoring_module.record_model_call = MagicMock()
 
 
 class _MockManagedContextRuntime:
-    def __init__(self, context_manager, components=None):
+    def __init__(self, context_manager, items=None):
         self.context_manager = context_manager
-        self.components = list(components or [])
+        self.items = list(items or [])
 
 
 class _MockContextManager:
