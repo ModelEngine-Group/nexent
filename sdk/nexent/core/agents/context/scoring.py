@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from threading import Lock
 from typing import Protocol, Sequence
 
 from .models import ContextItem
@@ -50,6 +51,7 @@ class CpuEmbeddingProvider:
         self.max_length = max_length
         self._tokenizer = None
         self._model = None
+        self._load_lock = Lock()
 
     @property
     def fingerprint(self) -> str:
@@ -58,19 +60,22 @@ class CpuEmbeddingProvider:
     def _load(self) -> None:
         if self._model is not None:
             return
-        import torch
-        from transformers import AutoModel, AutoTokenizer
+        with self._load_lock:
+            if self._model is not None:
+                return
+            from transformers import AutoModel, AutoTokenizer
 
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            self.model_path,
-            local_files_only=True,
-        )
-        self._model = AutoModel.from_pretrained(
-            self.model_path,
-            local_files_only=True,
-        ).to("cpu")
-        self._model.eval()
-        torch.set_grad_enabled(False)
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path,
+                local_files_only=True,
+            )
+            model = AutoModel.from_pretrained(
+                self.model_path,
+                local_files_only=True,
+            ).to("cpu")
+            model.eval()
+            self._tokenizer = tokenizer
+            self._model = model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         import torch
@@ -243,6 +248,8 @@ def _validate_vectors(vectors: Sequence[Sequence[float]], expected: int) -> None
     dimension = len(vectors[0])
     if dimension <= 0 or any(len(vector) != dimension for vector in vectors):
         raise ValueError("embedding provider returned inconsistent vector dimensions")
+    if any(not math.isfinite(float(component)) for vector in vectors for component in vector):
+        raise ValueError("embedding provider returned non-finite vector values")
 
 
 def _reverse_text_key(value: str) -> tuple[int, ...]:

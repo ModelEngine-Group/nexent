@@ -8,6 +8,7 @@ from nexent.core.agents.context import (
     ContextManager,
     ContextManagerConfig,
     ContextPolicy,
+    CpuEmbeddingProvider,
     EmbeddingProviderChain,
     PolicyLayers,
     normalize_context_inputs,
@@ -144,6 +145,43 @@ def test_embedding_provider_priority_external_then_cpu_then_none():
     third = EmbeddingProviderChain(external=broken_external, cpu=broken_cpu).embed(["query"])
     assert third.mode == "none"
     assert third.vectors is None
+
+
+def test_cpu_embedding_provider_runs_a_real_local_model(tmp_path):
+    from transformers import BertConfig, BertModel, BertTokenizerFast
+
+    vocab_path = tmp_path / "vocab.txt"
+    vocab_path.write_text(
+        "[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nuser\nintent\ncontext\n",
+        encoding="utf-8",
+    )
+    tokenizer = BertTokenizerFast(vocab_file=str(vocab_path))
+    model = BertModel(BertConfig(
+        vocab_size=len(tokenizer),
+        hidden_size=8,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        intermediate_size=16,
+    ))
+    tokenizer.save_pretrained(tmp_path)
+    model.save_pretrained(tmp_path)
+
+    provider = CpuEmbeddingProvider(str(tmp_path), max_length=16)
+    vectors = provider.embed(["user intent", "context"])
+
+    assert len(vectors) == 2
+    assert all(len(vector) == 8 for vector in vectors)
+    assert all(sum(component * component for component in vector) == pytest.approx(1.0) for vector in vectors)
+
+
+def test_embedding_chain_rejects_non_finite_external_vectors_and_uses_cpu():
+    external = _Provider(vectors=[[float("nan")], [1.0]], name="external")
+    cpu = _Provider(vectors=[[1.0], [1.0]], name="cpu")
+
+    batch = EmbeddingProviderChain(external=external, cpu=cpu).embed(["query", "item"])
+
+    assert batch.mode == "cpu"
+    assert batch.failures == ("external:ValueError",)
 
 
 def test_mmr_uses_embedding_relevance_and_penalizes_redundancy():

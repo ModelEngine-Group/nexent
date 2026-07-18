@@ -268,6 +268,21 @@ ProcessType = _module_mocks["sdk.nexent.core.utils.observer"].ProcessType
 MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserver
 
 
+def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = object.__new__(module.CoreAgent)
+    agent.context_runtime = MagicMock()
+    agent.stop_event = MagicMock()
+    agent.stop_event.is_set.return_value = False
+    agent._run_stream = MagicMock(return_value=iter(["first", "second"]))
+
+    stream = agent._run_stream_with_context_evidence(task="task", max_steps=2)
+    assert next(stream) == "first"
+    stream.close()
+
+    agent.context_runtime.finalize_evidence.assert_called_once_with(status="cancelled")
+
+
 # ----------------------------------------------------------------------------
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------

@@ -677,6 +677,9 @@ You have been provided with these additional arguments, that you can access usin
         try:
             yield from self._run_stream(task=task, max_steps=max_steps, images=images)
             status = "cancelled" if self.stop_event.is_set() else "completed"
+        except GeneratorExit:
+            status = "cancelled"
+            raise
         finally:
             self.context_runtime.finalize_evidence(status=status)
 
