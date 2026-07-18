@@ -361,10 +361,7 @@ def _require_active_run_session(
         user_id=user_id,
         conversation_id=conversation_id,
     )
-    if (
-        int(session.get("draft_agent_id") or 0) != draft_agent_id
-        or not get_conversation(conversation_id, user_id=user_id)
-    ):
+    if not get_conversation(conversation_id, user_id=user_id):
         raise Nl2AgentDraftNotFoundError()
     return session
 

@@ -177,6 +177,7 @@ async def test_resolve_session_api_passes_authenticated_owner(monkeypatch) -> No
     )
     resolve = MagicMock(
         return_value={
+            "nl2agent_agent_id": 101,
             "draft_agent_id": 202,
             "conversation_id": 902,
             "status": "active",
@@ -192,6 +193,45 @@ async def test_resolve_session_api_passes_authenticated_owner(monkeypatch) -> No
         tenant_id="tenant",
         user_id="user",
     )
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_http_contract_restores_complete_execution_context(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    monkeypatch.setattr(
+        nl2agent_app,
+        "resolve_active_session",
+        MagicMock(
+            return_value={
+                "nl2agent_agent_id": 101,
+                "draft_agent_id": 202,
+                "conversation_id": 902,
+                "status": "active",
+            }
+        ),
+    )
+    app = FastAPI()
+    app.include_router(nl2agent_app.router)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/nl2agent/session/by-conversation/902")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "nl2agent_agent_id": 101,
+        "draft_agent_id": 202,
+        "conversation_id": 902,
+        "status": "active",
+    }
 
 
 @pytest.mark.asyncio
