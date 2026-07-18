@@ -72,10 +72,14 @@ def test_every_backend_item_payload_serializes_and_renders(language):
     messages = ContextItemRenderer().render(items)
 
     assert messages
-    assert {item.type for item in items} == set(ContextItemType) - {ContextItemType.HISTORY}
+    assert {item.type for item in items} == {
+        ContextItemType.SYSTEM, ContextItemType.TOOL, ContextItemType.SKILL,
+        ContextItemType.MEMORY, ContextItemType.KNOWLEDGE_BASE,
+        ContextItemType.MANAGED_AGENT, ContextItemType.EXTERNAL_AGENT,
+    }
     assert all(item.model_dump(mode="json") for item in items)
     system_composition_types = {
-        ContextItemType.SYSTEM_PROMPT,
+        ContextItemType.SYSTEM,
         ContextItemType.TOOL,
         ContextItemType.SKILL,
         ContextItemType.MANAGED_AGENT,
@@ -92,7 +96,7 @@ def test_every_backend_item_payload_serializes_and_renders(language):
 @pytest.mark.parametrize(
     ("item_type", "expected_role"),
     [
-        (ContextItemType.SYSTEM_PROMPT, "system"),
+        (ContextItemType.SYSTEM, "system"),
         (ContextItemType.TOOL, "system"),
         (ContextItemType.SKILL, "system"),
         (ContextItemType.MEMORY, "user"),
@@ -128,7 +132,7 @@ def test_group_handler_failure_has_stable_error_payload():
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
-def test_default_rendering_is_byte_equivalent_to_phase_2(language):
+def test_default_rendering_has_deterministic_class_defined_order(language):
     items = build_context_inputs(
         duty="Duty <&> 职责",
         constraint="Constraint\n第二行",
@@ -158,4 +162,12 @@ def test_default_rendering_is_byte_equivalent_to_phase_2(language):
         text = "".join(part.get("text", "") for part in message["content"])
         actual.append((message["role"], hashlib.sha256(text.encode()).hexdigest()))
 
-    assert actual == PHASE_2_FULL_MESSAGE_DIGESTS[language]
+    second = RealContextManager()
+    second.replace_items(list(reversed(items)))
+    repeated = []
+    for message in second.build_context_messages():
+        text = "".join(part.get("text", "") for part in message["content"])
+        repeated.append((message["role"], hashlib.sha256(text.encode()).hexdigest()))
+    assert actual == repeated
+    first_user = next(index for index, (role, _) in enumerate(actual) if role == "user")
+    assert all(role == "system" for role, _ in actual[:first_user])

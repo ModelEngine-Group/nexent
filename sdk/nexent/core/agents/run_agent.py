@@ -11,7 +11,7 @@ from ...monitor import (
     set_monitoring_capacity_snapshot,
     set_monitoring_safe_input_budget_snapshot,
 )
-from .agent_model import AgentHistory, AgentRunInfo
+from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
 
 
@@ -23,7 +23,7 @@ def _get_authorized_context_items(agent_run_info: AgentRunInfo):
     """Return the run snapshot, falling back for direct SDK callers."""
     context_input = getattr(agent_run_info, "context_input", None)
     if context_input is not None:
-        return tuple(item for item in context_input.items if item.type.value != "history")
+        return tuple(context_input.items)
     return getattr(agent_run_info.agent_config, "context_items", None)
 
 
@@ -31,11 +31,8 @@ def _get_authorized_history(agent_run_info: AgentRunInfo):
     """Return the run snapshot, falling back for direct SDK callers."""
     context_input = getattr(agent_run_info, "context_input", None)
     if context_input is not None:
-        return [
-            AgentHistory(role=item.content["role"], content=item.content["text"])
-            for item in context_input.items
-            if item.type.value == "history"
-        ]
+        # Historical runs are ContextItems. AgentMemory is reserved for this run.
+        return []
     return agent_run_info.history
 
 

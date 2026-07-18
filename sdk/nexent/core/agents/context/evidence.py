@@ -48,6 +48,29 @@ class ContextEvidenceCollector:
                 self._finalized = replace(
                     latest,
                     compression_records=compression_records,
+                    raw_token_estimate=max(call.raw_token_estimate for call in self._calls),
+                    history_compression_triggered=any(
+                        call.history_compression_triggered for call in self._calls
+                    ),
+                    new_summary_coverage=next((
+                        call.new_summary_coverage for call in reversed(self._calls)
+                        if call.new_summary_coverage is not None
+                    ), None),
+                    summary_persist_status=next((
+                        call.summary_persist_status for call in reversed(self._calls)
+                        if call.summary_persist_status != "not_attempted"
+                    ), "not_attempted"),
+                    current_action_compact_count=max(
+                        call.current_action_compact_count for call in self._calls
+                    ),
+                    representation_cache_hits=sum(
+                        call.representation_cache_hits for call in self._calls
+                    ),
+                    representation_cache_misses=sum(
+                        call.representation_cache_misses for call in self._calls
+                    ),
+                    compact_exhausted=any(call.compact_exhausted for call in self._calls),
+                    over_hard_budget=any(call.over_hard_budget for call in self._calls),
                     model_call_count=len(self._calls),
                     loop_status=status,
                 )

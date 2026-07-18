@@ -8,14 +8,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Mapping
 
-from smolagents.memory import AgentMemory, MemoryStep
+from smolagents.memory import AgentMemory
 from smolagents.models import ChatMessage, Model
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext, ModelTool
 from .evidence import ContextEvidenceCollector
 from .manager import ContextManager
 from .models import ContextItem, ContextItemInput
-from .summary_step import ManagedRunContext
+from .run_context import ManagedRunContext
 
 
 ContextItemCandidate = ContextItemInput | ContextItem
@@ -101,18 +101,6 @@ class ManagedContextRuntime:
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ChatMessage | dict[str, object]]:
         """Return display-only memory messages without compression side effects."""
         return self.context_manager.render_memory_messages(memory)
-
-    def truncate_observation(self, memory_step: MemoryStep) -> None:
-        max_observation_length = self.context_manager.config.max_observation_length
-        observation = getattr(memory_step, "observations", None)
-        if max_observation_length <= 0 or not observation or len(observation) <= max_observation_length:
-            return
-        half = max_observation_length // 2
-        marker = (
-            f"\n...[Output truncated to {max_observation_length} characters. "
-            "Use search or read tools to find specific results.]\n"
-        )
-        memory_step.observations = observation[:half] + marker + observation[-half:]
 
     def compression_stats(self) -> dict[str, object]:
         return self.context_manager.get_step_compression_stats()

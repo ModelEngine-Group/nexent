@@ -1,27 +1,18 @@
 """Configuration for context management and compression."""
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Mapping
+from typing import Any, Callable, Dict, Mapping
 
 from .policy import PolicyLayers
-
-
-if TYPE_CHECKING:
-    from .scoring import EmbeddingProvider
 
 
 @dataclass
 class ContextManagerConfig:
     """Configuration for context-history compression."""
-    # === Compression Settings (existing) ===
-    enabled: bool = False
     token_threshold: int = 10000
     soft_input_budget_tokens: int = 0
     hard_input_budget_tokens: int = 0
     keep_recent_steps: int = 4
-    keep_recent_pairs: int = 2
-    max_chunk_count: int = 0
-    max_memory_step_length: int = 2000
 
     summary_system_prompt: str = (
         "You are a conversation summarization assistant. Compress the following "
@@ -30,10 +21,8 @@ class ContextManagerConfig:
         "pending items, and context to preserve. Output strict JSON format without markdown blocks."
     )
 
-    # Separate prompt for INCREMENTAL summary updates ("here is the previous
-    # summary + new turns; produce an updated summary"). When empty the
-    # incremental compression path falls back to summary_system_prompt for
-    # backwards compatibility.
+    # Separate prompt for incremental summary updates: the previous persisted
+    # checkpoint plus newly completed conversation turns produces a new checkpoint.
     incremental_summary_system_prompt: str = (
         "You are a conversation summarization assistant updating an existing "
         "structured summary. The input has two sections: '## Previous Summary' "
@@ -58,19 +47,7 @@ class ContextManagerConfig:
     estimated_chunk_summary_tokens: int = 400
     chars_per_token: float = 1.5
 
-    # Pre-truncate single observations (model/tool outputs) longer than this
-    # character limit at execute_action time, before they reach memory.
-    # 0 = disabled (production default). Only takes effect when ``enabled``
-    # is True, so production callers that do not opt in see no behaviour
-    # change.
-    max_observation_length: int = 0
-
-    # Layered item-selection policy. The built-in effective policy is disabled,
-    # preserving Phase 4 behavior until a tenant, agent, or request opts in.
+    # Processing policy only decides whether adaptive compaction is enabled.
     policy_layers: PolicyLayers | Mapping[str, Any] = field(default_factory=PolicyLayers)
-    selection_query: str = ""
-    external_embedding_provider: "EmbeddingProvider | None" = None
-    cpu_embedding_provider: "EmbeddingProvider | None" = None
-    mmr_lambda: float = 0.7
-    marginal_relevance_threshold: float = 0.0
-    optional_item_budget_tokens: int = 0
+    # Narrow callback injected by Backend; SDK never imports database services.
+    history_summary_sink: Callable[[Any], Any] | None = None

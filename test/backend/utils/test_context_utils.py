@@ -35,7 +35,7 @@ def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
         "system:skills_usage",
         "system:code_norms",
     ]
-    assert all(item.type == ContextItemType.SYSTEM_PROMPT for item in items)
+    assert all(item.type == ContextItemType.SYSTEM for item in items)
 
 
 def test_all_sources_are_naturally_granular_and_keep_stable_order():
@@ -125,7 +125,9 @@ def test_rendered_roles_and_sections_match_context_semantics():
         language="en",
     )
 
-    assert messages[0]["role"] == "user"
+    assert messages[0]["role"] == "system"
+    first_user = next(index for index, message in enumerate(messages) if message["role"] == "user")
+    assert all(message["role"] == "system" for message in messages[:first_user])
     assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
     assert any(message["role"] == "user" and "knowledge_base_search" in str(message) for message in messages)
 

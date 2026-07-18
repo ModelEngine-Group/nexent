@@ -328,24 +328,22 @@ def build_context_inputs(
         item_id: str,
         text: str,
         priority: int,
-        required: bool = True,
         authority: str = "agent",
     ) -> None:
         if text:
             inputs.append(ContextItemInput(
                 id=f"system:{item_id}",
-                type=ContextItemType.SYSTEM_PROMPT,
+                type=ContextItemType.SYSTEM,
                 content={"text": text},
                 source=(f"agent_prompt:{item_id}",),
                 priority=priority,
-                required=required,
                 metadata={"authority": authority},
             ))
 
     if include_app_context and app_name and app_description and user_id:
         add_system("header", _build_header_text(
             app_name, app_description, user_id, language
-        ), 100, True, "tenant")
+        ), 100, "tenant")
 
     if include_memory and memory_list:
         for index, memory in enumerate(memory_list):
@@ -359,7 +357,7 @@ def build_context_inputs(
             ))
 
     if duty:
-        add_system("duty", _build_duty_text(duty, language, is_manager), 80, True)
+        add_system("duty", _build_duty_text(duty, language, is_manager), 80)
 
     if include_skills and skills:
         for index, skill in enumerate(skills):
@@ -367,16 +365,15 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"skill:{name}", type=ContextItemType.SKILL, content=dict(skill),
                 source=(f"skill:{name}",), priority=70,
-                required=True,
                 metadata={"render_group": "skills", "language": language, "authority": "agent"},
             ))
 
     add_system("execution_flow", _build_execution_flow_text(
         None, language, is_manager
-    ), 60, True, "platform")
+    ), 60, "platform")
     add_system("available_resources_header", _build_available_resources_header_text(
         is_manager, language
-    ), 55, True, "platform")
+    ), 55, "platform")
 
     if include_tools and tools:
         for name, tool in tools.items():
@@ -390,7 +387,6 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"tool:{name}", type=ContextItemType.TOOL, content=payload,
                 source=(f"tool:{name}",), priority=50,
-                required=True,
                 metadata={
                     "render_group": "tools", "language": language,
                     "is_manager": is_manager, "authority": "agent",
@@ -421,7 +417,6 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"managed_agent:{name}", type=ContextItemType.MANAGED_AGENT, content=payload,
                 source=(f"managed_agent:{name}",), priority=45,
-                required=True,
                 metadata={"render_group": "managed_agents", "language": language, "authority": "agent"},
             ))
 
@@ -436,33 +431,31 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"external_agent:{payload['agent_id']}", type=ContextItemType.EXTERNAL_AGENT,
                 content=payload, source=(f"external_agent:{payload['agent_id']}",), priority=44,
-                required=True,
                 metadata={"render_group": "external_agents", "language": language, "authority": "agent"},
             ))
 
     if is_manager and not managed_agents and not external_a2a_agents:
         inputs.append(ContextItemInput(
-            id="system:agent_fallback", type=ContextItemType.SYSTEM_PROMPT,
+            id="system:agent_fallback", type=ContextItemType.SYSTEM,
             content={"template": "agent_fallback", "language": language},
             source=("agent_prompt:agent_fallback",), priority=5,
-            required=True,
             metadata={"authority": "platform"},
         ))
     if include_skills:
         inputs.append(ContextItemInput(
-            id="system:skills_usage", type=ContextItemType.SYSTEM_PROMPT,
+            id="system:skills_usage", type=ContextItemType.SYSTEM,
             content={
                 "template": "skills_usage", "skills": skills or [],
                 "language": language, "is_manager": is_manager,
             },
-            source=("agent_prompt:skills_usage",), priority=40, required=True,
+            source=("agent_prompt:skills_usage",), priority=40,
             metadata={"authority": "platform"},
         ))
     if constraint:
-        add_system("constraint", _build_constraint_text(constraint, language), 30, True)
-    add_system("code_norms", _build_code_norms_text(language, is_manager), 20, True, "platform")
+        add_system("constraint", _build_constraint_text(constraint, language), 30)
+    add_system("code_norms", _build_code_norms_text(language, is_manager), 20, "platform")
     if few_shots:
-        add_system("footer", _build_footer_text(few_shots, language), 10, True)
+        add_system("footer", _build_footer_text(few_shots, language), 10)
     return inputs
 
 

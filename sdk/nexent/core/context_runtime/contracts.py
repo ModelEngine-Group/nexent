@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 
 
 if TYPE_CHECKING:
-    from smolagents.memory import AgentMemory, MemoryStep
+    from smolagents.memory import AgentMemory
     from smolagents.models import ChatMessage, Model
     from smolagents.tools import Tool
 
@@ -21,7 +21,6 @@ else:
     AgentMemory = object
     ContextItemCandidate = object
     ContextManager = object
-    MemoryStep = object
     Model = object
     ModelMessage = object
     ModelTool = object
@@ -38,15 +37,24 @@ class ContextEvidence:
     compression_records: tuple[object, ...] = ()
     stable_prefix_fingerprint: str | None = None
     prefix_change_reasons: tuple[str, ...] = ()
-    excluded_item_ids: tuple[str, ...] = ()
-    selection_reason_codes: tuple[str, ...] = ()
     policy_fingerprint: str | None = None
-    selection_decision_fingerprint: str | None = None
-    embedding_mode: str = "none"
-    embedding_provider_fingerprint: str | None = None
-    embedding_failures: tuple[str, ...] = ()
+    processing_mode: str = "passthrough"
+    soft_budget: int = 0
+    hard_budget: int = 0
+    raw_token_estimate: int = 0
+    final_token_estimate: int = 0
+    loaded_summary_unit_id: int | None = None
+    loaded_summary_coverage: int | None = None
+    new_history_turn_count: int = 0
+    history_compression_triggered: bool = False
+    new_summary_coverage: int | None = None
+    summary_persist_status: str = "not_attempted"
+    item_representations: tuple[tuple[str, str], ...] = ()
+    current_action_compact_count: int = 0
     representation_cache_hits: int = 0
     representation_cache_misses: int = 0
+    compact_exhausted: bool = False
+    over_hard_budget: bool = False
     model_call_count: int = 0
     loop_status: str | None = None
 
@@ -92,9 +100,6 @@ class ContextRuntime(Protocol):
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
         """Return all model messages for final-answer generation."""
-
-    def truncate_observation(self, memory_step: MemoryStep) -> None:
-        """Apply path-specific observation controls without exposing mode checks."""
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:
         """Return display-only messages without triggering compression."""
@@ -145,9 +150,6 @@ class UnconfiguredContextRuntime:
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
-        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
-
-    def truncate_observation(self, memory_step: MemoryStep) -> None:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:

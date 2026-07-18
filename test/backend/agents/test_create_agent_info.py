@@ -190,9 +190,10 @@ sys.modules['nexent.core.agents.context'] = _create_stub_module(
     "nexent.core.agents.context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
-    ContextProcessingMode=types.SimpleNamespace(REDUCE_THEN_COMPRESS="reduce_then_compress"),
-    CpuEmbeddingProvider=MagicMock(),
-    ExternalEmbeddingProvider=MagicMock(),
+    ContextProcessingMode=types.SimpleNamespace(
+        PASSTHROUGH="passthrough",
+        ADAPTIVE_COMPACT="adaptive_compact",
+    ),
     PolicyLayers=types.SimpleNamespace(model_validate=lambda value: value),
     resolve_policy=lambda layers: types.SimpleNamespace(
         processing_mode=(layers.get("request") or {}).get("processing_mode", "passthrough")
@@ -1823,7 +1824,8 @@ class TestCreateAgentConfig:
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
+        config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
+        assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
@@ -1865,7 +1867,8 @@ class TestCreateAgentConfig:
         mocks["build_components"].assert_called_once()
         assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+        config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
+        assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):

@@ -7,7 +7,7 @@ from sdk.nexent.core.agents.context_input import ContextInput
 
 
 def test_context_input_freezes_authorized_item_collection():
-    item = ContextItemInput(id="system:one", type="system_prompt", content={"text": "authorized"})
+    item = ContextItemInput(id="system:one", type="system", content={"text": "authorized"})
 
     snapshot = ContextInput(items=(item,))
 
@@ -24,7 +24,7 @@ def test_context_input_rejects_mutable_collection():
 def test_context_input_detaches_nested_payload_from_config_item():
     item = ContextItemInput(
         id="system:one",
-        type="system_prompt",
+        type="system",
         content={"text": "authorized"},
         metadata={"labels": ["original"]},
     )

@@ -19,13 +19,14 @@ _CONTEXT_PACKAGE = f"{__package__.rsplit('.', 1)[0]}.context"
 _SUBMODULES = (
     "budget",
     "config",
-    "current_compression",
+    "history_compression",
     "llm_summary",
     "manager",
-    "previous_compression",
-    "stats_export",
+    "models",
+    "policy",
+    "run_context",
+    "selection",
     "step_renderer",
-    "summary_step",
 )
 for _name in _SUBMODULES:
     sys.modules[f"{__name__}.{_name}"] = import_module(f"{_CONTEXT_PACKAGE}.{_name}")
@@ -33,17 +34,13 @@ for _name in _SUBMODULES:
 from ..context import (  # noqa: E402
     ContextManager,
     ContextManagerConfig,
+    HistoryCompressor,
+    HistorySummaryCandidate,
     ManagedRunContext,
-    SummaryTaskStep,
     _is_context_length_error,
-    compress_history_offline,
     format_summary_output,
 )
-from ..summary_cache import (  # noqa: E402
-    CompressionCallRecord,
-    CurrentSummaryCache,
-    PreviousSummaryCache,
-)
+from ..summary_cache import CompressionCallRecord  # noqa: E402
 
 
 __all__ = [
@@ -51,11 +48,9 @@ __all__ = [
     "COMPATIBILITY_REMOVAL_VERSION",
     "ContextManager",
     "ContextManagerConfig",
-    "CurrentSummaryCache",
+    "HistoryCompressor",
+    "HistorySummaryCandidate",
     "ManagedRunContext",
-    "PreviousSummaryCache",
-    "SummaryTaskStep",
     "_is_context_length_error",
-    "compress_history_offline",
     "format_summary_output",
 ]

@@ -542,12 +542,6 @@ Additional Args:
             if postcheck.severity == "warning":
                 self._append_verification_feedback(memory_step, postcheck)
 
-        # Pre-truncate observations when ContextManager is enabled. Keeps the
-        # head + tail of long outputs around a truncation marker so downstream
-        # compression sees bounded-length step records and the model can still
-        # search/read for the elided portion.
-        self.context_runtime.truncate_observation(memory_step)
-
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
                 Text(

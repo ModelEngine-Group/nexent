@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pytest
+from smolagents.memory import ActionStep, TaskStep
+from smolagents.monitoring import Timing
 
 from nexent.core.agents.context import ContextManager
 from nexent.core.agents.context import ContextItemInput
@@ -19,7 +21,7 @@ def _message_text(message):
 
 
 def _text_item(item_id, text, role="system"):
-    item_type = "system_prompt" if role == "system" else "history"
+    item_type = "system" if role == "system" else "knowledge_base"
     return ContextItemInput(id=item_id, type=item_type, content={"text": text, "role": role})
 
 
@@ -51,7 +53,7 @@ class _Step:
 
 
 def test_context_manager_assembles_stable_dynamic_and_history_messages():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
     manager.register_item(_text_item("system:policy", "stable policy"))
     manager.register_item(_text_item("history:memory", "memory fact", "user"))
     manager.register_item(ContextItemInput(
@@ -60,7 +62,7 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     memory = _Memory()
 
     run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
-    memory.steps.append(_Step("user", "current task"))
+    memory.steps.append(TaskStep(task="current task"))
     final = manager.assemble_final_context(
         model=None,
         memory=memory,
@@ -71,8 +73,8 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
 
     assert [_message_text(message) for message in final.messages] == [
         "stable policy",
-        "kb fact",
         "memory fact",
+        "kb fact",
         "current task",
     ]
     assert final.evidence.stable_message_count == 1
@@ -81,14 +83,37 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.tools == [{"name": "a"}, {"name": "z"}]
 
 
+def test_prepare_run_projects_fallback_system_prompt_without_mutating_memory():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+
+    run_context = manager.prepare_run_context(
+        memory=memory,
+        fallback_system_prompt="runtime fallback",
+    )
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    assert memory.system_prompt is None
+    assert [_message_text(message) for message in final.messages] == ["runtime fallback"]
+    assert run_context.items[0].id == "system:fallback"
+
+
 def test_context_manager_owns_final_answer_assembly():
-    manager = ContextManager(ContextManagerConfig(enabled=False, token_threshold=10000))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
     manager.register_item(_text_item("system:policy", "stable policy"))
     manager.register_item(_text_item("history:memory", "memory fact", "user"))
     memory = _Memory()
 
     run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
-    memory.steps.append(_Step("assistant", "work trace"))
+    memory.steps.append(ActionStep(
+        step_number=1, timing=Timing(start_time=0), action_output="work trace",
+        model_output="work trace",
+    ))
     final = manager.assemble_final_context(
         model=None,
         memory=memory,
@@ -108,15 +133,15 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "system",
         "user",
-        "user",
         "assistant",
+        "user",
     ]
-    assert [_message_text(message) for message in final.messages[:4]] == [
+    assert [_message_text(message) for message in final.messages[:3]] == [
         "stable policy",
         "final instruction",
         "memory fact",
-        "answer task: original task",
     ]
+    assert _message_text(final.messages[-1]) == "answer task: original task"
     assert final.evidence.stable_message_count == 2
     assert "context_purpose" in final.evidence.prefix_change_reasons or (
         final.evidence.prefix_change_reasons == ("initial_request",)
@@ -124,7 +149,7 @@ def test_context_manager_owns_final_answer_assembly():
 
 
 def test_context_manager_attributes_tool_schema_change():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
     manager.register_item(_text_item("system:policy", "stable policy"))
     memory = _Memory()
 
@@ -147,7 +172,7 @@ def test_context_manager_attributes_tool_schema_change():
 
 
 def test_context_manager_reports_multiple_stable_change_reasons():
-    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
     manager.register_item(_text_item("system:policy", "stable policy"))
     memory = _Memory()
 

@@ -192,7 +192,7 @@ def build_agent_run_info(
     prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
 
     # Set context manager config
-    cm_config = context_manager_config or ContextManagerConfig(enabled=False)
+    cm_config = context_manager_config or ContextManagerConfig()
 
 
     agent_config = AgentConfig(
@@ -277,7 +277,7 @@ def build_agent_run_info_with_custom_prompt(
         model_name="main_model",
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
-        context_manager_config=context_manager_config or ContextManagerConfig(enabled=False),
+        context_manager_config=context_manager_config or ContextManagerConfig(),
         context_items=[ContextItemInput(
             id="system:custom", type="system_prompt", content={"text": system_prompt}, required=True
         )],

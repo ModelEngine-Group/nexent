@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -56,14 +57,39 @@ def _render_text(item: ContextItem, *, default_role: str) -> list[dict[str, Any]
     return [_text_message(role, text)]
 
 
+def _render_summary(item: ContextItem) -> list[dict[str, Any]]:
+    summary = item.content["summary"]
+    text = summary if isinstance(summary, str) else "\n".join(
+        f"{key}: {value}" for key, value in summary.items() if value
+    )
+    return [_text_message("user", f"Summary of earlier conversation:\n{text}")]
+
+
+def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
+    return [
+        _text_message("user", str(item.content["user_message"])),
+        _text_message("assistant", str(item.content["assistant_final_answer"])),
+    ]
+
+
+def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
+    if "messages" in item.content:
+        return list(item.content["messages"])
+    return [_text_message("assistant", json.dumps(item.content, ensure_ascii=False, default=str))]
+
+
 class ContextItemRenderer:
     """Registry-backed renderer that consumes only the selected item values."""
 
     def __init__(self, handlers: dict[ContextItemType, ItemHandler] | None = None):
         self._handlers = {
-            ContextItemType.SYSTEM_PROMPT: lambda item: _render_text(item, default_role="system"),
+            ContextItemType.SYSTEM: lambda item: _render_text(item, default_role="system"),
             ContextItemType.KNOWLEDGE_BASE: lambda item: _render_text(item, default_role="user"),
-            ContextItemType.HISTORY: lambda item: _render_text(item, default_role="user"),
+            ContextItemType.HISTORY_SUMMARY: _render_summary,
+            ContextItemType.CONVERSATION_TURN: _render_turn,
+            ContextItemType.CURRENT_TASK: lambda item: _render_text(item, default_role="user"),
+            ContextItemType.CURRENT_PLANNING: lambda item: _render_text(item, default_role="assistant"),
+            ContextItemType.CURRENT_ACTION: _render_current_action,
         }
         self._handlers.update(handlers or {})
 

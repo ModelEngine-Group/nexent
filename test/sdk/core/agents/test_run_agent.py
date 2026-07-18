@@ -866,7 +866,8 @@ def test_authorized_history_snapshot_overrides_mutable_run_history(basic_agent_r
     basic_agent_run_info.history = [MagicMock(name="stale_history")]
 
     history = run_agent._get_authorized_history(basic_agent_run_info)
-    assert [(entry.role, entry.content) for entry in history] == [("user", "authorized history")]
+    # Cross-run history is represented by ContextItems, never restored into AgentMemory.
+    assert history == []
 
 
 def test_authorized_history_keeps_direct_sdk_compatibility(basic_agent_run_info):

@@ -93,8 +93,11 @@ from services.conversation_management_service import (
     create_new_conversation,
     generate_conversation_title_service,
     get_conversation_service,
+    get_current_run_user_message_id,
     get_latest_assistant_message,
     get_last_unit_for_message,
+    load_historical_context,
+    persist_history_summary_candidate,
     save_conversation_user,
     save_message,
     save_message_unit,
@@ -2716,21 +2719,41 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
-def _build_authorized_context_input(agent_run_info) -> ContextInput:
+def _build_authorized_context_input(agent_run_info, historical_context=None) -> ContextInput:
     """Freeze configured context and authorized history into one item snapshot."""
-    history_items = tuple(
-        ContextItemInput(
-            id=f"history:{index}",
-            type="history",
-            content={"role": entry.role, "text": entry.content},
+    if historical_context is None:
+        fallback_turns = []
+        pending_user = None
+        for index, entry in enumerate(agent_run_info.history or ()):
+            if entry.role == MESSAGE_ROLE["USER"]:
+                pending_user = (index, entry)
+            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
+                user_index, user_entry = pending_user
+                fallback_turns.append({
+                    "user_message": user_entry.content,
+                    "assistant_final_answer": entry.content,
+                    "attachments": [],
+                    "user_message_id": -(user_index + 1),
+                    "assistant_message_id": -(index + 1),
+                })
+                pending_user = None
+        historical_context = {"conversation_turns": fallback_turns}
+    history_items = []
+    summary = historical_context.get("history_summary")
+    if summary:
+        history_items.append(ContextItemInput(
+            id=f"history_summary:{summary['unit_id']}", type="history_summary",
+            content=summary, source=("conversation_history",),
+        ))
+    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
+        history_items.append(ContextItemInput(
+            id=f"conversation_turn:{turn['user_message_id']}:{turn['assistant_message_id']}",
+            type="conversation_turn", content=turn,
             source=("conversation_history",),
-            priority=50,
-            metadata={"authority": "user" if entry.role == "user" else "agent"},
-        )
-        for index, entry in enumerate(agent_run_info.history or ())
-    )
+            metadata={"layout_order": order},
+        ))
     return ContextInput(
-        items=tuple(agent_run_info.agent_config.context_items or ()) + history_items,
+        items=tuple(agent_run_info.agent_config.context_items or ()) + tuple(history_items),
     )
 
 
@@ -2765,12 +2788,31 @@ async def prepare_agent_run(
         context_policy=agent_request.context_policy,
     )
 
-    agent_run_info.context_input = _build_authorized_context_input(agent_run_info)
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = get_current_run_user_message_id(
+            agent_request.conversation_id, user_id
+        )
+        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
+            current_message_id = None
+            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
+    agent_run_info.context_input = _build_authorized_context_input(
+        agent_run_info, historical_context
+    )
 
     # Mount a run-scoped ContextManager if enabled.
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
-    if cm_config and cm_config.enabled:
+    if cm_config:
+        cm_config.history_summary_sink = (
+            (lambda candidate: persist_history_summary_candidate(
+                agent_request.conversation_id, candidate, user_id, tenant_id
+            )) if historical_context is not None else None
+        )
         cm = agent_run_manager.create_context_manager(
             conversation_id=str(agent_request.conversation_id),
             config=cm_config,
@@ -2790,7 +2832,8 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
-        submit(save_conversation_user, agent_request, user_id, tenant_id)
+        # Historical checkpoint lookup for this run needs the current message boundary.
+        save_conversation_user(agent_request, user_id, tenant_id)
         return
 
     if target == MESSAGE_ROLE["ASSISTANT"]:

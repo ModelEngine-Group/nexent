@@ -1,143 +1,56 @@
-"""ContextManager: the main orchestrator for agent context compression and managed context assembly.
+"""Managed context assembly for fine-grained items and adaptive compaction."""
 
-Owns compression collaborators and delegates history compression/rendering to
-them. Fine-grained item assembly remains directly on ContextManager.
-"""
+from __future__ import annotations
 
 import hashlib
 import json
 import logging
 import threading
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from copy import deepcopy
+from typing import Any, Dict, Optional, Sequence
 
-from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
-from smolagents.models import ChatMessage
+from smolagents.memory import ActionStep, AgentMemory, TaskStep
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext
-from ...utils.token_estimation import (
-    estimate_tokens,
-    estimate_tokens_for_steps,
-    estimate_tokens_for_system_prompt,
-    msg_char_count,
-    msg_token_count,
-)
-from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from .budget import (
-    extract_message_text,
-    extract_pairs,
-    is_curr_cache_valid,
-    is_prev_cache_valid,
-    message_role,
-)
+from ..summary_cache import CompressionCallRecord
+from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
-from .current_compression import CurrentCompressor
+from .history_compression import HistoryCompressor, HistorySummaryCandidate
 from .llm_summary import LLMSummary
+from .models import ContextItem, ContextItemInput, ContextItemType, normalize_context_inputs
 from .policy import ContextProcessingMode, resolve_policy
-from .previous_compression import PreviousCompressor
-from .scoring import EmbeddingProviderChain
+from .run_context import ManagedRunContext
 from .selection import select_context_items
-from .stats_export import (
-    export_summary as _export_summary,
-)
-from .stats_export import (
-    get_all_compression_stats as _get_all_compression_stats,
-)
-from .stats_export import (
-    get_step_compression_stats as _get_step_compression_stats,
-)
-from .stats_export import (
-    get_token_counts as _get_token_counts,
-)
 from .step_renderer import StepRenderer
-from .summary_step import ManagedRunContext, SummaryTaskStep
 
 
 logger = logging.getLogger("agent_context")
 
 
 class ContextManager:
-    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: Optional[int] = None):
+    """Owns ordering, budget checks, compaction and final rendering."""
+
+    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None):
         self.config = config or ContextManagerConfig()
-        self._previous_summary_cache: Optional[PreviousSummaryCache] = None
-        self._current_summary_cache: Optional[CurrentSummaryCache] = None
-
-        self._last_run_start_idx: Optional[int] = None
-
-        if max_steps is not None and self.config.keep_recent_steps >= max_steps:
-            self.config.keep_recent_steps = max_steps
-
-        self.compression_calls_log: List[CompressionCallRecord] = []
-        self._step_local_log: List[CompressionCallRecord] = []
-        self._lock = threading.Lock()
-
-        self._last_uncompressed_token_count: Optional[int] = None
-        self._last_compressed_token_count: Optional[int] = None
-
-        self._previous_stable_fingerprint: Optional[str] = None
-        self._previous_stable_items: Dict[str, str] = {}
-
+        if max_steps is not None:
+            self.config.keep_recent_steps = min(self.config.keep_recent_steps, max_steps)
         if self.config.max_summary_input_tokens <= 0:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
             self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
-
-        self._items: List = []
-
-        # Compose compression collaborators.
+        self._lock = threading.Lock()
+        self._items: list[ContextItem] = []
         self._renderer = StepRenderer(self.config)
         self._llm = LLMSummary(self.config, self._renderer)
-        self._prev_compressor = PreviousCompressor(self.config, self._renderer, self._llm)
-        self._curr_compressor = CurrentCompressor(self.config, self._renderer, self._llm)
-
-    # ============================================================
-    #  Effective token estimation
-    # ============================================================
-
-    def _effective_tokens(self, memory: AgentMemory, current_run_start_idx: int) -> int:
-        system_prompt_tokens = estimate_tokens_for_system_prompt(memory)
-        prev_steps = memory.steps[:current_run_start_idx]
-        curr_steps = memory.steps[current_run_start_idx:]
-        return (system_prompt_tokens + self._effective_prev_tokens(prev_steps)
-                + self._effective_curr_tokens(curr_steps))
-
-    def _effective_prev_tokens(self, prev_steps: List[MemoryStep]) -> int:
-        if not prev_steps:
-            return 0
-        prev_pairs = extract_pairs(prev_steps)
-        is_valid, covered_idx = is_prev_cache_valid(prev_pairs, self._previous_summary_cache)
-        if not is_valid:
-            return estimate_tokens_for_steps(prev_steps, self.config.chars_per_token)
-        uncovered = prev_pairs[covered_idx:]
-        uncovered_tokens = (
-            self._renderer.estimate_text_tokens(self._renderer.pairs_to_text(uncovered))
-            if uncovered else 0
-        )
-        return (self._renderer.estimate_text_tokens(self._previous_summary_cache.summary_text)
-                + uncovered_tokens)
-
-    def _effective_curr_tokens(self, curr_steps: List[MemoryStep]) -> int:
-        if not curr_steps:
-            return 0
-        curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
-        action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
-        is_valid, covered_idx = is_curr_cache_valid(action_steps, self._current_summary_cache)
-        if not is_valid:
-            return estimate_tokens_for_steps(curr_steps, self.config.chars_per_token)
-        task_tokens = (
-            self._renderer.estimate_text_tokens(curr_task.task or "") if curr_task else 0
-        )
-        uncovered = action_steps[covered_idx:]
-        uncovered_tokens = (
-            self._renderer.estimate_text_tokens(self._renderer.actions_to_text(uncovered))
-            if uncovered else 0
-        )
-        return (task_tokens
-                + self._renderer.estimate_text_tokens(self._current_summary_cache.summary_text)
-                + uncovered_tokens)
-
-    # ============================================================
-    #  Main Entry Point
-    # ============================================================
+        self._history_compressor = HistoryCompressor(self._llm)
+        self._history_candidate: HistorySummaryCandidate | None = None
+        self._current_item_cache: dict[int, ContextItem] = {}
+        self._step_local_log: list[CompressionCallRecord] = []
+        self.compression_calls_log: list[CompressionCallRecord] = []
+        self._last_uncompressed_token_count: int | None = None
+        self._last_compressed_token_count: int | None = None
+        self._previous_stable_fingerprint: str | None = None
+        self._previous_stable_items: dict[str, str] = {}
 
     def _soft_input_budget_tokens(self) -> int:
         return self.config.soft_input_budget_tokens or self.config.token_threshold
@@ -145,612 +58,298 @@ class ContextManager:
     def _hard_input_budget_tokens(self) -> int:
         return self.config.hard_input_budget_tokens or int(self.config.token_threshold * 1.1)
 
-    def compress_if_needed(
-        self,
-        model,
-        memory,
-        original_messages: List[ChatMessage],
-        current_run_start_idx,
-        context_overhead_tokens: int = 0,
-        enabled_override: bool | None = None,
-    ) -> List[ChatMessage]:
-        compression_enabled = (
-            self.config.enabled if enabled_override is None else enabled_override
-        )
-        if not compression_enabled:
-            return original_messages
-
-        soft_input_budget_tokens = self._soft_input_budget_tokens()
-        hard_input_budget_tokens = self._hard_input_budget_tokens()
-        soft_history_budget_tokens = max(0, soft_input_budget_tokens - context_overhead_tokens)
-        hard_history_budget_tokens = max(0, hard_input_budget_tokens - context_overhead_tokens)
-
-        if estimate_tokens(memory, self.config.chars_per_token) <= soft_history_budget_tokens:
-            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
-            self._last_compressed_token_count = self._last_uncompressed_token_count
-            return original_messages
-
-        with self._lock:
-            # Run detection
-            if (self._last_run_start_idx is not None
-                    and current_run_start_idx != self._last_run_start_idx):
-                self._current_summary_cache = None
-            self._last_run_start_idx = current_run_start_idx
-
-            if self._effective_tokens(memory, current_run_start_idx) <= soft_history_budget_tokens:
-                # Stable-phase bypass
-                self._step_local_log.clear()
-
-                prev_steps = memory.steps[:current_run_start_idx]
-                curr_steps = memory.steps[current_run_start_idx:]
-
-                prev_summary_step = None
-                prev_tail_steps = list(prev_steps)
-                prev_pairs = extract_pairs(prev_steps)
-                if prev_pairs:
-                    is_valid, covered_idx = is_prev_cache_valid(prev_pairs, self._previous_summary_cache)
-                    if is_valid:
-                        prev_summary_step = SummaryTaskStep(
-                            task=self._previous_summary_cache.summary_text
-                        )
-                        uncovered = prev_pairs[covered_idx:]
-                        prev_tail_steps = self._renderer.pairs_to_steps(uncovered)
-
-                curr_kept_steps = list(curr_steps)
-                if curr_steps:
-                    curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
-                    curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
-                    if curr_action_steps:
-                        is_valid, covered_idx = is_curr_cache_valid(curr_action_steps, self._current_summary_cache)
-                        if is_valid:
-                            uncovered = curr_action_steps[covered_idx:]
-                            curr_kept_steps = (
-                                ([curr_task] if curr_task else [])
-                                + [SummaryTaskStep(task=self._current_summary_cache.summary_text)]
-                                + list(uncovered)
-                            )
-
-                record = CompressionCallRecord(
-                    call_type="stable_bypass", cache_hit=True,
-                    details={"reason": "stable_period_effective_under_threshold"},
-                )
-                self.compression_calls_log.append(record)
-                self._step_local_log.append(record)
-
-                compressed_msgs = self._renderer.build_messages(
-                    memory, prev_summary_step, prev_tail_steps, curr_kept_steps
-                )
-                self._last_uncompressed_token_count = self._msg_token_count(original_messages)
-                self._last_compressed_token_count = self._msg_token_count(compressed_msgs)
-                return compressed_msgs
-
-            self._step_local_log.clear()
-            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
-
-            prev_steps = memory.steps[:current_run_start_idx]
-            curr_steps = memory.steps[current_run_start_idx:]
-
-            prev_tokens = self._effective_prev_tokens(prev_steps)
-            curr_tokens = self._effective_curr_tokens(curr_steps)
-
-            compress_prev = prev_tokens > soft_history_budget_tokens * 0.6
-            compress_curr = curr_tokens > soft_history_budget_tokens * 0.4
-
-            total_effective_tokens = prev_tokens + curr_tokens + context_overhead_tokens
-            if compress_prev or compress_curr:
-                logger.info(
-                    f"Context compression triggered: total_tokens={total_effective_tokens}, "
-                    f"soft_budget={soft_input_budget_tokens}, "
-                    f"hard_budget={hard_input_budget_tokens}, "
-                    f"context_overhead_tokens={context_overhead_tokens}, "
-                    f"prev_tokens={prev_tokens} (compress={compress_prev}), "
-                    f"curr_tokens={curr_tokens} (compress={compress_curr})"
-                )
-
-            # --------------- Previous phase ---------------
-            prev_summary_step: Optional[SummaryTaskStep] = None
-            prev_tail_steps: List[MemoryStep] = list(prev_steps)
-            prev_pairs = extract_pairs(prev_steps)
-
-            if compress_prev and prev_pairs:
-                keep_n = min(self.config.keep_recent_pairs, len(prev_pairs))
-                pairs_to_compress = prev_pairs[:-keep_n] if keep_n > 0 else prev_pairs
-                pairs_to_keep = prev_pairs[-keep_n:] if keep_n > 0 else []
-                if pairs_to_compress:
-                    result = self._prev_compressor.compress(
-                        pairs_to_compress, self._previous_summary_cache, model
-                    )
-                    summary_text = result.summary_text
-                    if summary_text:
-                        if "[CONTEXT COMPACTION" in summary_text:
-                            prev_summary_step = SummaryTaskStep(task=summary_text, prefix="Context fallback, Truncated raw history:")
-                        else:
-                            prev_summary_step = SummaryTaskStep(task=summary_text)
-                        prev_tail_steps = self._renderer.pairs_to_steps(pairs_to_keep)
-                    if result.new_cache:
-                        self._previous_summary_cache = result.new_cache
-                    self.compression_calls_log.extend(result.records)
-                    self._step_local_log.extend(result.records)
-            elif prev_pairs:
-                is_valid, covered_idx = is_prev_cache_valid(prev_pairs, self._previous_summary_cache)
-                if is_valid:
-                    prev_summary_step = SummaryTaskStep(
-                        task=self._previous_summary_cache.summary_text
-                    )
-                    uncovered = prev_pairs[covered_idx:]
-                    prev_tail_steps = self._renderer.pairs_to_steps(uncovered)
-
-            # --------------- Current phase ---------------
-            curr_kept_steps: List[MemoryStep] = list(curr_steps)
-
-            if curr_steps:
-                curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
-                curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
-
-                if compress_curr and curr_action_steps:
-                    keep_n = min(self.config.keep_recent_steps, len(curr_action_steps))
-                    if keep_n > 0 and keep_n < len(curr_action_steps):
-                        boundary = curr_action_steps[-keep_n]
-                        prev_a = curr_action_steps[-keep_n - 1]
-                        if (getattr(boundary, "observations", None) is not None
-                                and getattr(prev_a, "tool_calls", None) is not None):
-                            keep_n += 1
-
-                    actions_to_compress = (
-                        curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
-                    )
-                    actions_to_keep = (
-                        curr_action_steps[-keep_n:] if keep_n > 0 else []
-                    )
-                    if actions_to_compress:
-                        result = self._curr_compressor.compress(
-                            curr_task, actions_to_compress,
-                            self._current_summary_cache, model,
-                        )
-                        curr_summary_text = result.summary_text
-                        if curr_summary_text:
-                            if "[CONTEXT COMPACTION" in curr_summary_text:
-                                curr_summary_step = SummaryTaskStep(task=curr_summary_text, prefix="Truncated recent action steps:")
-                            else:
-                                curr_summary_step = SummaryTaskStep(task=curr_summary_text)
-                            curr_kept_steps = (
-                                ([curr_task] if curr_task else [])
-                                + [curr_summary_step]
-                                + list(actions_to_keep)
-                            )
-                        if result.new_cache:
-                            self._current_summary_cache = result.new_cache
-                        self.compression_calls_log.extend(result.records)
-                        self._step_local_log.extend(result.records)
-                elif curr_action_steps:
-                    is_valid, covered_idx = is_curr_cache_valid(curr_action_steps, self._current_summary_cache)
-                    if is_valid:
-                        uncovered = curr_action_steps[covered_idx:]
-                        curr_kept_steps = (
-                            ([curr_task] if curr_task else [])
-                            + [SummaryTaskStep(task=self._current_summary_cache.summary_text)]
-                            + list(uncovered)
-                        )
-
-            final_messages = self._renderer.build_messages(
-                memory, prev_summary_step, prev_tail_steps, curr_kept_steps
-            )
-            final_tokens = self._msg_token_count(final_messages)
-            self._last_compressed_token_count = final_tokens
-            if final_tokens > hard_history_budget_tokens:
-                logger.warning(
-                    f"Still exceeds hard input budget after compression: {final_tokens} > {hard_history_budget_tokens}. "
-                    f"Consider reducing keep_recent_pairs ({self.config.keep_recent_pairs}) "
-                    f"or keep_recent_steps({self.config.keep_recent_steps})"
-                )
-            return final_messages
-
-    # ============================================================
-    #  Token Estimation
-    # ============================================================
-
-    def _estimate_tokens_for_steps(self, steps):
-        return estimate_tokens_for_steps(steps, self.config.chars_per_token)
-
-    def _estimate_tokens(self, memory: AgentMemory) -> int:
-        return estimate_tokens(memory, self.config.chars_per_token)
-
-    def _msg_char_count(self, msg: Union[ChatMessage, List[ChatMessage]]) -> int:
-        return msg_char_count(msg)
-
-    def _msg_token_count(self, msg):
-        return msg_token_count(msg, self.config.chars_per_token)
-
-    # ============================================================
-    #  Stats delegation
-    # ============================================================
-
-    def get_step_compression_stats(self) -> dict:
-        with self._lock:
-            return _get_step_compression_stats(self._step_local_log)
-
-    def get_all_compression_stats(self) -> dict:
-        with self._lock:
-            return _get_all_compression_stats(self.compression_calls_log)
-
-    # ============================================================
-    #  Benchmark export APIs
-    # ============================================================
-
-    def build_compressed_snapshot(
-        self, model, memory: AgentMemory, current_run_start_idx: int,
-    ) -> Tuple[List[ChatMessage], dict]:
-        saved_prev_cache = self._previous_summary_cache
-        saved_curr_cache = self._current_summary_cache
-        saved_step_log = list(self._step_local_log)
-        saved_calls_log = list(self.compression_calls_log)
-
-        try:
-            original_messages = memory.system_prompt.to_messages() if memory.system_prompt else []
-            for step in memory.steps:
-                original_messages.extend(step.to_messages())
-
-            compressed_messages = self.compress_if_needed(
-                model, memory, original_messages, current_run_start_idx
-            )
-
-            metadata = {
-                "token_counts": self.get_token_counts(),
-                "summary": self.export_summary(),
-                "compression_stats": self.get_step_compression_stats(),
-            }
-            return compressed_messages, metadata
-        finally:
-            self._previous_summary_cache = saved_prev_cache
-            self._current_summary_cache = saved_curr_cache
-            self._step_local_log = saved_step_log
-            self.compression_calls_log = saved_calls_log
-
-    def get_token_counts(self) -> dict:
-        with self._lock:
-            return _get_token_counts(
-                self._last_uncompressed_token_count,
-                self._last_compressed_token_count,
-            )
-
-    def export_summary(self) -> dict:
-        with self._lock:
-            return _export_summary(
-                self._previous_summary_cache,
-                self._current_summary_cache,
-                self.config,
-            )
-
-    # ============================================================
-    #  Managed Context Assembly (W3)
-    # ============================================================
-
     def prepare_run_context(
-        self,
-        memory: AgentMemory,
-        fallback_system_prompt: str,
+        self, memory: AgentMemory, fallback_system_prompt: str,
         items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
-        from smolagents.memory import SystemPromptStep
-
-        source_items = self._item_source(items)
+        self._history_candidate = None
+        self._current_item_cache.clear()
+        source = self._item_source(items)
+        if fallback_system_prompt and not any(
+            item.type == ContextItemType.SYSTEM for item in source
+        ):
+            source.append(ContextItem.from_input(ContextItemInput(
+                id="system:fallback",
+                type=ContextItemType.SYSTEM,
+                content={"text": fallback_system_prompt},
+                metadata={"layout_order": -1, "runtime_fallback": True},
+            )))
         policy = resolve_policy(self.config.policy_layers)
-        query = self.config.selection_query or self._latest_user_text(source_items)
-        normalized_items, selection_decision = select_context_items(
-            source_items,
-            policy,
-            query=query,
-            providers=EmbeddingProviderChain(
-                external=self.config.external_embedding_provider,
-                cpu=self.config.cpu_embedding_provider,
-            ),
-            mmr_lambda=self.config.mmr_lambda,
-            allow_reduction=policy.processing_mode == ContextProcessingMode.REDUCE_THEN_COMPRESS,
-            marginal_threshold=self.config.marginal_relevance_threshold,
-            optional_budget_tokens=(
-                self.config.optional_item_budget_tokens
-                or max(1, int(self._soft_input_budget_tokens() * 0.2))
-                if policy.processing_mode == ContextProcessingMode.REDUCE_THEN_COMPRESS
-                else None
-            ),
-        )
-        logger.info(
-            "Context policy decision: mode=%s selected=%s excluded=%s embedding_mode=%s "
-            "policy_fingerprint=%s decision_fingerprint=%s",
-            policy.processing_mode.value,
-            list(selection_decision.selected_item_ids),
-            list(selection_decision.excluded_item_ids),
-            selection_decision.embedding_mode,
-            selection_decision.policy_fingerprint,
-            selection_decision.decision_fingerprint,
-        )
-        item_messages = self.build_context_messages(items=normalized_items)
-        stable_messages = [
-            message for message in item_messages
-            if message_role(message) in {"system", "developer"}
-        ]
-        dynamic_messages = [
-            message for message in item_messages
-            if message_role(message) not in {"system", "developer"}
-        ]
-
-        stable_text = "\n\n".join(
-            extract_message_text(message) for message in stable_messages
-        )
-        memory.system_prompt = SystemPromptStep(
-            system_prompt=stable_text or fallback_system_prompt
-        )
-        selected_item_types = tuple(
-            item.type.value for item in normalized_items
-        )
+        selected, decision = select_context_items(source, policy)
+        messages = self.build_context_messages(selected)
+        stable = [message for message in messages if message_role(message) in {"system", "developer"}]
+        dynamic = [message for message in messages if message_role(message) not in {"system", "developer"}]
         return ManagedRunContext(
-            item_messages=tuple(item_messages),
-            stable_messages=tuple(stable_messages),
-            dynamic_messages=tuple(dynamic_messages),
-            selected_item_types=selected_item_types,
-            items=tuple(normalized_items),
-            selection_decision=selection_decision,
+            item_messages=tuple(messages), stable_messages=tuple(stable),
+            dynamic_messages=tuple(dynamic),
+            selected_item_types=tuple(item.type.value for item in selected),
+            items=tuple(selected), selection_decision=decision,
         )
 
     def assemble_final_context(
-        self,
-        *,
-        model: Any,
-        memory: AgentMemory,
-        current_run_start_idx: int,
-        tools: Sequence[Any] | None = None,
-        purpose: str = "step",
-        task: Optional[str] = None,
-        final_answer_templates: Optional[Dict[str, Any]] = None,
-        run_context: Optional[ManagedRunContext] = None,
-    ) -> "FinalContext":
-        if run_context is None:
-            run_context = self.prepare_run_context(memory, fallback_system_prompt="")
-
-        tools = self._canonical_tools(tools or ())
+        self, *, model: Any, memory: AgentMemory, current_run_start_idx: int,
+        tools: Sequence[Any] | None = None, purpose: str = "step",
+        task: str | None = None, final_answer_templates: Optional[Dict[str, Any]] = None,
+        run_context: ManagedRunContext | None = None,
+    ) -> FinalContext:
+        run_context = run_context or self.prepare_run_context(memory, "")
+        policy = resolve_policy(self.config.policy_layers)
+        persisted_items = list(run_context.items)
+        if self._history_candidate is not None:
+            persisted_items = [item for item in persisted_items if item.type not in {
+                ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN,
+            }]
+            persisted_items.append(self._history_candidate.as_item())
+        current_items = self._project_current_run(memory, current_run_start_idx)
+        items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
         purpose_stable, purpose_dynamic = self._purpose_messages(
-            purpose=purpose,
-            task=task,
-            final_answer_templates=final_answer_templates,
+            purpose=purpose, task=task, final_answer_templates=final_answer_templates,
         )
+        canonical_tools = self._canonical_tools(tools or ())
+        raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
+        final_items = list(items)
+        history_triggered = False
+        new_coverage = None
+        persist_status = "not_attempted"
+        self._step_local_log = []
 
-        original_messages = self._messages_from_memory(memory)
-        stable_messages = [*run_context.stable_messages, *purpose_stable]
-        dynamic_messages = [*run_context.dynamic_messages, *purpose_dynamic]
+        if policy.processing_mode == ContextProcessingMode.ADAPTIVE_COMPACT and raw_tokens > self._soft_input_budget_tokens():
+            summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
+            turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
+            if turns:
+                history_triggered = True
+                result = self._history_compressor.compress(summary, turns, model)
+                self._record_compression(result.records)
+                if result.candidate is not None:
+                    self._history_candidate = result.candidate
+                    new_coverage = result.candidate.covered_through_message_id
+                    final_items = [item for item in final_items if item.type not in {
+                        ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN,
+                    }]
+                    final_items.append(result.candidate.as_item())
+                    persist_status = self._persist_candidate(result.candidate)
+                elif result.fallback_turns:
+                    fallback_by_id = {item.id: item for item in result.fallback_turns}
+                    final_items = [fallback_by_id.get(item.id, item) for item in final_items]
 
-        context_overhead_tokens = (
-            self._msg_token_count(dynamic_messages)
-            + self._estimate_tools_tokens(tools)
-            + self._msg_token_count(purpose_stable)
-        )
-        compressed_messages = self.compress_if_needed(
-            model,
-            memory,
-            original_messages,
-            current_run_start_idx,
-            context_overhead_tokens=context_overhead_tokens,
-            enabled_override=(
-                resolve_policy(self.config.policy_layers).processing_mode
-                != ContextProcessingMode.PASSTHROUGH
-            ),
-        )
-        history_messages = self._without_leading_stable_messages(compressed_messages)
-        messages = [
-            *stable_messages,
-            *dynamic_messages,
-            *history_messages,
-        ]
+            final_items = self._compact_to_soft_budget(
+                final_items, purpose_stable, purpose_dynamic, canonical_tools
+            )
 
-        self._last_compressed_token_count = self._msg_token_count(messages) + self._estimate_tools_tokens(tools)
+        final_items.sort(key=lambda item: item.layout_key)
+        rendered = self.build_context_messages(final_items)
+        messages = [*purpose_stable]
+        # Stable item messages remain first for KV-cache reuse.
+        stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
+        dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
+        messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
+        final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
+        self._last_uncompressed_token_count = raw_tokens
+        self._last_compressed_token_count = final_tokens
+        hard = self._hard_input_budget_tokens()
+        over_hard = final_tokens > hard
+        compact_exhausted = over_hard
+        if over_hard:
+            logger.warning("Context remains over hard budget after safe compact: %s > %s", final_tokens, hard)
 
-        fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
-        item_fingerprints = self._stable_item_fingerprints(
-            purpose_stable,
-            items=run_context.items,
-        )
-        if tools:
-            item_fingerprints["tools"] = self._fingerprint(tools)
-        reasons = self._change_reasons(fingerprint, item_fingerprints)
-        self._previous_stable_fingerprint = fingerprint
-        self._previous_stable_items = item_fingerprints
-
-        selection_decision = run_context.selection_decision
+        representations = tuple((
+            item.id, str(item.metadata.get("representation", "raw"))
+        ) for item in final_items)
+        hits = sum(item.representation_cache_stats[0] for item in items)
+        misses = sum(item.representation_cache_stats[1] for item in items)
+        loaded = next((item for item in run_context.items if item.type == ContextItemType.HISTORY_SUMMARY), None)
+        stable_fp = self._fingerprint({"messages": [*stable, *purpose_stable], "tools": canonical_tools})
+        reasons = self._change_reasons(stable_fp, self._stable_item_fingerprints(final_items, purpose_stable, canonical_tools))
+        self._previous_stable_fingerprint = stable_fp
+        selected_ids = tuple(item.id for item in final_items)
         return FinalContext(
-            messages=messages,
-            tools=tools,
+            messages=messages, tools=canonical_tools,
             evidence=ContextEvidence(
-                selected_item_ids=tuple(item.id for item in run_context.items),
-                selected_item_types=run_context.selected_item_types,
-                stable_message_count=len(stable_messages),
-                dynamic_message_count=len(messages) - len(stable_messages),
-                compression_records=tuple(self._step_local_log or ()),
-                stable_prefix_fingerprint=fingerprint,
+                selected_item_ids=selected_ids,
+                selected_item_types=tuple(item.type.value for item in final_items),
+                stable_message_count=len(stable) + len(purpose_stable),
+                dynamic_message_count=len(dynamic) + len(purpose_dynamic),
+                compression_records=tuple(self._step_local_log),
+                stable_prefix_fingerprint=stable_fp,
                 prefix_change_reasons=tuple(reasons),
-                excluded_item_ids=(
-                    selection_decision.excluded_item_ids if selection_decision else ()
+                policy_fingerprint=run_context.selection_decision.policy_fingerprint if run_context.selection_decision else None,
+                processing_mode=policy.processing_mode.value,
+                soft_budget=self._soft_input_budget_tokens(), hard_budget=hard,
+                raw_token_estimate=raw_tokens, final_token_estimate=final_tokens,
+                loaded_summary_unit_id=(loaded.content.get("unit_id") if loaded else None),
+                loaded_summary_coverage=(loaded.content.get("covered_through_message_id") if loaded else None),
+                new_history_turn_count=sum(item.type == ContextItemType.CONVERSATION_TURN for item in run_context.items),
+                history_compression_triggered=history_triggered,
+                new_summary_coverage=new_coverage, summary_persist_status=persist_status,
+                item_representations=representations,
+                current_action_compact_count=sum(
+                    kind == "compact" and next(item for item in final_items if item.id == item_id).type == ContextItemType.CURRENT_ACTION
+                    for item_id, kind in representations
                 ),
-                selection_reason_codes=(
-                    tuple(decision.reason_code for decision in selection_decision.item_decisions)
-                    if selection_decision else ()
-                ),
-                policy_fingerprint=(selection_decision.policy_fingerprint if selection_decision else None),
-                selection_decision_fingerprint=(
-                    selection_decision.decision_fingerprint if selection_decision else None
-                ),
-                embedding_mode=(selection_decision.embedding_mode if selection_decision else "none"),
-                embedding_provider_fingerprint=(
-                    selection_decision.embedding_provider_fingerprint
-                    if selection_decision else None
-                ),
-                embedding_failures=(
-                    selection_decision.embedding_failures if selection_decision else ()
-                ),
-                representation_cache_hits=(
-                    selection_decision.representation_cache_hits
-                    if selection_decision else 0
-                ),
-                representation_cache_misses=(
-                    selection_decision.representation_cache_misses
-                    if selection_decision else 0
-                ),
+                representation_cache_hits=hits, representation_cache_misses=misses,
+                compact_exhausted=compact_exhausted, over_hard_budget=over_hard,
             ),
         )
 
-    def _purpose_messages(
-        self,
-        *,
-        purpose: str,
-        task: Optional[str],
-        final_answer_templates: Optional[Dict[str, Any]],
-    ) -> Tuple[List[dict], List[dict]]:
+    def _compact_to_soft_budget(self, items, purpose_stable, purpose_dynamic, tools):
+        result = list(items)
+        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
+            return result
+        keep_recent = max(0, self.config.keep_recent_steps)
+        actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
+        candidates = actions[:-keep_recent] if keep_recent else actions
+        candidates += [item for item in result if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact]
+        savings = []
+        for item in candidates:
+            compact = item.compact()
+            saving = max(0, item.token_estimate - compact.token_estimate)
+            savings.append((saving, item.layout_key, item, compact))
+        for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
+            index = result.index(original)
+            result[index] = compact
+            if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
+                break
+        return result
+
+    def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
+        projected: list[ContextItem] = []
+        action_index = planning_index = 0
+        for index, step in enumerate(memory.steps[start:]):
+            cached = self._current_item_cache.get(id(step))
+            if cached is not None:
+                projected.append(cached)
+                if cached.type == ContextItemType.CURRENT_ACTION:
+                    action_index += 1
+                elif cached.type == ContextItemType.CURRENT_PLANNING:
+                    planning_index += 1
+                continue
+            if isinstance(step, TaskStep):
+                item = ContextItem.from_input(ContextItemInput(
+                    id=f"current_task:{index}", type=ContextItemType.CURRENT_TASK,
+                    content={"text": step.task or ""},
+                    metadata={"layout_order": index},
+                ))
+                projected.append(item)
+            elif isinstance(step, ActionStep):
+                content = {
+                    "step_number": getattr(step, "step_number", action_index + 1),
+                    "tool_calls": deepcopy(getattr(step, "tool_calls", None)),
+                    "observations": deepcopy(getattr(step, "observations", None)),
+                    "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
+                    "result": deepcopy(getattr(step, "action_output", None)),
+                    "messages": [self._message_to_dict(message) for message in step.to_messages()],
+                }
+                item = ContextItem.from_input(ContextItemInput(
+                    id=f"current_action:{action_index}", type=ContextItemType.CURRENT_ACTION,
+                    content=content,
+                    metadata={"layout_order": action_index},
+                ))
+                projected.append(item)
+                action_index += 1
+            elif step.__class__.__name__ == "PlanningStep":
+                item = ContextItem.from_input(ContextItemInput(
+                    id=f"current_planning:{planning_index}", type=ContextItemType.CURRENT_PLANNING,
+                    content={"text": "\n".join(extract_message_text(m) for m in step.to_messages())},
+                    metadata={"layout_order": planning_index},
+                ))
+                projected.append(item)
+                planning_index += 1
+            else:
+                continue
+            self._current_item_cache[id(step)] = item
+        return projected
+
+    def _persist_candidate(self, candidate: HistorySummaryCandidate) -> str:
+        sink = self.config.history_summary_sink
+        if sink is None:
+            return "not_configured"
+        try:
+            sink(candidate)
+            return "succeeded"
+        except Exception:
+            logger.exception("History summary persistence failed; using run-local candidate")
+            return "failed"
+
+    def _purpose_messages(self, *, purpose, task, final_answer_templates):
         if purpose != "final_answer":
             return [], []
         if not final_answer_templates:
             raise ValueError("final_answer purpose requires final_answer_templates")
         from jinja2 import StrictUndefined, Template
-
-        final_answer = final_answer_templates["final_answer"]
-        if "pre_messages" not in final_answer or "post_messages" not in final_answer:
-            raise ValueError("final_answer template requires pre_messages and post_messages")
-        pre_messages = final_answer["pre_messages"]
-        post_messages = Template(
-            final_answer["post_messages"],
-            undefined=StrictUndefined,
-        ).render(task=task or "")
+        template = final_answer_templates["final_answer"]
         return (
-            [{"role": "system", "content": [{"type": "text", "text": pre_messages}]}],
-            [{"role": "user", "content": [{"type": "text", "text": post_messages}]}],
+            [{"role": "system", "content": [{"type": "text", "text": template["pre_messages"]}]}],
+            [{"role": "user", "content": [{"type": "text", "text": Template(template["post_messages"], undefined=StrictUndefined).render(task=task or "")}]}],
         )
 
-    @staticmethod
-    def _messages_from_memory(memory: AgentMemory) -> List[Any]:
-        messages: List[Any] = []
+    def _estimate_items(self, items, stable, dynamic, tools):
+        return self._message_tokens([*self.build_context_messages(items), *stable, *dynamic]) + self._tools_tokens(tools)
+
+    def _message_tokens(self, messages):
+        return max(0, int(sum(len(extract_message_text(message)) for message in messages) / self.config.chars_per_token))
+
+    def _tools_tokens(self, tools):
+        return int(len(json.dumps(tools, ensure_ascii=False, default=str)) / self.config.chars_per_token) if tools else 0
+
+    def _record_compression(self, records):
+        self._step_local_log.extend(records)
+        self.compression_calls_log.extend(records)
+
+    def get_step_compression_stats(self):
+        return {"calls": len(self._step_local_log), "records": list(self._step_local_log)}
+
+    def get_all_compression_stats(self):
+        return {"calls": len(self.compression_calls_log), "records": list(self.compression_calls_log)}
+
+    def get_token_counts(self):
+        return {"uncompressed": self._last_uncompressed_token_count, "compressed": self._last_compressed_token_count}
+
+    def export_summary(self):
+        return {"history_candidate": self._history_candidate}
+
+    def build_compressed_snapshot(self, model, memory, current_run_start_idx):
+        final = self.assemble_final_context(model=model, memory=memory, current_run_start_idx=current_run_start_idx)
+        return final.messages, {"token_counts": self.get_token_counts(), "compression_stats": self.get_step_compression_stats()}
+
+    def render_memory_messages(self, memory):
+        messages = []
         if memory.system_prompt:
             messages.extend(memory.system_prompt.to_messages())
         for step in memory.steps:
             messages.extend(step.to_messages())
         return messages
 
-    def render_memory_messages(self, memory: AgentMemory) -> List[Any]:
-        """Render memory for display without triggering selection or compression."""
-        return self._messages_from_memory(memory)
+    def register_item(self, item):
+        normalized = self._item_source([item])[0]
+        with self._lock:
+            if any(existing.id == normalized.id for existing in self._items):
+                raise ValueError(f"duplicate context item id: {normalized.id}")
+            self._items.append(normalized)
 
-    @classmethod
-    def _without_leading_stable_messages(cls, messages: Sequence[Any]) -> List[Any]:
-        remaining = list(messages)
-        while remaining and message_role(remaining[0]) in {"system", "developer"}:
-            remaining.pop(0)
-        return remaining
+    def clear_items(self):
+        with self._lock:
+            self._items.clear()
 
-    @staticmethod
-    def _canonical_tools(tools: Sequence[Any]) -> List[Any]:
-        indexed_tools = [
-            (index, tool, ContextManager._normalize_for_fingerprint(tool))
-            for index, tool in enumerate(tools)
-        ]
-        return [
-            tool for _, tool, _ in sorted(
-                indexed_tools,
-                key=lambda item: (
-                    json.dumps(
-                        item[2],
-                        sort_keys=True,
-                        ensure_ascii=False,
-                    ),
-                    item[0],
-                ),
-            )
-        ]
+    def get_registered_items(self):
+        with self._lock:
+            return list(self._items)
 
-    def _estimate_tools_tokens(self, tools: Sequence[Any]) -> int:
-        if not tools:
-            return 0
-        return self._renderer.estimate_text_tokens(
-            json.dumps(self._normalize_for_fingerprint(tools), ensure_ascii=False, sort_keys=True, default=str)
-        )
+    def replace_items(self, items):
+        normalized = self._item_source(items)
+        with self._lock:
+            self._items = normalized
 
-    @staticmethod
-    def _normalize_for_fingerprint(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {
-                str(key): ContextManager._normalize_for_fingerprint(item)
-                for key, item in sorted(value.items(), key=lambda item: str(item[0]))
-            }
-        if isinstance(value, (list, tuple)):
-            return [ContextManager._normalize_for_fingerprint(item) for item in value]
-        if hasattr(value, "model_dump"):
-            return ContextManager._normalize_for_fingerprint(value.model_dump())
-        name = getattr(value, "name", None)
-        if isinstance(name, str) and name:
-            return {"__class__": value.__class__.__name__, "name": name}
-        if hasattr(value, "__dict__"):
-            public_attrs = {
-                key: item for key, item in vars(value).items()
-                if not key.startswith("_")
-            }
-            if public_attrs:
-                return ContextManager._normalize_for_fingerprint(public_attrs)
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            return value
-        return {
-            "__class__": f"{value.__class__.__module__}.{value.__class__.__qualname__}",
-        }
+    def build_context_messages(self, items=None):
+        from .rendering import ContextItemRenderer
+        return ContextItemRenderer().render(sorted(self._item_source(items), key=lambda item: item.layout_key))
 
-    def _fingerprint(self, messages: Sequence[Any]) -> str:
-        encoded = json.dumps(
-            self._normalize_for_fingerprint(messages),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        )
-        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    def build_system_prompt(self):
+        return self.build_context_messages()
 
-    def _stable_item_fingerprints(
-        self,
-        purpose_stable: Sequence[Any] = (),
-        items: Optional[Sequence[Any]] = None,
-    ) -> Dict[str, str]:
-        result: Dict[str, str] = {}
-        from ..context import ContextItemRenderer
-        for item in self._item_source(items):
-            stable = [message for message in ContextItemRenderer().render([item])
-                      if message_role(message) in {"system", "developer"}]
-            if stable:
-                result[item.id] = self._fingerprint(stable)
-        if purpose_stable:
-            result["purpose"] = self._fingerprint(purpose_stable)
-        return result
-
-    def _change_reasons(
-        self, current: str, item_fingerprints: Dict[str, str]
-    ) -> List[str]:
-        if self._previous_stable_fingerprint is None:
-            return ["initial_request"]
-        if self._previous_stable_fingerprint == current:
-            return []
-        reasons: List[str] = []
-        if self._previous_stable_items.get("tools") != item_fingerprints.get("tools"):
-            reasons.append("tool_schema_version")
-        if self._previous_stable_items.get("purpose") != item_fingerprints.get("purpose"):
-            reasons.append("context_purpose")
-        previous_items = {
-            key: value for key, value in self._previous_stable_items.items()
-            if key not in {"tools", "purpose"}
-        }
-        current_items = {
-            key: value for key, value in item_fingerprints.items()
-            if key not in {"tools", "purpose"}
-        }
-        if previous_items != current_items:
-            reasons.append("system_prompt_version")
-        return reasons or ["unexpected_nondeterminism"]
-
-    def _item_source(self, items: Optional[Sequence[Any]]) -> List[Any]:
-        from ..context.models import ContextItem, normalize_context_inputs
+    def _item_source(self, items):
         source = list(items) if items is not None else self.get_registered_items()
         if not source:
-            return source
+            return []
         if all(isinstance(item, ContextItem) for item in source):
             return source
         if any(isinstance(item, ContextItem) for item in source):
@@ -758,51 +357,55 @@ class ContextManager:
         return normalize_context_inputs(source)
 
     @staticmethod
-    def _ordered_items(items: Sequence[Any]) -> List[Any]:
-        """Use the class-defined stable layout, independent of scoring order."""
-        return sorted(items, key=lambda item: item.layout_key)
+    def _canonical_tools(tools):
+        return sorted(list(tools), key=lambda tool: json.dumps(ContextManager._normalize(tool), sort_keys=True, default=str))
 
     @staticmethod
-    def _latest_user_text(items: Sequence[Any]) -> str:
-        """Return the latest authorized user history text for relevance scoring."""
-        for item in reversed(items):
-            if item.type.value == "history" and item.content.get("role") == "user":
-                return item.content.get("text", "")
-        return ""
+    def _normalize(value):
+        if isinstance(value, dict):
+            return {str(k): ContextManager._normalize(v) for k, v in sorted(value.items(), key=lambda pair: str(pair[0]))}
+        if isinstance(value, (list, tuple)):
+            return [ContextManager._normalize(v) for v in value]
+        if hasattr(value, "model_dump"):
+            return ContextManager._normalize(value.model_dump())
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return {"name": getattr(value, "name", value.__class__.__name__)}
 
-    # ============================================================
-    #  Context Item Management
-    # ============================================================
+    @staticmethod
+    def _message_to_dict(message):
+        if isinstance(message, dict):
+            return deepcopy(message)
+        role = getattr(message.role, "value", message.role)
+        return {"role": str(role), "content": deepcopy(message.content)}
 
-    def register_item(self, item) -> None:
-        with self._lock:
-            current = self._item_source([item])[0]
-            if any(existing.id == current.id for existing in self._items):
-                raise ValueError(f"duplicate context item id: {current.id}")
-            self._items.append(current)
+    def _fingerprint(self, value):
+        encoded = json.dumps(self._normalize(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
 
-    def clear_items(self) -> None:
-        with self._lock:
-            self._items.clear()
+    def _stable_item_fingerprints(self, items, purpose, tools):
+        stable = {item.id: self._fingerprint(item.content) for item in items if item.type in {
+            ContextItemType.SYSTEM, ContextItemType.TOOL, ContextItemType.SKILL,
+            ContextItemType.MANAGED_AGENT, ContextItemType.EXTERNAL_AGENT,
+        }}
+        if purpose:
+            stable["purpose"] = self._fingerprint(purpose)
+        if tools:
+            stable["tools"] = self._fingerprint(tools)
+        return stable
 
-    def get_registered_items(self) -> List:
-        with self._lock:
-            return list(self._items)
-
-    def replace_items(self, items: List) -> None:
-        normalized = self._item_source(items)
-        with self._lock:
-            self._items = normalized
-
-    def build_context_messages(
-        self,
-        items: Optional[Sequence[Any]] = None,
-    ) -> List:
-        source_items = self._ordered_items(self._item_source(items))
-        if not source_items:
+    def _change_reasons(self, current, item_fingerprints):
+        if self._previous_stable_fingerprint is None:
+            self._previous_stable_items = item_fingerprints
+            return ["initial_request"]
+        if self._previous_stable_fingerprint == current:
             return []
-        from ..context import ContextItemRenderer
-        return ContextItemRenderer().render(source_items)
-
-    def build_system_prompt(self) -> List:
-        return self.build_context_messages()
+        reasons = []
+        if self._previous_stable_items.get("tools") != item_fingerprints.get("tools"):
+            reasons.append("tool_schema_version")
+        if self._previous_stable_items.get("purpose") != item_fingerprints.get("purpose"):
+            reasons.append("context_purpose")
+        if {k:v for k,v in self._previous_stable_items.items() if k not in {"tools","purpose"}} != {k:v for k,v in item_fingerprints.items() if k not in {"tools","purpose"}}:
+            reasons.append("system_prompt_version")
+        self._previous_stable_items = item_fingerprints
+        return reasons or ["unexpected_nondeterminism"]

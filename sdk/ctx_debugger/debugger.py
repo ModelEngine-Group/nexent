@@ -23,6 +23,8 @@ import time
 import uuid
 from typing import Any, Iterable, List, Optional, Set
 
+from nexent.core.agents.context import resolve_policy
+
 logger = logging.getLogger(__name__)
 
 # Set inside the compression wrapper so the model wrapper can tag calls.
@@ -164,9 +166,8 @@ class ContextDebugger:
         self._compression_step_counter += 1
 
         config_snapshot = {
-            "enabled": cm.config.enabled,
+            "processing_mode": resolve_policy(cm.config.policy_layers).processing_mode.value,
             "token_threshold": cm.config.token_threshold,
-            "keep_recent_pairs": cm.config.keep_recent_pairs,
             "keep_recent_steps": cm.config.keep_recent_steps,
         }
 

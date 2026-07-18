@@ -125,9 +125,7 @@ export function extractAssistantMsgFromResponse(
       }
 
       step.contents.push({
-        id: `model-${Date.now()}-${Math.random()
-          .toString(36)
-          .substring(2, 7)}`,
+        id: `model-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         type: chatConfig.messageTypes.MODEL_OUTPUT,
         subType,
         content,
@@ -254,6 +252,19 @@ export function extractAssistantMsgFromResponse(
               currentStep.metrics = null;
             }
           }
+          break;
+        }
+
+        case chatConfig.messageTypes.HISTORY_SUMMARY: {
+          const currentStep = getOrCreateCurrentStep(steps, "History Summary");
+          currentStep.contents.push({
+            id: `history-summary-${dialog_msg.message_id}-${currentStep.contents.length}`,
+            type: chatConfig.messageTypes.HISTORY_SUMMARY,
+            content: msg.content,
+            expanded: false,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 

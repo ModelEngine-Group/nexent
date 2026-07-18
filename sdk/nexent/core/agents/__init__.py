@@ -11,7 +11,6 @@ from typing import Any
 
 
 _AGENT_MODEL_MODULE = ".agent_model"
-_SUMMARY_CACHE_MODULE = ".summary_cache"
 
 _EXPORTS = {
     "CoreAgent": (".core_agent", "CoreAgent"),
@@ -24,10 +23,7 @@ _EXPORTS = {
     "ContextItemInput": (".context", "ContextItemInput"),
     "ContextItemType": (".context", "ContextItemType"),
     "ContextManager": (".context", "ContextManager"),
-    "SummaryTaskStep": (".context", "SummaryTaskStep"),
-    "PreviousSummaryCache": (_SUMMARY_CACHE_MODULE, "PreviousSummaryCache"),
-    "CurrentSummaryCache": (_SUMMARY_CACHE_MODULE, "CurrentSummaryCache"),
-    "CompressionCallRecord": (_SUMMARY_CACHE_MODULE, "CompressionCallRecord"),
+    "CompressionCallRecord": (".summary_cache", "CompressionCallRecord"),
     "ContextManagerConfig": (".context", "ContextManagerConfig"),
 }
 

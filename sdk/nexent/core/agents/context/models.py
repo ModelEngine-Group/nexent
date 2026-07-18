@@ -1,61 +1,58 @@
-"""Stable context input DTO and normalized SDK context item."""
+"""Immutable, fine-grained context items used by the managed runtime."""
 
 from __future__ import annotations
 
 import json
 from copy import deepcopy
 from enum import Enum, IntEnum
-from hashlib import sha256
 from threading import Lock
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 
 class ContextItemType(str, Enum):
-    """Context candidate types supported by the SDK rendering boundary."""
-
-    SYSTEM_PROMPT = "system_prompt"
+    SYSTEM = "system"
     TOOL = "tool"
     SKILL = "skill"
     MEMORY = "memory"
     KNOWLEDGE_BASE = "knowledge_base"
     MANAGED_AGENT = "managed_agent"
     EXTERNAL_AGENT = "external_agent"
-    HISTORY = "history"
+    HISTORY_SUMMARY = "history_summary"
+    CONVERSATION_TURN = "conversation_turn"
+    CURRENT_TASK = "current_task"
+    CURRENT_PLANNING = "current_planning"
+    CURRENT_ACTION = "current_action"
 
 
 class ContextSection(IntEnum):
-    """Stable prompt regions; values define the KV-cache-friendly order."""
+    """Class-defined order keeps the stable prefix and run layout predictable."""
 
-    STABLE_SYSTEM = 0
-    DYNAMIC_EVIDENCE = 1
-    HISTORY = 2
-
-
-_TYPE_FALLBACK_RELEVANCE: dict[ContextItemType, float] = {
-    ContextItemType.MEMORY: 0.70,
-    ContextItemType.KNOWLEDGE_BASE: 0.65,
-    ContextItemType.HISTORY: 0.60,
-    ContextItemType.SKILL: 0.50,
-    ContextItemType.MANAGED_AGENT: 0.45,
-    ContextItemType.EXTERNAL_AGENT: 0.45,
-    ContextItemType.TOOL: 0.40,
-    ContextItemType.SYSTEM_PROMPT: 0.35,
-}
+    SYSTEM = 0
+    TOOL = 10
+    SKILL = 20
+    MANAGED_AGENT = 30
+    EXTERNAL_AGENT = 40
+    MEMORY = 50
+    KNOWLEDGE_BASE = 60
+    HISTORY_SUMMARY = 70
+    CONVERSATION_TURN = 80
+    CURRENT_TASK = 90
+    CURRENT_PLANNING = 100
+    CURRENT_ACTION = 110
 
 
 class ContextItemInput(BaseModel):
-    """Serializable DTO accepted at the backend-to-SDK boundary."""
+    """Serializable backend-to-SDK DTO; it never carries database objects."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(min_length=1)
     type: ContextItemType
-    content: Any
+    content: dict[str, Any]
     source: tuple[str, ...] = ()
     priority: int = 10
-    required: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("content", "metadata")
@@ -69,198 +66,311 @@ class ContextItemInput(BaseModel):
 
     @field_validator("metadata")
     @classmethod
-    def _reject_source_object_fallback(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def _reject_source_objects(cls, value: dict[str, Any]) -> dict[str, Any]:
         if "_source_component" in value:
             raise ValueError("_source_component fallback is not permitted")
         return value
 
     @model_validator(mode="after")
-    def _validate_type_payload(self) -> "ContextItemInput":
-        if not isinstance(self.content, dict):
-            raise ValueError(f"{self.type.value} content must be an object")
+    def _validate_payload(self) -> "ContextItemInput":
         required_fields = {
             ContextItemType.TOOL: ("name",),
             ContextItemType.SKILL: ("name",),
-            ContextItemType.MEMORY: (),
             ContextItemType.MANAGED_AGENT: ("name",),
             ContextItemType.EXTERNAL_AGENT: ("agent_id", "name"),
-        }.get(self.type)
-        if required_fields is not None:
-            missing = [field for field in required_fields if not self.content.get(field)]
-            if missing:
-                raise ValueError(f"{self.type.value} content missing fields: {', '.join(missing)}")
-            if self.type == ContextItemType.MEMORY and not any(
-                self.content.get(field) for field in ("memory", "content")
-            ):
-                raise ValueError("memory content requires memory or content")
-        elif self.type in {
-            ContextItemType.SYSTEM_PROMPT,
-            ContextItemType.KNOWLEDGE_BASE,
-            ContextItemType.HISTORY,
-        }:
-            if self.type == ContextItemType.SYSTEM_PROMPT and "template" in self.content:
-                if self.content["template"] not in {"skills_usage", "agent_fallback"}:
-                    raise ValueError(f"unknown system template: {self.content['template']}")
-            elif not isinstance(self.content.get("text"), str):
-                raise ValueError(f"{self.type.value} content requires text")
-        if self.type == ContextItemType.HISTORY and self.content.get("role") not in {"user", "assistant"}:
-            raise ValueError("history content requires user or assistant role")
+            ContextItemType.HISTORY_SUMMARY: ("summary", "covered_through_message_id"),
+            ContextItemType.CONVERSATION_TURN: (
+                "user_message", "assistant_final_answer",
+                "user_message_id", "assistant_message_id",
+            ),
+        }.get(self.type, ())
+        missing = [name for name in required_fields if self.content.get(name) is None]
+        if missing:
+            raise ValueError(f"{self.type.value} content missing fields: {', '.join(missing)}")
+        if self.type == ContextItemType.MEMORY and not any(
+            self.content.get(name) for name in ("memory", "content", "text")
+        ):
+            raise ValueError("memory content requires memory, content or text")
+        if self.type in {
+            ContextItemType.SYSTEM, ContextItemType.KNOWLEDGE_BASE,
+            ContextItemType.CURRENT_TASK, ContextItemType.CURRENT_PLANNING,
+        } and "template" not in self.content and not isinstance(self.content.get("text"), str):
+            raise ValueError(f"{self.type.value} content requires text")
         return self
 
 
 class ContextItem(BaseModel):
-    """Normalized immutable candidate consumed by SDK context services."""
+    """Run-local immutable view with one optional deterministic compact form."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    id: str = Field(min_length=1)
+    ITEM_TYPE: ClassVar[ContextItemType | None] = None
+    SECTION: ClassVar[ContextSection]
+    REQUIRED: ClassVar[bool] = False
+    SUPPORTS_COMPACT: ClassVar[bool] = False
+
+    id: str
     type: ContextItemType
-    content: Any
+    content: dict[str, Any]
     source: tuple[str, ...] = ()
     priority: int = 10
-    required: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
     token_estimate: int = Field(default=0, ge=0)
 
-    _representation_cache: dict[tuple[str, str], "ContextItem | None"] = PrivateAttr(default_factory=dict)
-    _representation_lock: Lock = PrivateAttr(default_factory=Lock)
-    _representation_cache_hits: int = PrivateAttr(default=0)
-    _representation_cache_misses: int = PrivateAttr(default=0)
+    _compact_result: "ContextItem | None" = PrivateAttr(default=None)
+    _compact_lock: Lock = PrivateAttr(default_factory=Lock)
+    _compact_cache_hits: int = PrivateAttr(default=0)
+    _compact_cache_misses: int = PrivateAttr(default=0)
+
+    @model_validator(mode="after")
+    def _validate_concrete_type(self) -> "ContextItem":
+        if self.ITEM_TYPE is not None and self.type != self.ITEM_TYPE:
+            raise ValueError(
+                f"{self.__class__.__name__} requires type {self.ITEM_TYPE.value}"
+            )
+        return self
 
     @classmethod
     def from_input(cls, value: ContextItemInput) -> "ContextItem":
-        """Normalize a public DTO without retaining a source-object fallback."""
-        estimated = max(1, int(len(json.dumps(value.content, ensure_ascii=False)) / 1.5))
-        return cls(**deepcopy(value.model_dump()), token_estimate=estimated)
+        data = deepcopy(value.model_dump())
+        data["token_estimate"] = _estimate(data["content"])
+        item_class = _ITEM_CLASSES[value.type]
+        return item_class(**data)
 
     @property
-    def content_fingerprint(self) -> str:
-        """Stable identity for cached representations of this immutable item."""
-
-        encoded = json.dumps(self.content, ensure_ascii=False, sort_keys=True, default=str)
-        return sha256(encoded.encode("utf-8")).hexdigest()
+    def layout_key(self) -> tuple[int, int, int, str]:
+        order = self.metadata.get("layout_order", 0)
+        return int(self.SECTION), int(order), -self.priority, self.id
 
     @property
-    def layout_key(self) -> tuple[int, int, str]:
-        """Return the class-defined stable prompt position for this item."""
+    def supports_compact(self) -> bool:
+        return self.SUPPORTS_COMPACT
 
-        if self.type == ContextItemType.HISTORY:
-            section = ContextSection.HISTORY
-        elif self.type in {ContextItemType.MEMORY, ContextItemType.KNOWLEDGE_BASE}:
-            section = ContextSection.DYNAMIC_EVIDENCE
-        else:
-            section = ContextSection.STABLE_SYSTEM
-        return int(section), -self.priority, self.id
-
-    def score(self) -> float:
-        """Return the deterministic no-embedding relevance fallback."""
-
-        if self.required:
-            raise ValueError(f"required context item must not be scored: {self.id}")
-        return _TYPE_FALLBACK_RELEVANCE[self.type]
+    @property
+    def required(self) -> bool:
+        """Requiredness is defined once by the concrete Item type."""
+        return self.REQUIRED
 
     @property
     def supported_representations(self) -> tuple[str, ...]:
-        """Representations explicitly supported by this item class."""
+        return ("raw", "compact") if self.supports_compact else ("raw",)
 
-        if self.required or self.type not in {
-            ContextItemType.MEMORY,
-            ContextItemType.KNOWLEDGE_BASE,
-            ContextItemType.HISTORY,
-        }:
-            return ("raw",)
-        return ("raw", "compact", "drop")
+    def compact(self) -> "ContextItem":
+        """Return the single class-defined compact form, cached after success."""
+        if not self.supports_compact:
+            raise ValueError(f"{self.type.value} does not support compact")
+        with self._compact_lock:
+            if self._compact_result is not None:
+                self._compact_cache_hits += 1
+                return self._compact_result
+            result = self._build_compact_result()
+            self._compact_result = result
+            self._compact_cache_misses += 1
+            return result
 
-    def represent(
-        self,
-        representation: str = "raw",
-        *,
-        config_fingerprint: str = "",
-        max_tokens: int | None = None,
-    ) -> "ContextItem | None":
-        """Lazily compute and cache a class-defined representation."""
-
-        if representation not in self.supported_representations:
-            raise ValueError(
-                f"unsupported representation for {self.type.value}: {representation}"
-            )
-        cache_key = (
-            representation,
-            f"{self.content_fingerprint}:{config_fingerprint}:{max_tokens}",
-        )
-        with self._representation_lock:
-            if cache_key in self._representation_cache:
-                self._representation_cache_hits += 1
-            else:
-                self._representation_cache_misses += 1
-                self._representation_cache[cache_key] = self._build_representation(
-                    representation,
-                    max_tokens=max_tokens,
-                )
-            return self._representation_cache[cache_key]
+    def represent(self, representation: str = "raw") -> "ContextItem":
+        """Small rendering adapter; deletion and dynamic compact budgets do not exist."""
+        if representation == "raw":
+            return self
+        if representation == "compact":
+            return self.compact()
+        raise ValueError(f"unsupported representation: {representation}")
 
     @property
     def representation_cache_stats(self) -> tuple[int, int]:
-        """Return (hits, misses) for loop-level evidence aggregation."""
+        return self._compact_cache_hits, self._compact_cache_misses
 
-        return self._representation_cache_hits, self._representation_cache_misses
+    def _build_compact_result(self) -> "ContextItem":
+        compacted = self._build_compact_content(deepcopy(self.content))
+        data = self.model_dump(exclude={"content", "token_estimate", "metadata"})
+        data["metadata"] = {**deepcopy(self.metadata), "representation": "compact"}
+        return self.__class__(**data, content=compacted, token_estimate=_estimate(compacted))
 
-    def _build_representation(
-        self,
-        representation: str,
-        *,
-        max_tokens: int | None,
-    ) -> "ContextItem | None":
-        """Build a type-owned representation without a global tier policy."""
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError(f"{self.type.value} does not define compact")
 
-        if representation == "raw":
-            return self
-        if representation == "drop" and not self.required:
-            return None
-        if representation == "compact" and not self.required:
-            content = deepcopy(self.content)
-            if self.type == ContextItemType.MEMORY:
-                allowed = {"memory", "content", "memory_level", "score"}
-                content = {key: value for key, value in content.items() if key in allowed}
-                text_key = "memory" if "memory" in content else "content"
-            else:
-                text_key = "text"
-            text = str(content.get(text_key, ""))
-            if max_tokens is not None:
-                empty_content = {**content, text_key: ""}
-                overhead = len(json.dumps(empty_content, ensure_ascii=False))
-                char_limit = max(0, int(max_tokens * 1.5) - overhead)
-                if len(text) > char_limit:
-                    marker = "\n...[context item compacted]"
-                    if char_limit <= len(marker):
-                        text = marker[:char_limit]
-                    else:
-                        text = text[: char_limit - len(marker)] + marker
-            content = {**content, text_key: text}
-            estimated = max(1, int(len(json.dumps(content, ensure_ascii=False)) / 1.5))
-            data = self.model_dump(exclude={"content", "token_estimate"})
-            return ContextItem(**data, content=content, token_estimate=estimated)
-        raise ValueError(f"unsupported representation: {representation}")
+
+class SystemContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.SYSTEM
+    SECTION = ContextSection.SYSTEM
+    REQUIRED = True
+
+
+class ToolContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.TOOL
+    SECTION = ContextSection.TOOL
+    REQUIRED = True
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_tool(content)
+
+
+class SkillContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.SKILL
+    SECTION = ContextSection.SKILL
+    REQUIRED = True
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_skill(content)
+
+
+class ManagedAgentContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.MANAGED_AGENT
+    SECTION = ContextSection.MANAGED_AGENT
+    REQUIRED = True
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_managed_agent(content)
+
+
+class ExternalAgentContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.EXTERNAL_AGENT
+    SECTION = ContextSection.EXTERNAL_AGENT
+    REQUIRED = True
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_external_agent(content)
+
+
+class MemoryContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.MEMORY
+    SECTION = ContextSection.MEMORY
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_memory(content)
+
+
+class KnowledgeBaseContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.KNOWLEDGE_BASE
+    SECTION = ContextSection.KNOWLEDGE_BASE
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_text(content)
+
+
+class HistorySummaryContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.HISTORY_SUMMARY
+    SECTION = ContextSection.HISTORY_SUMMARY
+    REQUIRED = True
+
+
+class ConversationTurnContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.CONVERSATION_TURN
+    SECTION = ContextSection.CONVERSATION_TURN
+    REQUIRED = True
+
+
+class CurrentTaskContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.CURRENT_TASK
+    SECTION = ContextSection.CURRENT_TASK
+    REQUIRED = True
+
+
+class CurrentPlanningContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.CURRENT_PLANNING
+    SECTION = ContextSection.CURRENT_PLANNING
+    REQUIRED = True
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_text(content)
+
+
+class CurrentActionContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.CURRENT_ACTION
+    SECTION = ContextSection.CURRENT_ACTION
+    REQUIRED = True
+    SUPPORTS_COMPACT = True
+
+    def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
+        return _compact_action(content)
+
+
+_ITEM_CLASSES: dict[ContextItemType, type[ContextItem]] = {
+    item_class.ITEM_TYPE: item_class
+    for item_class in (
+        SystemContextItem,
+        ToolContextItem,
+        SkillContextItem,
+        ManagedAgentContextItem,
+        ExternalAgentContextItem,
+        MemoryContextItem,
+        KnowledgeBaseContextItem,
+        HistorySummaryContextItem,
+        ConversationTurnContextItem,
+        CurrentTaskContextItem,
+        CurrentPlanningContextItem,
+        CurrentActionContextItem,
+    )
+}
 
 
 def normalize_context_inputs(values: list[ContextItemInput]) -> list[ContextItem]:
-    """Validate run-local identity and normalize inputs into SDK items."""
     items: list[ContextItem] = []
     seen: set[str] = set()
     for value in values:
         item = ContextItem.from_input(value)
         if item.id in seen:
             raise ValueError(f"duplicate context item id: {item.id}")
-        if item.required and _is_empty_content(item.content):
+        if item.required and _is_empty(item.content):
             raise ValueError(f"required context item is empty: {item.id}")
         seen.add(item.id)
         items.append(item)
-    return items
+    return sorted(items, key=lambda item: item.layout_key)
 
 
-def _is_empty_content(content: Any) -> bool:
-    if content is None or content == "":
-        return True
-    if isinstance(content, dict) and "text" in content:
-        return content.get("text") == ""
-    return False
+def _estimate(content: dict[str, Any]) -> int:
+    return max(1, int(len(json.dumps(content, ensure_ascii=False, default=str)) / 1.5))
+
+
+def _is_empty(content: dict[str, Any]) -> bool:
+    return not content or ("text" in content and content["text"] == "")
+
+
+def _limit_text(value: Any, limit: int = 2000) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    half = max(0, (limit - 45) // 2)
+    return f"{text[:half]}\n...[deterministically compacted]...\n{text[-half:]}"
+
+
+def _compact_text(content: dict[str, Any]) -> dict[str, Any]:
+    return {**content, "text": _limit_text(content.get("text"))}
+
+
+def _compact_action(content: dict[str, Any]) -> dict[str, Any]:
+    """Keep the action/result boundary and remove verbose reasoning/process fields."""
+    allowed = ("step_number", "tool_calls", "observations", "error", "result")
+    result = {name: deepcopy(content[name]) for name in allowed if content.get(name) is not None}
+    if "observations" in result:
+        result["observations"] = _limit_text(result["observations"])
+    if "result" in result:
+        result["result"] = _limit_text(result["result"])
+    return result
+
+
+def _compact_tool(content: dict[str, Any]) -> dict[str, Any]:
+    return {name: deepcopy(content[name]) for name in ("name", "description", "inputs", "output_type") if name in content}
+
+
+def _compact_skill(content: dict[str, Any]) -> dict[str, Any]:
+    return {name: deepcopy(content[name]) for name in ("name", "trigger", "constraints", "description") if name in content}
+
+
+def _compact_memory(content: dict[str, Any]) -> dict[str, Any]:
+    return {name: deepcopy(content[name]) for name in ("memory", "content", "text", "memory_level", "source") if name in content}
+
+
+def _compact_managed_agent(content: dict[str, Any]) -> dict[str, Any]:
+    return {name: deepcopy(content[name]) for name in ("name", "description", "tools", "requirements") if name in content}
+
+
+def _compact_external_agent(content: dict[str, Any]) -> dict[str, Any]:
+    return {name: deepcopy(content[name]) for name in ("agent_id", "name", "description", "url", "protocol", "requirements") if name in content}

@@ -647,6 +647,40 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(
             final_answer_units[0]["content"], "The capital of France is Paris.")
 
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_returns_history_summary_unit(
+            self, mock_get_conversation_history):
+        """History API preserves summary units for frontend event rendering."""
+        summary_content = ('{"summary":{"task_overview":"done"},'
+                           '"covered_through_message_id":24}')
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123,
+            "create_time": "2023-04-01",
+            "message_records": [{
+                "message_id": 24,
+                "role": "assistant",
+                "message_content": "answer",
+                "units": [{
+                    "unit_id": 1001,
+                    "unit_type": "history_summary",
+                    "unit_content": summary_content,
+                    "unit_index": 2,
+                    "unit_status": "completed",
+                }],
+                "opinion_flag": None,
+            }],
+            "search_records": [],
+            "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        summary_units = [
+            unit for unit in result[0]["message"][0]["message"]
+            if unit["type"] == "history_summary"]
+        self.assertEqual(summary_units, [{
+            "type": "history_summary", "content": summary_content}])
+
     @patch('backend.services.conversation_management_service.get_conversation')
     @patch('backend.services.conversation_management_service.get_source_searches_by_message')
     @patch('backend.services.conversation_management_service.get_source_images_by_message')

@@ -28,13 +28,13 @@ def _factory() -> NexentAgent:
 
 def test_create_single_agent_injects_managed_runtime_and_run_items():
     factory = _factory()
-    item = ContextItemInput(id="system:policy", type="system_prompt", content={"text": "stable policy"})
+    item = ContextItemInput(id="system:policy", type="system", content={"text": "stable policy"})
     config = AgentConfig(
         name="agent",
         description="desc",
         model_name="main",
         tools=[],
-        context_manager_config=ContextManagerConfig(enabled=True, token_threshold=1000),
+        context_manager_config=ContextManagerConfig(token_threshold=1000),
         context_items=[item],
     )
     captured = {}
@@ -60,7 +60,7 @@ def test_create_single_agent_keeps_managed_runtime_when_compression_disabled():
         description="desc",
         model_name="main",
         tools=[],
-        context_manager_config=ContextManagerConfig(enabled=False, token_threshold=1000),
+        context_manager_config=ContextManagerConfig(token_threshold=1000),
     )
     captured = {}
 
@@ -74,7 +74,7 @@ def test_create_single_agent_keeps_managed_runtime_when_compression_disabled():
 
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
-    assert runtime.context_manager.config.enabled is False
+    assert runtime.context_manager.config.policy_layers is not None
 
 
 def test_create_single_agent_defaults_to_managed_runtime_without_config():
@@ -97,4 +97,4 @@ def test_create_single_agent_defaults_to_managed_runtime_without_config():
 
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
-    assert runtime.context_manager.config.enabled is False
+    assert runtime.context_manager.config.policy_layers is not None

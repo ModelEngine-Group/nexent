@@ -15,8 +15,8 @@ _BOOTSTRAP_MODULES = (
     "nexent.core.agents.context",
     "nexent.core.agents.context.manager",
     "nexent.core.agents.context.models",
+    "nexent.core.agents.context.run_context",
     "nexent.core.agents.context.runtime",
-    "nexent.core.agents.context.summary_step",
     "nexent.core.context_runtime",
     "nexent.core.context_runtime.contracts",
     "smolagents.memory",
@@ -75,10 +75,6 @@ def _bootstrap():
     models_module.ContextItem = type("ContextItem", (), {})
     models_module.ContextItemInput = type("ContextItemInput", (), {})
     sys.modules[models_module.__name__] = models_module
-    summary_module = types.ModuleType("nexent.core.agents.context.summary_step")
-    summary_module.ManagedRunContext = type("ManagedRunContext", (), {})
-    sys.modules[summary_module.__name__] = summary_module
-
     _load("nexent.core.context_runtime.contracts", "core/context_runtime/contracts.py")
     managed = _load("nexent.core.agents.context.runtime", "core/agents/context/runtime.py")
     return managed, snapshot
@@ -112,9 +108,6 @@ class _ContextManager:
 
     def prepare_run_context(self, *, memory, fallback_system_prompt, items=None):
         self.calls.append(("prepare_run_context", fallback_system_prompt, items))
-        memory.system_prompt = types.SimpleNamespace(
-            to_messages=lambda: [{"role": "system", "content": "managed stable"}]
-        )
         return types.SimpleNamespace(
             stable_messages=({"role": "system", "content": "managed stable"},),
             dynamic_messages=(),

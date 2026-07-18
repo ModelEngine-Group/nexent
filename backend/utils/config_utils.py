@@ -19,7 +19,6 @@ logger = logging.getLogger("config_utils")
 
 CONTEXT_SOFT_LIMIT_RATIO_KEY = "context.soft_limit_ratio"
 CONTEXT_POLICY_KEY = "context.policy"
-CONTEXT_CPU_EMBEDDING_MODEL_PATH_KEY = "context.cpu_embedding_model_path"
 
 
 def safe_value(value):
@@ -168,15 +167,6 @@ class TenantConfigManager:
         if not isinstance(parsed, dict):
             raise ValueError(f"{CONTEXT_POLICY_KEY} must be a JSON object")
         return parsed
-
-    def get_context_cpu_embedding_model_path(self, tenant_id: str | None = None) -> str | None:
-        """Return an explicitly configured local-only CPU embedding model path."""
-        if tenant_id is None:
-            return None
-        value = self.load_config(tenant_id).get(CONTEXT_CPU_EMBEDDING_MODEL_PATH_KEY)
-        if value in (None, ""):
-            return None
-        return str(value)
 
     def set_single_config(self, user_id: str | None = None, tenant_id: str | None = None, key: str | None = None,
                           value: str | None = None, ):

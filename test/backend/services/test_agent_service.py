@@ -4255,7 +4255,9 @@ async def test_prepare_agent_run(
     # Setup
     mock_run_info = MagicMock()
     mock_run_info.agent_config.context_items = []
-    mock_run_info.agent_config.context_manager_config.enabled = False
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
     mock_run_info.history = []
     mock_create_run_info.return_value = mock_run_info
     mock_memory_context = MagicMock()
@@ -4294,12 +4296,12 @@ async def test_prepare_agent_run(
     assert mock_run_info.context_input.items == ()
 
 
-@patch('backend.services.agent_service.submit')
-def test_save_messages(mock_submit, mock_agent_request):
+@patch('backend.services.agent_service.save_conversation_user')
+def test_save_messages(mock_save_user, mock_agent_request):
     """Test save_messages function."""
     # Test user message saving
     save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
-    mock_submit.assert_called_once()
+    mock_save_user.assert_called_once_with(mock_agent_request, "u", "t")
 
     # Test assistant message saving now raises because incremental
     # persistence has replaced the old batch path.

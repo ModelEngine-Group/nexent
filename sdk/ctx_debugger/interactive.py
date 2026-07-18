@@ -129,10 +129,9 @@ class Session:
                  keep_recent_steps=4, max_steps=5):
         self.max_steps = max_steps
         self.cm_config = ContextManagerConfig(
-            enabled=True,
             token_threshold=token_threshold,
-            keep_recent_pairs=keep_recent_pairs,
             keep_recent_steps=keep_recent_steps,
+            policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
         )
         self.history = []           # list[AgentHistory]
         self.turn = 0

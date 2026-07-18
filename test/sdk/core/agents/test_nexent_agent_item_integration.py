@@ -8,11 +8,11 @@ from sdk.nexent.core.agents.context import ContextManagerConfig
 
 
 def _item(item_id: str, text: str) -> ContextItemInput:
-    return ContextItemInput(id=item_id, type="system_prompt", content={"text": text})
+    return ContextItemInput(id=item_id, type="system", content={"text": text})
 
 
 def test_context_manager_registers_items_in_order():
-    manager = ContextManager(ContextManagerConfig(enabled=True))
+    manager = ContextManager(ContextManagerConfig())
     manager.register_item(_item("system:first", "first"))
     manager.register_item(_item("system:second", "second"))
 

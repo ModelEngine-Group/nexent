@@ -1992,7 +1992,6 @@ class TestRunStreamRealExecution:
         agent.step_metrics = []
         agent._last_uncompressed_est = 110
         agent.context_manager = MagicMock()
-        agent.context_manager.config.enabled = True
         agent.context_manager.config.token_threshold = 4096
         agent.context_manager.config.chars_per_token = 1.5
         agent.context_runtime = self._context_runtime_mock(

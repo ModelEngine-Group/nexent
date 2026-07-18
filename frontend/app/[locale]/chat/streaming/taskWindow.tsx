@@ -324,6 +324,96 @@ const iconMap: Record<string, React.ReactNode> = {
   default: <Wrench size={16} className="mr-2" color="#4b5563" />, // Default icon
 };
 
+type HistorySummaryPayload = {
+  summary?: string | Record<string, unknown>;
+  covered_through_message_id?: number;
+  trigger?: string;
+};
+
+type TranslationFunction = Parameters<MessageHandler["render"]>[1];
+
+const formatHistorySummary = (
+  summary: HistorySummaryPayload["summary"]
+): string => {
+  if (typeof summary === "string") return summary;
+  if (!summary || typeof summary !== "object") return "";
+  return Object.entries(summary)
+    .filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === "string" && entry[1].trim().length > 0
+    )
+    .map(([key, value]) => `**${key.replaceAll("_", " ")}**\n\n${value}`)
+    .join("\n\n");
+};
+
+const HistorySummaryEvent = ({
+  content,
+  t,
+}: {
+  content: string;
+  t: TranslationFunction;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  let payload: HistorySummaryPayload = {};
+  try {
+    payload = JSON.parse(content) as HistorySummaryPayload;
+  } catch {
+    payload = { summary: content };
+  }
+
+  const summary = formatHistorySummary(payload.summary);
+  const trigger = payload.trigger
+    ? t(`taskWindow.historySummary.triggers.${payload.trigger}`, {
+        defaultValue: payload.trigger,
+      })
+    : t("taskWindow.historySummary.triggerUnknown");
+
+  return (
+    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 text-left"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="flex items-center gap-2 font-medium text-gray-700">
+          <FileText size={15} aria-hidden="true" />
+          {t("taskWindow.historySummary.title")}
+        </span>
+        <ChevronRight
+          size={16}
+          aria-hidden="true"
+          className={`shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+      </button>
+      <div className="mt-1 text-xs text-gray-500">
+        {typeof payload.covered_through_message_id === "number" && (
+          <span className="mr-3">
+            {t("taskWindow.historySummary.coveredThrough", {
+              id: payload.covered_through_message_id,
+            })}
+          </span>
+        )}
+        <span>{t("taskWindow.historySummary.trigger", { trigger })}</span>
+      </div>
+      {expanded && (
+        <div className="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-700">
+          {summary ? (
+            <MarkdownRenderer
+              content={summary}
+              className="task-message-content"
+              showDiagramToggle={false}
+              enableMultimodal={false}
+            />
+          ) : (
+            t("taskWindow.historySummary.empty")
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 type KnowledgeSiteInfo = {
   key: string;
   domain: string;
@@ -344,6 +434,13 @@ type KnowledgeSiteInfo = {
 
 // Define the handlers for different types of messages to improve extensibility
 const messageHandlers: MessageHandler[] = [
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.HISTORY_SUMMARY,
+    render: (message, t) => (
+      <HistorySummaryEvent content={message.content || ""} t={t} />
+    ),
+  },
   // Preprocess type processor - handles contents array logic
   {
     canHandle: (message) => message.type === chatConfig.contentTypes.PREPROCESS,
@@ -410,11 +507,19 @@ const messageHandlers: MessageHandler[] = [
       message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
     render: (message, _t) => (
       <div
-        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+        className={
+          message.subType === "deep_thinking"
+            ? "deep-thinking-content"
+            : "task-message-content"
+        }
       >
         <MarkdownRenderer
           content={convertToMarkdownCodeFences(message.content)}
-          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+          className={
+            message.subType === "deep_thinking"
+              ? "deep-thinking-content"
+              : "task-message-content"
+          }
           showDiagramToggle={false}
           enableMultimodal={false}
         />
@@ -1151,11 +1256,19 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) => message.type === "model_output",
     render: (message, _t) => (
       <div
-        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+        className={
+          message.subType === "deep_thinking"
+            ? "deep-thinking-content"
+            : "task-message-content"
+        }
       >
         <MarkdownRenderer
           content={convertToMarkdownCodeFences(message.content)}
-          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+          className={
+            message.subType === "deep_thinking"
+              ? "deep-thinking-content"
+              : "task-message-content"
+          }
           showDiagramToggle={false}
           enableMultimodal={false}
         />

@@ -447,12 +447,12 @@ class NexentAgent:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
             # ContextManager is the only production context assembly path.
-            # ``enabled`` controls compression, not runtime selection.
+            # ContextPolicy controls whether adaptive compaction is active.
             from .context import ContextManager, ContextManagerConfig, ManagedContextRuntime
 
             ctx_config = (
                 getattr(agent_config, "context_manager_config", None)
-                or ContextManagerConfig(enabled=False)
+                or ContextManagerConfig()
             )
             context_manager = ContextManager(
                 config=ctx_config,

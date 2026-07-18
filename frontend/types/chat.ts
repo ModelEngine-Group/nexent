@@ -40,6 +40,7 @@ export interface StepContent {
     | typeof chatConfig.messageTypes.MEMORY_SEARCH
     | typeof chatConfig.messageTypes.PREPROCESS
     | typeof chatConfig.messageTypes.VERIFICATION
+    | typeof chatConfig.messageTypes.HISTORY_SUMMARY
     | typeof chatConfig.messageTypes.MAX_STEPS_REACHED;
   content: string;
   expanded: boolean;

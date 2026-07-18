@@ -347,18 +347,16 @@ async def main(
             "- Keep the checkpoint short and stable. Do not append history."
         )
         cm_config = ContextManagerConfig(
-            enabled=True,
             token_threshold=token_threshold,
-            keep_recent_pairs=keep_recent_pairs,
             keep_recent_steps=keep_recent_steps,
-            max_observation_length=max_observation_length,
+            policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
             summary_json_schema=custom_summary_schema,
             summary_system_prompt=custom_summary_system_prompt,
             incremental_summary_system_prompt=custom_incremental_summary_system_prompt,
         )
     else:
         # baseline: no compression
-        cm_config = ContextManagerConfig(enabled=False, token_threshold=10**9)
+        cm_config = ContextManagerConfig(token_threshold=10**9)
 
     # Output directory
     if output_dir is None:
