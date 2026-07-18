@@ -17,7 +17,6 @@ BEGIN
     SELECT 1
     FROM nexent.nl2agent_session_t
     WHERE runner_agent_id IS NULL
-      AND delete_flag <> 'Y'
   ) THEN
     ALTER TABLE nexent.nl2agent_session_t
     ALTER COLUMN runner_agent_id SET NOT NULL;

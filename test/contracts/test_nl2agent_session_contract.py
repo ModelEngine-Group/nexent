@@ -21,6 +21,9 @@ def test_runner_identity_is_declared_in_every_persistence_surface() -> None:
     assert '"runner_agent_id" int4 NOT NULL' in init_sql
     assert "ADD COLUMN IF NOT EXISTS runner_agent_id int4" in migration_sql
     assert "ALTER COLUMN runner_agent_id SET NOT NULL" in migration_sql
+    constraint_block = migration_sql.split("DO $$", 1)[1]
+    null_guard = constraint_block.split("IF NOT EXISTS", 1)[1].split("THEN", 1)[0]
+    assert "delete_flag" not in null_guard
 
 
 def test_session_discovery_contract_requires_runner_identity() -> None:
