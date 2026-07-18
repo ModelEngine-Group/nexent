@@ -1793,6 +1793,10 @@
             "title": "Draft Agent Id",
             "type": "integer"
           },
+          "nl2agent_agent_id": {
+            "title": "Nl2Agent Agent Id",
+            "type": "integer"
+          },
           "status": {
             "enum": [
               "active",
@@ -1816,6 +1820,7 @@
           }
         },
         "required": [
+          "nl2agent_agent_id",
           "draft_agent_id",
           "conversation_id",
           "status"

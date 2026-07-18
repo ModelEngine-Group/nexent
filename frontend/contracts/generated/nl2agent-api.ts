@@ -1101,6 +1101,8 @@ export interface components {
       create_time?: string | null;
       /** Draft Agent Id */
       draft_agent_id: number;
+      /** Nl2Agent Agent Id */
+      nl2agent_agent_id: number;
       /**
        * Status
        * @enum {string}

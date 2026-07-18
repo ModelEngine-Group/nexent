@@ -10,6 +10,7 @@ import {
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
 
 const session = {
+  nl2agent_agent_id: 101,
   draft_agent_id: 202,
   conversation_id: 902,
   status: "active" as const,
