@@ -155,29 +155,37 @@ mock_sdk_nexent_monitor_monitoring_module = types.ModuleType("sdk.nexent.monitor
 mock_sdk_nexent_monitor_monitoring_module.record_model_call = MagicMock()
 
 
-class _MockLegacyContextRuntime:
-    context_manager = None
-
-
 class _MockManagedContextRuntime:
-    def __init__(self, context_manager):
+    def __init__(self, context_manager, components=None):
         self.context_manager = context_manager
+        self.components = list(components or [])
+
+
+class _MockContextManager:
+    def __init__(self, config, max_steps):
+        self.config = config
+        self.max_steps = max_steps
+
+
+class _MockContextManagerConfig:
+    def __init__(self, enabled=False, **kwargs):
+        self.enabled = enabled
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
 mock_sdk_context_runtime_module.__path__ = []
-mock_sdk_context_runtime_legacy_module = types.ModuleType("sdk.nexent.core.context_runtime.legacy")
-mock_sdk_context_runtime_legacy_module.__path__ = []
-mock_sdk_context_runtime_legacy_runtime_module = types.ModuleType(
-    "sdk.nexent.core.context_runtime.legacy.runtime"
-)
-mock_sdk_context_runtime_legacy_runtime_module.LegacyContextRuntime = _MockLegacyContextRuntime
 mock_sdk_context_runtime_managed_module = types.ModuleType("sdk.nexent.core.context_runtime.managed")
 mock_sdk_context_runtime_managed_module.__path__ = []
 mock_sdk_context_runtime_managed_runtime_module = types.ModuleType(
     "sdk.nexent.core.context_runtime.managed.runtime"
 )
 mock_sdk_context_runtime_managed_runtime_module.ManagedContextRuntime = _MockManagedContextRuntime
+mock_sdk_agent_context_module = types.ModuleType("sdk.nexent.core.agents.agent_context")
+mock_sdk_agent_context_module.ContextManager = _MockContextManager
+mock_sdk_summary_config_module = types.ModuleType("sdk.nexent.core.agents.summary_config")
+mock_sdk_summary_config_module.ContextManagerConfig = _MockContextManagerConfig
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -296,10 +304,10 @@ module_mocks = {
     "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
     "sdk.nexent.core.tools": mock_sdk_nexent_core_tools_module,
     "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
-    "sdk.nexent.core.context_runtime.legacy": mock_sdk_context_runtime_legacy_module,
-    "sdk.nexent.core.context_runtime.legacy.runtime": mock_sdk_context_runtime_legacy_runtime_module,
     "sdk.nexent.core.context_runtime.managed": mock_sdk_context_runtime_managed_module,
     "sdk.nexent.core.context_runtime.managed.runtime": mock_sdk_context_runtime_managed_runtime_module,
+    "sdk.nexent.core.agents.agent_context": mock_sdk_agent_context_module,
+    "sdk.nexent.core.agents.summary_config": mock_sdk_summary_config_module,
     "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
     "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
@@ -358,16 +366,13 @@ sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
 sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
 sys.modules.setdefault("sdk.nexent.core.tools", mock_sdk_nexent_core_tools_module)
 sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
-sys.modules.setdefault("sdk.nexent.core.context_runtime.legacy", mock_sdk_context_runtime_legacy_module)
-sys.modules.setdefault(
-    "sdk.nexent.core.context_runtime.legacy.runtime",
-    mock_sdk_context_runtime_legacy_runtime_module,
-)
 sys.modules.setdefault("sdk.nexent.core.context_runtime.managed", mock_sdk_context_runtime_managed_module)
 sys.modules.setdefault(
     "sdk.nexent.core.context_runtime.managed.runtime",
     mock_sdk_context_runtime_managed_runtime_module,
 )
+sys.modules.setdefault("sdk.nexent.core.agents.agent_context", mock_sdk_agent_context_module)
+sys.modules.setdefault("sdk.nexent.core.agents.summary_config", mock_sdk_summary_config_module)
 
 
 # ----------------------------------------------------------------------------

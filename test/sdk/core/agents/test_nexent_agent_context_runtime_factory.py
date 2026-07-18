@@ -52,7 +52,7 @@ def test_create_single_agent_injects_managed_runtime_and_registers_components():
     assert runtime.context_manager.get_registered_components() == []
 
 
-def test_create_single_agent_injects_legacy_runtime_when_context_manager_disabled():
+def test_create_single_agent_keeps_managed_runtime_when_compression_disabled():
     factory = _factory()
     config = AgentConfig(
         name="agent",
@@ -72,5 +72,28 @@ def test_create_single_agent_injects_legacy_runtime_when_context_manager_disable
         factory.create_single_agent(config)
 
     runtime = captured["context_runtime"]
-    assert type(runtime).__name__ == "LegacyContextRuntime"
-    assert runtime.context_manager is None
+    assert type(runtime).__name__ == "ManagedContextRuntime"
+    assert runtime.context_manager.config.enabled is False
+
+
+def test_create_single_agent_defaults_to_managed_runtime_without_config():
+    factory = _factory()
+    config = AgentConfig(
+        name="agent",
+        description="desc",
+        model_name="main",
+        tools=[],
+    )
+    captured = {}
+
+    def fake_core_agent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+        factory.create_single_agent(config)
+
+    runtime = captured["context_runtime"]
+    assert type(runtime).__name__ == "ManagedContextRuntime"
+    assert runtime.context_manager.config.enabled is False

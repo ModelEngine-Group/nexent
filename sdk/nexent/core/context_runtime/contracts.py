@@ -1,4 +1,4 @@
-"""Neutral contracts shared by independent legacy and managed context paths."""
+"""Contracts for the single ContextManager-backed runtime path."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,7 +28,7 @@ class FinalContext:
 
 
 class ContextRuntime(Protocol):
-    """Runtime protocol; implementations must not depend on one another."""
+    """Runtime protocol implemented by the ContextManager adapter."""
 
     context_manager: Any | None
 

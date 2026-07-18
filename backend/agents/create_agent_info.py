@@ -4,7 +4,6 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.summary_config import ContextManagerConfig
@@ -712,9 +711,7 @@ async def create_agent_config(
     constraint_prompt = agent_info.get("constraint_prompt", "")
     few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
-    # Get template content (use manager template if has any sub-agents)
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    prompt_template = get_agent_prompt_template(is_manager=is_manager, language=language)
 
     # Get app information
     default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
@@ -853,12 +850,11 @@ async def create_agent_config(
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
 
-    # Select the context path once.  Managed assembly receives raw components
-    # and must never consume a Jinja-rendered legacy prompt.
+    # This compatibility flag controls compression only. ContextManager remains
+    # the single context assembly path when compression is disabled.
     enable_context_manager = agent_info.get("enable_context_manager", False)
 
-    # Assemble legacy system_prompt only for the isolated fallback path.
-    # Get skills list for prompt template
+    # Get skills list for ContextManager components.
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
@@ -879,12 +875,6 @@ async def create_agent_config(
         "knowledge_base_summary": knowledge_base_summary,
         "user_id": user_id,
     }
-    system_prompt = ""
-    if not enable_context_manager:
-        system_prompt = Template(
-            prompt_template["system_prompt"], undefined=StrictUndefined
-        ).render(render_kwargs)
-
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None
     if model_id_to_use is not None:
@@ -927,34 +917,30 @@ async def create_agent_config(
         model_info.get("model_name") if model_info else model_name,
     )
 
-    # Managed context assembly starts from raw sources.  No legacy rendered
-    # prompt is supplied on this path.
-    context_components = []
-    if enable_context_manager:
-        context_components = build_context_components(
-            duty=duty_prompt,
-            constraint=constraint_prompt,
-            few_shots=few_shots_prompt,
-            app_name=app_name,
-            app_description=app_description,
-            user_id=user_id,
-            language=language,
-            is_manager=is_manager,
-            tools=render_kwargs["tools"],
-            skills=skills,
-            managed_agents=render_kwargs["managed_agents"],
-            external_a2a_agents=render_kwargs["external_a2a_agents"],
-            memory_list=memory_list,
-            memory_search_query=last_user_query,
-            knowledge_base_summary=knowledge_base_summary,
-            kb_ids=kb_ids,
-        )
+    context_components = build_context_components(
+        duty=duty_prompt,
+        constraint=constraint_prompt,
+        few_shots=few_shots_prompt,
+        app_name=app_name,
+        app_description=app_description,
+        user_id=user_id,
+        language=language,
+        is_manager=is_manager,
+        tools=render_kwargs["tools"],
+        skills=skills,
+        managed_agents=render_kwargs["managed_agents"],
+        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        memory_list=memory_list,
+        memory_search_query=last_user_query,
+        knowledge_base_summary=knowledge_base_summary,
+        kb_ids=kb_ids,
+    )
 
-        logger.info(
-            f"Agent {agent_id} context assembly: "
-            f"skills_count={len(skills)}, "
-            f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
-        )
+    logger.info(
+        f"Agent {agent_id} context assembly: "
+        f"skills_count={len(skills)}, "
+        f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
+    )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
         token_threshold=context_token_threshold,
@@ -967,7 +953,6 @@ async def create_agent_config(
         description="undefined" if agent_info["description"] is None else agent_info["description"],
         prompt_templates=await prepare_prompt_templates(
             is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,
-            system_prompt=system_prompt,
             language=language,
             agent_id=agent_id
         ),
@@ -1177,7 +1162,6 @@ async def discover_langchain_tools():
 
 async def prepare_prompt_templates(
     is_manager: bool,
-    system_prompt: str,
     language: str = 'zh',
     agent_id: int = None,
 ):
@@ -1186,7 +1170,6 @@ async def prepare_prompt_templates(
 
     Args:
         is_manager: Whether it is a manager mode
-        system_prompt: System prompt content
         language: Language code ('zh' or 'en')
         agent_id: Agent ID for fetching skill instances
 
@@ -1194,7 +1177,10 @@ async def prepare_prompt_templates(
         dict: Prompt template configuration
     """
     prompt_templates = get_agent_prompt_template(is_manager, language)
-    prompt_templates["system_prompt"] = system_prompt
+    # Stable context is assembled exclusively by ContextManager. Keep the key
+    # for smolagents prompt-template compatibility, but never source it from a
+    # second rendering path.
+    prompt_templates["system_prompt"] = ""
 
     return prompt_templates
 

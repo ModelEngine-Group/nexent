@@ -836,8 +836,6 @@ def test_mount_conversation_context_manager_updates_runtime_authority(basic_agen
 
 def test_mount_context_manager_uses_authorized_snapshot(basic_agent_run_info):
     """Run-local authorized components override mutable AgentConfig data."""
-    from nexent.core.agents.context_input import ContextInput
-
     context_manager = MagicMock(name="context_manager")
     context_runtime = types.SimpleNamespace(
         context_manager=MagicMock(),
@@ -846,7 +844,10 @@ def test_mount_context_manager_uses_authorized_snapshot(basic_agent_run_info):
     agent = types.SimpleNamespace(context_runtime=context_runtime, context_manager=None)
     authorized_component = MagicMock(name="authorized_component")
     basic_agent_run_info.context_manager = context_manager
-    basic_agent_run_info.context_input = ContextInput(components=(authorized_component,))
+    basic_agent_run_info.context_input = types.SimpleNamespace(
+        components=(authorized_component,),
+        history=(),
+    )
     basic_agent_run_info.agent_config.context_components = [MagicMock(name="stale_component")]
 
     run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
@@ -856,10 +857,11 @@ def test_mount_context_manager_uses_authorized_snapshot(basic_agent_run_info):
 
 def test_authorized_history_snapshot_overrides_mutable_run_history(basic_agent_run_info):
     """History consumed by the SDK must come from the authorized run snapshot."""
-    from nexent.core.agents.context_input import ContextInput
-
     authorized_history = MagicMock(name="authorized_history")
-    basic_agent_run_info.context_input = ContextInput(history=(authorized_history,))
+    basic_agent_run_info.context_input = types.SimpleNamespace(
+        components=(),
+        history=(authorized_history,),
+    )
     basic_agent_run_info.history = [MagicMock(name="stale_history")]
 
     assert run_agent._get_authorized_history(basic_agent_run_info) == (authorized_history,)
@@ -874,8 +876,8 @@ def test_authorized_history_keeps_direct_sdk_compatibility(basic_agent_run_info)
     assert run_agent._get_authorized_history(basic_agent_run_info) is history
 
 
-def test_mount_conversation_context_manager_rejects_legacy_runtime(basic_agent_run_info):
-    """A reusable ContextManager is valid only when the active runtime is managed."""
+def test_mount_conversation_context_manager_rejects_runtime_without_manager(basic_agent_run_info):
+    """A reusable ContextManager requires an active runtime manager boundary."""
     conversation_context_manager = MagicMock(name="conversation_context_manager")
     agent = types.SimpleNamespace(
         context_runtime=types.SimpleNamespace(context_manager=None),

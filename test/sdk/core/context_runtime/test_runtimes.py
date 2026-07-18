@@ -1,4 +1,4 @@
-"""Low-dependency tests for independent legacy and managed context runtimes."""
+"""Low-dependency tests for the ContextManager runtime."""
 from __future__ import annotations
 
 import importlib.util
@@ -13,9 +13,7 @@ _BOOTSTRAP_MODULES = (
     "nexent.core",
     "nexent.core.context_runtime",
     "nexent.core.context_runtime.managed",
-    "nexent.core.context_runtime.legacy",
     "nexent.core.context_runtime.contracts",
-    "nexent.core.context_runtime.legacy.runtime",
     "nexent.core.context_runtime.managed.runtime",
     "smolagents.memory",
 )
@@ -36,7 +34,6 @@ def _bootstrap():
         ("nexent.core", ROOT / "core"),
         ("nexent.core.context_runtime", ROOT / "core" / "context_runtime"),
         ("nexent.core.context_runtime.managed", ROOT / "core" / "context_runtime" / "managed"),
-        ("nexent.core.context_runtime.legacy", ROOT / "core" / "context_runtime" / "legacy"),
     ):
         package = types.ModuleType(name)
         package.__path__ = [str(path)]
@@ -54,9 +51,8 @@ def _bootstrap():
     memory_module.SystemPromptStep = SystemPromptStep
     sys.modules["smolagents.memory"] = memory_module
     _load("nexent.core.context_runtime.contracts", "core/context_runtime/contracts.py")
-    legacy = _load("nexent.core.context_runtime.legacy.runtime", "core/context_runtime/legacy/runtime.py")
     managed = _load("nexent.core.context_runtime.managed.runtime", "core/context_runtime/managed/runtime.py")
-    return legacy, managed, snapshot
+    return managed, snapshot
 
 
 def _restore(snapshot):
@@ -111,7 +107,7 @@ class _ContextManager:
 
 
 def test_managed_runtime_is_thin_context_manager_adapter():
-    _, managed_module, snapshot = _bootstrap()
+    managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
         component = types.SimpleNamespace(component_type="system_prompt")
@@ -143,9 +139,8 @@ def test_managed_runtime_is_thin_context_manager_adapter():
     finally:
         _restore(snapshot)
 
-
 def test_managed_runtime_replaces_components_without_mutating_context_manager():
-    _, managed_module, snapshot = _bootstrap()
+    managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
         runtime = managed_module.ManagedContextRuntime(manager)
@@ -160,7 +155,7 @@ def test_managed_runtime_replaces_components_without_mutating_context_manager():
 
 
 def test_managed_runtime_uses_component_snapshot_without_explicit_prepare_run():
-    _, managed_module, snapshot = _bootstrap()
+    managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
         component = types.SimpleNamespace(component_type="knowledge")
@@ -169,37 +164,5 @@ def test_managed_runtime_uses_component_snapshot_without_explicit_prepare_run():
         runtime.prepare_step(model=None, memory=_Memory(), current_run_start_idx=0)
 
         assert manager.calls[0] == ("prepare_run_context", "", [component])
-    finally:
-        _restore(snapshot)
-
-
-def test_legacy_runtime_does_not_require_context_manager():
-    legacy_module, _, snapshot = _bootstrap()
-    try:
-        runtime = legacy_module.LegacyContextRuntime()
-        memory = _Memory()
-        runtime.prepare_run(memory=memory, fallback_system_prompt="legacy prompt")
-        final = runtime.prepare_step(
-            model=None,
-            memory=memory,
-            current_run_start_idx=0,
-        )
-
-        assert runtime.context_manager is None
-        assert final.messages == [{"role": "system", "content": "legacy prompt"}]
-    finally:
-        _restore(snapshot)
-
-
-def test_legacy_runtime_truncates_large_observations():
-    legacy_module, _, snapshot = _bootstrap()
-    try:
-        runtime = legacy_module.LegacyContextRuntime()
-        step = types.SimpleNamespace(observations="x" * 120_000)
-
-        runtime.truncate_observation(step)
-
-        assert len(step.observations) > 100_000
-        assert "Output truncated to 100000 characters" in step.observations
     finally:
         _restore(snapshot)

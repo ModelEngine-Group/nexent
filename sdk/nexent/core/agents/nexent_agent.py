@@ -446,25 +446,24 @@ class NexentAgent:
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Choose one context runtime at construction time.  The managed and
-            # legacy implementations do not call one another after this point.
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config and ctx_config.enabled:
-                from .agent_context import ContextManager
-                from ..context_runtime.managed.runtime import ManagedContextRuntime
+            # ContextManager is the only production context assembly path.
+            # ``enabled`` controls compression, not runtime selection.
+            from ..context_runtime.managed.runtime import ManagedContextRuntime
+            from .agent_context import ContextManager
+            from .summary_config import ContextManagerConfig
 
-                context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps,
-                )
-                context_runtime = ManagedContextRuntime(
-                    context_manager,
-                    components=getattr(agent_config, 'context_components', None) or [],
-                )
-            else:
-                from ..context_runtime.legacy.runtime import LegacyContextRuntime
-
-                context_runtime = LegacyContextRuntime()
+            ctx_config = (
+                getattr(agent_config, "context_manager_config", None)
+                or ContextManagerConfig(enabled=False)
+            )
+            context_manager = ContextManager(
+                config=ctx_config,
+                max_steps=agent_config.max_steps,
+            )
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                components=getattr(agent_config, "context_components", None) or [],
+            )
 
             # Create the agent
             agent = CoreAgent(

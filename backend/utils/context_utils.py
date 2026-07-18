@@ -20,9 +20,6 @@ if TYPE_CHECKING:
         ManagedAgentsComponent,
         ExternalAgentsComponent,
         SystemPromptComponent,
-        ToolConfig,
-        AgentConfig,
-        ExternalA2AAgentConfig,
     )
 
 
@@ -1217,7 +1214,7 @@ def build_agent_fallback_component(
 
 
 def build_context_components(
-    # Raw params for piecewise assembly (NEW in Goal 3)
+    # Raw inputs for component-based assembly.
     duty: Optional[str] = None,
     constraint: Optional[str] = None,
     few_shots: Optional[str] = None,
@@ -1235,8 +1232,6 @@ def build_context_components(
     memory_search_query: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
-    # Legacy param for fallback (removed short-circuit in Goal 3)
-    system_prompt: Optional[str] = None,
     # Inclusion flags (kept for backward compatibility)
     include_tools: bool = True,
     include_skills: bool = True,
@@ -1248,8 +1243,8 @@ def build_context_components(
 ) -> List["ContextComponent"]:
     """Build list of ContextComponents from agent configuration data.
 
-    Piecewise assembly: Each semantic section is emitted as a dedicated
-    ContextComponent, assembled in the exact order matching Jinja2 templates.
+    Each semantic section is emitted as a dedicated ContextComponent in the
+    stable order established by the former prompt templates.
 
     Assembly order (15 sections):
       1. Header (基本信息)
@@ -1268,11 +1263,6 @@ def build_context_components(
      14. Code Norms (python代码规范)
      15. Footer (示例模板 + 结尾)
 
-    Note: The a330d815 short-circuit (if system_prompt: return [single])
-    has been REMOVED. All callers must provide raw params for piecewise assembly.
-    The system_prompt param is kept for future fallback use but not currently
-    used in the piecewise path.
-
     Args:
         duty: Agent's primary duty text
         constraint: Resource usage constraint text
@@ -1290,7 +1280,6 @@ def build_context_components(
         memory_search_query: Query used to search memory
         knowledge_base_summary: Summary text from knowledge bases
         kb_ids: List of knowledge base IDs
-        system_prompt: (Legacy) Pre-rendered system prompt - NOT USED in piecewise path
         include_*: Flags for backward compatibility
 
     Returns:

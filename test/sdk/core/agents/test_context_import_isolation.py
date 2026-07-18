@@ -12,7 +12,6 @@ import {module_name}
 forbidden = [
     'nexent.core.agents.agent_context',
     'nexent.core.context_runtime.managed.runtime',
-    'nexent.core.context_runtime.legacy.runtime',
 ]
 loaded = [name for name in forbidden if name in sys.modules]
 assert not loaded, loaded
@@ -26,3 +25,14 @@ def test_agent_model_import_does_not_load_context_manager_or_runtimes():
 
 def test_nexent_agent_import_does_not_load_context_manager_or_runtimes():
     _run_isolation_check("nexent.core.agents.nexent_agent")
+
+
+def test_legacy_context_runtime_is_removed():
+    result = subprocess.run(
+        [sys.executable, "-c", "import nexent.core.context_runtime.legacy.runtime"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" in result.stderr
