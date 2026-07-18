@@ -448,9 +448,7 @@ class NexentAgent:
 
             # ContextManager is the only production context assembly path.
             # ``enabled`` controls compression, not runtime selection.
-            from ..context_runtime.managed.runtime import ManagedContextRuntime
-            from .agent_context import ContextManager
-            from .summary_config import ContextManagerConfig
+            from .context import ContextManager, ContextManagerConfig, ManagedContextRuntime
 
             ctx_config = (
                 getattr(agent_config, "context_manager_config", None)

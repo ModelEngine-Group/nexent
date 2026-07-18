@@ -5,7 +5,7 @@ import hashlib
 import pytest
 
 from backend.utils.context_utils import build_context_inputs
-from nexent.core.agents.agent_context import ContextManager as RealContextManager
+from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context import ContextItemRenderer, ContextItemType
 from nexent.core.agents.context.models import normalize_context_inputs
 

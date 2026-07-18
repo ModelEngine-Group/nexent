@@ -11,11 +11,17 @@ ROOT = Path(__file__).resolve().parents[4] / "sdk" / "nexent"
 _BOOTSTRAP_MODULES = (
     "nexent",
     "nexent.core",
+    "nexent.core.agents",
+    "nexent.core.agents.context",
+    "nexent.core.agents.context.manager",
+    "nexent.core.agents.context.models",
+    "nexent.core.agents.context.runtime",
+    "nexent.core.agents.context.summary_step",
     "nexent.core.context_runtime",
-    "nexent.core.context_runtime.managed",
     "nexent.core.context_runtime.contracts",
-    "nexent.core.context_runtime.managed.runtime",
     "smolagents.memory",
+    "smolagents.models",
+    "smolagents.tools",
 )
 
 
@@ -32,8 +38,9 @@ def _bootstrap():
     for name, path in (
         ("nexent", ROOT),
         ("nexent.core", ROOT / "core"),
+        ("nexent.core.agents", ROOT / "core" / "agents"),
+        ("nexent.core.agents.context", ROOT / "core" / "agents" / "context"),
         ("nexent.core.context_runtime", ROOT / "core" / "context_runtime"),
-        ("nexent.core.context_runtime.managed", ROOT / "core" / "context_runtime" / "managed"),
     ):
         package = types.ModuleType(name)
         package.__path__ = [str(path)]
@@ -49,9 +56,31 @@ def _bootstrap():
             return [{"role": "system", "content": self.system_prompt}]
 
     memory_module.SystemPromptStep = SystemPromptStep
+    memory_module.AgentMemory = type("AgentMemory", (), {})
+    memory_module.MemoryStep = type("MemoryStep", (), {})
     sys.modules["smolagents.memory"] = memory_module
+
+    models_module = types.ModuleType("smolagents.models")
+    models_module.ChatMessage = type("ChatMessage", (), {})
+    models_module.Model = type("Model", (), {})
+    sys.modules["smolagents.models"] = models_module
+    tools_module = types.ModuleType("smolagents.tools")
+    tools_module.Tool = type("Tool", (), {})
+    sys.modules["smolagents.tools"] = tools_module
+
+    manager_module = types.ModuleType("nexent.core.agents.context.manager")
+    manager_module.ContextManager = type("ContextManager", (), {})
+    sys.modules[manager_module.__name__] = manager_module
+    models_module = types.ModuleType("nexent.core.agents.context.models")
+    models_module.ContextItem = type("ContextItem", (), {})
+    models_module.ContextItemInput = type("ContextItemInput", (), {})
+    sys.modules[models_module.__name__] = models_module
+    summary_module = types.ModuleType("nexent.core.agents.context.summary_step")
+    summary_module.ManagedRunContext = type("ManagedRunContext", (), {})
+    sys.modules[summary_module.__name__] = summary_module
+
     _load("nexent.core.context_runtime.contracts", "core/context_runtime/contracts.py")
-    managed = _load("nexent.core.context_runtime.managed.runtime", "core/context_runtime/managed/runtime.py")
+    managed = _load("nexent.core.agents.context.runtime", "core/agents/context/runtime.py")
     return managed, snapshot
 
 
@@ -104,6 +133,9 @@ class _ContextManager:
 
     def get_step_compression_stats(self):
         return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}
+
+    def render_memory_messages(self, memory):
+        return []
 
 
 def test_managed_runtime_is_thin_context_manager_adapter():

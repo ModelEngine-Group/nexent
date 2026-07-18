@@ -186,6 +186,13 @@ mock_sdk_agent_context_module = types.ModuleType("sdk.nexent.core.agents.agent_c
 mock_sdk_agent_context_module.ContextManager = _MockContextManager
 mock_sdk_summary_config_module = types.ModuleType("sdk.nexent.core.agents.summary_config")
 mock_sdk_summary_config_module.ContextManagerConfig = _MockContextManagerConfig
+mock_sdk_agent_context_domain_module = types.ModuleType("sdk.nexent.core.agents.context")
+mock_sdk_agent_context_domain_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents" / "context")
+]
+mock_sdk_agent_context_domain_module.ContextManager = _MockContextManager
+mock_sdk_agent_context_domain_module.ContextManagerConfig = _MockContextManagerConfig
+mock_sdk_agent_context_domain_module.ManagedContextRuntime = _MockManagedContextRuntime
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -307,6 +314,7 @@ module_mocks = {
     "sdk.nexent.core.context_runtime.managed": mock_sdk_context_runtime_managed_module,
     "sdk.nexent.core.context_runtime.managed.runtime": mock_sdk_context_runtime_managed_runtime_module,
     "sdk.nexent.core.agents.agent_context": mock_sdk_agent_context_module,
+    "sdk.nexent.core.agents.context": mock_sdk_agent_context_domain_module,
     "sdk.nexent.core.agents.summary_config": mock_sdk_summary_config_module,
     "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
@@ -373,6 +381,7 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault("sdk.nexent.core.agents.agent_context", mock_sdk_agent_context_module)
 sys.modules.setdefault("sdk.nexent.core.agents.summary_config", mock_sdk_summary_config_module)
+sys.modules.setdefault("sdk.nexent.core.agents.context", mock_sdk_agent_context_domain_module)
 
 
 # ----------------------------------------------------------------------------

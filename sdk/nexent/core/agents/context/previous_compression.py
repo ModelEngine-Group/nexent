@@ -2,18 +2,19 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from ..summary_cache import CompressionCallRecord, PreviousSummaryCache
-from ..summary_config import ContextManagerConfig
 from .budget import (
     action_content,
     is_prev_cache_valid,
     pair_fingerprint,
     trim_pairs_to_budget,
 )
+from .config import ContextManagerConfig
 from .llm_summary import LLMSummary, SummaryResult
 from .step_renderer import StepRenderer
+
 
 logger = logging.getLogger("agent_context.previous_compression")
 

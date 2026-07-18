@@ -29,7 +29,7 @@ import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
 from utils.context_utils import build_context_inputs  # noqa: E402
 from utils.prompt_template_utils import get_agent_prompt_template  # noqa: E402
 
-from nexent.core.agents.agent_context import ContextManagerConfig  # noqa: E402
+from nexent.core.agents.context import ContextManagerConfig  # noqa: E402
 from nexent.core.agents.agent_model import (  # noqa: E402
     AgentConfig,
     AgentHistory,

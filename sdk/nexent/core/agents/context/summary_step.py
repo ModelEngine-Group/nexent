@@ -1,4 +1,4 @@
-"""Data types for agent context: summary steps and managed run context."""
+"""Context summary steps and managed run state."""
 
 from dataclasses import dataclass
 from typing import Any, Tuple

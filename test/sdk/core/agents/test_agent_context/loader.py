@@ -1,13 +1,13 @@
 """
 loader.py
 ─────────
-Loads the agent_context package in isolation via importlib,
+Loads the unified context package in isolation via importlib,
 bypassing __init__.py chains that drag in unrelated heavy dependencies.
 
 Also injects a fully-functional token_estimation stub so that the module
 under test executes its real estimation logic without any external imports.
 
-Since agent_context/ is now a package (directory), we load each submodule
+The production implementation lives in agents/context. We load each submodule
 manually via importlib in dependency order, then wire them together as
 ``sdk.nexent.core.agents.agent_context.*`` in ``sys.modules``.
 
@@ -154,7 +154,7 @@ _HERE_DIR   = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_HERE_DIR)))))
 _SDK_ROOT   = os.path.join(_REPO_ROOT, "sdk")
 _AGENTS_DIR = os.path.join(_SDK_ROOT, "nexent", "core", "agents")
-_AC_DIR     = os.path.join(_AGENTS_DIR, "agent_context")
+_AC_DIR     = os.path.join(_AGENTS_DIR, "context")
 
 
 def _agents_file(filename: str) -> str:
@@ -163,7 +163,7 @@ def _agents_file(filename: str) -> str:
 
 
 def _ac_file(filename: str) -> str:
-    """Absolute path to a file in sdk/nexent/core/agents/agent_context/."""
+    """Absolute path to a file in sdk/nexent/core/agents/context/."""
     return os.path.join(_AC_DIR, filename)
 
 
@@ -230,7 +230,7 @@ def _register_stub_packages():
 _register_stub_packages()
 
 
-# ── 5. Load summary_cache and summary_config modules ────────────────────
+# ── 5. Load summary cache, context config, and runtime contracts ────────
 
 def _load_file_module(full_name: str, filepath: str, package: str):
     """Load a single .py file as a module via importlib."""
@@ -246,8 +246,8 @@ def _load_file_module(full_name: str, filepath: str, package: str):
 
 _load_file_module("sdk.nexent.core.agents.summary_cache",
                    _agents_file("summary_cache.py"), "sdk.nexent.core.agents")
-_load_file_module("sdk.nexent.core.agents.summary_config",
-                   _agents_file("summary_config.py"), "sdk.nexent.core.agents")
+_load_file_module("sdk.nexent.core.agents.agent_context.config",
+                   _ac_file("config.py"), "sdk.nexent.core.agents.agent_context")
 
 # Load context_runtime.contracts for manager.py's lazy import
 _load_file_module(f"{_CONTEXT_RUNTIME_PACKAGE}.contracts",

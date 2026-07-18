@@ -2,9 +2,9 @@
 
 import pytest
 
-from sdk.nexent.core.agents.agent_context import ContextManager
+from sdk.nexent.core.agents.context import ContextManager
 from sdk.nexent.core.agents.context import ContextItem, ContextItemInput
-from sdk.nexent.core.agents.summary_config import ContextManagerConfig
+from sdk.nexent.core.agents.context import ContextManagerConfig
 
 
 def _item(item_id: str, text: str) -> ContextItemInput:

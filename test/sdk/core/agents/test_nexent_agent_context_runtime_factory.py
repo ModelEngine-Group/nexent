@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from sdk.nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from sdk.nexent.core.agents.context import ContextItemInput
 from sdk.nexent.core.agents.nexent_agent import NexentAgent
-from sdk.nexent.core.agents.summary_config import ContextManagerConfig
+from sdk.nexent.core.agents.context import ContextManagerConfig
 from sdk.nexent.core.utils.observer import MessageObserver
 
 

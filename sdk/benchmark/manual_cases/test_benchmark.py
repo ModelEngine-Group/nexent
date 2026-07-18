@@ -17,7 +17,7 @@ from agent_runner import (
     ContextManagerConfig,
 )
 
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 from nexent.core.utils.token_estimation import estimate_tokens_text
 
 from eval_utils import eval_text, average_score
@@ -37,7 +37,7 @@ Now start!"""
 
 
 # --- Custom summary schema and prompts for knowledge-discussion benchmarks ---
-# These override the default 10-field Hermes schema from summary_config.py
+# These override the default 10-field Hermes schema from context/config.py
 # with a deduplicated 6-field schema (~620 word budget) that merges
 # completed_work + resolved_questions into "progress" and restricts
 # key_facts to values NOT already stated in progress, eliminating

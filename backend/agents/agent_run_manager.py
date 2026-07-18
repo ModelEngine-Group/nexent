@@ -6,7 +6,7 @@ from nexent.core.agents.agent_model import AgentRunInfo
 from services.runtime_state_service import runtime_state_service
 
 if TYPE_CHECKING:
-    from nexent.core.agents.agent_context import ContextManager, ContextManagerConfig
+    from nexent.core.agents.context import ContextManager, ContextManagerConfig
 
 logger = logging.getLogger("agent_run_manager")
 
@@ -81,7 +81,7 @@ class AgentRunManager:
         max_steps: int
     ) -> "ContextManager":
         """Create a ContextManager isolated to one agent run."""
-        from nexent.core.agents.agent_context import ContextManager
+        from nexent.core.agents.context import ContextManager
 
         logger.info(
             "Created run-scoped ContextManager for conversation_id: %s",

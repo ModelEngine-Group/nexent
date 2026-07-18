@@ -58,7 +58,7 @@ from agent_runner import build_agent_run_info, run_agent_with_tracking
 # would close the shared underlying buffer, breaking output entirely.
 _OUT = sys.stdout
 
-from nexent.core.agents.agent_context import ContextManager, ContextManagerConfig
+from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.agent_model import AgentHistory
 from nexent.core.utils.token_estimation import estimate_tokens_text
 

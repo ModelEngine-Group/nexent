@@ -186,6 +186,11 @@ sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
 )
+sys.modules['nexent.core.agents.context'] = _create_stub_module(
+    "nexent.core.agents.context",
+    ContextManager=MagicMock(),
+    ContextManagerConfig=MagicMock(),
+)
 sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
     "nexent.core.agents.summary_config",
     ContextManagerConfig=MagicMock(),

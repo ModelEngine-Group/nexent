@@ -9,7 +9,7 @@ from loader import (
     has_invoked_tools, message_role,
     trim_pairs_to_budget,
 )
-from sdk.nexent.core.agents.agent_context.budget import _is_context_length_error
+from sdk.nexent.core.agents.context.budget import _is_context_length_error
 
 
 class TestPureFunctions:

@@ -5,15 +5,14 @@ import hashlib
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from smolagents.memory import ActionStep, TaskStep
 
-from ..summary_cache import CurrentSummaryCache, PreviousSummaryCache
-from ..summary_config import ContextManagerConfig
 from ...utils.token_estimation import estimate_tokens_text
-
+from ..summary_cache import CurrentSummaryCache, PreviousSummaryCache
 from .summary_step import SummaryTaskStep
+
 
 logger = logging.getLogger("agent_context.budget")
 

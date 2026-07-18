@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
-from nexent.core.agents.summary_config import ContextManagerConfig
+from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
@@ -854,7 +854,7 @@ async def create_agent_config(
     # the single context assembly path when compression is disabled.
     enable_context_manager = agent_info.get("enable_context_manager", False)
 
-    # Get skills list for ContextManager components.
+    # Get the skills included in ContextManager items.
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0

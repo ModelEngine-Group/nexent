@@ -10,22 +10,17 @@ import json
 import logging
 from typing import List, Optional, Tuple
 
-from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
+from smolagents.memory import ActionStep, AgentMemory, MemoryStep
 from smolagents.models import ChatMessage, MessageRole
 
-from ..summary_cache import CompressionCallRecord
-from ..summary_config import ContextManagerConfig
 from ...utils.token_estimation import (
     _extract_text_from_messages,
-    estimate_tokens,
-    estimate_tokens_for_steps,
     estimate_tokens_text,
-    msg_char_count,
-    msg_token_count,
 )
-
-from .budget import format_summary_output, _is_context_length_error
+from .budget import format_summary_output
+from .config import ContextManagerConfig
 from .summary_step import SummaryTaskStep
+
 
 logger = logging.getLogger("agent_context.step_renderer")
 

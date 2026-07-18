@@ -124,7 +124,12 @@ def build_smolagents_mock() -> ModuleType:
     models_mod = ModuleType("smolagents.models")
     models_mod.ChatMessage = _ChatMessage
     models_mod.MessageRole = _MessageRole
+    models_mod.Model = type("Model", (), {})
     setattr(mock_smolagents, "models", models_mod)
+
+    tools_mod = ModuleType("smolagents.tools")
+    tools_mod.Tool = type("Tool", (), {})
+    setattr(mock_smolagents, "tools", tools_mod)
 
     return mock_smolagents
 
@@ -140,6 +145,7 @@ def register_smolagents_mocks() -> ModuleType:
         "smolagents":        mock,
         "smolagents.memory": mock.memory,
         "smolagents.models": mock.models,
+        "smolagents.tools": mock.tools,
         "smolagents.agents": mock.agents,
     })
     return mock
@@ -162,7 +168,7 @@ def restore_real_smolagents() -> None:
     the real package while those mocks are active can make smolagents initialize
     against an inconsistent module graph.
     """
-    for key in ("smolagents.memory", "smolagents.models", "smolagents.agents", "smolagents"):
+    for key in ("smolagents.memory", "smolagents.models", "smolagents.tools", "smolagents.agents", "smolagents"):
         mod = sys.modules.get(key)
         # Heuristic for mock: ModuleType without __spec__ and __file__.
         if mod is not None and getattr(mod, "__spec__", None) is None and not hasattr(mod, "__file__"):

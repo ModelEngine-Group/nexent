@@ -1,9 +1,9 @@
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 from nexent.core.agents.context import ContextItemInput
-from nexent.core.agents.summary_config import ContextManagerConfig
+from nexent.core.agents.context import ContextManagerConfig
 
 
 def _message_text(message):

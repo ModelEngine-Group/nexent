@@ -1,28 +1,61 @@
-"""Agent context management for memory compression and summarization.
+"""Deprecated compatibility path for :mod:`nexent.core.agents.context`."""
 
-Provides ContextManager for token-aware memory compression of agent memory,
-supporting incremental summarization with cache-based optimization.
-"""
+from __future__ import annotations
 
-from .manager import ContextManager
-from .summary_step import SummaryTaskStep, ManagedRunContext
-from .budget import format_summary_output, _is_context_length_error
-from .step_renderer import compress_history_offline
+import sys
+import warnings
+from importlib import import_module
 
-# Re-export types from sibling modules so that
-# ``from agent_context import ContextManagerConfig`` still works.
-from ..summary_config import ContextManagerConfig
-from ..summary_cache import CompressionCallRecord, PreviousSummaryCache, CurrentSummaryCache
+
+COMPATIBILITY_REMOVAL_VERSION = "v2.4.0"
+warnings.warn(
+    "nexent.core.agents.agent_context is deprecated; use nexent.core.agents.context; "
+    f"the compatibility path will be removed in {COMPATIBILITY_REMOVAL_VERSION}",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+_CONTEXT_PACKAGE = f"{__package__.rsplit('.', 1)[0]}.context"
+_SUBMODULES = (
+    "budget",
+    "config",
+    "current_compression",
+    "llm_summary",
+    "manager",
+    "previous_compression",
+    "stats_export",
+    "step_renderer",
+    "summary_step",
+)
+for _name in _SUBMODULES:
+    sys.modules[f"{__name__}.{_name}"] = import_module(f"{_CONTEXT_PACKAGE}.{_name}")
+
+from ..context import (  # noqa: E402
+    ContextManager,
+    ContextManagerConfig,
+    ManagedRunContext,
+    SummaryTaskStep,
+    _is_context_length_error,
+    compress_history_offline,
+    format_summary_output,
+)
+from ..summary_cache import (  # noqa: E402
+    CompressionCallRecord,
+    CurrentSummaryCache,
+    PreviousSummaryCache,
+)
+
 
 __all__ = [
+    "CompressionCallRecord",
+    "COMPATIBILITY_REMOVAL_VERSION",
     "ContextManager",
-    "SummaryTaskStep",
+    "ContextManagerConfig",
+    "CurrentSummaryCache",
     "ManagedRunContext",
-    "format_summary_output",
+    "PreviousSummaryCache",
+    "SummaryTaskStep",
     "_is_context_length_error",
     "compress_history_offline",
-    "ContextManagerConfig",
-    "CompressionCallRecord",
-    "PreviousSummaryCache",
-    "CurrentSummaryCache",
+    "format_summary_output",
 ]

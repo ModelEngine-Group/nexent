@@ -46,7 +46,7 @@ from agent_runner import (
     ContextManagerConfig,
 )
 from nexent.core.agents.agent_model import AgentHistory
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 
 from dataset import load_books, EventQABook
 from eval_utils import score_mcq

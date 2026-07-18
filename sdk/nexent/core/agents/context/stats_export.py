@@ -1,9 +1,9 @@
 """Pure functions for compression statistics and export. No classes, no state."""
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from ..summary_config import ContextManagerConfig
+from .config import ContextManagerConfig
 
 
 def get_step_compression_stats(step_local_log: List[CompressionCallRecord]) -> dict:

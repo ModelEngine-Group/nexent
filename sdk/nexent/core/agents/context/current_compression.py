@@ -7,16 +7,15 @@ from typing import List, Optional
 from smolagents.memory import ActionStep, TaskStep
 
 from ..summary_cache import CompressionCallRecord, CurrentSummaryCache
-from ..summary_config import ContextManagerConfig
 from .budget import (
     action_fingerprint,
     is_curr_cache_valid,
-    is_observation_step,
-    is_tool_call_step,
     trim_actions_to_budget,
 )
+from .config import ContextManagerConfig
 from .llm_summary import LLMSummary, SummaryResult
 from .step_renderer import StepRenderer
+
 
 logger = logging.getLogger("agent_context.current_compression")
 

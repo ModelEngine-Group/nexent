@@ -23,12 +23,12 @@ _EXPORTS = {
     "ContextItem": (".context", "ContextItem"),
     "ContextItemInput": (".context", "ContextItemInput"),
     "ContextItemType": (".context", "ContextItemType"),
-    "ContextManager": (".agent_context", "ContextManager"),
-    "SummaryTaskStep": (".agent_context", "SummaryTaskStep"),
+    "ContextManager": (".context", "ContextManager"),
+    "SummaryTaskStep": (".context", "SummaryTaskStep"),
     "PreviousSummaryCache": (_SUMMARY_CACHE_MODULE, "PreviousSummaryCache"),
     "CurrentSummaryCache": (_SUMMARY_CACHE_MODULE, "CurrentSummaryCache"),
     "CompressionCallRecord": (_SUMMARY_CACHE_MODULE, "CompressionCallRecord"),
-    "ContextManagerConfig": (".summary_config", "ContextManagerConfig"),
+    "ContextManagerConfig": (".context", "ContextManagerConfig"),
 }
 
 

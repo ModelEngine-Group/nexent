@@ -89,20 +89,14 @@ def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo
         return
 
     context_runtime = getattr(agent, "context_runtime", None)
-    if getattr(context_runtime, "context_manager", None) is None:
+    if context_runtime is None or context_runtime.context_manager is None:
         raise RuntimeError(
             "Conversation-level ContextManager requires an active managed context runtime"
         )
 
     context_runtime.context_manager = context_manager
     context_items = _get_authorized_context_items(agent_run_info)
-    replace_runtime_items = getattr(context_runtime, "replace_items", None)
-    if callable(replace_runtime_items):
-        replace_runtime_items(context_items or [])
-    else:
-        raise RuntimeError(
-            "Managed context runtime does not support run-local item replacement"
-        )
+    context_runtime.replace_items(context_items or [])
     agent.context_manager = context_manager
 
 

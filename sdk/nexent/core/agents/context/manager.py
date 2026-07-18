@@ -25,7 +25,6 @@ from ...utils.token_estimation import (
     msg_token_count,
 )
 from ..summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from ..summary_config import ContextManagerConfig
 from .budget import (
     extract_message_text,
     extract_pairs,
@@ -33,6 +32,7 @@ from .budget import (
     is_prev_cache_valid,
     message_role,
 )
+from .config import ContextManagerConfig
 from .current_compression import CurrentCompressor
 from .llm_summary import LLMSummary
 from .previous_compression import PreviousCompressor
@@ -565,6 +565,10 @@ class ContextManager:
         for step in memory.steps:
             messages.extend(step.to_messages())
         return messages
+
+    def render_memory_messages(self, memory: AgentMemory) -> List[Any]:
+        """Render memory for display without triggering selection or compression."""
+        return self._messages_from_memory(memory)
 
     @classmethod
     def _without_leading_stable_messages(cls, messages: Sequence[Any]) -> List[Any]:

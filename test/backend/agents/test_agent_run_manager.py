@@ -300,7 +300,7 @@ class TestAgentRunManager:
     def test_context_manager_is_run_scoped(self, mocker):
         """Concurrent runs never reuse mutable context state, even for one conversation."""
         context_manager_class = mocker.patch(
-            "nexent.core.agents.agent_context.ContextManager",
+            "nexent.core.agents.context.ContextManager",
             side_effect=[MagicMock(name="first"), MagicMock(name="second")],
         )
         first_config = MagicMock(name="first_config")
@@ -321,7 +321,7 @@ class TestAgentRunManager:
 
     def test_concurrent_context_manager_creation_is_isolated(self, mocker):
         context_manager_class = mocker.patch(
-            "nexent.core.agents.agent_context.ContextManager",
+            "nexent.core.agents.context.ContextManager",
             side_effect=lambda **_kwargs: MagicMock(),
         )
 

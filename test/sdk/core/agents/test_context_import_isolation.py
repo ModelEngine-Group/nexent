@@ -10,8 +10,8 @@ def _run_isolation_check(module_name: str) -> None:
 import sys
 import {module_name}
 forbidden = [
-    'nexent.core.agents.agent_context',
-    'nexent.core.context_runtime.managed.runtime',
+    'nexent.core.agents.context.manager',
+    'nexent.core.agents.context.runtime',
 ]
 loaded = [name for name in forbidden if name in sys.modules]
 assert not loaded, loaded

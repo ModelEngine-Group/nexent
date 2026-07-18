@@ -58,7 +58,7 @@ from agent_runner import (
 )
 
 from nexent.core.agents.agent_model import AgentHistory
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 
 
 # ---- QA-specific system prompt builder ----
