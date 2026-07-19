@@ -197,18 +197,25 @@ class ContextManager:
             return result
         keep_recent = max(0, self.config.keep_recent_steps)
         actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
-        candidates = actions[:-keep_recent] if keep_recent else actions
-        candidates += [item for item in result if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact]
-        savings = []
-        for item in candidates:
-            compact = item.compact()
-            saving = max(0, item.token_estimate - compact.token_estimate)
-            savings.append((saving, item.layout_key, item, compact))
-        for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
-            index = result.index(original)
-            result[index] = compact
-            if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
-                break
+        old_actions = actions[:-keep_recent] if keep_recent else actions
+        other_items = [
+            item for item in result
+            if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact
+        ]
+        # The stages are intentional: reclaim old current-run execution detail
+        # before degrading stable resources or planning/evidence Items. Within a
+        # stage, prefer the largest deterministic saving.
+        for candidates in (old_actions, other_items):
+            savings = []
+            for item in candidates:
+                compact = item.compact()
+                saving = max(0, item.token_estimate - compact.token_estimate)
+                savings.append((saving, item.layout_key, item, compact))
+            for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
+                index = result.index(original)
+                result[index] = compact
+                if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
+                    return result
         return result
 
     def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
