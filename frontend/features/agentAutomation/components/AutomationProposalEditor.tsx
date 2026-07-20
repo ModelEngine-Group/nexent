@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { Form, Input, InputNumber, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 
+import AutomationDateTimePicker from "./AutomationDateTimePicker";
+
 import type {
   AgentAutomationProposalData,
   UpdateAutomationProposalPayload,
@@ -29,7 +31,7 @@ export default function AutomationProposalEditor({
   onCancel,
   onSave,
 }: AutomationProposalEditorProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const [form] = Form.useForm<AutomationProposalFormValues>();
 
   useEffect(() => {
@@ -104,7 +106,7 @@ export default function AutomationProposalEditor({
                 label={t("agentAutomation.proposal.startAt")}
                 rules={[{ required: true }]}
               >
-                <Input type="datetime-local" />
+                <AutomationDateTimePicker language={i18n.language} />
               </Form.Item>
               <Form.Item
                 name="timezone"

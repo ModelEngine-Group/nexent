@@ -2768,7 +2768,6 @@
   "agentAutomation.proposal.intervalSeconds": "间隔秒数",
   "agentAutomation.proposal.cronExpression": "Cron 表达式",
   "agentAutomation.proposal.defaultTitle": "自动任务",
-  "agentAutomation.proposal.clickToEdit": "点击修改自动任务",
   "agentAutomation.proposal.edit": "修改",
   "agentAutomation.proposal.schedule": "执行计划",
   "agentAutomation.proposal.missingCapability": "缺少：{{name}}",

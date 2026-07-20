@@ -1,3 +1,5 @@
+import dayjs, { type Dayjs } from "dayjs";
+
 import type {
   AgentAutomationProposalData,
   ScheduleRuleType,
@@ -10,16 +12,10 @@ export interface AutomationProposalFormValues {
   instruction: string;
   mode: "ONCE" | "RECURRING";
   rule_type: Exclude<ScheduleRuleType, "AT">;
-  start_at: string;
+  start_at: Dayjs;
   timezone: string;
   cron_expr?: string;
   interval_seconds?: number;
-}
-
-function toLocalInputValue(value: string): string {
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export function proposalToFormValues(
@@ -34,7 +30,7 @@ export function proposalToFormValues(
     instruction: proposal.task?.instruction || "",
     mode: trigger.mode,
     rule_type: trigger.rule_type === "INTERVAL" ? "INTERVAL" : "CRON",
-    start_at: toLocalInputValue(trigger.start_at),
+    start_at: dayjs(trigger.start_at),
     timezone: trigger.timezone,
     cron_expr: trigger.cron_expr || "0 9 * * *",
     interval_seconds: trigger.interval_seconds || 3600,
@@ -47,7 +43,7 @@ export function formValuesToProposalPatch(
 ): UpdateAutomationProposalPayload {
   const common = {
     timezone: values.timezone,
-    start_at: new Date(values.start_at).toISOString(),
+    start_at: values.start_at.toISOString(),
     end_at: originalTrigger.end_at,
   };
   let scheduleTrigger: ScheduleTrigger;

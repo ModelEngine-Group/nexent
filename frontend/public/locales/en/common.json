@@ -2889,7 +2889,6 @@
   "agentAutomation.proposal.intervalSeconds": "Interval in seconds",
   "agentAutomation.proposal.cronExpression": "Cron expression",
   "agentAutomation.proposal.defaultTitle": "Automation task",
-  "agentAutomation.proposal.clickToEdit": "Click to edit the automation task",
   "agentAutomation.proposal.edit": "Edit",
   "agentAutomation.proposal.schedule": "Schedule",
   "agentAutomation.proposal.missingCapability": "Missing: {{name}}",

@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Space, Tag } from "antd";
+import { Button, Space } from "antd";
 import { Bot, CalendarClock, Loader2, Pencil, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -98,7 +98,6 @@ export default function AutomationProposalCard({
     );
   }
 
-  const matched = proposal.capability_resolution?.matched_capabilities || [];
   const missing = proposal.capability_resolution?.missing_capabilities || [];
   const schedule = formatSchedule(proposal, i18n.language, t);
   const agentSnapshot = proposal.capability_resolution?.agent_snapshot;
@@ -110,30 +109,9 @@ export default function AutomationProposalCard({
         : undefined;
   const agentName = proposal.task?.agent_name || snapshotAgentName;
   const editable = Boolean(onEdit);
-  const openEditor = () => {
-    if (editable) onEdit?.();
-  };
 
   return (
-    <div
-      className={`border rounded-md p-4 bg-white transition-colors ${
-        editable
-          ? "border-gray-200 cursor-pointer hover:border-blue-400 hover:bg-blue-50/20"
-          : "border-gray-200"
-      }`}
-      role={editable ? "button" : undefined}
-      tabIndex={editable ? 0 : undefined}
-      aria-label={
-        editable ? t("agentAutomation.proposal.clickToEdit") : undefined
-      }
-      onClick={openEditor}
-      onKeyDown={(event) => {
-        if (editable && (event.key === "Enter" || event.key === " ")) {
-          event.preventDefault();
-          openEditor();
-        }
-      }}
-    >
+    <div className="border border-gray-200 rounded-md p-4 bg-white">
       <div className="flex items-start gap-3">
         <CalendarClock size={20} className="mt-0.5" />
         <div className="flex-1 min-w-0">
@@ -147,10 +125,7 @@ export default function AutomationProposalCard({
                 type="text"
                 size="small"
                 icon={<Pencil size={14} />}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openEditor();
-                }}
+                onClick={onEdit}
               >
                 {t("agentAutomation.proposal.edit")}
               </Button>
@@ -172,23 +147,6 @@ export default function AutomationProposalCard({
               {t("agentAutomation.proposal.schedule")}: {schedule}
             </div>
           )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {matched.map((capability) => (
-              <Tag
-                key={capability.binding_ref || capability.name}
-                color="green"
-              >
-                {capability.display_name || capability.name}
-              </Tag>
-            ))}
-            {missing.map((capability) => (
-              <Tag key={capability.name} color="red">
-                {t("agentAutomation.proposal.missingCapability", {
-                  name: capability.name,
-                })}
-              </Tag>
-            ))}
-          </div>
           {missing.length > 0 && (
             <div className="text-xs text-red-500 mt-2">
               {t("agentAutomation.proposal.capabilityHint")}
@@ -201,7 +159,7 @@ export default function AutomationProposalCard({
               })}
             </div>
           )}
-          <Space className="mt-4" onClick={(event) => event.stopPropagation()}>
+          <Space className="mt-4">
             {proposal.executable && !proposal.confirmed_task_id ? (
               <Button
                 type="primary"

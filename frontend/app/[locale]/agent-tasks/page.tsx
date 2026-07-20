@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dayjs, { type Dayjs } from "dayjs";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
@@ -39,6 +40,7 @@ import {
 } from "lucide-react";
 
 import { agentAutomationService } from "@/services/agentAutomationService";
+import AutomationDateTimePicker from "@/features/agentAutomation/components/AutomationDateTimePicker";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
 import type {
   AgentAutomationRun,
@@ -135,22 +137,17 @@ interface TaskFormValues {
   instruction: string;
   mode: "ONCE" | "RECURRING";
   rule_type: "INTERVAL" | "CRON";
-  start_at: string;
+  start_at: Dayjs;
   cron_expr?: string;
   interval_seconds?: number;
   timeout_seconds?: number;
-}
-
-function toLocalInputValue(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function buildPatchPayload(
   values: TaskFormValues
 ): UpdateAutomationTaskPayload {
   const mode = values.mode;
-  const startAt = new Date(values.start_at).toISOString();
+  const startAt = values.start_at.toISOString();
   const timezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
   const scheduleTrigger =
@@ -194,7 +191,7 @@ function taskToFormValues(task: AgentAutomationTask) {
     instruction: task.instruction,
     mode: trigger.mode,
     rule_type: trigger.rule_type === "AT" ? "CRON" : trigger.rule_type,
-    start_at: toLocalInputValue(new Date(trigger.start_at)),
+    start_at: dayjs(trigger.start_at),
     cron_expr: trigger.cron_expr || "0 9 * * *",
     interval_seconds: trigger.interval_seconds || 3600,
     timeout_seconds: task.timeout_seconds || 1800,
@@ -821,7 +818,7 @@ export default function AgentTasksPage() {
                   label={t("agentAutomation.page.firstRunAt")}
                   rules={[{ required: true }]}
                 >
-                  <Input type="datetime-local" />
+                  <AutomationDateTimePicker language={i18n.language} />
                 </Form.Item>
                 {getFieldValue("mode") === "RECURRING" && (
                   <>
