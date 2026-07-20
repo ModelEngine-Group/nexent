@@ -869,6 +869,21 @@ class TestGetAgentInfoList:
         with pytest.raises(LookupError, match="Published agent not found"):
             await ns.get_agent_info_by_name_for_northbound(ctx, "missing_agent")
 
+    async def test_get_agent_info_by_name_empty(self):
+        """Test that empty/whitespace agent_name raises ValueError."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+
+        with pytest.raises(ValueError, match="agent_name is required"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "   ")
+
+    async def test_get_agent_info_by_name_internal_error(self):
+        """Test that internal errors from _get_visible_published_agents are wrapped."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.side_effect = RuntimeError("DB connection lost")
+
+        with pytest.raises(Exception, match="Failed to get agent info for agent_name"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "any_agent")
+
 
 @pytest.mark.asyncio
 class TestUpdateConversationTitle:
