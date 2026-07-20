@@ -40,3 +40,9 @@ export const resolveNl2AgentDraftAgentId = (
   if (conversationId !== handoffConversationId) return null;
   return asPositiveInteger(handoffDraftAgentId);
 };
+
+export const resolveNl2AgentRunnerId = (
+  persistedRunnerId: unknown,
+  selectedAgentId: unknown
+): number | null =>
+  asPositiveInteger(persistedRunnerId) ?? asPositiveInteger(selectedAgentId);

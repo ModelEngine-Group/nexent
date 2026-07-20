@@ -40,7 +40,10 @@ import {
   StreamingMessage,
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
-import { resolveNl2AgentDraftAgentId } from "@/lib/chat/nl2agentDraftContext";
+import {
+  resolveNl2AgentDraftAgentId,
+  resolveNl2AgentRunnerId,
+} from "@/lib/chat/nl2agentDraftContext";
 import { Nl2AgentWorkflowProvider } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
   isNl2AgentAutoContinueText,
@@ -742,11 +745,8 @@ export function ChatInterface() {
             : undefined, // Use complete attachment object structure
       };
 
-      // Only add agent_id if it's not null
-      if (selectedAgentId !== null) {
-        runAgentParams.agent_id = Number(selectedAgentId);
-      }
-
+      const persistedSession =
+        (await resolvePersistedNl2AgentSession(id)) ?? null;
       const draftAgentIdForRun =
         resolveNl2AgentDraftAgentId(
           id,
@@ -754,10 +754,21 @@ export function ChatInterface() {
           nl2agentConversationId,
           nl2agentDraftAgentId
         ) ??
-        (await resolvePersistedNl2AgentSession(id))?.draft_agent_id ??
+        persistedSession?.draft_agent_id ??
         null;
       if (draftAgentIdForRun !== null) {
         runAgentParams.draft_agent_id = draftAgentIdForRun;
+      }
+
+      // A recovered NL2AGENT session owns the runner for this request. React
+      // state updates from discovery are asynchronous, so do not reuse a
+      // stale ordinary-agent selection while switching conversations.
+      const runnerAgentId = resolveNl2AgentRunnerId(
+        persistedSession?.nl2agent_agent_id,
+        selectedAgentId
+      );
+      if (runnerAgentId !== null) {
+        runAgentParams.agent_id = runnerAgentId;
       }
 
       // Add selected model_id for agent run

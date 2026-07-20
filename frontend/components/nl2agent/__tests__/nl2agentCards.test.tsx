@@ -4,6 +4,7 @@ import React from "react";
 import {
   resolveNl2AgentCardAgentId,
   resolveNl2AgentDraftAgentId,
+  resolveNl2AgentRunnerId,
 } from "@/lib/chat/nl2agentDraftContext";
 import {
   isNl2AgentAutoContinueText,
@@ -646,6 +647,16 @@ describe("resolveNl2AgentDraftAgentId", () => {
   it("does not leak a handoff draft into another conversation", () => {
     assert.equal(resolveNl2AgentDraftAgentId(10, {}, 11, 303), null);
     assert.equal(resolveNl2AgentDraftAgentId(11, {}, 11, 303), 303);
+  });
+});
+
+describe("resolveNl2AgentRunnerId", () => {
+  it("prefers the durable runner over a stale selected agent", () => {
+    assert.equal(resolveNl2AgentRunnerId(101, "999"), 101);
+  });
+
+  it("uses the selected agent for a normal conversation", () => {
+    assert.equal(resolveNl2AgentRunnerId(undefined, "999"), 999);
   });
 });
 
