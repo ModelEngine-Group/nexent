@@ -1,7 +1,14 @@
 from enum import Enum
 from typing import Annotated, Optional, Any, List, Dict, Literal
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+)
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -456,13 +463,32 @@ Nl2AgentPositiveInt = Annotated[int, Field(strict=True, ge=1)]
 Nl2AgentItemKey = Annotated[str, Field(min_length=1, max_length=300)]
 
 
+def _parse_nl2agent_json_object_id(value: Any) -> Any:
+    """Normalize one canonical JSON object key before strict ID validation."""
+    if not isinstance(value, str) or not value.isascii() or not value.isdigit():
+        return value
+    if len(value) > 1 and value.startswith("0"):
+        return value
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+Nl2AgentJsonPositiveIntKey = Annotated[
+    int,
+    BeforeValidator(_parse_nl2agent_json_object_id),
+    Field(strict=True, ge=1),
+]
+
+
 class Nl2AgentApplyLocalResourcesRequest(_StrictNl2AgentRequest):
     """Request body for bulk-binding local tools and skills to a draft agent."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
     tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
     skill_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
-    tool_config_values: Dict[Nl2AgentPositiveInt, Dict[str, Any]] = Field(
+    tool_config_values: Dict[Nl2AgentJsonPositiveIntKey, Dict[str, Any]] = Field(
         default_factory=dict, max_length=100
     )
 

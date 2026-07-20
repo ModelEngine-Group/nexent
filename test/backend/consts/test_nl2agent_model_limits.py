@@ -21,6 +21,30 @@ def test_request_identifiers_reject_booleans() -> None:
         )
 
 
+def test_local_tool_config_accepts_canonical_json_object_id_keys() -> None:
+    request = Nl2AgentApplyLocalResourcesRequest.model_validate(
+        {
+            "recommendation_batch_id": "batch",
+            "tool_ids": [28],
+            "tool_config_values": {"28": {"top_k": 8}},
+        }
+    )
+
+    assert request.tool_config_values == {28: {"top_k": 8}}
+
+
+@pytest.mark.parametrize("tool_id", [True, "0", "-1", "1.5", "01", " 28"])
+def test_local_tool_config_rejects_invalid_json_object_id_keys(tool_id) -> None:
+    with pytest.raises(ValidationError):
+        Nl2AgentApplyLocalResourcesRequest.model_validate(
+            {
+                "recommendation_batch_id": "batch",
+                "tool_ids": [28],
+                "tool_config_values": {tool_id: {"top_k": 8}},
+            }
+        )
+
+
 def test_request_collections_are_bounded() -> None:
     with pytest.raises(ValidationError):
         Nl2AgentApplyLocalResourcesRequest(

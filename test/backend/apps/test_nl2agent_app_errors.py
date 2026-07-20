@@ -314,6 +314,56 @@ async def test_local_registration_api_maps_workflow_conflict(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_apply_local_resources_http_contract_accepts_tool_config_map(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    apply_local = AsyncMock(
+        return_value={
+            "recommendation_batch_id": "batch",
+            "status": "applied",
+            "bound_tool_count": 1,
+            "bound_skill_count": 0,
+            "tool_ids": [28],
+            "skill_ids": [],
+            "chat_injection_text": "Continue",
+        }
+    )
+    monkeypatch.setattr(nl2agent_app, "apply_local_resources_batch", apply_local)
+    app = FastAPI()
+    app.include_router(nl2agent_app.router)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/nl2agent/session/202/apply-local-resources",
+            json={
+                "recommendation_batch_id": "batch",
+                "tool_ids": [28],
+                "skill_ids": [],
+                "tool_config_values": {"28": {"top_k": 8}},
+            },
+        )
+
+    assert response.status_code == 200
+    apply_local.assert_awaited_once_with(
+        agent_id=202,
+        recommendation_batch_id="batch",
+        tool_ids=[28],
+        skill_ids=[],
+        tool_config_values={28: {"top_k": 8}},
+        tenant_id="tenant",
+        user_id="user",
+    )
+
+
+@pytest.mark.asyncio
 async def test_finalize_api_passes_validated_verification_config(monkeypatch) -> None:
     monkeypatch.setattr(
         nl2agent_app,
