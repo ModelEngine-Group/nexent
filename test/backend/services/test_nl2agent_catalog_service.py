@@ -1,6 +1,12 @@
 """Focused NL2AGENT service tests."""
 # ruff: noqa: F405
 
+import json
+
+from nexent.core.tools.nl2agent.search_web_skills_tool import (
+    get_search_web_skills_tool,
+)
+
 from test.backend.services.nl2agent_test_support import *  # noqa: F403
 
 
@@ -212,3 +218,19 @@ async def test_resource_missing_official_skill_is_online_recoverable_only():
         "web-search",
     ]
     assert missing_names == ["create-docx"]
+
+    recorded = []
+    tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=catalogs["official_skills"],
+        requirements_confirmed=True,
+        record_search_result=lambda **result: recorded.append(result),
+    )
+
+    payload = json.loads(tool(query="docx"))
+
+    assert [(item["skill_id"], item["status"]) for item in payload["items"]] == [
+        (3, "resource_missing")
+    ]
+    assert recorded[0]["resource_type"] == "skill"

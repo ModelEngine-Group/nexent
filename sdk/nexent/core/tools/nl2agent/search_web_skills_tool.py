@@ -21,7 +21,9 @@ def _rank_web_skills(candidates: List[Dict[str, Any]], query: str) -> List[Dict[
     eligible: List[Dict[str, Any]] = []
     for candidate in candidates:
         status = str(candidate.get("status") or "").strip().lower()
-        if status != "installable":
+        # A resource-missing official Skill is intentionally recoverable through
+        # the same install action, which restores its files from the official ZIP.
+        if status not in {"installable", "resource_missing"}:
             continue
         skill_name = str(candidate.get("skill_name") or candidate.get("name") or "").strip()
         if not skill_name:
@@ -106,7 +108,7 @@ class NL2AgentSearchWebSkillsTool(Tool):
     frontend renders each as an individual card with an "Install" button.
 
     Args:
-        query: 1-3 short keywords matching skill names or tags
+        query: 1-3 short English keywords matching skill names or tags
             (e.g. "code review", "document analysis"). Never a full sentence.
 
     Returns:
@@ -116,7 +118,12 @@ class NL2AgentSearchWebSkillsTool(Tool):
 
     name = "nl2agent_search_web_skills"
     description = __doc__ or "Search official web skills."
-    inputs = {"query": {"type": "string", "description": "Concise skill search keywords."}}
+    inputs = {
+        "query": {
+            "type": "string",
+            "description": "Concise English skill search keywords.",
+        }
+    }
     output_type = "string"
 
     def __init__(self, context: Nl2AgentContext):

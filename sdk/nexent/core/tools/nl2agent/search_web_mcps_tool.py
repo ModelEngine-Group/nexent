@@ -370,7 +370,7 @@ class NL2AgentSearchWebMcpsTool(Tool):
     those tools explicitly.
 
     Args:
-        query: 1-3 short keywords matching MCP server names or tags
+        query: 1-3 short English keywords matching MCP server names or tags
             (e.g. "github", "email"). Never a full sentence.
 
     Returns:
@@ -380,7 +380,12 @@ class NL2AgentSearchWebMcpsTool(Tool):
 
     name = "nl2agent_search_web_mcps"
     description = __doc__ or "Search web MCP marketplaces."
-    inputs = {"query": {"type": "string", "description": "Concise MCP search keywords."}}
+    inputs = {
+        "query": {
+            "type": "string",
+            "description": "Concise English MCP search keywords.",
+        }
+    }
     output_type = "string"
 
     def __init__(self, context: Nl2AgentContext):

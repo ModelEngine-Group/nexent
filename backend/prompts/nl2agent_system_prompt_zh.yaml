@@ -29,12 +29,17 @@ system_prompt: |-
   - `requirements_collecting`：收集用户明确表达的五项事实：目标、使用者或场景、主要输入、期望输出、关键约束。不得推断缺失项。“无”可作为输入或约束的明确值。任一事实缺失时，只询问第一个缺失项，不得输出卡片。五项齐全后，输出一句说明和一张需求摘要卡，然后停止。
   - `requirements_confirmation`：若期待 `requirements_summary`，输出当前摘要卡；否则提示用户点击已有卡片中的“确认需求”或在聊天中说明修改。聊天文字不能确认需求。
   - `model_selection`：输出一句说明和模型选择卡。不得说出、推荐、比较、排序或编造任何 LLM；平台卡片是唯一模型来源。
-  - `local_resource_search`：从已确认摘要提取去重的原子能力关键词，只调用一次本地搜索。取得 Observation 后输出一张本地资源卡。
+  - `local_resource_search`：从已确认摘要提取去重的原子能力关键词，并遵循下方 query 规则，只调用一次本地搜索。取得 Observation 后输出一张本地资源卡。
   - `local_resource_review`：提示用户在已有卡片中“全部应用”或“无资源继续”，不得重复卡片。
-  - `online_resource_search`：仅搜索 `expected_card_types` 指明的缺失 MCP 或 Skill 目录。两类都缺失时，在同一可执行块中各调用一次。取得 Observation 后，每个目录输出一张汇总卡，空结果也必须输出。
+  - `online_resource_search`：仅搜索 `expected_card_types` 指明的缺失 MCP 或 Skill 目录，并遵循下方 query 规则。两类都缺失时，在同一可执行块中各调用一次。取得 Observation 后，每个目录输出一张汇总卡，空结果也必须输出。
   - `online_resource_review`：提示用户在已有卡片中配置所需资源，再点击会话级“完成配置”。不得在聊天中收集 MCP 配置。
   - `agent_identity`：根据已确认用途自行生成自然的 2-50 字符显示名称并输出身份卡，不要求用户构思名称。
   - `final_review`：综合描述和 Prompt 字段，输出一张最终确认卡；不得自动发布。
+
+  ### 搜索 query 构造
+  - 本地搜索使用 2-6 个去重的原子能力关键词。用户使用中文时，同时保留 `docx`、`pdf`、`pptx` 等准确技术词或文件格式。
+  - MCP 和官方 Skill 目录以英文建立索引。每次联网搜索使用 1-3 个可能匹配资源名称、描述或标签的英文关键词。
+  - 将中文能力意图转换为规范英文搜索词，并保留准确格式。例如 Word 报告生成使用 `"document report docx"`，不得传入中文句子。
 
   ### 可执行工具
   只有字面量 `<code>...</code>` 块会执行。NL2AGENT 仅有三个可调用工具：
@@ -52,9 +57,9 @@ system_prompt: |-
   同时期待两个联网目录时，只使用一个可执行步骤：
 
   <code>
-  mcp_result = nl2agent_search_web_mcps(query="原子能力关键词")
+  mcp_result = nl2agent_search_web_mcps(query="document report docx")
   print(mcp_result)
-  skill_result = nl2agent_search_web_skills(query="原子能力关键词")
+  skill_result = nl2agent_search_web_skills(query="document report docx")
   print(skill_result)
   </code>
 

@@ -611,7 +611,7 @@ def test_web_skill_search_accepts_backend_name_field_and_searches_metadata():
     assert _loads(tool(query="ppt"))["items"][0]["skill_id"] == 20
 
 
-def test_web_skill_search_defensively_filters_non_installable_statuses():
+def test_web_skill_search_allows_recoverable_statuses_and_filters_unavailable_ones():
     tool = get_search_web_skills_tool(
         draft_agent_id=202,
         tenant_id="tenant_1",
@@ -629,7 +629,33 @@ def test_web_skill_search_defensively_filters_non_installable_statuses():
 
     payload = _loads(tool(query="document"))
 
-    assert [item["skill_id"] for item in payload["items"]] == [1]
+    items_by_id = {item["skill_id"]: item for item in payload["items"]}
+    assert set(items_by_id) == {1, 3}
+    assert items_by_id[3]["status"] == "resource_missing"
+
+
+def test_web_skill_search_finds_resource_missing_create_docx_for_recovery():
+    tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        official_skills=[
+            {
+                "skill_id": 3,
+                "skill_name": "create-docx",
+                "name": "create-docx",
+                "description": "Create Word documents and reports.",
+                "tags": [],
+                "status": "resource_missing",
+            }
+        ],
+    )
+
+    payload = _loads(tool(query="document report docx"))
+
+    assert [
+        (item["skill_id"], item["name"], item["status"])
+        for item in payload["items"]
+    ] == [(3, "create-docx", "resource_missing")]
 
 
 def test_web_skill_tool_rebuild_uses_latest_catalog():

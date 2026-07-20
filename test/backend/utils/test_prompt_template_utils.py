@@ -265,6 +265,31 @@ class TestPromptTemplateUtils:
         assert "flat" in prompt or "扁平数组" in prompt
         assert '"skill_id":3' in prompt
 
+    @pytest.mark.parametrize(
+        ("language", "marketplace_rule", "translation_rule"),
+        [
+            (
+                "en",
+                "MCP and official Skill catalogs are indexed in English",
+                "Translate non-English capability intent into canonical English search terms",
+            ),
+            (
+                "zh",
+                "MCP 和官方 Skill 目录以英文建立索引",
+                "将中文能力意图转换为规范英文搜索词",
+            ),
+        ],
+    )
+    def test_nl2agent_prompt_uses_english_canonical_terms_for_online_search(
+        self, language, marketplace_rule, translation_rule
+    ):
+        prompt = get_nl2agent_system_prompt(language=language)
+
+        assert marketplace_rule in prompt
+        assert translation_rule in prompt
+        assert 'query="document report docx"' in prompt
+        assert "1-3" in prompt
+
     @pytest.mark.parametrize("language", ["en", "zh"])
     def test_nl2agent_prompt_keeps_requirements_and_model_gates(
         self, language
