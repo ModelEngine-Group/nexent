@@ -375,3 +375,17 @@ def test_model_and_fresh_init_match_incremental_migration():
         assert "nl2agent_catalog_snapshot_t" in sql
         assert "fk_nl2agent_session_catalog_snapshot" in sql
         assert "workflow_revision" in sql
+
+
+def test_historical_nl2agent_migrations_are_safe_to_reapply_after_schema_upgrade():
+    root = Path(__file__).resolve().parents[3]
+    session_migration = (
+        root / "deploy/sql/migrations/v2.3.0_0716_add_nl2agent_session.sql"
+    ).read_text(encoding="utf-8")
+    catalog_migration = (
+        root / "deploy/sql/migrations/v2.3.0_0717_share_nl2agent_catalog_snapshots.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "column_name = 'catalog_revision'" in session_migration
+    assert "column_name = 'session_catalogs'" in catalog_migration
+    assert "conname = 'fk_nl2agent_session_catalog_snapshot'" in catalog_migration

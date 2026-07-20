@@ -26,4 +26,16 @@ ON nexent.nl2agent_session_t (tenant_id, user_id, status);
 
 COMMENT ON TABLE nexent.nl2agent_session_t IS 'Durable NL2AGENT workflow session snapshots';
 COMMENT ON COLUMN nexent.nl2agent_session_t.workflow_revision IS 'Optimistic-lock revision for workflow_state';
-COMMENT ON COLUMN nexent.nl2agent_session_t.catalog_revision IS 'Optimistic-lock revision for session_catalogs';
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name = 'nl2agent_session_t'
+          AND column_name = 'catalog_revision'
+    ) THEN
+        COMMENT ON COLUMN nexent.nl2agent_session_t.catalog_revision
+        IS 'Optimistic-lock revision for session_catalogs';
+    END IF;
+END $$;
