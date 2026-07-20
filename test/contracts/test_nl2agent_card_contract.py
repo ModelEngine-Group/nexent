@@ -249,6 +249,7 @@ def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:
     language_to_type = {
         "nl2agent-requirements-summary": "requirements_summary",
         "nl2agent-model-selection": "model_selection",
+        "nl2agent-local-resources": "local_resources",
         "nl2agent-agent-identity": "agent_identity",
         "nl2agent-finalize": "final_review",
     }

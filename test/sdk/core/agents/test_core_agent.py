@@ -1870,6 +1870,25 @@ class TestRunStreamRealExecution:
             for name, module in original_modules.items():
                 sys.modules[name] = module
 
+    def test_application_final_answer_contract_failure_enters_repair_gate(self):
+        module = self._load_core_agent_in_isolation()
+        agent = object.__new__(module.CoreAgent)
+        controller_result = module.VerificationResult(
+            passed=True,
+            severity="info",
+            event="final_answer",
+            phase="final_pass",
+        )
+        agent.verification_controller = MagicMock()
+        agent.verification_controller.verify_final_answer.return_value = controller_result
+        agent.final_answer_validator = MagicMock(return_value="Keep the skills array flat.")
+
+        result = agent._verify_final_answer("build agent", "malformed card", "", 1)
+
+        assert result.passed is False
+        assert result.failed_criteria == ["final_answer_contract"]
+        assert result.repair_instruction == "Keep the skills array flat."
+
     def test_run_stream_max_steps_path_real_execution(self):
         """Test that actually executes _run_stream and covers max_steps path lines."""
         import threading

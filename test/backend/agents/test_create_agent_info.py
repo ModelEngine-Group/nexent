@@ -169,6 +169,10 @@ sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 sys.modules['utils.context_utils'] = utils_mock.context_utils
 sys.modules['utils.nl2agent_catalog_snapshot'] = nl2agent_catalog_snapshot
+sys.modules['utils.nl2agent_card_validation'] = _create_stub_module(
+    "utils.nl2agent_card_validation",
+    validate_nl2agent_final_answer=MagicMock(),
+)
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -3867,7 +3871,8 @@ class TestCreateAgentRunInfo:
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None
+                safe_input_budget_snapshot=None,
+                final_answer_validator=None,
             )
             mock_build_factory.assert_called_once_with("http://test.server")
 

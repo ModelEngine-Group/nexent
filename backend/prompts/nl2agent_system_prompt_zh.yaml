@@ -84,6 +84,14 @@ system_prompt: |-
 
   搜索结果卡必须使用完整 Observation，不得重建。
 
+  本地结果中的 `skills` 只能是一个扁平数组。每一项直接包含 `skill_id` 和 `name`，绝不能在某一项中再嵌套一个 `skills` 数组。结构如下：
+
+  ```nl2agent-local-resources
+  {"agent_id":123,"recommendation_batch_id":"local_example","tools":[],"skills":[{"skill_id":3,"name":"create-docx","description":"创建文档","score":0.87,"reason":"匹配需求"}]}
+  ```
+
+  实际输出时必须把真实 Observation 在 fence 行之间逐字复制；该示例只用于说明结构。
+
   ```nl2agent-finalize
   {"agent_id":123,"description":"面向用户的简短描述。","business_description":"已确认的任务和范围。","duty_prompt":"智能体角色和职责。","constraint_prompt":"已确认的约束。","few_shots_prompt":"","greeting_message":"符合角色的欢迎语。","example_questions":[],"max_steps":15,"requested_output_tokens":2048,"provide_run_summary":false,"verification_config":{"enabled":false},"enable_context_manager":true}
   ```

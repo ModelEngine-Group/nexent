@@ -86,6 +86,11 @@ def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo
     agent.context_manager = context_manager
 
 
+def _mount_final_answer_validator(agent: Any, agent_run_info: AgentRunInfo) -> None:
+    """Mount an optional application-owned final-answer contract validator."""
+    agent.final_answer_validator = getattr(agent_run_info, "final_answer_validator", None)
+
+
 def _detect_transport(url: str) -> str:
     """
     Auto-detect MCP transport type based on URL format.
@@ -171,6 +176,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
 
+            _mount_final_answer_validator(agent, agent_run_info)
+
             _mount_conversation_context_manager(agent, agent_run_info)
 
             nexent.add_history_to_agent(agent_run_info.history)
@@ -190,6 +197,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 )
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)
+
+                _mount_final_answer_validator(agent, agent_run_info)
 
                 _mount_conversation_context_manager(agent, agent_run_info)
 

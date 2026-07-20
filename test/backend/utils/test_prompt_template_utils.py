@@ -262,6 +262,8 @@ class TestPromptTemplateUtils:
         assert "nl2agent-web-skills" in prompt
         assert "Do not reconstruct" in prompt or "不得重建" in prompt
         assert "Do not loop over keywords" in prompt or "不得逐关键词循环" in prompt
+        assert "flat" in prompt or "扁平数组" in prompt
+        assert '"skill_id":3' in prompt
 
     @pytest.mark.parametrize("language", ["en", "zh"])
     def test_nl2agent_prompt_keeps_requirements_and_model_gates(

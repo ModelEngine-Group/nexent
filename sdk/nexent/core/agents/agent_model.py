@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from threading import Event
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -275,6 +275,11 @@ class AgentRunInfo(BaseModel):
     safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved W2 safe input budget snapshot for request execution",
         default=None,
+    )
+    final_answer_validator: Optional[Callable[[Any], Optional[str]]] = Field(
+        description="Optional run-scoped final answer contract validator",
+        default=None,
+        exclude=True,
     )
 
     class Config:

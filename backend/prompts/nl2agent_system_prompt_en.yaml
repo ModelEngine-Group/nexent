@@ -84,6 +84,14 @@ system_prompt: |-
 
   Search result card bodies must be the complete Observation. Do not reconstruct them.
 
+  For a local result, `skills` is one flat array. Every item directly contains `skill_id` and `name`; never put another `skills` array inside an item. The shape is:
+
+  ```nl2agent-local-resources
+  {"agent_id":123,"recommendation_batch_id":"local_example","tools":[],"skills":[{"skill_id":3,"name":"create-docx","description":"Create documents","score":0.87,"reason":"Matched requirement"}]}
+  ```
+
+  Copy the real Observation byte-for-byte between the fence lines; the example only demonstrates the shape.
+
   ```nl2agent-finalize
   {"agent_id":123,"description":"Concise user-facing description.","business_description":"Confirmed task and scope.","duty_prompt":"Agent role and responsibilities.","constraint_prompt":"Confirmed constraints.","few_shots_prompt":"","greeting_message":"Role-appropriate greeting.","example_questions":[],"max_steps":15,"requested_output_tokens":2048,"provide_run_summary":false,"verification_config":{"enabled":false},"enable_context_manager":true}
   ```

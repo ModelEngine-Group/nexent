@@ -4,7 +4,10 @@ import json
 
 import pytest
 
-from utils.nl2agent_card_validation import message_contains_valid_card
+from utils.nl2agent_card_validation import (
+    message_contains_valid_card,
+    validate_nl2agent_final_answer,
+)
 
 
 def _fence(language: str, payload: object) -> str:
@@ -140,3 +143,31 @@ def test_message_rejects_inline_fence_without_line_anchored_closing_fence():
     )
 
     assert not message_contains_valid_card(content, "model_selection", 202, None)
+
+
+def test_final_answer_validator_rejects_nested_local_skill_payload():
+    content = """```nl2agent-local-resources
+{"agent_id":77,"recommendation_batch_id":"local_1","tools":[],"skills":[{"name":"create-docx","skills":[{"skill_id":3,"name":"create-docx"}]}]}
+```"""
+
+    error = validate_nl2agent_final_answer(content, draft_agent_id=77)
+
+    assert error is not None
+    assert "flat" in error
+
+
+def test_final_answer_validator_accepts_complete_local_card():
+    payload = {
+        "agent_id": 77,
+        "recommendation_batch_id": "local_1",
+        "tools": [],
+        "skills": [{"skill_id": 3, "name": "create-docx", "description": "Create documents", "score": 0.87, "reason": "Matched"}],
+    }
+
+    assert validate_nl2agent_final_answer(_fence("nl2agent-local-resources", payload), 77) is None
+
+
+def test_final_answer_validator_rejects_malformed_opening_fence():
+    content = '```nl2agent-local-resources {"agent_id":77}```'
+
+    assert validate_nl2agent_final_answer(content, 77) is not None

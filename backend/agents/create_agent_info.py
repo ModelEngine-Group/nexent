@@ -57,6 +57,7 @@ from database.model_management_db import get_model_records, get_model_by_model_i
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
+from utils.nl2agent_card_validation import validate_nl2agent_final_answer
 from utils.prompt_template_utils import (
     get_agent_prompt_template,
     get_nl2agent_system_prompt,
@@ -1692,6 +1693,11 @@ async def create_agent_run_info(
             agent_config,
             "safe_input_budget_snapshot",
             None,
+        ),
+        final_answer_validator=(
+            partial(validate_nl2agent_final_answer, draft_agent_id=draft_agent_id)
+            if draft_agent_id is not None
+            else None
         ),
     )
     return agent_run_info

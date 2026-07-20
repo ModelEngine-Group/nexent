@@ -855,6 +855,16 @@ def test_mount_conversation_context_manager_rejects_legacy_runtime(basic_agent_r
     conversation_context_manager.replace_components.assert_not_called()
 
 
+def test_mount_final_answer_validator_updates_agent(basic_agent_run_info):
+    validator = lambda answer: "invalid" if answer else None
+    basic_agent_run_info.final_answer_validator = validator
+    agent = types.SimpleNamespace()
+
+    run_agent._mount_final_answer_validator(agent, basic_agent_run_info)
+
+    assert agent.final_answer_validator is validator
+
+
 @pytest.mark.asyncio
 async def test_agent_run_uses_copy_context(basic_agent_run_info, monkeypatch):
     """agent_run passes ctx.run as Thread target, preserving contextvars."""

@@ -102,3 +102,42 @@ def message_contains_valid_card(
             continue
         valid_count += 1
     return target_count == 1 and valid_count == 1
+
+
+def validate_nl2agent_final_answer(
+    content: Any,
+    draft_agent_id: int,
+) -> Optional[str]:
+    """Return a repair instruction when an NL2AGENT card block is invalid."""
+    message = "" if content is None else str(content)
+    position = 0
+    parsed_blocks = 0
+    seen_types = set()
+    while match := _CARD_OPENING_PATTERN.search(message, position):
+        parsed_blocks += 1
+        language = match.group(1).lower()
+        card_type = _LANGUAGE_TO_TYPE.get(language)
+        closing_match = _CARD_CLOSING_PATTERN.search(message, match.end())
+        if closing_match is None:
+            return f"Close the `{language}` fence and copy the complete card JSON."
+        position = closing_match.end()
+        if card_type is None:
+            return f"Use a supported NL2AGENT card fence instead of `{language}`."
+        try:
+            payload = json.loads(message[match.end():closing_match.start()].strip())
+        except (json.JSONDecodeError, TypeError):
+            return f"Copy valid JSON into the `{language}` card without rewriting it."
+        if not isinstance(payload, dict) or not _schema_validators()[card_type].is_valid(payload):
+            return (
+                f"The `{language}` payload does not match the card contract. "
+                "Copy the complete tool Observation unchanged; arrays such as `skills` must stay flat."
+            )
+        if not _matches_agent(payload, draft_agent_id):
+            return f"Use the Current Session draft agent ID in the `{language}` card."
+        if card_type in seen_types:
+            return f"Render exactly one `{language}` card in the final answer."
+        seen_types.add(card_type)
+    marker_count = len(re.findall(r"```nl2agent-", message, re.IGNORECASE))
+    if marker_count != parsed_blocks:
+        return "Use a complete NL2AGENT card opening fence followed by a newline and valid JSON."
+    return None
