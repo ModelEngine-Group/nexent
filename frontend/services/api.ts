@@ -89,6 +89,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
       version: (agentId: number, versionNo: number) =>

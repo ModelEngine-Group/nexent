@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
-from consts.exceptions import SkillDuplicateError
+from consts.exceptions import SkillDuplicateError, AppException
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
@@ -30,6 +30,7 @@ from services.agent_service import (
     export_agent_with_skills_impl,
     import_agent_with_skills_impl,
 )
+from services.prompt_service import generate_guardrail_rules_impl
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -159,6 +160,44 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent update error.")
+
+
+@agent_config_router.post("/generate_guardrail_rules")
+async def generate_guardrail_rules_api(
+    http_request: Request,
+    description: str = Body(..., embed=True),
+    model_id: int = Body(..., embed=True),
+    language: str = Body("zh", embed=True),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Generate guardrail regex rules from a natural-language description via LLM.
+    Returns {type: "single"|"multi", candidates|rules}.
+    """
+    _, tenant_id, auth_language = get_current_user_info(authorization, http_request)
+    try:
+        result = generate_guardrail_rules_impl(
+            description=description,
+            model_id=model_id,
+            tenant_id=tenant_id,
+            language=auth_language or language,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Success", "data": result},
+        )
+    except AppException as e:
+        logger.error(f"Generate guardrail rules error: {str(e)}")
+        return JSONResponse(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            content={"message": str(e), "data": None},
+        )
+    except Exception as e:
+        logger.exception(f"Generate guardrail rules error: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Generate guardrail rules error.",
+        )
 
 
 @agent_config_router.delete("")

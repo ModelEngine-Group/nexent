@@ -45,6 +45,8 @@ import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
 import GuardrailConfigPanel from "./GuardrailConfigPanel";
+import GuardrailSummaryCard from "./GuardrailSummaryCard";
+import GuardrailConfigModal from "./GuardrailConfigModal";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
@@ -132,6 +134,7 @@ export default function AgentGenerateDetail({}) {
   const [promptTemplateManagerOpen, setPromptTemplateManagerOpen] = useState(false);
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
   const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+  const [guardrailModalOpen, setGuardrailModalOpen] = useState(false);
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
   useEffect(() => {
@@ -1176,9 +1179,9 @@ export default function AgentGenerateDetail({}) {
                         />
                       </Form.Item>
 
-                      {/* Guardrail configuration panel — panel has its own header, no Form.Item label needed */}
+                      {/* Guardrail summary card — opens modal for full configuration */}
                       <div className="mb-3">
-                        <GuardrailConfigPanel
+                        <GuardrailSummaryCard
                           config={
                             (editedAgent.verification_config?.guardrail_config) || {
                               enabled: false,
@@ -1186,14 +1189,21 @@ export default function AgentGenerateDetail({}) {
                               default_action: "pass",
                             }
                           }
-                          onChange={(guardrailConfig) => {
+                          onToggle={(enabled) => {
+                            const currentGuardrail =
+                              editedAgent.verification_config?.guardrail_config || {
+                                enabled: false,
+                                rules: [],
+                                default_action: "pass",
+                              };
                             updateAgentConfig({
                               verification_config: {
                                 ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
-                                guardrail_config: guardrailConfig,
+                                guardrail_config: { ...currentGuardrail, enabled },
                               },
                             });
                           }}
+                          onOpenConfig={() => setGuardrailModalOpen(true)}
                         />
                       </div>
                     </Form>
@@ -1358,6 +1368,29 @@ export default function AgentGenerateDetail({}) {
           onReplace={handleReplaceOptimizedContent}
         />
       ) : null}
+
+      {/* Guardrail configuration modal */}
+      <GuardrailConfigModal
+        open={guardrailModalOpen}
+        config={
+          (editedAgent.verification_config?.guardrail_config) || {
+            enabled: false,
+            rules: [],
+            default_action: "pass",
+          }
+        }
+        onChange={(guardrailConfig) => {
+          updateAgentConfig({
+            verification_config: {
+              ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+              guardrail_config: guardrailConfig,
+            },
+          });
+        }}
+        onClose={() => setGuardrailModalOpen(false)}
+        llmModels={availableLlmModels}
+        defaultModelId={selectedMainAgentModel?.id}
+      />
     </Flex>
   );
 }

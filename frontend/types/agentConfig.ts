@@ -76,32 +76,7 @@ export interface GuardrailConfig {
   default_action: GuardrailSeverity;
 }
 
-export const DEFAULT_GUARDRAIL_RULES: GuardrailRule[] = [
-  {
-    name: "cn_id_number",
-    pattern: "\\d{17}[\\dXx]",
-    severity: "block",
-    description: "Chinese national ID number (18 digits)",
-  },
-  {
-    name: "cn_phone",
-    pattern: "1[3-9]\\d{9}",
-    severity: "mask",
-    description: "Chinese mobile phone number",
-  },
-  {
-    name: "email_address",
-    pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
-    severity: "mask",
-    description: "Email address",
-  },
-  {
-    name: "bank_card",
-    pattern: "\\d{16,19}",
-    severity: "block",
-    description: "Bank card number (16-19 digits)",
-  },
-];
+export const DEFAULT_GUARDRAIL_RULES: GuardrailRule[] = [];
 
 export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = {
   enabled: false,

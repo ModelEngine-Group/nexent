@@ -32,6 +32,7 @@ from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_prompt_optimize_prompt_template,
     get_prompt_template,
+    get_guardrail_regex_prompt_template,
 )
 
 from dataclasses import dataclass, field
@@ -454,6 +455,89 @@ def optimize_prompt_section_impl(
         "original_content": current_content,
         "optimized_content": optimized_content,
     }
+
+
+def _extract_json_object(raw: str) -> Optional[dict]:
+    """从可能含 markdown 代码块/前后文字的 LLM 输出中提取首个 JSON 对象。
+
+    容错:markdown fence、前后解释文字、单引号、尾随逗号。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    snippet = text[start:end + 1]
+    try:
+        return json.loads(snippet)
+    except (ValueError, TypeError):
+        pass
+    # 容错:单引号 → 双引号、去尾随逗号
+    try:
+        fixed = snippet.replace("'", '"')
+        import re as _re
+        fixed = _re.sub(r",\s*([}\]])", r"\1", fixed)
+        return json.loads(fixed)
+    except (ValueError, TypeError):
+        return None
+
+
+def generate_guardrail_rules_impl(
+    description: str,
+    model_id: int,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+) -> dict:
+    """调用 LLM 根据自然语言描述生成护栏正则规则，返回 {type, candidates|rules}。
+
+    type=single → {type, candidates:[{pattern, desc}]}
+    type=multi  → {type, rules:[{name, pattern, severity, desc}]}
+    """
+    if not (description or "").strip():
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "Description is required.",
+        )
+
+    prompt_template = get_guardrail_regex_prompt_template(language)
+    user_prompt = Template(
+        prompt_template["GUARDRAIL_USER_PROMPT"], undefined=StrictUndefined
+    ).render({"description": description})
+
+    raw = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=user_prompt,
+        system_prompt=prompt_template["GUARDRAIL_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    # 诊断日志:记录 LLM 原始输出(便于排查"格式不对"问题)
+    logger.info("[guardrail] desc=%r model_id=%s raw(500)=%s", description[:80], model_id, (raw or "")[:500])
+
+    if not raw:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    parsed = _extract_json_object(raw)
+    if not isinstance(parsed, dict):
+        logger.warning("[guardrail] JSON 解析失败, raw=%s", (raw or "")[:800])
+        raise AppException(
+            ErrorCode.MODEL_PROMPT_GENERATION_FAILED,
+            "LLM did not return valid JSON for guardrail rules.",
+        )
+
+    result_type = str(parsed.get("type") or "").strip().lower()
+    if result_type == "single":
+        candidates = parsed.get("candidates")
+        return {"type": "single", "candidates": candidates if isinstance(candidates, list) else []}
+    if result_type == "multi":
+        rules = parsed.get("rules")
+        return {"type": "multi", "rules": rules if isinstance(rules, list) else []}
+    raise AppException(
+        ErrorCode.MODEL_PROMPT_GENERATION_FAILED,
+        "Unknown guardrail result type.",
+    )
 
 
 def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):

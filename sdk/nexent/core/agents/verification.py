@@ -459,9 +459,17 @@ class GuardrailEngine:
         """
         try:
             if isinstance(msg, dict):
-                msg["content"] = text
+                content = msg.get("content")
+                if isinstance(content, list):
+                    msg["content"] = [{"type": "text", "text": text}]
+                else:
+                    msg["content"] = text
             else:
-                setattr(msg, "content", text)
+                content = getattr(msg, "content", None)
+                if isinstance(content, list):
+                    setattr(msg, "content", [{"type": "text", "text": text}])
+                else:
+                    setattr(msg, "content", text)
         except Exception:
             pass
 
