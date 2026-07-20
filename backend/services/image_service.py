@@ -81,6 +81,7 @@ async def _fetch_aidp_image(url: str):
             url,
             headers={"Authorization": f"Bearer {api_key}"},
             allow_redirects=False,
+            ssl=False,  # Disable SSL verification because AIDP servers use self-signed certificates
         ) as response:
             if response.status != HTTPStatus.OK:
                 error_text = await response.text()
