@@ -489,6 +489,18 @@ class TestPlatformQuota:
             assert result["capacity_bytes"] == 500 * GB
             assert "500" in result["capacity_readable"]
 
+    def test_get_platform_capacity_ignores_invalid_stored_value(self):
+        with patch(
+            "database.tenant_config_db.get_single_config_info",
+            return_value={"config_value": "invalid"},
+        ):
+            result = QuotaService.get_platform_capacity()
+
+        assert result == {"capacity_bytes": None, "capacity_readable": None}
+
+    def test_quota_input_supports_mb(self):
+        assert QuotaService._quota_input_to_bytes(None, 100) == 100 * 1024 * 1024
+
     def test_set_platform_capacity(self):
         with patch.object(QuotaService, "_set_tenant_config") as mock_set, patch.object(
             QuotaService,
@@ -521,6 +533,16 @@ class TestPlatformQuota:
                 "KB_QUOTA_HARD_LIMIT_EDITABLE" in str(call) for call in mock_set.call_args_list
             )
             assert editable_call
+
+    def test_set_tenant_hard_limit_none_removes_platform_management(self):
+        with patch.object(QuotaService, "_delete_tenant_config") as mock_delete:
+            result = QuotaService.set_tenant_hard_limit("target-tenant")
+
+        assert result == {
+            "hard_limit_bytes": None,
+            "hard_limit_readable": None,
+        }
+        assert mock_delete.call_count == 2
 
     def test_rejects_tenant_quota_below_actual_usage(self):
         with patch.object(
@@ -632,6 +654,31 @@ class TestPlatformQuota:
         tenant = result["tenants"][0]
         assert tenant["warning_enabled"] is False
         assert tenant["warning_level"] == "normal"
+
+    def test_platform_overview_tolerates_tenant_usage_failure(self):
+        with patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": None, "capacity_readable": None},
+        ), patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={
+                "tenant_ids": ["tenant-1"],
+                "hard_limits": {"tenant-1": 10 * GB},
+                "total_allocated_bytes": 10 * GB,
+                "unmanaged_tenant_count": 0,
+            },
+        ), patch.object(
+            QuotaService, "get_usage", side_effect=RuntimeError("usage failed")
+        ), patch(
+            "database.tenant_config_db.get_single_config_info", return_value={}
+        ):
+            result = QuotaService.get_platform_overview()
+
+        assert result["tenants"][0]["actual_bytes"] == 0
+        assert result["tenants"][0]["warning_enabled"] is False
+        assert result["tenants"][0]["warning_level"] == "normal"
 
 
 # ═══════════════════════════════════════════════════════════════════════
