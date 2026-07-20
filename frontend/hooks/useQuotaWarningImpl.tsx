@@ -26,10 +26,15 @@ import type {
 } from "@/types/quota";
 
 const DISMISS_PREFIX = "quota_warning_dismissed";
-const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
+const DISMISS_TTL_MS = 5 * 1000;
 
-function getDismissKey(scope: string, id: string, level: string): string {
-  return `${DISMISS_PREFIX}_${scope}_${id}_${level}`;
+function getDismissKey(
+  userId: string,
+  scope: string,
+  id: string,
+  level: string
+): string {
+  return `${DISMISS_PREFIX}_${userId}_${scope}_${id}_${level}`;
 }
 
 function isDismissed(key: string): boolean {
@@ -82,7 +87,11 @@ interface WarningItem {
 
 type UserRole = "SU" | "ADMIN" | string;
 
-export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
+export function useQuotaWarning(
+  userRole?: UserRole,
+  tenantId?: string | null,
+  userId?: string
+) {
   const { t } = useTranslation("common");
   const router = useRouter();
   const params = useParams();
@@ -92,6 +101,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
   const activeLevelByItemRef = useRef<Map<string, WarningLevel>>(new Map());
   const programmaticCloseRef = useRef<Set<string>>(new Set());
   const isPlatformAdmin = userRole === "SU" || userRole === "ASSET_OWNER";
+  const dismissOwner = userId || "anonymous";
 
   const unregisterNotificationKey = useCallback((notificationKey: string) => {
     for (const [
@@ -113,7 +123,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
         "exceeded",
         "blocked",
       ] as WarningLevel[]) {
-        clearDismissed(getDismissKey(scope, id, level));
+        clearDismissed(getDismissKey(dismissOwner, scope, id, level));
       }
 
       const itemKey = `${scope}:${id}`;
@@ -129,7 +139,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
       notificationKeysByItemRef.current.delete(itemKey);
       activeLevelByItemRef.current.delete(itemKey);
     },
-    [unregisterNotificationKey]
+    [dismissOwner, unregisterNotificationKey]
   );
 
   const clearAllActiveNotifications = useCallback(() => {
@@ -180,7 +190,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
 
   const dismissWarning = useCallback(
     (scope: "tenant" | "kb", id: string, level: WarningLevel) => {
-      setDismissed(getDismissKey(scope, id, level));
+      setDismissed(getDismissKey(dismissOwner, scope, id, level));
       const itemKey = `${scope}:${id}`;
       const notificationKeys = notificationKeysByItemRef.current.get(itemKey);
       if (!notificationKeys) return;
@@ -191,7 +201,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
         unregisterNotificationKey(notificationKey);
       }
     },
-    [unregisterNotificationKey]
+    [dismissOwner, unregisterNotificationKey]
   );
 
   /**
@@ -206,7 +216,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
       notificationId: string,
       items: WarningItem[]
     ) => {
-      const key = `quota:${scope}:${level}:${notificationId}`;
+      const key = `quota:${dismissOwner}:${scope}:${level}:${notificationId}`;
       if (shownRef.current.has(key)) return;
       shownRef.current.add(key);
       for (const item of items) {
@@ -229,7 +239,9 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
           const wasProgrammatic = programmaticCloseRef.current.delete(key);
           if (!wasProgrammatic) {
             for (const item of items) {
-              setDismissed(getDismissKey(scope, item.id, level));
+              setDismissed(
+                getDismissKey(dismissOwner, scope, item.id, level)
+              );
             }
           }
           unregisterNotificationKey(key);
@@ -243,7 +255,7 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
         notification.error(config);
       }
     },
-    [unregisterNotificationKey]
+    [dismissOwner, unregisterNotificationKey]
   );
 
   /**
@@ -260,7 +272,8 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
       }
 
       const activeItems = items.filter(
-        (item) => !isDismissed(getDismissKey(scope, item.id, level))
+        (item) =>
+          !isDismissed(getDismissKey(dismissOwner, scope, item.id, level))
       );
       if (activeItems.length === 0) return;
 
@@ -322,7 +335,14 @@ export function useQuotaWarning(userRole?: UserRole, tenantId?: string | null) {
         .join("|");
       notify(level, message, description, scope, notificationId, activeItems);
     },
-    [clearWarningState, navigateToQuotaManagement, notify, t, userRole]
+    [
+      clearWarningState,
+      dismissOwner,
+      navigateToQuotaManagement,
+      notify,
+      t,
+      userRole,
+    ]
   );
 
   /**

@@ -26,7 +26,7 @@ export function QuotaWarningMonitor({
     closeAllActiveNotifications,
     processPlatformQuotaStatus,
     processUsageQuotaStatus,
-  } = useQuotaWarning(userRole, tenantId);
+  } = useQuotaWarning(userRole, tenantId, user?.id);
   const inFlightRef = useRef(false);
   const lastCheckedAtRef = useRef(0);
   const debounceTimerRef = useRef<number | null>(null);
@@ -121,7 +121,7 @@ export function QuotaWarningMonitor({
 
   useEffect(
     () => () => closeAllActiveNotifications(),
-    [closeAllActiveNotifications, tenantId, userRole]
+    [closeAllActiveNotifications, tenantId, user?.id, userRole]
   );
 
   return null;
