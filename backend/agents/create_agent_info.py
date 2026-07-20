@@ -181,6 +181,18 @@ def _build_nl2agent_current_session(
     }
 
 
+def _load_nl2agent_trusted_search_batches(
+    tenant_id: str,
+    draft_agent_id: int,
+) -> Dict[str, Dict[str, Any]]:
+    """Load the latest durable search proofs for final-answer validation."""
+    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+    batches = state.get("trusted_search_batches")
+    if not isinstance(batches, dict):
+        raise ValueError("NL2AGENT trusted search batches are malformed")
+    return batches
+
+
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
 # Keyed by model_id; cleared only on process restart.
@@ -1695,7 +1707,15 @@ async def create_agent_run_info(
             None,
         ),
         final_answer_validator=(
-            partial(validate_nl2agent_final_answer, draft_agent_id=draft_agent_id)
+            partial(
+                validate_nl2agent_final_answer,
+                draft_agent_id=draft_agent_id,
+                trusted_search_batch_provider=partial(
+                    _load_nl2agent_trusted_search_batches,
+                    tenant_id,
+                    draft_agent_id,
+                ),
+            )
             if draft_agent_id is not None
             else None
         ),

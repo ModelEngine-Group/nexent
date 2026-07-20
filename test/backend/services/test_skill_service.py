@@ -4834,6 +4834,52 @@ class TestInitSkillListForTenantAsync:
 class TestOfficialSkillsZipDirectory:
     """Test official skill ZIP catalog discovery."""
 
+    def test_install_from_zip_restores_existing_skill_with_missing_resources(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        from backend.services import skill_service
+
+        zip_bytes = b"PK\x03\x04test-skill"
+        (tmp_path / "test-skill.zip").write_bytes(zip_bytes)
+        local_skills_dir = tmp_path / "tenant-skills"
+        service = MagicMock()
+        service.skill_manager.local_skills_dir = str(local_skills_dir)
+        service.update_skill_from_file.return_value = {"name": "test-skill"}
+        monkeypatch.setattr(
+            skill_service,
+            "_get_official_skills_zip_dir",
+            lambda: str(tmp_path),
+        )
+        monkeypatch.setattr(
+            skill_service.skill_db,
+            "get_skill_by_name",
+            MagicMock(return_value={"skill_id": 7, "name": "test-skill"}),
+        )
+        monkeypatch.setattr(
+            skill_service,
+            "SkillService",
+            MagicMock(return_value=service),
+        )
+
+        installed = skill_service.install_skills_from_zip_for_tenant(
+            ["test-skill"],
+            "tenant_1",
+            user_id="user_1",
+            locale="en",
+        )
+
+        assert installed == ["test-skill"]
+        service.update_skill_from_file.assert_called_once_with(
+            skill_name="test-skill",
+            file_content=zip_bytes,
+            file_type="zip",
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+        service.create_skill_from_file.assert_not_called()
+
     def test_get_official_skills_with_status_uses_repo_asset_fallback(
         self, tmp_path, monkeypatch
     ):

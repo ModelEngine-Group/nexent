@@ -449,7 +449,7 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_start_session_keeps_only_installable_official_skills(
+async def test_start_session_keeps_installable_and_recoverable_official_skills(
     monkeypatch, caplog
 ):
     clear_nl2agent_session_catalogs()
@@ -492,11 +492,13 @@ async def test_start_session_keeps_only_installable_official_skills(
         )
 
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
-        official_skills[0]
+        official_skills[0],
+        official_skills[2],
     ]
     assert "tenant_id=tenant_1" in caplog.text
     assert "draft_agent_id=202" in caplog.text
     assert "missing-files" in caplog.text
+    assert "online recoverable" in caplog.text
 
 
 @pytest.mark.asyncio

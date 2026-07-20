@@ -42,6 +42,14 @@ uv pip install ../sdk
 `--all-extras` installs every optional dependency (data processing, testing, etc.). After syncing, install the local SDK package.
 ::::
 
+:::: warning Skill storage for host-run backends
+When the backend runs directly on Windows, macOS, or Linux instead of inside a
+container, set `SKILLS_PATH` to an absolute directory that the host process can
+access. Container-only paths such as `/mnt/nexent-data/skills` are not valid for
+a Windows host process. Tenant Skill resources are stored under
+`SKILLS_PATH/<tenant_id>/`.
+::::
+
 #### Optional: Accelerate with Mirror Sources
 
 If downloads are slow, use domestic mirrors:

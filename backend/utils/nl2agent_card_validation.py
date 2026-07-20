@@ -1,14 +1,17 @@
 """Server-side validation for persisted NL2AGENT card messages."""
 
 import json
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from jsonschema import Draft7Validator
 from referencing import Registry, Resource
 
+
+logger = logging.getLogger(__name__)
 
 _CARD_OPENING_PATTERN = re.compile(
     r"```(nl2agent-[^\s`]+)[^\S\r\n]*\r?\n",
@@ -29,6 +32,8 @@ _LANGUAGE_TO_TYPE = {
 _SCHEMA_PATH = (
     Path(__file__).resolve().parents[2] / "contracts" / "nl2agent-card.schema.json"
 )
+_TRUSTED_CARD_TYPES = {"local_resources", "web_mcp", "web_skill"}
+TrustedSearchBatchProvider = Callable[[], Dict[str, Dict[str, Any]]]
 
 
 @lru_cache(maxsize=1)
@@ -66,6 +71,47 @@ def _matches_agent(payload: Dict[str, Any], draft_agent_id: int) -> bool:
 def _card_key(payload: Dict[str, Any]) -> Optional[str]:
     value = payload.get("recommendation_batch_id")
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _online_card_items(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    items = payload.get("items")
+    return items if isinstance(items, list) else [payload]
+
+
+def _web_skill_item_key(item: Dict[str, Any]) -> str:
+    skill_id = item.get("skill_id")
+    if isinstance(skill_id, int) and not isinstance(skill_id, bool):
+        return f"skill:{skill_id}"
+    return f"skill-name:{str(item.get('skill_name') or '').strip().casefold()}"
+
+
+def _matches_trusted_search_batch(
+    card_type: str,
+    payload: Dict[str, Any],
+    trusted_batch: Optional[Dict[str, Any]],
+) -> bool:
+    """Compare action-authorizing card fields with one immutable search proof."""
+    if not isinstance(trusted_batch, dict):
+        return False
+    if card_type == "local_resources":
+        return (
+            trusted_batch.get("resource_type") == "local"
+            and trusted_batch.get("tool_ids")
+            == sorted({int(item["tool_id"]) for item in payload["tools"]})
+            and trusted_batch.get("skill_ids")
+            == sorted({int(item["skill_id"]) for item in payload["skills"]})
+        )
+    items = _online_card_items(payload)
+    if card_type == "web_mcp":
+        resource_type = "mcp"
+        item_keys = sorted({str(item["recommendation_id"]).strip() for item in items})
+    else:
+        resource_type = "skill"
+        item_keys = sorted({_web_skill_item_key(item) for item in items})
+    return (
+        trusted_batch.get("resource_type") == resource_type
+        and trusted_batch.get("item_keys") == item_keys
+    )
 
 
 def message_contains_valid_card(
@@ -107,12 +153,14 @@ def message_contains_valid_card(
 def validate_nl2agent_final_answer(
     content: Any,
     draft_agent_id: int,
+    trusted_search_batch_provider: Optional[TrustedSearchBatchProvider] = None,
 ) -> Optional[str]:
     """Return a repair instruction when an NL2AGENT card block is invalid."""
     message = "" if content is None else str(content)
     position = 0
     parsed_blocks = 0
     seen_types = set()
+    trusted_batches: Optional[Dict[str, Dict[str, Any]]] = None
     while match := _CARD_OPENING_PATTERN.search(message, position):
         parsed_blocks += 1
         language = match.group(1).lower()
@@ -134,6 +182,30 @@ def validate_nl2agent_final_answer(
             )
         if not _matches_agent(payload, draft_agent_id):
             return f"Use the Current Session draft agent ID in the `{language}` card."
+        if card_type in _TRUSTED_CARD_TYPES and trusted_search_batch_provider is not None:
+            if trusted_batches is None:
+                try:
+                    trusted_batches = trusted_search_batch_provider()
+                except Exception:
+                    logger.exception(
+                        "Failed to load trusted NL2AGENT search batches: draft_agent_id=%s",
+                        draft_agent_id,
+                    )
+                    return (
+                        "The trusted search result could not be verified. "
+                        "Do not render a recommendation card; rerun the required search action."
+                    )
+            card_key = _card_key(payload)
+            if not _matches_trusted_search_batch(
+                card_type,
+                payload,
+                trusted_batches.get(card_key) if card_key else None,
+            ):
+                return (
+                    f"The `{language}` card does not match its trusted search result. "
+                    "Rerun the required search action and copy its complete Observation unchanged "
+                    "without adding, removing, filtering, or replacing resources."
+                )
         if card_type in seen_types:
             return f"Render exactly one `{language}` card in the final answer."
         seen_types.add(card_type)

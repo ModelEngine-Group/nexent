@@ -167,6 +167,156 @@ def test_final_answer_validator_accepts_complete_local_card():
     assert validate_nl2agent_final_answer(_fence("nl2agent-local-resources", payload), 77) is None
 
 
+def test_final_answer_validator_rejects_local_card_filtered_from_trusted_batch():
+    payload = {
+        "agent_id": 80,
+        "recommendation_batch_id": "local_3e22328ccb2f4a3c48370961",
+        "tools": [],
+        "skills": [{"skill_id": 3, "name": "create-docx"}],
+    }
+    trusted = {
+        "local_3e22328ccb2f4a3c48370961": {
+            "resource_type": "local",
+            "tool_ids": [28, 52],
+            "skill_ids": [3, 11, 14],
+            "item_keys": [],
+        }
+    }
+
+    error = validate_nl2agent_final_answer(
+        _fence("nl2agent-local-resources", payload),
+        80,
+        trusted_search_batch_provider=lambda: trusted,
+    )
+
+    assert error is not None
+    assert "does not match its trusted search result" in error
+    assert "without adding, removing, filtering, or replacing resources" in error
+
+
+def test_final_answer_validator_accepts_exact_trusted_local_card():
+    payload = {
+        "agent_id": 80,
+        "recommendation_batch_id": "local_exact",
+        "tools": [
+            {"tool_id": 28, "name": "tool-28"},
+            {"tool_id": 52, "name": "tool-52"},
+        ],
+        "skills": [
+            {"skill_id": 3, "name": "create-docx"},
+            {"skill_id": 11, "name": "search-datamate"},
+            {"skill_id": 14, "name": "search-knowledge-base"},
+        ],
+    }
+    trusted = {
+        "local_exact": {
+            "resource_type": "local",
+            "tool_ids": [28, 52],
+            "skill_ids": [3, 11, 14],
+            "item_keys": [],
+        }
+    }
+
+    assert (
+        validate_nl2agent_final_answer(
+            _fence("nl2agent-local-resources", payload),
+            80,
+            trusted_search_batch_provider=lambda: trusted,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("language", "payload", "trusted"),
+    [
+        (
+            "nl2agent-web-mcps",
+            {
+                "agent_id": 80,
+                "recommendation_batch_id": "mcp_batch",
+                "items": [
+                    {
+                        "agent_id": 80,
+                        "recommendation_id": "registry:github",
+                        "name": "GitHub",
+                        "install_options": [
+                            {
+                                "option_id": "remote",
+                                "type": "remote",
+                                "label": "Remote",
+                                "requires_configuration": False,
+                                "fields": [],
+                                "supported": True,
+                                "status": "ready",
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "mcp_batch": {
+                    "resource_type": "mcp",
+                    "tool_ids": [],
+                    "skill_ids": [],
+                    "item_keys": ["registry:other"],
+                }
+            },
+        ),
+        (
+            "nl2agent-web-skills",
+            {
+                "agent_id": 80,
+                "recommendation_batch_id": "skill_batch",
+                "items": [{"skill_id": 3, "name": "create-docx"}],
+            },
+            {
+                "skill_batch": {
+                    "resource_type": "skill",
+                    "tool_ids": [],
+                    "skill_ids": [],
+                    "item_keys": ["skill:14"],
+                }
+            },
+        ),
+    ],
+)
+def test_final_answer_validator_rejects_modified_online_card(
+    language,
+    payload,
+    trusted,
+):
+    error = validate_nl2agent_final_answer(
+        _fence(language, payload),
+        80,
+        trusted_search_batch_provider=lambda: trusted,
+    )
+
+    assert error is not None
+    assert "does not match its trusted search result" in error
+
+
+def test_final_answer_validator_fails_closed_when_trusted_state_is_unavailable():
+    payload = {
+        "agent_id": 80,
+        "recommendation_batch_id": "local_1",
+        "tools": [],
+        "skills": [],
+    }
+
+    def fail_loading():
+        raise RuntimeError("database unavailable")
+
+    error = validate_nl2agent_final_answer(
+        _fence("nl2agent-local-resources", payload),
+        80,
+        trusted_search_batch_provider=fail_loading,
+    )
+
+    assert error is not None
+    assert "could not be verified" in error
+
+
 def test_final_answer_validator_rejects_malformed_opening_fence():
     content = '```nl2agent-local-resources {"agent_id":77}```'
 

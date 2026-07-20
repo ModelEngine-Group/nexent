@@ -139,7 +139,8 @@ async def start_session(
 
     if resource_missing_names:
         logger.warning(
-            "Excluded resource-missing official Skills from NL2AGENT search: "
+            "Excluded resource-missing official Skills from NL2AGENT local search; "
+            "retained them as online recoverable resources: "
             "tenant_id=%s draft_agent_id=%s skills=%s",
             tenant_id,
             draft_agent_id,

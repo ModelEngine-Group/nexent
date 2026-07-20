@@ -41,6 +41,13 @@ uv pip install ../sdk
 `--all-extras` 安装所有可选依赖（数据处理、测试等），随后安装本地 SDK 包。
 ::::
 
+:::: warning 宿主机运行时的 Skill 存储路径
+如果 backend 直接运行在 Windows、macOS 或 Linux 宿主机上，而不是运行在容器内，
+必须把 `SKILLS_PATH` 设置为宿主机进程可访问的绝对目录。
+`/mnt/nexent-data/skills` 等容器专用路径不能直接用于 Windows 宿主机进程。
+租户 Skill 资源位于 `SKILLS_PATH/<tenant_id>/`。
+::::
+
 #### 可选：镜像加速
 
 ```bash

@@ -161,3 +161,54 @@ async def test_local_catalog_queries_are_bounded_at_provider_boundary():
         limit=2_000,
     )
     list_skills.assert_called_once_with(tenant_id="tenant_1", limit=2_000)
+
+
+@pytest.mark.asyncio
+async def test_resource_missing_official_skill_is_online_recoverable_only():
+    dependencies = nl2agent_catalog_service.CatalogDependencies(
+        list_all_tools=AsyncMock(return_value=[]),
+        list_tenant_skills=MagicMock(
+            return_value=[
+                {"skill_id": 3, "name": "create-docx", "description": "Missing"},
+                {"skill_id": 4, "name": "working-local", "description": "Ready"},
+            ]
+        ),
+        list_registry_mcp_services=AsyncMock(return_value={"servers": []}),
+        list_community_mcp_services=AsyncMock(return_value={"items": []}),
+        get_official_skills_with_status=MagicMock(
+            return_value=[
+                {
+                    "skill_id": 3,
+                    "skill_name": "create-docx",
+                    "name": "create-docx",
+                    "status": "resource_missing",
+                },
+                {
+                    "skill_id": 5,
+                    "skill_name": "web-search",
+                    "name": "web-search",
+                    "status": "installable",
+                },
+                {
+                    "skill_id": 6,
+                    "skill_name": "installed-official",
+                    "name": "installed-official",
+                    "status": "installed",
+                },
+            ]
+        ),
+    )
+
+    catalogs, missing_names = await nl2agent_catalog_service.load_session_catalogs(
+        "tenant_1",
+        dependencies,
+    )
+
+    assert [item["name"] for item in catalogs["skill_catalog"]] == [
+        "working-local"
+    ]
+    assert [item["name"] for item in catalogs["official_skills"]] == [
+        "create-docx",
+        "web-search",
+    ]
+    assert missing_names == ["create-docx"]

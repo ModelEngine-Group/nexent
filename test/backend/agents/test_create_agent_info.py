@@ -459,6 +459,7 @@ from backend.agents.create_agent_info import (
     _resolve_agent_run_model_id,
     _is_nl2agent_model_selection_confirmed,
     _build_nl2agent_current_session,
+    _load_nl2agent_trusted_search_batches,
     _load_nl2agent_system_prompt,
     _resolve_input_budget,
     _resolve_safe_input_budget,
@@ -469,6 +470,26 @@ HistoryItem = sys.modules["consts.model"].HistoryItem
 AgentRunException = sys.modules["consts.exceptions"].AgentRunException
 
 # Import ValidationError for testing (from mocked consts.exceptions)
+
+
+def test_load_nl2agent_trusted_search_batches_reads_latest_state():
+    states = [
+        {"trusted_search_batches": {}},
+        {"trusted_search_batches": {"local_1": {"resource_type": "local"}}},
+    ]
+    with patch(
+        "backend.agents.create_agent_info.get_nl2agent_session_state",
+        side_effect=states,
+    ) as get_state:
+        assert _load_nl2agent_trusted_search_batches("tenant_1", 202) == {}
+        assert _load_nl2agent_trusted_search_batches("tenant_1", 202) == states[1][
+            "trusted_search_batches"
+        ]
+
+    assert [item.args for item in get_state.call_args_list] == [
+        ("tenant_1", 202),
+        ("tenant_1", 202),
+    ]
 
 
 def test_load_nl2agent_system_prompt_preserves_valid_prompt():

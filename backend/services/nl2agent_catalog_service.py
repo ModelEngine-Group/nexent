@@ -272,8 +272,20 @@ async def load_session_catalogs(
         for item in official_skill_catalog
         if item.get("status") == "resource_missing"
     ]
+    resource_missing_keys = {
+        _normalized_skill_name(name)
+        for name in resource_missing_names
+        if _normalized_skill_name(name)
+    }
+    skill_catalog = [
+        item
+        for item in skill_catalog
+        if _normalized_skill_name(item.get("name")) not in resource_missing_keys
+    ]
     official_skills = [
-        item for item in official_skill_catalog if item.get("status") == "installable"
+        item
+        for item in official_skill_catalog
+        if item.get("status") in {"installable", "resource_missing"}
     ]
     return {
         "tool_catalog": tool_catalog,
@@ -311,7 +323,7 @@ def _require_installable_skill(
         matches_name = not normalized_name or item_name == normalized_name
         if not matches_id or not matches_name:
             continue
-        if item.get("status") in {"installable", "installed"}:
+        if item.get("status") in {"installable", "installed", "resource_missing"}:
             return item
         break
     raise AgentRunException(

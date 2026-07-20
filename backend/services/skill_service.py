@@ -2699,7 +2699,8 @@ def install_skills_from_zip_for_tenant(
     and database record creation).
 
     Skills that cannot be found as ZIP files are skipped with a warning.
-    Skills that already exist for the tenant are skipped (not reinstalled).
+    Skills that already exist with local resources are skipped. If the database
+    record exists but its local directory is missing, the ZIP restores it.
 
     Args:
         skill_names: List of skill names to install (e.g. ["search-knowledge-base"]).
@@ -2737,23 +2738,40 @@ def install_skills_from_zip_for_tenant(
         try:
             existing = skill_db.get_skill_by_name(skill_name, tenant_id)
             if existing:
-                logger.info(
-                    f"Skill '{skill_name}' already exists for tenant {tenant_id}, skipping"
-                )
-                installed.append(skill_name)
-                continue
+                local_skills_dir = service.skill_manager.local_skills_dir or ""
+                skill_dir = os.path.join(local_skills_dir, skill_name)
+                if os.path.isdir(skill_dir):
+                    logger.info(
+                        f"Skill '{skill_name}' already exists for tenant {tenant_id}, skipping"
+                    )
+                    installed.append(skill_name)
+                    continue
 
             with open(zip_path, "rb") as f:
                 zip_content = f.read()
 
-            result = service.create_skill_from_file(
-                file_content=zip_content,
-                skill_name=skill_name,
-                file_type="zip",
-                source=source,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
+            if existing:
+                result = service.update_skill_from_file(
+                    skill_name=skill_name,
+                    file_content=zip_content,
+                    file_type="zip",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+                logger.info(
+                    "Restored missing local resources for Skill '%s' in tenant %s",
+                    skill_name,
+                    tenant_id,
+                )
+            else:
+                result = service.create_skill_from_file(
+                    file_content=zip_content,
+                    skill_name=skill_name,
+                    file_type="zip",
+                    source=source,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
             installed_name = result.get("name", skill_name)
             installed.append(installed_name)
             logger.info(

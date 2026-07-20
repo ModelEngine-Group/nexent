@@ -98,20 +98,20 @@ def cache_durable_snapshot(snapshot: Dict[str, Any]) -> None:
     draft_agent_id = int(snapshot["draft_agent_id"])
     snapshot_id = str(snapshot["catalog_snapshot_id"])
     pipe = get_redis_service().client.pipeline()
-    pipe.setex(
+    pipe.set(
         state_key(tenant_id, draft_agent_id),
-        CACHE_TTL_SECONDS,
         json.dumps(snapshot["workflow_state"], ensure_ascii=False),
+        ex=CACHE_TTL_SECONDS,
     )
-    pipe.setex(
+    pipe.set(
         catalog_snapshot_key(tenant_id, snapshot_id),
-        CACHE_TTL_SECONDS,
         json.dumps(snapshot["catalog_snapshot"], ensure_ascii=False),
+        ex=CACHE_TTL_SECONDS,
     )
-    pipe.setex(
+    pipe.set(
         cache_key(tenant_id, draft_agent_id),
-        CACHE_TTL_SECONDS,
         json.dumps({"snapshot_id": snapshot_id}),
+        ex=CACHE_TTL_SECONDS,
     )
     pipe.execute()
 
@@ -316,15 +316,15 @@ def set_session_catalogs(
     snapshot_id = catalog_snapshot_id(payload)
     try:
         pipe = get_redis_service().client.pipeline()
-        pipe.setex(
+        pipe.set(
             catalog_snapshot_key(tenant, snapshot_id),
-            CACHE_TTL_SECONDS,
             json.dumps(payload, ensure_ascii=False),
+            ex=CACHE_TTL_SECONDS,
         )
-        pipe.setex(
+        pipe.set(
             cache_key(tenant, draft_id),
-            CACHE_TTL_SECONDS,
             json.dumps({"snapshot_id": snapshot_id}),
+            ex=CACHE_TTL_SECONDS,
         )
         pipe.execute()
     except Exception:

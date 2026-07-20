@@ -1592,7 +1592,10 @@ def test_validate_nl2agent_run_context_rejects_terminal_session(
 
 
 @pytest.mark.asyncio
-async def test_install_web_skill_rejects_resource_missing_catalog_item(monkeypatch):
+async def test_install_web_skill_recovers_resource_missing_catalog_item(monkeypatch):
+    _prepare_required_online_review()
+    install_from_zip = MagicMock(return_value=["missing-files"])
+    bind_skill = MagicMock()
     monkeypatch.setattr(
         nl2agent_service,
         "search_agent_info_by_agent_id",
@@ -1600,9 +1603,18 @@ async def test_install_web_skill_rejects_resource_missing_catalog_item(monkeypat
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
-    install_from_zip = MagicMock()
     monkeypatch.setattr(
         nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_tenant_skill_by_name",
+        MagicMock(return_value={"skill_id": 12, "skill_name": "missing-files"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "create_or_update_skill_by_skill_info",
+        bind_skill,
     )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1",
@@ -1619,18 +1631,24 @@ async def test_install_web_skill_rejects_resource_missing_catalog_item(monkeypat
         },
     )
 
-    with pytest.raises(
-        nl2agent_service.AgentRunException, match="not available for installation"
-    ):
-        await nl2agent_service.install_web_skill(
-            agent_id=202,
-            skill_id=12,
-            skill_name="missing-files",
-            tenant_id="tenant_1",
-            user_id="user_1",
-        )
+    result = await nl2agent_service.install_web_skill(
+        agent_id=202,
+        skill_id=12,
+        skill_name="missing-files",
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
 
-    install_from_zip.assert_not_called()
+    assert result["skill_id"] == 12
+    assert result["installed"] is True
+    assert result["bound"] is True
+    install_from_zip.assert_called_once_with(
+        skill_names=["missing-files"],
+        tenant_id="tenant_1",
+        user_id="user_1",
+        locale=None,
+    )
+    bind_skill.assert_called_once()
 
 
 async def test_install_web_skill_rejects_mismatched_id_and_name(monkeypatch):

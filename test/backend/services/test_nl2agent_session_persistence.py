@@ -67,6 +67,48 @@ def durable_cache(monkeypatch):
     return client
 
 
+def test_cache_snapshot_uses_set_with_expiration(monkeypatch):
+    pipe = MagicMock()
+    client = MagicMock()
+    client.pipeline.return_value = pipe
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
+
+    session_store.cache_durable_snapshot(_snapshot())
+
+    assert pipe.set.call_count == 3
+    assert all(
+        call.kwargs == {"ex": session_store.CACHE_TTL_SECONDS}
+        for call in pipe.set.call_args_list
+    )
+    pipe.setex.assert_not_called()
+    pipe.execute.assert_called_once_with()
+
+
+def test_catalog_cache_uses_set_with_expiration(monkeypatch):
+    pipe = MagicMock()
+    client = MagicMock()
+    client.pipeline.return_value = pipe
+    monkeypatch.setattr(
+        session_store,
+        "get_redis_service",
+        MagicMock(return_value=MagicMock(client=client)),
+    )
+
+    session_store.set_session_catalogs("tenant_1", 202, _catalogs())
+
+    assert pipe.set.call_count == 2
+    assert all(
+        call.kwargs == {"ex": session_store.CACHE_TTL_SECONDS}
+        for call in pipe.set.call_args_list
+    )
+    pipe.setex.assert_not_called()
+    pipe.execute.assert_called_once_with()
+
+
 def test_cache_miss_recovers_workflow_and_catalogs_from_database(
     durable_cache, monkeypatch
 ):
