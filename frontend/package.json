@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "6.2.5",
-    "@dicebear/core": "^9.2.2",
+    "@dicebear/core": "^10.3.0",
     "@dicebear/icons": "^9.2.2",
     "@radix-ui/react-scroll-area": "^1.2.2",
     "@radix-ui/react-tabs": "^1.1.13",
