@@ -170,6 +170,7 @@ services:
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait

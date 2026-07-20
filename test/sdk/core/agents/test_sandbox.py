@@ -20,7 +20,7 @@ import sys
 import time
 import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -2154,3 +2154,313 @@ class TestModuleLevelTimeImport:
         end = sandbox_module._now()
 
         assert end > start
+
+
+class TestTargetedSandboxCoverage:
+    """Execute security, lifecycle, and factory branches directly."""
+
+    def test_shell_guard_boxed_and_wrapped_calls(self):
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        logger = MagicMock()
+
+        assert sandbox_module._install_shell_guard(executor, ShellPolicy.BOXED, logger) is executor
+        assert not hasattr(executor, "_nexent_shell_guard_installed")
+
+        sandbox_module._install_shell_guard(executor, ShellPolicy.DISABLED, logger)
+        assert "SecurityError" in executor.__call__("import os; os.system('id')")
+        logger.warning.assert_called_once()
+        assert executor.__call__("print('safe')") == "ok"
+        assert sandbox_module._install_shell_guard(executor, ShellPolicy.DISABLED, logger) is executor
+
+    @pytest.mark.parametrize("content_length", ["0", str(1024 * 1024 + 1)])
+    def test_tool_bridge_rejects_invalid_request_sizes(self, content_length):
+        bridge = sandbox_module._ToolBridge(MagicMock())
+        try:
+            handler = bridge._server.RequestHandlerClass
+            request = MagicMock()
+            request.path = "/invoke"
+            request.headers.get.side_effect = [f"Bearer {bridge._token}", content_length]
+
+            handler.do_POST(request)
+
+            request.send_response.assert_called_once_with(500)
+            assert b"Invalid request size" in request.wfile.write.call_args.args[0]
+        finally:
+            bridge.close()
+
+    def test_host_tool_bridge_logs_proxy_output(self):
+        executor = SimpleNamespace(
+            container=object(),
+            send_tools=MagicMock(),
+            run_code_raise_errors=MagicMock(return_value=SimpleNamespace(logs="registered")),
+            cleanup=MagicMock(),
+        )
+        logger = MagicMock()
+        sandbox_module._install_host_tool_bridge(executor, logger)
+        bridge = executor._nexent_tool_bridge
+        bridge._bridge_host = MagicMock(return_value="bridge-host")
+        host_tool = SimpleNamespace(_nexent_execute_on_host=True)
+
+        executor.send_tools({"host": host_tool})
+
+        logger.debug.assert_any_call("Host tool proxy registration output: %s", "registered")
+        executor.cleanup()
+
+    @pytest.mark.parametrize(
+        ("error", "package"),
+        [(ModuleNotFoundError("No module named 'missing_pkg'"), "missing_pkg"),
+         (ModuleNotFoundError("custom import failure"), "unknown")],
+    )
+    def test_diagnostics_wrapper_converts_missing_modules(self, error, package):
+        executor = SimpleNamespace(__call__=MagicMock(side_effect=error))
+        logger = MagicMock()
+
+        sandbox_module._wrap_with_diagnostics(executor, logger)
+        result = executor.__call__("import something")
+
+        assert result.startswith(f"ModuleNotFoundError: {package}")
+        assert sandbox_module._wrap_with_diagnostics(executor, logger) is executor
+
+    def test_cleanup_ignores_container_kill_failure(self):
+        container = SimpleNamespace(kill=MagicMock(side_effect=RuntimeError("kill failed")))
+        executor = SimpleNamespace(cleanup=MagicMock(side_effect=RuntimeError("cleanup failed")), container=container)
+
+        sandbox_module.cleanup_executor(executor, MagicMock())
+
+        container.kill.assert_called_once()
+
+    def test_kernel_lease_execution_and_cleanup_paths(self, monkeypatch):
+        remote_run = MagicMock(return_value="result")
+        websocket = MagicMock()
+        websocket_module = SimpleNamespace(create_connection=MagicMock(return_value=websocket))
+        remote_module = SimpleNamespace(_websocket_run_code_raise_errors=remote_run)
+        monkeypatch.setitem(sys.modules, "websocket", websocket_module)
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease._closed = False
+        lease.ws_url = "ws://kernel"
+        lease.logger = MagicMock()
+        lease.base_url = "http://kernel"
+        lease.kernel_id = "kernel-id"
+        lease._logger = MagicMock()
+        lease._requests = SimpleNamespace(delete=MagicMock(return_value=SimpleNamespace(status_code=500)))
+
+        assert lease.run_code_raise_errors("1 + 1") == "result"
+        remote_run.assert_called_once_with("1 + 1", websocket, lease.logger)
+        lease.cleanup()
+        lease._logger.warning.assert_called_once()
+        lease._requests.delete.assert_called_once()
+        lease.cleanup()
+        lease._requests.delete.assert_called_once()
+        with pytest.raises(RuntimeError, match="already closed"):
+            lease.run_code_raise_errors("2 + 2")
+
+    def test_kernel_lease_delegates_remote_executor_methods(self, monkeypatch):
+        remote = SimpleNamespace(
+            send_variables=MagicMock(),
+            install_packages=MagicMock(return_value=["pkg"]),
+            _patch_final_answer_with_exception=MagicMock(),
+            send_tools=MagicMock(),
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", SimpleNamespace(RemotePythonExecutor=remote))
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+
+        lease.send_variables({"x": 1})
+        assert lease.install_packages(["pkg"]) == ["pkg"]
+        lease._patch_final_answer_with_exception("final")
+        lease.send_tools({"tool": object()})
+
+        remote.send_variables.assert_called_once_with(lease, {"x": 1})
+        remote.install_packages.assert_called_once_with(lease, ["pkg"])
+        remote._patch_final_answer_with_exception.assert_called_once_with(lease, "final")
+        remote.send_tools.assert_called_once()
+
+    def test_system_non_docker_acquire_builds_and_tracks_executor(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(cleanup=MagicMock())
+        monkeypatch.setattr(pool, "_build_executor", MagicMock(return_value=executor))
+        config = SandboxConfig(level=SandboxLevel.WASM, scope=SandboxScope.SYSTEM, docker_image="wasm:key")
+
+        result = pool.acquire(config, MagicMock())
+
+        assert result is executor
+        assert pool._pools["wasm:key"] == []
+        assert pool._in_use[id(executor)] == "wasm:key"
+
+    def test_shared_docker_replaces_dead_owner(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        dead = SimpleNamespace(container=SimpleNamespace(reload=MagicMock(), status="exited"), cleanup=MagicMock())
+        replacement = SimpleNamespace(base_url="http://new", container=object())
+        pool._system_containers["image"] = dead
+        monkeypatch.setattr(pool, "_recover_docker_container", MagicMock(return_value=replacement))
+        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="lease"))
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda executor, *args: executor)
+        config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM, docker_image="image")
+
+        lease = pool._acquire_shared_docker_kernel(config, MagicMock(), False)
+
+        assert lease.kernel_id == "lease"
+        dead.cleanup.assert_called_once()
+        assert pool._system_containers["image"] is replacement
+
+    def test_shared_docker_discards_racing_container(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        built = SimpleNamespace(base_url="http://built", container=object(), cleanup=MagicMock())
+        winner = SimpleNamespace(base_url="http://winner", container=object())
+
+        class RacingContainers(dict):
+            def get(self, key, default=None):
+                return None
+
+            def setdefault(self, key, value):
+                self[key] = winner
+                return winner
+
+        pool._system_containers = RacingContainers()
+        monkeypatch.setattr(pool, "_recover_docker_container", MagicMock(return_value=built))
+        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda owner, logger: MagicMock(kernel_id="lease", owner=owner))
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda executor, *args: executor)
+        config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM, docker_image="image")
+
+        lease = pool._acquire_shared_docker_kernel(config, MagicMock(), False)
+
+        built.cleanup.assert_called_once()
+        assert lease.owner is winner
+
+    def test_release_none_is_noop(self):
+        SandboxPoolManager.get_instance().release(None, MagicMock())
+
+    def test_build_wasm_rejects_host_tools_and_wraps_executor(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        config = SandboxConfig(level=SandboxLevel.WASM)
+        with pytest.raises(RuntimeError, match="does not support host tool"):
+            pool._build_executor(config, MagicMock(), host_tools_exist=True)
+
+        wasm = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        remote_module = SimpleNamespace(WasmExecutor=MagicMock(return_value=wasm))
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        result = pool._build_wasm_executor(config, MagicMock())
+        assert result is wasm
+        assert result._nexent_backend == "wasm"
+
+    def test_build_wasm_falls_back_when_constructor_fails(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        remote_module = SimpleNamespace(WasmExecutor=MagicMock(side_effect=RuntimeError("wasm failed")))
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        monkeypatch.setattr(sandbox_module, "_make_local_executor", MagicMock(return_value=SimpleNamespace()))
+
+        result = pool._build_wasm_executor(SandboxConfig(level=SandboxLevel.WASM), MagicMock())
+
+        assert result is not None
+
+    def test_recovery_tries_next_connection_host(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            name=sandbox_module.SANDBOX_CONTAINER_NAME,
+            status="running",
+            labels={"com.nexent.sandbox": "runtime"},
+            attrs={"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}},
+        )
+        container.client = MagicMock()
+        docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
+            containers=SimpleNamespace(list=lambda **kwargs: [container])
+        ))
+        get = MagicMock(side_effect=[RuntimeError("first failed"), SimpleNamespace(
+            raise_for_status=lambda: None, json=lambda: []
+        )])
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=get))
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["first", "second"])
+
+        recovered = pool._recover_docker_container(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock(), False
+        )
+
+        assert recovered.host == "second"
+
+    def test_recovery_returns_none_when_all_connection_hosts_fail(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            name=sandbox_module.SANDBOX_CONTAINER_NAME,
+            status="running",
+            labels={"com.nexent.sandbox": "runtime"},
+            attrs={"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}},
+        )
+        docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
+            containers=SimpleNamespace(list=lambda **kwargs: [container])
+        ))
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("down"))))
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["only"])
+
+        assert pool._recover_docker_container(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock(), False
+        ) is None
+
+    def test_remove_stale_container_using_image_and_port(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            name="old-name",
+            image=SimpleNamespace(tags=["custom:image"]),
+            attrs={"NetworkSettings": {"Ports": {"8888/tcp": [{"HostPort": "8888"}]}}},
+        )
+        docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
+            containers=SimpleNamespace(list=lambda **kwargs: [container])
+        ))
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+
+        pool._remove_stale_docker_containers(SandboxConfig(docker_image="custom:image"), MagicMock())
+
+        container.remove.assert_called_once_with(force=True)
+
+    def test_system_docker_cleanup_preserves_original_error_when_remove_fails(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        container = MagicMock(attrs={"NetworkSettings": {"Networks": {}}})
+        container.remove.side_effect = RuntimeError("remove failed")
+        docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
+            containers=SimpleNamespace(run=MagicMock(return_value=container))
+        ))
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("not ready"))))
+        monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["host"])
+        monotonic = iter([0, 31])
+        monkeypatch.setattr(sandbox_module.time, "monotonic", lambda: next(monotonic))
+
+        with pytest.raises(RuntimeError, match="did not become ready"):
+            pool._build_system_docker_executor(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock(), {}
+            )
+
+    def test_docker_network_failure_and_host_bridge_installation(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"), send_tools=MagicMock(), cleanup=MagicMock())
+        docker_executor = MagicMock(return_value=executor)
+        remote_module = SimpleNamespace(DockerExecutor=docker_executor)
+        docker_module = SimpleNamespace(from_env=MagicMock(side_effect=RuntimeError("network unavailable")))
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        bridge_installer = MagicMock(return_value=executor)
+        monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
+        config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
+        monkeypatch.setattr(pool, "_build_system_docker_executor", MagicMock(return_value=executor))
+
+        assert pool._build_docker_executor(config, MagicMock(), True) is executor
+        bridge_installer.assert_not_called()
+
+        config.scope = SandboxScope.SESSION
+        pool._build_docker_executor(config, MagicMock(), True)
+        bridge_installer.assert_called_once_with(executor, ANY)
+
+    def test_evict_and_clean_stale_keep_survivors(self):
+        pool = SandboxPoolManager.get_instance()
+        survivor = _FakeExecutor("survivor", alive=True)
+        pool._pools["survivor"] = [survivor]
+        pool._last_touch[id(survivor)] = time.time()
+
+        pool._evict_idle(MagicMock())
+        assert pool._pools["survivor"] == [survivor]
+        pool._clean_stale(MagicMock())
+        assert pool._pools["survivor"] == [survivor]
