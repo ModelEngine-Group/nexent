@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from services.agent_automation import facade as facade_module
 from services.agent_automation.errors import (
+    AutomationCapabilityBindingInvalidError,
     AutomationCapabilityNotReadyError,
     AutomationConversationAlreadyBoundError,
     AutomationNotFoundError,
@@ -19,7 +20,10 @@ from services.agent_automation.models import (
     AutomationProposalStatus,
     AutomationRunStatus,
     AutomationTaskCreateRequest,
+    AutomationTaskPatchRequest,
+    CapabilityBinding,
     CapabilityResolution,
+    CapabilityType,
     ScheduleMode,
     ScheduleRuleType,
     ScheduleTrigger,
@@ -980,3 +984,465 @@ async def test_create_task_rejects_past_once_schedule_before_external_lookups(mo
         )
 
     assert looked_up is False
+
+
+@pytest.mark.asyncio
+async def test_patch_task_updates_schedule_runtime_and_capabilities(monkeypatch):
+    service = AgentAutomationFacade()
+    task = {
+        "task_id": 1,
+        "conversation_id": 9,
+        "agent_id": 3,
+        "agent_version_no": 2,
+        "title": "old",
+        "instruction": "old instruction",
+        "fire_count": 4,
+        "runtime_snapshot": {"name": "assistant", "model_id": 1},
+    }
+    updated_values = {}
+    binding = CapabilityBinding(
+        type=CapabilityType.TOOL,
+        name="web_search",
+        display_name="web_search",
+        binding_ref="tool:web_search",
+    )
+    resolution = CapabilityResolution(
+        executable=True,
+        matched_capabilities=[binding],
+        agent_snapshot={"name": "assistant-v2", "display_name": "助手 V2"},
+    )
+
+    monkeypatch.setattr(service, "get_task", lambda *args: task)
+
+    async def fake_resolve(*args, **kwargs):
+        return resolution
+
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve)
+    monkeypatch.setattr(
+        facade_module,
+        "compute_next_fire_at",
+        lambda trigger, now, fire_count: datetime(2030, 1, 1, 1, 1, tzinfo=timezone.utc),
+    )
+
+    def fake_update(task_id, tenant_id, user_id, values):
+        updated_values.update(values)
+        return {**task, **values}
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_task", fake_update)
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {(3, 2): "助手 V2"},
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda task_ids, tenant_id, user_id: set(),
+    )
+
+    result = await service.patch_task(
+        1,
+        AutomationTaskPatchRequest(
+            title="new",
+            instruction="new instruction",
+            timeout_seconds=60,
+            model_id=8,
+            tool_params={"top_k": 3},
+            capability_bindings=[binding],
+            schedule_trigger=ScheduleTrigger(
+                mode=ScheduleMode.RECURRING,
+                rule_type=ScheduleRuleType.INTERVAL,
+                timezone="UTC",
+                start_at="2030-01-01T00:00:00+00:00",
+                interval_seconds=60,
+            ),
+        ),
+        "tenant",
+        "user",
+    )
+
+    assert result["title"] == "new"
+    assert result["agent_name"] == "助手 V2"
+    assert updated_values["schedule_mode"] == "RECURRING"
+    assert updated_values["schedule_rule_type"] == "INTERVAL"
+    assert updated_values["capability_bindings"][0]["binding_ref"] == "tool:web_search"
+    assert updated_values["runtime_snapshot"]["model_id"] == 8
+    assert updated_values["runtime_snapshot"]["tool_params"] == {"top_k": 3}
+    assert updated_values["runtime_snapshot"]["original_instruction"] == "new instruction"
+
+
+@pytest.mark.asyncio
+async def test_patch_task_rejects_unready_capabilities_and_lost_update(monkeypatch):
+    service = AgentAutomationFacade()
+    task = {
+        "task_id": 1,
+        "agent_id": 3,
+        "instruction": "old",
+        "runtime_snapshot": {},
+    }
+    monkeypatch.setattr(service, "get_task", lambda *args: task)
+
+    async def unavailable(*args, **kwargs):
+        return CapabilityResolution(
+            executable=False,
+            missing_capabilities=[{"name": "web_search"}],
+        )
+
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", unavailable)
+    with pytest.raises(AutomationCapabilityNotReadyError):
+        await service.patch_task(
+            1,
+            AutomationTaskPatchRequest(instruction="search news"),
+            "tenant",
+            "user",
+        )
+
+    async def available(*args, **kwargs):
+        return CapabilityResolution(executable=True)
+
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", available)
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_task", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError):
+        await service.patch_task(
+            1,
+            AutomationTaskPatchRequest(instruction="plain task"),
+            "tenant",
+            "user",
+        )
+
+
+@pytest.mark.asyncio
+async def test_task_management_methods_cover_successful_lifecycle(monkeypatch):
+    service = AgentAutomationFacade()
+    task = {
+        "task_id": 1,
+        "conversation_id": 9,
+        "agent_id": 3,
+        "agent_version_no": 0,
+        "instruction": "run",
+        "fire_count": 0,
+        "schedule_config": {
+            "mode": "RECURRING",
+            "rule_type": "INTERVAL",
+            "timezone": "UTC",
+            "start_at": "2030-01-01T00:00:00+00:00",
+            "interval_seconds": 60,
+        },
+    }
+    updates = []
+    canceled = []
+
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {(3, 0): "助手"},
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda task_ids, tenant_id, user_id: set(),
+    )
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task", lambda *args: task)
+
+    def fake_update(task_id, tenant_id, user_id, values):
+        updates.append(values)
+        return {**task, **values}
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_task", fake_update)
+    monkeypatch.setattr(
+        facade_module,
+        "compute_next_fire_at",
+        lambda trigger, now, fire_count: datetime(2030, 1, 1, 0, 1, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        service,
+        "_cancel_active_runs_for_conversation",
+        lambda conversation_id, user_id, reason: canceled.append((conversation_id, reason)),
+    )
+    monkeypatch.setattr(facade_module.agent_automation_db, "soft_delete_task", lambda *args: True)
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_runs",
+        lambda *args, **kwargs: [{"run_id": 5}],
+    )
+
+    async def fake_execute(task_payload, trigger_type):
+        return {"run_id": 5, "trigger_type": trigger_type}
+
+    monkeypatch.setattr(
+        "services.agent_automation.runner.agent_automation_runner.execute_task",
+        fake_execute,
+    )
+
+    assert service.get_task(1, "tenant", "user")["agent_name"] == "助手"
+    assert service.pause_task(1, "tenant", "user")["status"] == "PAUSED"
+    assert service.resume_task(1, "tenant", "user")["status"] == "ACTIVE"
+    assert service.list_runs(1, "tenant", "user") == [{"run_id": 5}]
+    assert (await service.run_task_now(1, "tenant", "user"))["trigger_type"] == "MANUAL"
+    assert service.delete_task(1, "tenant", "user") is True
+    assert canceled == [(9, "Automation task was deleted.")]
+    assert any(update.get("next_fire_at") for update in updates)
+
+
+def test_task_management_methods_cover_not_found_paths(monkeypatch):
+    service = AgentAutomationFacade()
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError):
+        service.get_task(1, "tenant", "user")
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task_by_conversation", lambda *args: None)
+    assert service.get_task_for_conversation(9, "tenant", "user") is None
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_task", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError):
+        service.pause_task(1, "tenant", "user")
+
+    monkeypatch.setattr(service, "get_task", lambda *args: {
+        "task_id": 1,
+        "schedule_config": {
+            "mode": "RECURRING",
+            "rule_type": "INTERVAL",
+            "timezone": "UTC",
+            "start_at": "2030-01-01T00:00:00+00:00",
+            "interval_seconds": 60,
+        },
+        "fire_count": 0,
+    })
+    monkeypatch.setattr(
+        facade_module,
+        "compute_next_fire_at",
+        lambda trigger, now, fire_count: datetime(2030, 1, 1, tzinfo=timezone.utc),
+    )
+    with pytest.raises(AutomationNotFoundError):
+        service.resume_task(1, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_create_task_rejects_invalid_context_capabilities_and_binding(monkeypatch):
+    service = AgentAutomationFacade()
+    request = AutomationTaskCreateRequest(
+        title="task",
+        agent_id=3,
+        instruction="search news",
+        conversation_id=9,
+        schedule_trigger=ScheduleTrigger(
+            mode=ScheduleMode.ONCE,
+            rule_type=ScheduleRuleType.AT,
+            timezone="UTC",
+            start_at="2030-01-01T00:00:00+00:00",
+        ),
+    )
+
+    monkeypatch.setattr(facade_module, "get_conversation", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError):
+        await service.create_task(request, "tenant", "user")
+
+    monkeypatch.setattr(facade_module, "get_conversation", lambda *args: {"conversation_id": 9})
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_task_by_conversation",
+        lambda *args: {"task_id": 1},
+    )
+    with pytest.raises(AutomationConversationAlreadyBoundError):
+        await service.create_task(request, "tenant", "user")
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task_by_conversation", lambda *args: None)
+
+    async def unavailable(*args, **kwargs):
+        return CapabilityResolution(executable=False)
+
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", unavailable)
+    with pytest.raises(AutomationCapabilityNotReadyError):
+        await service.create_task(request, "tenant", "user")
+
+    binding = CapabilityBinding(
+        type=CapabilityType.TOOL,
+        name="removed",
+        binding_ref="tool:removed",
+    )
+    request.capability_bindings = [binding]
+
+    async def available(*args, **kwargs):
+        return CapabilityResolution(executable=True, matched_capabilities=[binding])
+
+    async def invalid_binding(*args, **kwargs):
+        return {"unavailable_bindings": [binding.model_dump(mode="json")]}
+
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", available)
+    monkeypatch.setattr(facade_module, "validate_bindings_available", invalid_binding)
+    with pytest.raises(AutomationCapabilityBindingInvalidError):
+        await service.create_task(request, "tenant", "user")
+
+
+def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch):
+    service = AgentAutomationFacade()
+    assert facade_module._enrich_tasks_with_agent_names([], "tenant", "user") == []
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("identity unavailable")),
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("run lookup unavailable")),
+    )
+    enriched = facade_module._enrich_tasks_with_agent_names(
+        [{"task_id": 1, "agent_id": 3, "runtime_snapshot": {}}],
+        "tenant",
+        "user",
+    )
+    assert enriched[0]["agent_name"] == "Agent #3"
+    assert enriched[0]["is_running"] is False
+
+    monkeypatch.setattr(
+        "services.agent_automation.runner.agent_automation_runner.cancel_for_conversation",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("runner unavailable")),
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "cancel_runs_by_conversation",
+        lambda *args: 0,
+    )
+    service._cancel_active_runs_for_conversation(9, "user", "cleanup")
+
+
+def test_facade_helpers_and_run_deletion_errors_cover_boundary_paths(monkeypatch):
+    service = AgentAutomationFacade()
+    assert facade_module._as_utc("2030-01-01T00:00:00Z") == datetime(
+        2030,
+        1,
+        1,
+        tzinfo=timezone.utc,
+    )
+    assert facade_module._json("plain") == "plain"
+    with pytest.raises(AutomationScheduleInvalidError, match="cron expression"):
+        facade_module._validate_schedule_policy(ScheduleTrigger(
+            mode=ScheduleMode.RECURRING,
+            rule_type=ScheduleRuleType.CRON,
+            timezone="UTC",
+            start_at="2030-01-01T00:00:00+00:00",
+            cron_expr="invalid cron",
+        ))
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError):
+        service.cancel_run(1, "tenant", "user")
+    with pytest.raises(AutomationNotFoundError):
+        service.delete_run(1, "tenant", "user")
+
+    terminal_run = {
+        "run_id": 1,
+        "task_id": 2,
+        "conversation_id": 9,
+        "status": AutomationRunStatus.SUCCEEDED.value,
+    }
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *args: terminal_run)
+    assert service.cancel_run(1, "tenant", "user") == terminal_run
+    monkeypatch.setattr(facade_module.agent_automation_db, "soft_delete_run", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError, match="no longer deletable"):
+        service.delete_run(1, "tenant", "user")
+
+    monkeypatch.setattr(service, "get_task", lambda *args: {"task_id": 2, "conversation_id": 9})
+    monkeypatch.setattr(service, "_cancel_active_runs_for_conversation", lambda *args: None)
+    monkeypatch.setattr(facade_module.agent_automation_db, "soft_delete_task", lambda *args: False)
+    with pytest.raises(AutomationNotFoundError):
+        service.delete_task(2, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_update_proposal_covers_not_editable_expired_and_missing_task_paths(monkeypatch):
+    service = AgentAutomationFacade()
+    request = AutomationProposalPatchRequest(title="updated")
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError, match="not editable"):
+        await service.update_proposal(1, request, "tenant", "user")
+
+    expired = {
+        "proposal_id": 1,
+        "status": AutomationProposalStatus.PENDING.value,
+        "expires_at": datetime.now(timezone.utc) - timedelta(minutes=1),
+        "proposed_task": {"title": "old", "instruction": "run"},
+        "agent_id": 3,
+        "conversation_id": 9,
+    }
+    statuses = []
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: expired)
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "update_proposal_status",
+        lambda *args: statuses.append(args[-1]) or True,
+    )
+    with pytest.raises(AutomationNotFoundError, match="expired"):
+        await service.update_proposal(1, request, "tenant", "user")
+    assert statuses == [AutomationProposalStatus.EXPIRED.value]
+
+    accepted = {
+        **expired,
+        "status": AutomationProposalStatus.ACCEPTED.value,
+        "expires_at": None,
+    }
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: accepted)
+    monkeypatch.setattr(service, "get_task_for_conversation", lambda *args: None)
+    with pytest.raises(AutomationNotFoundError, match="Confirmed automation task"):
+        await service.update_proposal(1, request, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_update_and_confirm_proposal_cover_persistence_failure_paths(monkeypatch):
+    service = AgentAutomationFacade()
+    proposal = {
+        "proposal_id": 1,
+        "status": AutomationProposalStatus.PENDING.value,
+        "expires_at": None,
+        "proposed_task": {"title": "old", "instruction": "run"},
+        "capability_resolution": {},
+        "agent_id": 3,
+        "conversation_id": 9,
+    }
+    resolution = CapabilityResolution(
+        executable=True,
+        agent_snapshot={"display_name": "助手"},
+    )
+
+    async def resolve(*args, **kwargs):
+        return resolution
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: proposal)
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", resolve)
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal", lambda *args: False)
+    with pytest.raises(AutomationNotFoundError, match="not editable"):
+        await service.update_proposal(
+            1,
+            AutomationProposalPatchRequest(title="updated"),
+            "tenant",
+            "user",
+        )
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal", lambda *args: True)
+    monkeypatch.setattr(
+        facade_module.automation_conversation_adapter,
+        "update_proposal",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("message unavailable")),
+    )
+    result = await service.update_proposal(
+        1,
+        AutomationProposalPatchRequest(title="updated"),
+        "tenant",
+        "user",
+    )
+    assert result["task"]["title"] == "updated"
+
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_proposal",
+        lambda *args: {**proposal, "status": AutomationProposalStatus.ACCEPTED.value},
+    )
+    with pytest.raises(AutomationNotFoundError, match="not pending"):
+        await service.confirm_proposal(
+            1,
+            AutomationProposalConfirmRequest(),
+            "tenant",
+            "user",
+        )

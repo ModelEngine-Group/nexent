@@ -510,3 +510,146 @@ def test_manual_run_does_not_consume_scheduled_occurrence(monkeypatch):
     assert captured["next_fire_at"] == initial_next_fire
     assert captured["status"] == "ACTIVE"
     assert captured["consecutive_failures"] == 2
+
+
+def test_datetime_and_history_helpers_cover_fallback_inputs(monkeypatch):
+    runner_module = _load_runner_with_stubs(monkeypatch)
+    parsed = runner_module._parse_dt("2030-01-01T00:00:00Z")
+    fallback = runner_module._parse_dt(None)
+
+    assert parsed == datetime(2030, 1, 1, tzinfo=timezone.utc)
+    assert fallback.tzinfo == timezone.utc
+    assert runner_module._history_items([]) == []
+
+    assert runner_module._message_content({
+        "message": [
+            {"type": "string", "content": "draft"},
+            {"type": "automation_proposal", "content": "hidden"},
+            {"type": "final_answer", "content": "final"},
+        ]
+    }) == "final"
+    history = runner_module._history_items([{
+        "message": [
+            {
+                "role": "assistant",
+                "message": [
+                    {"type": "string", "content": "visible"},
+                    {"type": "automation_proposal", "content": "hidden"},
+                ],
+            },
+            {"role": "user", "message": ""},
+        ]
+    }])
+    assert [(item.role, item.content) for item in history] == [("assistant", "visible")]
+
+
+@pytest.mark.asyncio
+async def test_execute_task_carries_lease_owner_into_active_run(monkeypatch):
+    runner_module = _load_runner_with_stubs(monkeypatch)
+    runner = runner_module.AgentAutomationRunner()
+    captured = {}
+    monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda _: False)
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "create_run",
+        lambda values, user_id: {"run_id": 21, **values},
+    )
+
+    async def capture_active_run(run, task, scheduled, trigger_type):
+        captured.update(run)
+        return run
+
+    monkeypatch.setattr(runner, "_execute_active_run", capture_active_run)
+
+    result = await runner.execute_task(_base_task(), lease_owner="scheduler-a")
+
+    assert result["_lease_owner"] == "scheduler-a"
+    assert captured["_lease_owner"] == "scheduler-a"
+
+
+@pytest.mark.asyncio
+async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(monkeypatch):
+    runner_module = _load_runner_with_stubs(monkeypatch)
+    runner = runner_module.AgentAutomationRunner()
+    canceled = []
+    monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda _: False)
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "create_run",
+        lambda values, user_id: {"run_id": 22, **values},
+    )
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "cancel_run",
+        lambda *args: canceled.append(args) or {"run_id": 22, "status": "CANCELED"},
+    )
+    monkeypatch.setattr(runner, "cancel_for_conversation", lambda *args: canceled.append(args))
+
+    async def interrupt(*args):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(runner, "_execute_active_run", interrupt)
+    with pytest.raises(asyncio.CancelledError):
+        await runner.execute_task(_base_task())
+    assert any(call and call[0] == 22 for call in canceled)
+
+    async def fail(*args):
+        raise RuntimeError("agent failed")
+
+    monkeypatch.setattr(runner, "_execute_active_run", fail)
+    monkeypatch.setattr(
+        runner,
+        "_fail_run",
+        lambda run, task, code, message, check: {
+            "status": "FAILED",
+            "error_code": code,
+            "error_message": message,
+        },
+    )
+    result = await runner.execute_task(_base_task())
+    assert result["error_code"] == "AUTOMATION_RUN_FAILED"
+    assert result["error_message"] == "agent failed"
+
+
+def test_repeated_scheduled_failures_pause_task_and_stale_writes_are_discarded(monkeypatch):
+    runner_module = _load_runner_with_stubs(monkeypatch)
+    runner = runner_module.AgentAutomationRunner()
+    captured = {}
+    task = {
+        **_base_task(),
+        "consecutive_failures": 4,
+        "schedule_config": {
+            "mode": "RECURRING",
+            "rule_type": "INTERVAL",
+            "timezone": "UTC",
+            "start_at": "2020-01-01T00:00:00+00:00",
+            "interval_seconds": 60,
+        },
+    }
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "update_run",
+        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+    )
+    monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "update_task",
+        lambda task_id, tenant_id, user_id, values: captured.update(values) or values,
+    )
+
+    runner._finish_run(
+        {"run_id": 23, "started_at": datetime.now(timezone.utc), "trigger_type": "SCHEDULED"},
+        task,
+        "FAILED",
+        {"error_message": "fifth failure"},
+    )
+    assert captured["consecutive_failures"] == 5
+    assert captured["status"] == "PAUSED_BY_SYSTEM"
+
+    monkeypatch.setattr(
+        runner_module.agent_automation_db,
+        "update_task_if_lock_owner",
+        lambda *args: None,
+    )
+    assert runner._update_task_state(task, {}, "SCHEDULED", "stale-owner") is None

@@ -5,6 +5,7 @@ import pytest
 
 from nexent.scheduler import (
     ClaimedJob,
+    ExecutionLease,
     LeaseScheduler,
     ScheduleMode,
     ScheduleRuleType,
@@ -12,6 +13,7 @@ from nexent.scheduler import (
     SchedulerConfig,
     compute_next_fire_at,
 )
+from nexent.scheduler import triggers as trigger_engine
 
 
 async def _wait_until(predicate, timeout=1.0):
@@ -259,3 +261,147 @@ async def test_new_scheduler_resumes_persisted_job_after_restart():
 
     assert store.completed is True
     assert store.recover_count == 2
+
+
+def test_scheduler_config_and_lease_validation():
+    with pytest.raises(ValueError, match="must be positive"):
+        SchedulerConfig(poll_interval_seconds=0)
+
+    lease = ExecutionLease(job_id=1, owner_id="scheduler-a")
+    assert lease.is_valid is True
+    lease.lost.set()
+    assert lease.is_valid is False
+
+
+@pytest.mark.asyncio
+async def test_scheduler_start_is_idempotent_and_job_failures_release_lease():
+    class FailingStore(MemoryLeaseStore):
+        async def release(self, job_id, owner_id):
+            raise RuntimeError("release failed")
+
+    store = FailingStore([])
+
+    async def fail(job, lease):
+        raise RuntimeError("execution failed")
+
+    scheduler = LeaseScheduler(store, fail, _config(), owner_id="scheduler-a")
+    await scheduler.start()
+    first_loop = scheduler._loop_task
+    await scheduler.start()
+    assert scheduler._loop_task is first_loop
+
+    await scheduler._run_claimed(ClaimedJob(1, {"id": 1}))
+    await scheduler.stop()
+
+
+def test_cron_validation_fallback_rejects_invalid_fields(monkeypatch):
+    monkeypatch.setattr(trigger_engine, "croniter", None)
+
+    assert trigger_engine._is_valid_cron_field("", 0, 59) is False
+    assert trigger_engine._is_valid_cron_field("*/0", 0, 59) is False
+    assert trigger_engine._is_valid_cron_field("x-y", 0, 59) is False
+    assert trigger_engine._is_valid_cron_field("10-5", 0, 59) is False
+    assert trigger_engine._is_valid_cron_field("*/5", 0, 59) is True
+    assert trigger_engine._is_valid_cron_field("10-20/5", 0, 59) is True
+    assert trigger_engine._is_valid_cron_field("60", 0, 59) is False
+    assert trigger_engine.is_valid_cron_expression("*/5 9-17 * * 1-5") is True
+    assert trigger_engine.is_valid_cron_expression("bad cron") is False
+
+
+def test_croniter_validation_and_match_fail_closed(monkeypatch):
+    class WorkingCroniter:
+        @staticmethod
+        def is_valid(expression):
+            return True
+
+        @staticmethod
+        def match(expression, value):
+            return True
+
+    monkeypatch.setattr(trigger_engine, "croniter", WorkingCroniter)
+    value = datetime(2030, 1, 1, 9, 0, tzinfo=timezone.utc)
+    assert trigger_engine.is_valid_cron_expression("0 9 * * *") is True
+    assert trigger_engine._cron_matches_start("0 9 * * *", value) is True
+
+    class BrokenCroniter:
+        @staticmethod
+        def is_valid(expression):
+            raise RuntimeError("invalid")
+
+        @staticmethod
+        def match(expression, value):
+            raise RuntimeError("invalid")
+
+    monkeypatch.setattr(trigger_engine, "croniter", BrokenCroniter)
+    assert trigger_engine.is_valid_cron_expression("0 9 * * *") is False
+    assert trigger_engine._cron_matches_start("0 9 * * *", value) is False
+
+
+def test_schedule_calculation_rejects_invalid_combinations_and_honors_bounds(monkeypatch):
+    monkeypatch.setattr(trigger_engine, "croniter", None)
+    naive_start = datetime(2030, 1, 1, 9, 0)
+    assert trigger_engine._ensure_aware(naive_start, "UTC").tzinfo is not None
+
+    once = ScheduleSpec(
+        mode=ScheduleMode.ONCE,
+        rule_type=ScheduleRuleType.AT,
+        timezone="UTC",
+        start_at=naive_start,
+    )
+    assert compute_next_fire_at(once, datetime(2030, 1, 1, tzinfo=timezone.utc), 1) is None
+
+    interval = ScheduleSpec(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.INTERVAL,
+        timezone="UTC",
+        start_at=naive_start,
+        interval_seconds=0,
+    )
+    with pytest.raises(ValueError, match="interval_seconds"):
+        compute_next_fire_at(interval, datetime(2030, 1, 1, tzinfo=timezone.utc), 0)
+
+    interval = ScheduleSpec(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.INTERVAL,
+        timezone="UTC",
+        start_at=naive_start,
+        interval_seconds=60,
+        end_at=datetime(2030, 1, 1, 9, 0),
+    )
+    assert compute_next_fire_at(interval, datetime(2030, 1, 1, 8, 0), 0) == datetime(
+        2030, 1, 1, 9, 0, tzinfo=timezone.utc
+    )
+    assert compute_next_fire_at(interval, datetime(2030, 1, 1, 9, 1), 0) is None
+
+    invalid_cron = ScheduleSpec(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.CRON,
+        timezone="UTC",
+        start_at=naive_start,
+        cron_expr="bad cron",
+    )
+    with pytest.raises(ValueError, match="Invalid cron"):
+        compute_next_fire_at(invalid_cron, datetime(2030, 1, 1, tzinfo=timezone.utc), 0)
+
+    unsupported = ScheduleSpec(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.AT,
+        timezone="UTC",
+        start_at=naive_start,
+    )
+    with pytest.raises(ValueError, match="Unsupported schedule combination"):
+        compute_next_fire_at(unsupported, datetime(2030, 1, 1, tzinfo=timezone.utc), 0)
+
+
+def test_fallback_cron_day_rules_and_invalid_expression(monkeypatch):
+    monkeypatch.setattr(trigger_engine, "croniter", None)
+    month_end = datetime(2030, 1, 31, 9, 0, tzinfo=timezone.utc)
+
+    assert trigger_engine._cron_matches_start("0 9 L * *", month_end) is True
+    assert trigger_engine._cron_matches_start("0 9 1 * 4", month_end) is True
+    assert trigger_engine._cron_matches_start("bad", month_end) is False
+    assert trigger_engine._cron_field_matches("*/3", 9) is True
+    assert trigger_engine._cron_field_matches("5-10/2", 9) is True
+    assert trigger_engine._cron_weekday_matches("7", datetime(2030, 1, 6, tzinfo=timezone.utc)) is True
+    with pytest.raises(ValueError, match="Invalid cron expression"):
+        trigger_engine._fallback_next_cron("bad", month_end)
