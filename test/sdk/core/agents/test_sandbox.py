@@ -2348,7 +2348,11 @@ class TestTargetedSandboxCoverage:
         pool = SandboxPoolManager.get_instance()
         remote_module = SimpleNamespace(WasmExecutor=MagicMock(side_effect=RuntimeError("wasm failed")))
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
-        monkeypatch.setattr(sandbox_module, "_make_local_executor", MagicMock(return_value=SimpleNamespace()))
+        monkeypatch.setattr(
+            sandbox_module,
+            "_make_local_executor",
+            MagicMock(return_value=SimpleNamespace(__call__=MagicMock(return_value="local"))),
+        )
 
         result = pool._build_wasm_executor(SandboxConfig(level=SandboxLevel.WASM), MagicMock())
 
@@ -2356,12 +2360,11 @@ class TestTargetedSandboxCoverage:
 
     def test_recovery_tries_next_connection_host(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
-        container = MagicMock(
-            name=sandbox_module.SANDBOX_CONTAINER_NAME,
-            status="running",
-            labels={"com.nexent.sandbox": "runtime"},
-            attrs={"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}},
-        )
+        container = MagicMock()
+        container.name = sandbox_module.SANDBOX_CONTAINER_NAME
+        container.status = "running"
+        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.attrs = {"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}}
         container.client = MagicMock()
         docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
             containers=SimpleNamespace(list=lambda **kwargs: [container])
@@ -2382,12 +2385,11 @@ class TestTargetedSandboxCoverage:
 
     def test_recovery_returns_none_when_all_connection_hosts_fail(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
-        container = MagicMock(
-            name=sandbox_module.SANDBOX_CONTAINER_NAME,
-            status="running",
-            labels={"com.nexent.sandbox": "runtime"},
-            attrs={"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}},
-        )
+        container = MagicMock()
+        container.name = sandbox_module.SANDBOX_CONTAINER_NAME
+        container.status = "running"
+        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.attrs = {"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}}
         docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
             containers=SimpleNamespace(list=lambda **kwargs: [container])
         ))
