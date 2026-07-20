@@ -16,9 +16,11 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { FilterDropdownProps } from "antd/es/table/interface";
 import type { TableProps } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -53,6 +55,80 @@ const statusColor: Record<string, string> = {
   PAUSED_BY_SYSTEM: "red",
   COMPLETED: "blue",
 };
+
+const taskStatusFilters = [
+  "DRAFT",
+  "ENABLED",
+  "RUNNING",
+  "PAUSED",
+  "PAUSED_BY_SYSTEM",
+  "COMPLETED",
+];
+
+function CompactSearchFilter({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="p-2" onKeyDown={(event) => event.stopPropagation()}>
+      <Input
+        autoFocus
+        allowClear
+        className="w-56"
+        prefix={<Search size={14} className="text-gray-400" aria-hidden />}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
+function CompactStatusFilter({
+  currentValue,
+  onChange,
+  close,
+  allLabel,
+  options,
+}: {
+  currentValue: string;
+  onChange: (value: string) => void;
+  close: FilterDropdownProps["close"];
+  allLabel: string;
+  options: Array<{ label: string; value: string }>;
+}) {
+  const items = [{ label: allLabel, value: "" }, ...options];
+
+  return (
+    <div className="min-w-36 p-1">
+      {items.map((item) => {
+        const selected = currentValue === item.value;
+        return (
+          <button
+            key={item.value || "all"}
+            type="button"
+            className={`block w-full rounded px-3 py-2 text-left text-sm transition-colors ${
+              selected
+                ? "bg-blue-50 font-medium text-blue-600"
+                : "text-gray-700 hover:bg-gray-50"
+            }`}
+            onClick={() => {
+              onChange(item.value);
+              close();
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 interface TaskFormValues {
   title: string;
@@ -434,44 +510,12 @@ export default function AgentTasksPage() {
           className={filtered ? "text-blue-600" : "text-gray-500"}
         />
       ),
-      filterDropdown: ({ selectedKeys, setSelectedKeys, confirm, close }) => (
-        <div
-          className="w-72 p-3"
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <Input
-            autoFocus
-            allowClear
-            value={String(selectedKeys[0] || "")}
-            placeholder={t("agentAutomation.page.taskSearchPlaceholder")}
-            onChange={(event) =>
-              setSelectedKeys(event.target.value ? [event.target.value] : [])
-            }
-            onPressEnter={() => confirm()}
-          />
-          <div className="mt-3 flex justify-end gap-2">
-            <Button
-              size="small"
-              onClick={() => {
-                setSelectedKeys([]);
-                confirm();
-              }}
-            >
-              {t("agentAutomation.page.reset")}
-            </Button>
-            <Button size="small" onClick={() => close()}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="primary"
-              size="small"
-              icon={<Search size={14} />}
-              onClick={() => confirm()}
-            >
-              {t("agentAutomation.page.search")}
-            </Button>
-          </div>
-        </div>
+      filterDropdown: () => (
+        <CompactSearchFilter
+          value={taskNameSearch}
+          onChange={setTaskNameSearch}
+          placeholder={t("agentAutomation.page.taskSearchPlaceholder")}
+        />
       ),
       render: (_, task) => (
         <div className="min-w-0">
@@ -501,44 +545,12 @@ export default function AgentTasksPage() {
           className={filtered ? "text-blue-600" : "text-gray-500"}
         />
       ),
-      filterDropdown: ({ selectedKeys, setSelectedKeys, confirm, close }) => (
-        <div
-          className="w-72 p-3"
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <Input
-            autoFocus
-            allowClear
-            value={String(selectedKeys[0] || "")}
-            placeholder={t("agentAutomation.page.agentSearchPlaceholder")}
-            onChange={(event) =>
-              setSelectedKeys(event.target.value ? [event.target.value] : [])
-            }
-            onPressEnter={() => confirm()}
-          />
-          <div className="mt-3 flex justify-end gap-2">
-            <Button
-              size="small"
-              onClick={() => {
-                setSelectedKeys([]);
-                confirm();
-              }}
-            >
-              {t("agentAutomation.page.reset")}
-            </Button>
-            <Button size="small" onClick={() => close()}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="primary"
-              size="small"
-              icon={<Search size={14} />}
-              onClick={() => confirm()}
-            >
-              {t("agentAutomation.page.search")}
-            </Button>
-          </div>
-        </div>
+      filterDropdown: () => (
+        <CompactSearchFilter
+          value={agentNameSearch}
+          onChange={setAgentNameSearch}
+          placeholder={t("agentAutomation.page.agentSearchPlaceholder")}
+        />
       ),
       render: (_, task) => (
         <div className="min-w-0">
@@ -558,16 +570,28 @@ export default function AgentTasksPage() {
       title: t("agentAutomation.page.status"),
       dataIndex: "status",
       width: 130,
-      filters: [
-        "DRAFT",
-        "ENABLED",
-        "RUNNING",
-        "PAUSED",
-        "PAUSED_BY_SYSTEM",
-        "COMPLETED",
-      ].map((status) => ({ text: formatTaskStatus(status), value: status })),
+      filters: taskStatusFilters.map((status) => ({
+        text: formatTaskStatus(status),
+        value: status,
+      })),
       filteredValue: statusFilter ? [statusFilter] : null,
       filterMultiple: false,
+      filterDropdown: ({ close }) => (
+        <CompactStatusFilter
+          currentValue={statusFilter || ""}
+          onChange={(value) =>
+            setStatusFilter(
+              value ? (value as AutomationTaskListStatus) : undefined
+            )
+          }
+          close={close}
+          allLabel={t("agentAutomation.page.allStatuses")}
+          options={taskStatusFilters.map((status) => ({
+            label: formatTaskStatus(status),
+            value: status,
+          }))}
+        />
+      ),
       render: (_, task) => {
         const displayStatus = getTaskDisplayStatus(task);
         return (
@@ -622,52 +646,66 @@ export default function AgentTasksPage() {
     },
     {
       title: t("agentAutomation.page.actions"),
-      width: 280,
+      width: 150,
       render: (_, task) => (
-        <Space>
-          <Button
-            size="small"
-            icon={
-              task.is_running ? (
-                <LoaderCircle size={14} className="animate-spin" />
-              ) : (
-                <Play size={14} />
-              )
-            }
-            disabled={task.is_running}
-            onClick={() => runTask(task)}
-          >
-            {t("agentAutomation.page.run")}
-          </Button>
+        <Space size={4}>
+          <Tooltip title={t("agentAutomation.page.run")}>
+            <span className="inline-flex">
+              <Button
+                type="text"
+                shape="circle"
+                size="small"
+                icon={
+                  task.is_running ? (
+                    <LoaderCircle size={14} className="animate-spin" />
+                  ) : (
+                    <Play size={14} />
+                  )
+                }
+                aria-label={t("agentAutomation.page.run")}
+                disabled={task.is_running}
+                onClick={() => runTask(task)}
+              />
+            </span>
+          </Tooltip>
           {task.status === "ACTIVE" ? (
-            <Button
-              size="small"
-              icon={<Pause size={14} />}
-              onClick={() => pauseTask(task)}
-            >
-              {t("agentAutomation.page.pause")}
-            </Button>
+            <Tooltip title={t("agentAutomation.page.pause")}>
+              <Button
+                type="text"
+                shape="circle"
+                size="small"
+                icon={<Pause size={14} />}
+                aria-label={t("agentAutomation.page.pause")}
+                onClick={() => pauseTask(task)}
+              />
+            </Tooltip>
           ) : ["PAUSED", "PAUSED_BY_SYSTEM"].includes(task.status) ? (
-            <Button
-              size="small"
-              icon={<RefreshCw size={14} />}
-              onClick={() => resumeTask(task)}
-            >
-              {t("agentAutomation.page.resume")}
-            </Button>
+            <Tooltip title={t("agentAutomation.page.resume")}>
+              <Button
+                type="text"
+                shape="circle"
+                size="small"
+                icon={<RefreshCw size={14} />}
+                aria-label={t("agentAutomation.page.resume")}
+                onClick={() => resumeTask(task)}
+              />
+            </Tooltip>
           ) : null}
-          <Dropdown
-            menu={{ items: getMoreActionItems(task) }}
-            trigger={["click"]}
-            placement="bottomRight"
-          >
-            <Button
-              size="small"
-              icon={<MoreHorizontal size={14} />}
-              title={t("agentAutomation.page.moreActions")}
-              aria-label={t("agentAutomation.page.moreActions")}
-            />
-          </Dropdown>
+          <Tooltip title={t("agentAutomation.page.moreActions")}>
+            <Dropdown
+              menu={{ items: getMoreActionItems(task) }}
+              trigger={["click"]}
+              placement="bottomRight"
+            >
+              <Button
+                type="text"
+                shape="circle"
+                size="small"
+                icon={<MoreHorizontal size={14} />}
+                aria-label={t("agentAutomation.page.moreActions")}
+              />
+            </Dropdown>
+          </Tooltip>
         </Space>
       ),
     },
