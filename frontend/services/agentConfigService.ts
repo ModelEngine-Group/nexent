@@ -1244,6 +1244,8 @@ export const createSkill = async (skillData: {
   source?: string;
   tags?: string[];
   content?: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   files?: Array<{ path: string; content: string }>;
 }) => {
   try {
@@ -1256,6 +1258,12 @@ export const createSkill = async (skillData: {
     };
     if (skillData.files && skillData.files.length > 0) {
       requestBody.files = skillData.files;
+    }
+    if (skillData.group_ids !== undefined) {
+      requestBody.group_ids = skillData.group_ids;
+    }
+    if (skillData.ingroup_permission !== undefined) {
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
     const response = await fetch(API_ENDPOINTS.skills.create, {
@@ -1304,6 +1312,8 @@ export const updateSkill = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1319,6 +1329,10 @@ export const updateSkill = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId
@@ -1365,6 +1379,8 @@ export const updateSkillById = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1381,6 +1397,10 @@ export const updateSkillById = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId

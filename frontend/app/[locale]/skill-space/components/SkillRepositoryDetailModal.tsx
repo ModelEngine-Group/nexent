@@ -28,8 +28,7 @@ export function SkillRepositoryDetailModal({
   onRetry: () => void;
 }) {
   const { t } = useTranslation("common");
-  const author =
-    detail?.submitted_by?.trim() || t("skillRepository.detail.unknownAuthor");
+  const author = detail?.author?.trim();
   const updatedAt =
     formatRepositoryDate(detail?.updated_at) ||
     formatRepositoryDate(detail?.created_at) ||
@@ -72,10 +71,12 @@ export function SkillRepositoryDetailModal({
                 </h2>
                 <StatusTag status={detail.status} />
               </div>
-              <p className="mt-1 flex min-w-0 items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
-                <UserRound className="size-3.5 shrink-0" aria-hidden />
-                <span className="truncate">{author}</span>
-              </p>
+              {author ? (
+                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
+                  <UserRound className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{author}</span>
+                </p>
+              ) : null}
             </div>
           </header>
 

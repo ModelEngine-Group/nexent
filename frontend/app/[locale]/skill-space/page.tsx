@@ -22,11 +22,13 @@ import { ApiError } from "@/services/api";
 import { deleteSkillByName } from "@/services/skillService";
 import { cn } from "@/lib/utils";
 import type {
+  MineOwnershipFilter,
   MyEditableSkillItem,
   MySkillRepositoryInfoItem,
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
+import type { Skill } from "@/types/agentConfig";
 import { CountBadge } from "./components/SkillRepositoryControls";
 import { SkillRepositoryDetailModal } from "./components/SkillRepositoryDetailModal";
 import { MineSkillsView } from "./components/MineSkillsView";
@@ -37,6 +39,7 @@ import {
   STATUS_LABEL_KEYS,
 } from "./components/skillRepositoryShared";
 import SkillBuildModal from "../agents/components/agentConfig/SkillBuildModal";
+import SkillDetailModal from "../agents/components/agentConfig/SkillDetailModal";
 
 enum SkillRepositoryTab {
   REPOSITORY = "repository",
@@ -47,7 +50,6 @@ enum SkillRepositoryTab {
 const REPOSITORY_PAGE_SIZE = 6;
 const MINE_PAGE_SIZE = 6;
 const REVIEW_PAGE_SIZE = 10;
-
 const skillRepositoryTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
 };
@@ -73,6 +75,8 @@ export default function SkillRepositoryPage() {
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
   const [minePage, setMinePage] = useState(1);
+  const [mineOwnership, setMineOwnership] =
+    useState<MineOwnershipFilter>("all");
   const [mineSearch, setMineSearch] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [detailRepositoryId, setDetailRepositoryId] = useState<number | null>(
@@ -80,6 +84,9 @@ export default function SkillRepositoryPage() {
   );
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
+    null
+  );
+  const [viewingSkill, setViewingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
   const [copyListing, setCopyListing] =
@@ -103,17 +110,20 @@ export default function SkillRepositoryPage() {
 
   const mineParams = useMemo(
     () => ({
-      ownership: "all" as const,
+      ownership: mineOwnership,
       page: minePage,
       page_size: MINE_PAGE_SIZE,
       ...(mineSearch.trim() ? { search: mineSearch.trim() } : {}),
-      ...(!mineSearch.trim() ? { new_skill_padding: true } : {}),
+      ...(mineOwnership === "all" && !mineSearch.trim()
+        ? { new_skill_padding: true }
+        : {}),
     }),
-    [minePage, mineSearch]
+    [mineOwnership, minePage, mineSearch]
   );
 
   const reviewParams = useMemo(
     () => ({
+      status: "pending_review" as const,
       page: reviewPage,
       page_size: REVIEW_PAGE_SIZE,
       sort_by_update_time: true,
@@ -232,7 +242,9 @@ export default function SkillRepositoryPage() {
   const handleInstall = (listing: SkillRepositoryListingItem) => {
     const baseName = listing.name?.trim() || "Skill";
     setCopyListing(listing);
-    setCopyTargetName(t("skillRepository.copy.defaultName", { name: baseName }));
+    setCopyTargetName(
+      t("skillRepository.copy.defaultName", { name: baseName })
+    );
     setCopyNameError(null);
   };
 
@@ -271,7 +283,9 @@ export default function SkillRepositoryPage() {
         return;
       }
       message.error(
-        error instanceof Error ? error.message : t("skillRepository.copy.failed")
+        error instanceof Error
+          ? error.message
+          : t("skillRepository.copy.failed")
       );
     }
   };
@@ -316,28 +330,23 @@ export default function SkillRepositoryPage() {
     );
   };
 
-  const getActiveRepositoryInfo = (skill?: MyEditableSkillItem | null) =>
+  const getPendingRepositoryInfo = (skill?: MyEditableSkillItem | null) =>
     (skill?.repository_info ?? []).filter(
-      (info) => info.status === "shared" || info.status === "pending_review"
+      (info) => info.status === "pending_review"
     );
 
   const confirmEditListedSkill = async (
     skill: MyEditableSkillItem
   ): Promise<boolean> => {
-    const activeInfo = getActiveRepositoryInfo(skill);
-    if (activeInfo.length === 0) {
+    const pendingInfo = getPendingRepositoryInfo(skill);
+    if (pendingInfo.length === 0) {
       return true;
     }
 
-    const hasShared = activeInfo.some((info) => info.status === "shared");
     const confirmed = await new Promise<boolean>((resolve) => {
       modal.confirm({
-        title: hasShared
-          ? t("skillRepository.edit.confirmTakeDownTitle")
-          : t("skillRepository.edit.confirmWithdrawTitle"),
-        content: hasShared
-          ? t("skillRepository.edit.confirmTakeDownContent")
-          : t("skillRepository.edit.confirmWithdrawContent"),
+        title: t("skillRepository.edit.confirmWithdrawTitle"),
+        content: t("skillRepository.edit.confirmWithdrawContent"),
         okText: t("skillRepository.edit.continueSave"),
         cancelText: t("common.cancel"),
         onOk: () => resolve(true),
@@ -350,7 +359,7 @@ export default function SkillRepositoryPage() {
 
     try {
       await Promise.all(
-        activeInfo.map((info) =>
+        pendingInfo.map((info) =>
           updateStatusMutation.mutateAsync({
             skillRepositoryId: info.skill_repository_id,
             status: "not_shared",
@@ -497,6 +506,11 @@ export default function SkillRepositoryPage() {
                 <MineSkillsView
                   skills={mineItems}
                   counts={mineCounts}
+                  ownership={mineOwnership}
+                  onOwnershipChange={(ownership) => {
+                    setMineOwnership(ownership);
+                    setMinePage(1);
+                  }}
                   searchQuery={mineSearch}
                   onSearchChange={(value) => {
                     setMineSearch(value);
@@ -518,6 +532,7 @@ export default function SkillRepositoryPage() {
                     setEditingSkill(skill);
                     setSkillBuildOpen(true);
                   }}
+                  onViewSkill={(skill) => setViewingSkill(skill)}
                   onDeleteSkill={async (skill) => {
                     const name = skill.name?.trim();
                     if (!name) {
@@ -644,6 +659,21 @@ export default function SkillRepositoryPage() {
         }}
         onSuccess={handleSkillBuildSuccess}
         onBeforeEditSave={confirmEditListedSkill}
+      />
+      <SkillDetailModal
+        open={viewingSkill != null}
+        skill={
+          viewingSkill
+            ? ({
+                skill_id: viewingSkill.skill_id,
+                name: viewingSkill.name || "",
+                description: viewingSkill.description || "",
+                source: viewingSkill.source || "custom",
+                tags: viewingSkill.tags || [],
+              } satisfies Skill)
+            : null
+        }
+        onClose={() => setViewingSkill(null)}
       />
     </ConfigProvider>
   );

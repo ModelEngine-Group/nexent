@@ -21,16 +21,64 @@ from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import ModelConfig
-from consts.const import CONTAINER_SKILLS_PATH, OFFICIAL_SKILLS_ZIP_PATH, ROOT_DIR
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    CONTAINER_SKILLS_PATH,
+    OFFICIAL_SKILLS_ZIP_PATH,
+    PERMISSION_EDIT,
+    PERMISSION_PRIVATE,
+    ROOT_DIR,
+)
 from consts.exceptions import ForbiddenError, SkillException
 from database import skill_db
+from database.group_db import query_group_ids_by_user
+from database.user_tenant_db import get_user_tenant_by_user_id
 from agents.skill_creation_agent import create_skill_from_request
 from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
 from utils.content_classifier_utils import ContentClassifier
+from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger(__name__)
 
 _skill_manager: Optional[SkillManager] = None
+
+
+def _apply_default_skill_permission_fields(
+    skill_data: Dict[str, Any],
+    user_id: Optional[str],
+) -> None:
+    """Default user-created skills to the creator's groups with edit permission."""
+    if not user_id:
+        return
+    if skill_data.get("group_ids") is None:
+        skill_data["group_ids"] = convert_list_to_string(query_group_ids_by_user(user_id))
+    if not skill_data.get("ingroup_permission"):
+        skill_data["ingroup_permission"] = PERMISSION_EDIT
+
+
+def _get_user_role(user_id: Optional[str]) -> str:
+    if not user_id:
+        return "USER"
+    user_tenant = get_user_tenant_by_user_id(user_id)
+    if not user_tenant:
+        return "USER"
+    return str(user_tenant.get("user_role") or "USER")
+
+
+def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
+    if not user_id:
+        return False
+    if _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES:
+        return True
+    if str(skill.get("created_by")) == str(user_id):
+        return True
+    if skill.get("ingroup_permission") in (None, PERMISSION_PRIVATE):
+        return False
+    if skill.get("ingroup_permission") != PERMISSION_EDIT:
+        return False
+    skill_group_ids = {int(group_id) for group_id in skill.get("group_ids") or []}
+    user_group_ids = set(query_group_ids_by_user(user_id) or [])
+    return bool(skill_group_ids.intersection(user_group_ids))
 
 
 def _normalize_zip_entry_path(name: str) -> str:
@@ -1033,6 +1081,7 @@ class SkillService:
         if user_id:
             skill_data["created_by"] = user_id
             skill_data["updated_by"] = user_id
+        _apply_default_skill_permission_fields(skill_data, user_id)
 
         try:
             # Create database record first
@@ -1160,6 +1209,7 @@ class SkillService:
         if user_id:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
+        _apply_default_skill_permission_fields(skill_dict, user_id)
 
         result = skill_db.create_skill(skill_dict, tenant_id)
 
@@ -1293,6 +1343,7 @@ class SkillService:
         if user_id:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
+        _apply_default_skill_permission_fields(skill_dict, user_id)
 
         result = skill_db.create_skill(skill_dict, tenant_id)
 
@@ -1449,6 +1500,8 @@ class SkillService:
         existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
+        if user_id is not None and not _can_edit_skill(existing, user_id):
+            raise ForbiddenError("Not authorized to update this skill")
 
         content_bytes: bytes
         if isinstance(file_content, str):
@@ -1619,6 +1672,8 @@ class SkillService:
             existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
             if not existing:
                 raise SkillException(f"Skill not found: {skill_name}")
+            if user_id is not None and not _can_edit_skill(existing, user_id):
+                raise ForbiddenError("Not authorized to update this skill")
 
             result = skill_db.update_skill(
                 skill_name, skill_data, effective_tenant_id, updated_by=user_id or None
@@ -1671,7 +1726,7 @@ class SkillService:
                 )
 
             return self._enrich_configs_from_yaml(result)
-        except SkillException:
+        except (ForbiddenError, SkillException):
             raise
         except Exception as e:
             logger.error(f"Error updating skill {skill_name}: {e}")
@@ -1692,7 +1747,7 @@ class SkillService:
             existing = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
             if not existing:
                 raise SkillException(f"Skill not found: {skill_id}")
-            if not user_id or existing.get("created_by") != user_id:
+            if not _can_edit_skill(existing, user_id):
                 raise ForbiddenError("Not authorized to update this skill")
 
             local_dir = self._resolve_local_skills_dir_for_overlay()
@@ -2240,6 +2295,7 @@ class SkillService:
         if user_id:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
+        _apply_default_skill_permission_fields(skill_dict, user_id)
 
         result = skill_db.create_skill(skill_dict, tenant_id)
 

@@ -10,6 +10,7 @@ from sqlalchemy import update as sa_update
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
 from utils.skill_params_utils import strip_params_comments_for_db
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -203,10 +204,16 @@ def _build_skill_update_values(
         "content": "skill_content",
         "tags": "skill_tags",
         "source": "source",
+        "ingroup_permission": "ingroup_permission",
     }
     for input_field, model_field in field_mapping.items():
         if input_field in skill_data:
             row_values[model_field] = skill_data[input_field]
+    if "group_ids" in skill_data:
+        group_ids = skill_data["group_ids"]
+        row_values["group_ids"] = (
+            convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids
+        )
 
     for field in ("config_schemas", "config_values"):
         if field in skill_data:
@@ -242,6 +249,8 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
         "source": skill.source,
+        "group_ids": convert_string_to_list(skill.group_ids),
+        "ingroup_permission": skill.ingroup_permission,
         "created_by": skill.created_by,
         "create_time": skill.create_time.isoformat() if skill.create_time else None,
         "updated_by": skill.updated_by,
@@ -368,6 +377,12 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
             config_values=_params_value_for_db(
                 skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
+            group_ids=(
+                convert_list_to_string(skill_data.get("group_ids"))
+                if isinstance(skill_data.get("group_ids"), list)
+                else skill_data.get("group_ids")
+            ),
+            ingroup_permission=skill_data.get("ingroup_permission"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
             updated_by=skill_data.get("updated_by"),

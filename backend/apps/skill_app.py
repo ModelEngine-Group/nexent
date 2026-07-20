@@ -46,6 +46,8 @@ def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
         "content",
         "tags",
         "source",
+        "group_ids",
+        "ingroup_permission",
         "config_schemas",
         "config_values",
     ):
@@ -165,6 +167,8 @@ async def create_skill(
             "tool_ids": tool_ids,
             "tags": request.tags,
             "source": request.source,
+            "group_ids": request.group_ids,
+            "ingroup_permission": request.ingroup_permission,
             "config_schemas": request.config_schemas,
             "config_values": request.config_values,
             "files": request.files if request.files else [],
@@ -342,6 +346,8 @@ async def update_skill_from_file(
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
@@ -643,6 +649,8 @@ async def update_skill(
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))

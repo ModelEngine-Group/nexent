@@ -1058,6 +1058,8 @@ class SkillInfo(TableBase):
         JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
+    group_ids = Column(String, doc="Skill group IDs list")
+    ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
 
 
 class SkillToolRelation(TableBase):

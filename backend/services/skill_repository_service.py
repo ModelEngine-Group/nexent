@@ -15,7 +15,12 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_EDIT,
+    PERMISSION_PRIVATE,
+    PERMISSION_READ,
+)
 from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
 from database.skill_repository_db import (
     get_skill_repository_by_id_and_publisher,
@@ -24,12 +29,15 @@ from database.skill_repository_db import (
     insert_skill_repository_record,
     list_skill_repository_by_skill_ids,
     list_skill_repository_summaries,
+    reset_skill_repository_status,
     update_skill_repository_by_id,
     update_skill_repository_status_by_id,
 )
 from database.skill_db import get_skill_by_name
+from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.skill_service import SkillService
+from utils.str_utils import convert_string_to_list
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
@@ -83,6 +91,18 @@ _UPDATE_SNAPSHOT_FIELDS = (
 )
 
 
+def _to_group_id_set(group_ids: Any) -> set[int]:
+    if isinstance(group_ids, str):
+        return set(convert_string_to_list(group_ids))
+    if isinstance(group_ids, list):
+        return {
+            int(group_id)
+            for group_id in group_ids
+            if str(group_id).strip().isdigit()
+        }
+    return set()
+
+
 def _serialize_created_at(create_time: Any) -> Optional[str]:
     """Serialize DB create_time to an ISO string for API consumers."""
     if create_time is None:
@@ -119,12 +139,16 @@ def _to_detail_item(
 ) -> Dict[str, Any]:
     """Map a DB record to a skill marketplace detail payload."""
     snapshot = _as_dict(record.get("skill_info_json"))
+    creator_id = str(snapshot.get("created_by") or "").strip()
+    creator = get_user_tenant_by_user_id(creator_id) if creator_id else None
+    author = str((creator or {}).get("user_email") or "").strip() or None
     detail = {
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
         "name": record.get("name"),
         "description": record.get("description"),
         "source": record.get("source"),
+        "author": author,
         "submitted_by": record.get("submitted_by"),
         "icon": record.get("icon"),
         "status": record.get("status"),
@@ -164,12 +188,14 @@ def _to_repository_info_item(record: Dict[str, Any]) -> Dict[str, Any]:
 
 def _matches_ownership(skill: Dict[str, Any], user_id: str, ownership_filter: str) -> bool:
     """Return whether a skill belongs to the requested ownership bucket."""
-    created_by = skill.get("created_by")
-    if ownership_filter in (OWNERSHIP_ALL, OWNERSHIP_CREATED):
-        return created_by == user_id
+    if ownership_filter == OWNERSHIP_ALL:
+        return True
+    is_creator = str(skill.get("created_by")) == str(user_id)
+    if ownership_filter == OWNERSHIP_CREATED:
+        return is_creator
     if ownership_filter == OWNERSHIP_OTHERS:
-        return False
-    return created_by == user_id
+        return not is_creator
+    return True
 
 
 def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
@@ -190,11 +216,16 @@ def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
 
 def _count_skills_by_ownership(skills: List[Dict[str, Any]], user_id: str) -> Dict[str, int]:
     """Count editable skills in each ownership bucket."""
-    created = sum(1 for skill in skills if skill.get("created_by") == user_id)
+    created = sum(
+        1
+        for skill in skills
+        if str(skill.get("created_by")) == str(user_id)
+    )
+    others = len(skills) - created
     return {
-        OWNERSHIP_ALL: created,
+        OWNERSHIP_ALL: len(skills),
         OWNERSHIP_CREATED: created,
-        OWNERSHIP_OTHERS: 0,
+        OWNERSHIP_OTHERS: others,
     }
 
 
@@ -238,7 +269,43 @@ def _resolve_mine_skill_permission(
     """Resolve list-item permission for skill repository mine view."""
     if user_role in CAN_EDIT_ALL_USER_ROLES:
         return PERMISSION_EDIT
-    return PERMISSION_EDIT if skill.get("created_by") == user_id else PERMISSION_READ
+    if str(skill.get("created_by")) == str(user_id):
+        return PERMISSION_EDIT
+    ingroup_permission = skill.get("ingroup_permission")
+    return ingroup_permission if ingroup_permission is not None else PERMISSION_READ
+
+
+def _can_publish_skill(
+    *,
+    skill: Dict[str, Any],
+    user_id: str,
+    user_role: str,
+) -> bool:
+    """Return whether the user may submit the skill to the repository."""
+    if user_role == "ADMIN":
+        return True
+    return (
+        user_role == "DEV"
+        and str(skill.get("created_by")) == str(user_id)
+    )
+
+
+def _can_view_mine_skill(
+    *,
+    skill: Dict[str, Any],
+    user_id: str,
+    user_role: str,
+    user_group_ids: set[int],
+) -> bool:
+    """Return whether a skill should appear in the current user's mine list."""
+    if user_role in CAN_EDIT_ALL_USER_ROLES:
+        return True
+    if str(skill.get("created_by")) == str(user_id):
+        return True
+    if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
+        return False
+    skill_group_ids = _to_group_id_set(skill.get("group_ids"))
+    return bool(user_group_ids.intersection(skill_group_ids))
 
 
 def _resolve_submitter_email(user_id: str) -> Optional[str]:
@@ -255,9 +322,11 @@ def _validate_create_listing_permission(
 ) -> None:
     """Only ADMIN, or DEV who created the skill, may share to marketplace."""
     user_role = _get_user_role(user_id)
-    if user_role == "ADMIN":
-        return
-    if user_role == "DEV" and skill_info.get("created_by") == user_id:
+    if _can_publish_skill(
+        skill=skill_info,
+        user_id=user_id,
+        user_role=user_role,
+    ):
         return
     raise ForbiddenError(
         f"User role {user_role} not authorized to create repository listing"
@@ -322,6 +391,8 @@ def _build_skill_info_json(skill_info: Dict[str, Any]) -> Dict[str, Any]:
         "config_schemas": skill_info.get("config_schemas"),
         "config_values": skill_info.get("config_values"),
         "source": skill_info.get("source"),
+        "group_ids": skill_info.get("group_ids") or [],
+        "ingroup_permission": skill_info.get("ingroup_permission"),
         "tool_ids": skill_info.get("tool_ids") or [],
         "created_by": skill_info.get("created_by"),
     }
@@ -386,6 +457,48 @@ def _build_repository_data_from_skill(
     return repository_data
 
 
+def _find_resubmittable_repository_record(
+    skill_id: int,
+    tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find an existing review draft that can be refreshed by a new submission."""
+    pending = get_skill_repository_by_skill_id(
+        skill_id,
+        publisher_tenant_id=tenant_id,
+        statuses=[STATUS_PENDING_REVIEW],
+    )
+    if pending:
+        return pending
+    return get_skill_repository_by_skill_id(
+        skill_id,
+        publisher_tenant_id=tenant_id,
+        statuses=[STATUS_REJECTED],
+    )
+
+
+def _reset_repository_peer_statuses(
+    *,
+    skill_repository_id: int,
+    skill_id: int,
+    status: str,
+    publisher_tenant_id: str,
+) -> None:
+    """Reset peer listings with the same status; also clear rejected when submitting."""
+    reset_skill_repository_status(
+        repository_id=skill_repository_id,
+        skill_id=skill_id,
+        status=status,
+        publisher_tenant_id=publisher_tenant_id,
+    )
+    if status == STATUS_PENDING_REVIEW:
+        reset_skill_repository_status(
+            repository_id=skill_repository_id,
+            skill_id=skill_id,
+            status=STATUS_REJECTED,
+            publisher_tenant_id=publisher_tenant_id,
+        )
+
+
 def _validate_create_payload(repository_data: Dict[str, Any]) -> None:
     """Validate required fields before inserting a repository listing."""
     required_fields = (
@@ -426,9 +539,9 @@ def create_skill_repository_listing_impl(
     )
     _validate_create_payload(repository_data)
 
-    existing = get_skill_repository_by_skill_id(
+    existing = _find_resubmittable_repository_record(
         skill_id,
-        publisher_tenant_id=tenant_id,
+        tenant_id,
     )
     if not existing:
         repository_id = insert_skill_repository_record(
@@ -453,6 +566,13 @@ def create_skill_repository_listing_impl(
         if affected == 0:
             raise ValueError("Failed to update repository listing")
         is_updated = True
+
+    _reset_repository_peer_statuses(
+        skill_repository_id=repository_id,
+        skill_id=skill_id,
+        status=STATUS_PENDING_REVIEW,
+        publisher_tenant_id=tenant_id,
+    )
 
     record = get_skill_repository_by_id_and_publisher(
         repository_id,
@@ -590,6 +710,13 @@ def update_skill_repository_status_impl(
     )
     if rows_affected == 0:
         raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
+
+    _reset_repository_peer_statuses(
+        skill_repository_id=skill_repository_id,
+        skill_id=record["skill_id"],
+        status=status,
+        publisher_tenant_id=tenant_id,
+    )
 
     updated = get_skill_repository_by_id_and_publisher(
         skill_repository_id,
@@ -755,10 +882,17 @@ def _to_mine_skill_item(
         "description": skill.get("description"),
         "source": skill.get("source"),
         "tags": skill.get("tags") or [],
+        "group_ids": skill.get("group_ids") or [],
+        "ingroup_permission": skill.get("ingroup_permission"),
         "created_by": skill.get("created_by"),
         "created_at": skill.get("create_time"),
         "updated_at": skill.get("update_time"),
         "permission": _resolve_mine_skill_permission(
+            skill=skill,
+            user_id=user_id,
+            user_role=user_role,
+        ),
+        "can_publish": _can_publish_skill(
             skill=skill,
             user_id=user_id,
             user_role=user_role,
@@ -789,7 +923,17 @@ def list_my_editable_skills_impl(
     safe_page_size = max(int(page_size or 10), 1)
 
     user_role = _get_user_role(user_id)
-    skills = SkillService(tenant_id=tenant_id).list_skills(tenant_id=tenant_id)
+    user_group_ids = set(query_group_ids_by_user(user_id) or [])
+    skills = [
+        skill
+        for skill in SkillService(tenant_id=tenant_id).list_skills(tenant_id=tenant_id)
+        if _can_view_mine_skill(
+            skill=skill,
+            user_id=user_id,
+            user_role=user_role,
+            user_group_ids=user_group_ids,
+        )
+    ]
     counts = _count_skills_by_ownership(skills, user_id)
 
     filtered_skills = [

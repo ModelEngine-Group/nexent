@@ -66,6 +66,7 @@ def get_skill_repository_by_skill_id(
     skill_id: int,
     *,
     publisher_tenant_id: Optional[str] = None,
+    statuses: Optional[Collection[str]] = None,
 ) -> Optional[dict]:
     """Fetch an active repository listing by source skill_id."""
     with get_db_session() as session:
@@ -77,7 +78,9 @@ def get_skill_repository_by_skill_id(
             query = query.filter(
                 SkillRepository.publisher_tenant_id == publisher_tenant_id,
             )
-        record = query.first()
+        if statuses is not None:
+            query = query.filter(SkillRepository.status.in_(list(statuses)))
+        record = query.order_by(SkillRepository.update_time.desc()).first()
         return as_dict(record) if record else None
 
 
@@ -261,6 +264,29 @@ def update_skill_repository_status_by_id(
             update(SkillRepository)
             .where(*where_clauses)
             .values(**update_values)
+        )
+        return int(result.rowcount or 0)
+
+
+def reset_skill_repository_status(
+    *,
+    repository_id: int,
+    skill_id: int,
+    status: str,
+    publisher_tenant_id: str,
+) -> int:
+    """Set other active listings with the same skill and status to not_shared."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(SkillRepository)
+            .where(
+                SkillRepository.skill_id == skill_id,
+                SkillRepository.status == status,
+                SkillRepository.skill_repository_id != repository_id,
+                SkillRepository.publisher_tenant_id == publisher_tenant_id,
+                SkillRepository.delete_flag != "Y",
+            )
+            .values(status=STATUS_NOT_SHARED)
         )
         return int(result.rowcount or 0)
 

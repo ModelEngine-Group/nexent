@@ -35,10 +35,17 @@ import type {
   MyEditableSkillItem,
   MyEditableSkillListItem,
   MySkillRepositoryInfoItem,
+  MineOwnershipFilter,
   NewSkillPaddingItem,
   SkillRepositoryListingCreatePayload,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
+
+const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
+  "all",
+  "created",
+  "others",
+];
 
 function isNewSkillPaddingItem(
   item: MyEditableSkillListItem
@@ -49,6 +56,8 @@ function isNewSkillPaddingItem(
 export function MineSkillsView({
   skills,
   counts,
+  ownership,
+  onOwnershipChange,
   searchQuery,
   onSearchChange,
   isLoading,
@@ -61,6 +70,7 @@ export function MineSkillsView({
   onRetry,
   onCreateSkill,
   onEditSkill,
+  onViewSkill,
   onDeleteSkill,
   onApplyListing,
   isUpdatingStatus,
@@ -68,6 +78,8 @@ export function MineSkillsView({
 }: {
   skills: MyEditableSkillListItem[];
   counts: { all: number; created: number; others: number };
+  ownership: MineOwnershipFilter;
+  onOwnershipChange: (ownership: MineOwnershipFilter) => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   isLoading: boolean;
@@ -80,6 +92,7 @@ export function MineSkillsView({
   onRetry: () => void;
   onCreateSkill: () => void;
   onEditSkill: (skill: MyEditableSkillItem) => void;
+  onViewSkill: (skill: MyEditableSkillItem) => void;
   onDeleteSkill: (skill: MyEditableSkillItem) => Promise<void>;
   onApplyListing: (
     skill: MyEditableSkillItem,
@@ -95,6 +108,11 @@ export function MineSkillsView({
     useState<MyEditableSkillItem | null>(null);
   const [reviewModalInfo, setReviewModalInfo] =
     useState<MySkillRepositoryInfoItem | null>(null);
+  const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
+    all: "agentRepository.mine.filter.all",
+    created: "agentRepository.mine.filter.created",
+    others: "agentRepository.mine.filter.others",
+  };
 
   const openReviewModal = (skill: MyEditableSkillItem) => {
     const repositoryInfo = pickReviewDisplayRepositoryInfo(
@@ -183,10 +201,16 @@ export function MineSkillsView({
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        <FilterButton active onClick={() => {}}>
-          {t("skillRepository.filter.all")}
-          <span className="ml-1 text-xs opacity-80">{counts.all}</span>
-        </FilterButton>
+        {MINE_OWNERSHIP_FILTERS.map((filter) => (
+          <FilterButton
+            key={filter}
+            active={ownership === filter}
+            onClick={() => onOwnershipChange(filter)}
+          >
+            {t(ownershipLabelKey[filter])}
+            <span className="ml-1 text-xs opacity-80">{counts[filter]}</span>
+          </FilterButton>
+        ))}
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -198,35 +222,37 @@ export function MineSkillsView({
         isError={isError}
         isFetching={isFetching}
         onRetry={onRetry}
-        isEmpty={false}
+        isEmpty={skills.length === 0}
         emptyDescription={t("skillRepository.mine.empty")}
       >
-        <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {skills.map((skill) =>
-            isNewSkillPaddingItem(skill) ? (
-              <div key="new-skill-padding" className="h-full">
-                <CreateNewSkillCard onClick={onCreateSkill} />
-              </div>
-            ) : (
-              <MineSkillCard
-                key={skill.skill_id}
-                skill={skill}
-                onEdit={() => onEditSkill(skill)}
-                onDelete={() => handleDeleteSkill(skill)}
-                onApplyListing={() => handleEnableSkill(skill)}
-                onViewReview={() => openReviewModal(skill)}
-              />
-            )
-          )}
-        </div>
+        <>
+          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {skills.map((skill) =>
+              isNewSkillPaddingItem(skill) ? (
+                <div key="new-skill-padding" className="h-full">
+                  <CreateNewSkillCard onClick={onCreateSkill} />
+                </div>
+              ) : (
+                <MineSkillCard
+                  key={skill.skill_id}
+                  skill={skill}
+                  onEdit={() => onEditSkill(skill)}
+                  onView={() => onViewSkill(skill)}
+                  onDelete={() => handleDeleteSkill(skill)}
+                  onApplyListing={() => handleEnableSkill(skill)}
+                  onViewReview={() => openReviewModal(skill)}
+                />
+              )
+            )}
+          </div>
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={onPageChange}
+          />
+        </>
       </AsyncContent>
-
-      <PaginationBar
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={onPageChange}
-      />
 
       <SkillReviewStatusModal
         open={reviewModalOpen}
@@ -253,12 +279,14 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
 function MineSkillCard({
   skill,
   onEdit,
+  onView,
   onDelete,
   onApplyListing,
   onViewReview,
 }: {
   skill: MyEditableSkillItem;
   onEdit: () => void;
+  onView: () => void;
   onDelete: () => void;
   onApplyListing: () => void;
   onViewReview: () => void;
@@ -267,22 +295,35 @@ function MineSkillCard({
   const latestRepository = pickReviewDisplayRepositoryInfo(
     skill.repository_info ?? []
   );
+  const repositoryInfo = skill.repository_info ?? [];
+  const hasRepositoryInfo = latestRepository != null;
   const repositoryStatus = latestRepository?.status ?? "not_shared";
-  const hasRepositoryInfo = (skill.repository_info ?? []).length > 0;
-  const canApplyListing =
-    !latestRepository || latestRepository.status === "rejected";
-  const isEnabled = latestRepository?.status === "shared";
-  const canEdit = skill.permission !== "READ_ONLY";
+  const hasSharedRepository = repositoryInfo.some(
+    (info) => info.status === "shared"
+  );
+  const canEdit =
+    skill.permission !== "READ_ONLY" && skill.permission !== "PRIVATE";
+  const canPublish = skill.can_publish === true;
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
   const sourceLabel = getSkillSourceLabel(skill.source, t);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const isPendingReview = repositoryStatus === "pending_review";
+  const canApplyListing = canPublish && !isPendingReview;
+  const applyButtonLabel = isPendingReview
+    ? getSkillRepositoryStatusLabel(t, repositoryStatus)
+    : hasSharedRepository
+      ? t("skillRepository.mine.button.reapply")
+      : t("skillRepository.mine.button.apply");
   const menuItems: MenuProps["items"] = [
-    ...(isPendingReview
+    ...(canPublish && hasRepositoryInfo
       ? [
           {
             key: "review",
-            label: t("skillRepository.mine.viewReviewProgress"),
+            label: t(
+              isPendingReview
+                ? "skillRepository.mine.viewReviewProgress"
+                : "skillRepository.mine.viewRepositoryStatus"
+            ),
             icon: <ClipboardCheck className="size-3.5" aria-hidden />,
             onClick: onViewReview,
           },
@@ -309,7 +350,7 @@ function MineSkillCard({
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
                 {skill.name || t("skillRepository.common.untitled")}
               </h3>
-              {hasRepositoryInfo ? (
+              {hasSharedRepository ? (
                 <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                   <Share2 className="size-2.5" aria-hidden />
                   Hub
@@ -389,24 +430,22 @@ function MineSkillCard({
               type="default"
               className="min-w-0 flex-1"
               icon={<Eye className="size-3.5" aria-hidden />}
-              disabled
+              onClick={onView}
             >
               {t("skillRepository.common.view")}
             </Button>
           )}
-          <Button
-            type={isEnabled ? "default" : "primary"}
-            className="min-w-0 flex-1"
-            icon={<Power className="size-3.5" aria-hidden />}
-            disabled={
-              !canEdit || isEnabled || repositoryStatus === "pending_review"
-            }
-            onClick={canApplyListing ? onApplyListing : onViewReview}
-          >
-            {isEnabled
-              ? t("skillRepository.mine.button.listed")
-              : t("skillRepository.mine.button.apply")}
-          </Button>
+          {canPublish ? (
+            <Button
+              type={hasSharedRepository ? "default" : "primary"}
+              className="min-w-0 flex-1"
+              icon={<Power className="size-3.5" aria-hidden />}
+              disabled={isPendingReview}
+              onClick={canApplyListing ? onApplyListing : onViewReview}
+            >
+              {applyButtonLabel}
+            </Button>
+          ) : null}
         </div>
       </div>
     </article>

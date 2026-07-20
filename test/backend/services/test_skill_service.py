@@ -167,6 +167,9 @@ TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp",
 consts_const_mock.CONTAINER_SKILLS_PATH = TEST_LOCAL_SKILLS_DIR
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
+consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
+consts_const_mock.PERMISSION_EDIT = "EDIT"
+consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 
 class SkillException(Exception):
@@ -210,6 +213,10 @@ utils_skill_params_utils_mock.params_dict_to_roundtrip_yaml_text = MagicMock(ret
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
 utils_prompt_template_utils_mock.get_skill_creation_simple_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('utils.content_classifier_utils')
+utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock.convert_list_to_string = MagicMock(
+    side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
+)
 
 class MockContentClassifier:
     def classify(self, content):
@@ -220,6 +227,7 @@ sys.modules['utils'] = utils_mock
 sys.modules['utils.skill_params_utils'] = utils_skill_params_utils_mock
 sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
 sys.modules['utils.content_classifier_utils'] = utils_content_classifier_utils_mock
+sys.modules['utils.str_utils'] = utils_str_utils_mock
 
 # Set up database mocks
 database_mock = types.ModuleType('database')
@@ -230,6 +238,12 @@ database_client_mock.filter_property = MagicMock()
 
 database_db_models_mock = types.ModuleType('database.db_models')
 database_db_models_mock.SkillInfo = MagicMock()
+database_group_db_mock = types.ModuleType('database.group_db')
+database_group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
+database_user_tenant_db_mock = types.ModuleType('database.user_tenant_db')
+database_user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(
+    return_value={"user_role": "DEV"}
+)
 
 # Create mock skill_db module with functions
 database_skill_db_mock = types.ModuleType('database.skill_db')
@@ -319,6 +333,8 @@ sys.modules['database'] = database_mock
 sys.modules['database.client'] = database_client_mock
 sys.modules['database.skill_db'] = database_skill_db_mock
 sys.modules['database.db_models'] = database_db_models_mock
+sys.modules['database.group_db'] = database_group_db_mock
+sys.modules['database.user_tenant_db'] = database_user_tenant_db_mock
 setattr(database_mock, 'skill_db', database_skill_db_mock)
 
 # Mock nexent.core.agents.run_agent for create_skill_from_request
@@ -808,6 +824,26 @@ class TestSkillServiceUpdateSkill:
             result = service.update_skill("existing", {"description": "updated"}, tenant_id="test-tenant")
 
             assert result["description"] == "updated"
+
+    def test_update_skill_rejects_user_without_edit_permission(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
+        )
+        mocker.patch(
+            "backend.services.skill_service._can_edit_skill",
+            return_value=False,
+        )
+
+        service = SkillService(tenant_id="test-tenant")
+
+        with pytest.raises(skill_service.ForbiddenError):
+            service.update_skill(
+                "existing",
+                {"description": "updated"},
+                tenant_id="test-tenant",
+                user_id="viewer",
+            )
 
     def test_update_skill_with_params(self, mocker):
         mocker.patch(
@@ -1878,6 +1914,26 @@ description: Updated via MD
         result = service.update_skill_from_file("existing", content, file_type="md", tenant_id="test-tenant")
 
         assert result["description"] == "updated"
+
+    def test_update_from_file_rejects_user_without_edit_permission(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
+        )
+        mocker.patch(
+            "backend.services.skill_service._can_edit_skill",
+            return_value=False,
+        )
+
+        service = SkillService(tenant_id="test-tenant")
+
+        with pytest.raises(skill_service.ForbiddenError):
+            service.update_skill_from_file(
+                "existing",
+                b"---\nname: existing\n---",
+                tenant_id="test-tenant",
+                user_id="viewer",
+            )
 
     def test_update_from_zip(self, mocker):
         import zipfile

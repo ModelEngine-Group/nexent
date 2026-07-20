@@ -108,6 +108,7 @@ def test_get_repository_by_skill_id_with_optional_tenant(monkeypatch, mock_sessi
     session, query = mock_session
     record = MagicMock(payload={"skill_id": 8})
     query.filter.return_value = query
+    query.order_by.return_value = query
     query.first.return_value = record
     _patch_session(monkeypatch, session)
 

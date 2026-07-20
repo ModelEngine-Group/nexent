@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useEffect, useMemo, useRef, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -44,10 +44,18 @@ import {
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
-import { fetchSkillById } from "@/services/agentConfigService";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
+import {
+  fetchSkillById,
+  fetchSkillFileContent,
+  fetchSkillFiles,
+  type SkillFileNode,
+} from "@/services/agentConfigService";
+import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
 
 const { TextArea } = Input;
@@ -110,6 +118,39 @@ function mergeGeneratedSkillTabs(
   return { updatedTabs, finalTabs };
 }
 
+function flattenSkillFiles(
+  nodes: SkillFileNode[],
+  skillName: string
+): string[] {
+  const paths: string[] = [];
+  const walk = (items: SkillFileNode[], parentPath = "") => {
+    items.forEach((item) => {
+      const isRootSkillDirectory =
+        !parentPath && item.type === "directory" && item.name === skillName;
+      const path = isRootSkillDirectory
+        ? ""
+        : parentPath
+          ? `${parentPath}/${item.name}`
+          : item.name;
+      if (item.type === "file") {
+        paths.push(path);
+      } else if (item.children?.length) {
+        walk(item.children, path);
+      }
+    });
+  };
+  walk(nodes);
+  return paths;
+}
+
+function sortSkillTabs(tabs: SkillFileContent[]): SkillFileContent[] {
+  return [...tabs].sort((a, b) => {
+    if (a.path === "SKILL.md") return -1;
+    if (b.path === "SKILL.md") return 1;
+    return a.path.localeCompare(b.path);
+  });
+}
+
 export default function SkillBuildModal({
   isOpen,
   onCancel,
@@ -118,10 +159,33 @@ export default function SkillBuildModal({
   onBeforeEditSave,
 }: SkillBuildModalProps) {
   const { t } = useTranslation("common");
+  const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
+  const { data: groupData } = useGroupList(user?.tenantId ?? null);
+  const accessibleGroupIds = useMemo(
+    () => getAccessibleGroupIds(),
+    [getAccessibleGroupIds]
+  );
+  const { groups: filteredGroups } = useGroupDetails(
+    groupData?.groups ?? [],
+    accessibleGroupIds
+  );
+  const groupSelectOptions = useMemo(
+    () =>
+      filteredGroups.map((group) => ({
+        label: group.group_name,
+        value: group.group_id,
+      })),
+    [filteredGroups]
+  );
   const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingEditFiles, setIsLoadingEditFiles] = useState(false);
+  const [loadedEditSkillId, setLoadedEditSkillId] = useState<number | null>(
+    null
+  );
+  const [editFilesError, setEditFilesError] = useState<string | null>(null);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadExtractedSkillName, setUploadExtractedSkillName] =
@@ -229,6 +293,14 @@ export default function SkillBuildModal({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen || isEditMode) return;
+    form.setFieldsValue({
+      group_ids: accessibleGroupIds,
+      ingroup_permission: "READ_ONLY",
+    });
+  }, [accessibleGroupIds, form, isEditMode, isOpen]);
+
+  useEffect(() => {
     if (!isOpen) {
       // Abort any ongoing streaming request
       if (abortControllerRef.current) {
@@ -254,6 +326,9 @@ export default function SkillBuildModal({
       setSummaryContent("");
       currentAssistantIdRef.current = "";
       setAccumulatedDraft(null);
+      setLoadedEditSkillId(null);
+      setEditFilesError(null);
+      setIsLoadingEditFiles(false);
     }
   }, [isOpen]);
 
@@ -307,24 +382,72 @@ export default function SkillBuildModal({
         description: skill.description || "",
         source: skill.source || "custom",
         tags: Array.isArray(skill.tags) ? skill.tags : [],
+        group_ids: Array.isArray(skill.group_ids) ? skill.group_ids : [],
+        ingroup_permission: skill.ingroup_permission || "READ_ONLY",
       });
-      setSkillTabs([{ path: "SKILL.md", content: skill.content || "" }]);
-      setActiveSkillTab("SKILL.md");
     };
 
     setActiveTab("interactive");
-    applySkillInfo({
-      name: skillName,
-      description: editingSkill.description || "",
-      source: editingSkill.source || "custom",
-      tags: editingSkill.tags || [],
-    });
+    setEditFilesError(null);
+    setLoadedEditSkillId(null);
+    setIsLoadingEditFiles(true);
 
-    void fetchSkillById(editingSkill.skill_id).then((result) => {
-      if (result.success && result.data) {
-        applySkillInfo(result.data);
+    const loadEditFiles = async () => {
+      try {
+        const result = await fetchSkillById(editingSkill.skill_id);
+        const skillInfo =
+          result.success && result.data
+            ? result.data
+            : {
+                name: skillName,
+                description: editingSkill.description || "",
+                source: editingSkill.source || "custom",
+                tags: editingSkill.tags || [],
+                group_ids: editingSkill.group_ids || [],
+                ingroup_permission:
+                  editingSkill.ingroup_permission || "READ_ONLY",
+              };
+        const resolvedSkillName = skillInfo.name?.trim() || skillName;
+        const fileTree = await fetchSkillFiles(resolvedSkillName);
+        const filePaths = flattenSkillFiles(
+          normalizeSkillFiles(fileTree),
+          resolvedSkillName
+        );
+        if (filePaths.length === 0) {
+          throw new Error("Skill file tree is empty");
+        }
+        const tabs = await Promise.all(
+          filePaths.map(async (path) => {
+            const content = await fetchSkillFileContent(
+              resolvedSkillName,
+              path
+            );
+            if (content === null) {
+              throw new Error(`Failed to load skill file: ${path}`);
+            }
+            return { path, content };
+          })
+        );
+        if (!cancelled) {
+          const sortedTabs = sortSkillTabs(tabs);
+          applySkillInfo(skillInfo);
+          setSkillTabs(sortedTabs);
+          setActiveSkillTab(sortedTabs[0]?.path || "SKILL.md");
+          setLoadedEditSkillId(editingSkill.skill_id);
+        }
+      } catch (error) {
+        log.error("Failed to load skill files for editing:", error);
+        if (!cancelled) {
+          setEditFilesError(t("skillManagement.message.loadFilesFailed"));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingEditFiles(false);
+        }
       }
-    });
+    };
+
+    void loadEditFiles();
 
     return () => {
       cancelled = true;
@@ -354,6 +477,12 @@ export default function SkillBuildModal({
 
   const handleManualSubmit = async () => {
     try {
+      if (isEditMode && (isLoadingEditFiles || editFilesError)) {
+        message.error(
+          editFilesError || t("skillManagement.message.loadFilesFailed")
+        );
+        return;
+      }
       const values = await form.validateFields();
       if (isEditMode && editingSkill && onBeforeEditSave) {
         const shouldContinue = await onBeforeEditSave(editingSkill);
@@ -600,7 +729,9 @@ export default function SkillBuildModal({
             taskIdRef.current = taskId;
           },
           onThinkingUpdate: (step, desc) => {
-            setThinkingDescription(desc || t("skillManagement.generatingSkill"));
+            setThinkingDescription(
+              desc || t("skillManagement.generatingSkill")
+            );
           },
           onThinkingVisible: (visible) => {
             setIsThinkingVisible(visible);
@@ -775,6 +906,8 @@ export default function SkillBuildModal({
   const modalBodyFrame = "min(92vh, 760px)";
   const editingSkillName =
     editingSkill?.name?.trim() || interactiveSkillName.trim();
+  const isEditContentReady =
+    !isEditMode || loadedEditSkillId === editingSkill?.skill_id;
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
@@ -1071,6 +1204,7 @@ export default function SkillBuildModal({
       textareaRefs={textareaRefs}
       shouldAutoScrollRef={shouldAutoScrollRef}
       onTextareaScroll={handleTextareaScroll}
+      groupSelectOptions={groupSelectOptions}
     />
   );
 
@@ -1111,7 +1245,9 @@ export default function SkillBuildModal({
       title={
         <div>
           <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {isEditMode ? t("skillManagement.edit.title") : t("skillManagement.title")}
+            {isEditMode
+              ? t("skillManagement.edit.title")
+              : t("skillManagement.title")}
           </div>
           <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
             {isEditMode
@@ -1143,6 +1279,9 @@ export default function SkillBuildModal({
             type="primary"
             loading={isSubmitting}
             onClick={handleManualSubmit}
+            disabled={
+              isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
+            }
           >
             {getConfirmButtonText()}
           </Button>
@@ -1173,7 +1312,17 @@ export default function SkillBuildModal({
         items={visibleTabItems}
         className="skill-build-tabs shrink-0"
       />
-      {isEditMode || activeTab === "interactive" ? (
+      {isEditMode && !isEditContentReady ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <Spin spinning={isLoadingEditFiles}>
+            {editFilesError ? (
+              <p className="text-sm text-red-500">{editFilesError}</p>
+            ) : (
+              <div className="h-16 w-16" />
+            )}
+          </Spin>
+        </div>
+      ) : isEditMode || activeTab === "interactive" ? (
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {renderChatPanel()}
           {renderDraftPanel()}

@@ -18,6 +18,7 @@ export interface SkillRepositoryListingItem {
   tags?: string[];
   downloads?: number;
   category_id?: number | null;
+  author?: string | null;
   submitted_by?: string | null;
 }
 
@@ -66,13 +67,16 @@ export interface MyEditableSkillItem {
   description?: string | null;
   source?: string | null;
   tags?: string[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
   created_by?: string | null;
   updated_by?: string | null;
   create_time?: string | null;
   update_time?: string | null;
   updated_at?: string | null;
   downloads?: number;
-  permission?: "EDIT" | "READ_ONLY";
+  permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  can_publish?: boolean;
   repository_info: MySkillRepositoryInfoItem[];
 }
 

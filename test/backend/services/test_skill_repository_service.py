@@ -16,6 +16,19 @@ _BACKEND_ROOT = _REPO_ROOT / "backend"
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
+_MOCKED_MODULE_NAMES = [
+    "database.skill_repository_db",
+    "database.group_db",
+    "database.skill_db",
+    "database.user_tenant_db",
+    "services.skill_service",
+    "utils.str_utils",
+]
+_ORIGINAL_MODULES = {
+    name: sys.modules.get(name)
+    for name in _MOCKED_MODULE_NAMES
+}
+
 _consts_package = sys.modules.get("consts")
 if _consts_package is not None and not hasattr(_consts_package, "__path__"):
     _consts_package.__path__ = []
@@ -50,6 +63,8 @@ if consts_const_module is not None:
         consts_const_module.PERMISSION_EDIT = "edit"
     if not hasattr(consts_const_module, "PERMISSION_READ"):
         consts_const_module.PERMISSION_READ = "read"
+    if not hasattr(consts_const_module, "PERMISSION_PRIVATE"):
+        consts_const_module.PERMISSION_PRIVATE = "private"
 
 _skill_repo_db_mock = MagicMock()
 _skill_repo_db_mock.get_skill_repository_by_id_and_publisher = MagicMock()
@@ -58,9 +73,24 @@ _skill_repo_db_mock.increment_skill_repository_downloads = MagicMock(return_valu
 _skill_repo_db_mock.insert_skill_repository_record = MagicMock(return_value=1)
 _skill_repo_db_mock.list_skill_repository_by_skill_ids = MagicMock(return_value=[])
 _skill_repo_db_mock.list_skill_repository_summaries = MagicMock()
+_skill_repo_db_mock.reset_skill_repository_status = MagicMock(return_value=0)
 _skill_repo_db_mock.update_skill_repository_by_id = MagicMock(return_value=1)
 _skill_repo_db_mock.update_skill_repository_status_by_id = MagicMock(return_value=1)
 sys.modules["database.skill_repository_db"] = _skill_repo_db_mock
+
+_group_db_mock = MagicMock()
+_group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
+sys.modules["database.group_db"] = _group_db_mock
+
+_utils_str_utils_mock = types.ModuleType("utils.str_utils")
+_utils_str_utils_mock.convert_string_to_list = MagicMock(
+    side_effect=lambda value: [
+        int(item)
+        for item in str(value or "").split(",")
+        if item.strip().isdigit()
+    ]
+)
+sys.modules["utils.str_utils"] = _utils_str_utils_mock
 
 _skill_db_mock = MagicMock()
 _skill_db_mock.get_skill_by_name = MagicMock(return_value=None)
@@ -136,6 +166,14 @@ if not _has_duplicate_names:
 from backend.services import skill_repository_service as srs
 
 
+def teardown_module():
+    for name, original in _ORIGINAL_MODULES.items():
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
+
 def setup_function():
     _skill_repo_db_mock.reset_mock()
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = None
@@ -145,8 +183,11 @@ def setup_function():
     _skill_repo_db_mock.increment_skill_repository_downloads.return_value = 1
     _skill_repo_db_mock.insert_skill_repository_record.return_value = 1
     _skill_repo_db_mock.list_skill_repository_by_skill_ids.return_value = []
+    _skill_repo_db_mock.reset_skill_repository_status.return_value = 0
     _skill_repo_db_mock.update_skill_repository_by_id.return_value = 1
     _skill_repo_db_mock.update_skill_repository_status_by_id.return_value = 1
+    _group_db_mock.reset_mock()
+    _group_db_mock.query_group_ids_by_user.return_value = []
     _skill_db_mock.reset_mock()
     _skill_db_mock.get_skill_by_name.return_value = None
     _user_tenant_db_mock.reset_mock()
@@ -169,7 +210,11 @@ def _repository_record(status="not_shared", publisher_user_id="user-1"):
         "submitted_by": "dev@example.com",
         "tags": ["tag"],
         "downloads": 0,
-        "skill_info_json": {"content": "content", "tags": ["tag"]},
+        "skill_info_json": {
+            "content": "content",
+            "tags": ["tag"],
+            "created_by": "user-1",
+        },
         "create_time": None,
         "update_time": None,
     }
@@ -211,6 +256,28 @@ def test_create_skill_repository_listing_updates_existing_record():
     _skill_repo_db_mock.update_skill_repository_by_id.assert_called_once()
 
 
+def test_create_skill_repository_listing_does_not_overwrite_shared_record():
+    _skill_repo_db_mock.get_skill_repository_by_skill_id.side_effect = [None, None]
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
+        _repository_record(status="pending_review")
+    )
+
+    result = srs.create_skill_repository_listing_impl(
+        skill_id=10,
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+    assert result["is_updated"] is False
+    _skill_repo_db_mock.insert_skill_repository_record.assert_called_once()
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
+    requested_statuses = [
+        call.kwargs["statuses"]
+        for call in _skill_repo_db_mock.get_skill_repository_by_skill_id.call_args_list
+    ]
+    assert requested_statuses == [["pending_review"], ["rejected"]]
+
+
 def test_create_skill_repository_listing_rejects_non_owner_dev():
     class SkillServiceNonOwner(_SkillServiceMock):
         def get_skill_by_id(self, skill_id, tenant_id=None):
@@ -248,6 +315,12 @@ def test_update_status_admin_approves_pending_review():
 
     assert result["status"] == "shared"
     _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
+    _skill_repo_db_mock.reset_skill_repository_status.assert_called_once_with(
+        repository_id=1,
+        skill_id=10,
+        status="shared",
+        publisher_tenant_id="tenant-1",
+    )
 
 
 def test_update_status_dev_cannot_approve_review():
@@ -354,6 +427,54 @@ def test_list_my_editable_skills_filters_to_current_user_and_search():
 
     assert result["counts"] == {"all": 1, "created": 1, "others": 0}
     assert [item["name"] for item in result["items"]] == ["Excel Report"]
+
+
+def test_mine_ownership_uses_creator_not_edit_permission():
+    class ListSkillService(_SkillServiceMock):
+        def list_skills(self, tenant_id=None):
+            return [
+                {
+                    "skill_id": 1,
+                    "name": "Created Skill",
+                    "created_by": 100,
+                    "group_ids": [1],
+                    "ingroup_permission": "EDIT",
+                },
+                {
+                    "skill_id": 2,
+                    "name": "Editable Skill",
+                    "created_by": 200,
+                    "group_ids": [1],
+                    "ingroup_permission": "EDIT",
+                },
+            ]
+
+    with (
+        patch.object(srs, "SkillService", ListSkillService),
+        patch.object(
+            srs,
+            "get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        ),
+        patch.object(srs, "query_group_ids_by_user", return_value=[1]),
+    ):
+        created_result = srs.list_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="100",
+            ownership="created",
+        )
+        others_result = srs.list_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="100",
+            ownership="others",
+        )
+
+    assert created_result["counts"] == {"all": 2, "created": 1, "others": 1}
+    assert [item["name"] for item in created_result["items"]] == ["Created Skill"]
+    assert [item["name"] for item in others_result["items"]] == ["Editable Skill"]
+    assert others_result["items"][0]["permission"] == "EDIT"
+    assert created_result["items"][0]["can_publish"] is True
+    assert others_result["items"][0]["can_publish"] is False
 
 
 def test_list_repository_listings_validates_status():
@@ -528,6 +649,11 @@ def test_repository_list_and_detail_success():
     )
     detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
     assert detail["skill_repository_id"] == 1
+    assert detail["author"] == "dev@example.com"
+
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = None
+    detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+    assert detail["author"] is None
 
 
 def test_mapping_and_filter_helpers_cover_edge_branches():

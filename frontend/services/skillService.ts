@@ -29,6 +29,8 @@ export interface SkillData {
   source: string;
   tags: string[];
   content: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   files?: SkillFileContent[];
 }
 
@@ -41,6 +43,8 @@ export interface SkillListItem {
   description?: string;
   tags: string[];
   content?: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
   config_values: Record<string, unknown> | null;
   config_schemas: unknown[] | null;
   source: string;
@@ -196,6 +200,10 @@ export async function fetchSkillsList(
     const toolIds = Array.isArray(rawToolIds)
       ? rawToolIds.map((id) => Number(id)).filter((n) => !Number.isNaN(n))
       : [];
+    const rawGroupIds = s.group_ids;
+    const groupIds = Array.isArray(rawGroupIds)
+      ? rawGroupIds.map((id) => Number(id)).filter((n) => !Number.isNaN(n))
+      : [];
     return {
       skill_id: Number.isNaN(skillId) ? 0 : skillId,
       name: String(s.name ?? ""),
@@ -207,6 +215,11 @@ export async function fetchSkillsList(
       config_values,
       source: String(s.source ?? "custom"),
       tool_ids: toolIds,
+      group_ids: groupIds,
+      ingroup_permission:
+        s.ingroup_permission !== undefined
+          ? (s.ingroup_permission as "EDIT" | "READ_ONLY" | "PRIVATE" | null)
+          : undefined,
       created_by:
         s.created_by !== undefined
           ? (s.created_by as string | null)
@@ -247,6 +260,8 @@ export const submitSkillForm = async (
         source: values.source,
         tags: values.tags,
         content: values.content,
+        group_ids: values.group_ids,
+        ingroup_permission: values.ingroup_permission,
         files: values.files,
       });
     } else {
@@ -256,6 +271,8 @@ export const submitSkillForm = async (
         source: values.source,
         tags: values.tags,
         content: values.content,
+        group_ids: values.group_ids,
+        ingroup_permission: values.ingroup_permission,
         files: values.files,
       });
     }

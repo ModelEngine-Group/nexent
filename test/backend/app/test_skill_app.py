@@ -142,6 +142,8 @@ class MockSkillCreateRequest(BaseModel):
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[Dict[str, str]]] = None
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
 
 class MockSkillFileData(BaseModel):
     path: str
@@ -158,6 +160,8 @@ class MockSkillUpdateRequest(BaseModel):
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[MockSkillFileData]] = None
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
 
 class MockSkillResponse(BaseModel):
     skill_id: Optional[int] = None
