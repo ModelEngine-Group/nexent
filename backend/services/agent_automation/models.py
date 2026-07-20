@@ -138,6 +138,7 @@ class AutomationProposalCreateRequest(BaseModel):
     conversation_id: Optional[int] = Field(default=None, gt=0)
     agent_id: int = Field(gt=0)
     message: str = Field(min_length=1)
+    instruction: Optional[str] = Field(default=None, min_length=1)
     timezone: str = "Asia/Shanghai"
     agent_version_no: Optional[int] = None
     model_id: Optional[int] = None

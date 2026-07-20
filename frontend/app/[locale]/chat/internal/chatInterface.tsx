@@ -15,8 +15,8 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
 import {
-  analyzeAutomationMessage,
-  canAnalyzeAutomationMessage,
+  canHandleAutomationInvocation,
+  createAutomationProposalFromInvocation,
   createPreparingAutomationMessage,
   getAutomationConversationIds,
   hydrateAutomationProposalMessages,
@@ -24,6 +24,8 @@ import {
   resolvePreparingMessageAsAgentReply,
 } from "@/features/agentAutomation/chatAdapter";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
+import { parseTurnResourceInvocation } from "@/features/turnResourceInvocation/parser";
+import { validateTurnResourceInvocation } from "@/features/turnResourceInvocation/validation";
 import {
   storageService,
   convertImageUrlToApiUrl,
@@ -468,6 +470,22 @@ export function ChatInterface() {
     // Handle user message content
     const userMessageId = uuidv4();
     const userMessageContent = input.trim();
+    const turnResourceInvocation =
+      parseTurnResourceInvocation(userMessageContent);
+    if (turnResourceInvocation) {
+      const validationError = validateTurnResourceInvocation(
+        turnResourceInvocation,
+        attachments.length
+      );
+      if (validationError) {
+        message.info(
+          t(`turnResourceInvocation.validation.${validationError}`, {
+            command: turnResourceInvocation.definition.command,
+          })
+        );
+        return;
+      }
+    }
 
     // Get current conversation ID (null when new conversation)
     const currentConversationId = conversationManagement.selectedConversationId;
@@ -549,12 +567,12 @@ export function ChatInterface() {
       isComplete: false,
       steps: [],
     };
-    const shouldAnalyzeAutomation = canAnalyzeAutomationMessage(
+    const shouldCreateAutomation = canHandleAutomationInvocation(
       attachments.length,
       agentIdForRun,
       userMessageContent
     );
-    const preparingAutomationMessage = shouldAnalyzeAutomation
+    const preparingAutomationMessage = shouldCreateAutomation
       ? createPreparingAutomationMessage(
           assistantMessageId,
           initialAssistantMessage.timestamp
@@ -588,9 +606,9 @@ export function ChatInterface() {
     try {
       // Handle scheduled requests as chat commands before a normal Agent run.
       // This prevents a recurring command from executing once immediately.
-      if (shouldAnalyzeAutomation) {
+      if (shouldCreateAutomation) {
         try {
-          const proposal = await analyzeAutomationMessage({
+          const proposal = await createAutomationProposalFromInvocation({
             conversationId: currentConversationId ?? undefined,
             agentId: agentIdForRun,
             message: userMessageContent,
@@ -647,6 +665,7 @@ export function ChatInterface() {
             setShouldScrollToBottom(true);
             return;
           }
+          throw new Error("Automation invocation did not produce a proposal");
         } catch (error) {
           log.warn("Failed to handle automation chat command", error);
           const errorMessage = getAutomationErrorMessage(
@@ -697,7 +716,7 @@ export function ChatInterface() {
         };
         return {
           ...prev,
-          [id]: shouldAnalyzeAutomation
+          [id]: shouldCreateAutomation
             ? resolvePreparingMessageAsAgentReply(
                 prev[id] || [],
                 assistantMessageId,

@@ -249,10 +249,21 @@ async def test_create_proposal_uses_llm_structured_content_without_second_prompt
         "create_proposal",
         lambda values, user_id: {"proposal_id": 15, **values},
     )
+
+    def fake_append_proposal_exchange(
+        conversation_id,
+        user_instruction,
+        payload,
+        user_id,
+        tenant_id,
+    ):
+        captured["persisted_user_message"] = user_instruction
+        return {"message_id": 31, "unit_id": 41}
+
     monkeypatch.setattr(
         facade_module.automation_conversation_adapter,
         "append_proposal_exchange",
-        lambda *args: {"message_id": 31, "unit_id": 41},
+        fake_append_proposal_exchange,
     )
     monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal_task", lambda *args: True)
 
@@ -261,7 +272,8 @@ async def test_create_proposal_uses_llm_structured_content_without_second_prompt
             conversation_id=100,
             agent_id=7,
             model_id=42,
-            message="每天早上八点算一下当天的黄历信息",
+            message="/create-automation-task 每天早上八点算一下当天的黄历信息",
+            instruction="每天早上八点算一下当天的黄历信息",
         ),
         "tenant",
         "user",
@@ -273,6 +285,11 @@ async def test_create_proposal_uses_llm_structured_content_without_second_prompt
     assert result["task"]["instruction"] == "查询当天的黄历信息"
     assert result["task"]["schedule_trigger"]["cron_expr"] == "0 8 * * *"
     assert captured["analysis_context"].model_id == 42
+    assert (
+        captured["analysis_context"].message
+        == "每天早上八点算一下当天的黄历信息"
+    )
+    assert captured["persisted_user_message"].startswith("/create-automation-task ")
 
 
 @pytest.mark.asyncio

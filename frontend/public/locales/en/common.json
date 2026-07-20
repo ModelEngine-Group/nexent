@@ -2872,6 +2872,11 @@
   "common.updated": "Last Updated Date",
   "common.email": "Email",
 
+  "turnResourceInvocation.menuTitle": "Turn-scoped resource invocation",
+  "turnResourceInvocation.automation.title": "Automation task",
+  "turnResourceInvocation.automation.description": "Explicitly interpret this turn and prepare an automation task for confirmation",
+  "turnResourceInvocation.validation.argumentRequired": "Describe the task and schedule after {{command}}",
+  "turnResourceInvocation.validation.attachmentsNotSupported": "{{command}} does not support attachments yet. Remove them and try again.",
   "agentAutomation.proposal.preparingTitle": "Preparing automation task",
   "agentAutomation.proposal.preparingDescription": "Understanding the schedule, task details, and required capabilities. Please wait…",
   "agentAutomation.proposal.editorTitle": "Edit automation task",

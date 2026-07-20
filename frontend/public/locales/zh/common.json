@@ -2751,6 +2751,11 @@
   "common.updated": "最近更新时间",
   "common.email": "邮箱",
 
+  "turnResourceInvocation.menuTitle": "本轮资源调用",
+  "turnResourceInvocation.automation.title": "自动化任务",
+  "turnResourceInvocation.automation.description": "明确解析本轮指令，并生成可确认的自动化任务方案",
+  "turnResourceInvocation.validation.argumentRequired": "请在 {{command}} 后填写任务内容和执行时间",
+  "turnResourceInvocation.validation.attachmentsNotSupported": "{{command}} 暂不支持附件，请移除附件后重试",
   "agentAutomation.proposal.preparingTitle": "正在生成自动任务",
   "agentAutomation.proposal.preparingDescription": "正在理解执行时间、任务内容和所需能力，请稍候…",
   "agentAutomation.proposal.editorTitle": "修改自动任务",

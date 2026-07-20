@@ -1,6 +1,10 @@
 import type { ChatMessageType } from "@/types/chat";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import { agentAutomationService } from "@/services/agentAutomationService";
+import {
+  isTurnResourceType,
+  parseTurnResourceInvocation,
+} from "@/features/turnResourceInvocation/parser";
 
 interface AutomationAnalysisRequest {
   conversationId?: number;
@@ -9,26 +13,37 @@ interface AutomationAnalysisRequest {
   modelId?: number | null;
 }
 
-export function canAnalyzeAutomationMessage(
+export function canHandleAutomationInvocation(
   attachmentCount: number,
   agentId: number | null,
   message: string
 ): agentId is number {
-  return attachmentCount === 0 && agentId !== null && Boolean(message);
+  const invocation = parseTurnResourceInvocation(message);
+  return (
+    attachmentCount === 0 &&
+    agentId !== null &&
+    isTurnResourceType(invocation, "automation") &&
+    Boolean(invocation.argument)
+  );
 }
 
-export async function analyzeAutomationMessage({
+export async function createAutomationProposalFromInvocation({
   conversationId,
   agentId,
   message,
   modelId,
 }: AutomationAnalysisRequest): Promise<AgentAutomationProposalData> {
+  const invocation = parseTurnResourceInvocation(message);
+  if (!isTurnResourceType(invocation, "automation")) {
+    throw new Error("Message is not an automation resource invocation");
+  }
   const timezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
   return agentAutomationService.createProposal({
     conversation_id: conversationId,
     agent_id: agentId,
-    message,
+    message: invocation.sourceMessage,
+    instruction: invocation.argument,
     timezone,
     model_id: modelId,
   });

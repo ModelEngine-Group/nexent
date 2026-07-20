@@ -127,6 +127,7 @@ export const agentAutomationService = {
     conversation_id?: number;
     agent_id: number;
     message: string;
+    instruction?: string;
     timezone?: string;
     agent_version_no?: number | null;
     model_id?: number | null;

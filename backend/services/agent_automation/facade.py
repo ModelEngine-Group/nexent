@@ -150,17 +150,18 @@ class AgentAutomationFacade:
         tenant_id: str,
         user_id: str,
     ) -> Dict[str, Any]:
+        analysis_message = request.instruction or request.message
         try:
             parsed = await automation_intent_analyzer.analyze(AutomationIntentContext(
                 tenant_id=tenant_id,
-                message=request.message,
+                message=analysis_message,
                 timezone=request.timezone,
                 model_id=request.model_id,
             ))
         except ValueError as exc:
             raise AutomationScheduleInvalidError(
                 f"无法解析任务执行时间：{exc}",
-                details={"input": request.message, "timezone": request.timezone},
+                details={"input": analysis_message, "timezone": request.timezone},
             ) from exc
         if not parsed.get("is_automation_intent"):
             return {
@@ -176,7 +177,7 @@ class AgentAutomationFacade:
         if parsed.get("schedule_error") or not parsed.get("schedule_trigger"):
             raise AutomationScheduleInvalidError(
                 parsed.get("schedule_error") or "Unable to determine the automation schedule.",
-                details={"input": request.message, "timezone": request.timezone},
+                details={"input": analysis_message, "timezone": request.timezone},
             )
         _validate_schedule_policy(parsed["schedule_trigger"])
 

@@ -24,6 +24,8 @@ import { ChatAgentSelector } from "./chatAgentSelector";
 import { ChatModelSelector } from "./chatModelSelector";
 import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
 import { TokenMetrics } from "@/types/chat";
+import { TurnResourceCommandMenu } from "@/features/turnResourceInvocation/TurnResourceCommandMenu";
+import { getTurnResourceCommandSuggestions } from "@/features/turnResourceInvocation/parser";
 
 // Format file size
 const formatFileSize = (sizeInBytes: number): string => {
@@ -237,10 +239,24 @@ export function ChatInput({
     };
   }, [onImageUpload, onFileUpload]);
 
+  const applyCommand = (command: string) => {
+    onInputChange(`${command} `);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const applyFirstCommandSuggestion = () => {
+    const commandSuggestion = getTurnResourceCommandSuggestions(input)[0];
+    if (!commandSuggestion) return false;
+    applyCommand(commandSuggestion.command);
+    return true;
+  };
+
   // Modify keyboard event handling
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+
+      if (applyFirstCommandSuggestion()) return;
 
       // Check if there is input content, if there is no content, do not send
       if (!input.trim()) {
@@ -773,6 +789,10 @@ export function ChatInput({
     <>
       {renderDragOverlay()}
       {renderAttachments()}
+      <TurnResourceCommandMenu
+        input={input}
+        onSelect={applyCommand}
+      />
       <div
         className="max-h-[300px] overflow-y-auto pt-3"
         style={{
@@ -952,6 +972,8 @@ export function ChatInput({
 
   // Stop recording before sending a message
   const handleSend = () => {
+    if (applyFirstCommandSuggestion()) return;
+
     // Check if agent is selected
     if (!selectedAgentId) {
       setErrorMessage(t("agentSelector.pleaseSelectAgent"));
