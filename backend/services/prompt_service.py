@@ -7,7 +7,10 @@ from typing import Optional, List
 
 from jinja2 import StrictUndefined, Template
 
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
+
 from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
+from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
 from consts.error_code import ErrorCode
 from consts.error_message import ErrorMessage
 from consts.exceptions import AppException
@@ -805,6 +808,21 @@ def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: s
     tool_id_list = get_enable_tool_id_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id)
     tool_info_list = query_tools_by_ids(tool_id_list)
+
+    # parallel_executor is always built from the SDK class — no DB query.
+    seen_names = {t.get("name") for t in tool_info_list if t.get("name")}
+    if PARALLEL_EXECUTOR_TOOL_NAME not in seen_names:
+        tool_info_list.append({
+            "name": ParallelExecutorTool.name,
+            "description": ParallelExecutorTool.description,
+            "description_zh": ParallelExecutorTool.description_zh,
+            "inputs": json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
+            "output_type": ParallelExecutorTool.output_type,
+            "params": [],
+            "source": "local",
+            "class_name": ParallelExecutorTool.__name__,
+        })
+
     return tool_info_list
 
 
