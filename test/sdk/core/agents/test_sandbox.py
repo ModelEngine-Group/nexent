@@ -2358,6 +2358,27 @@ class TestTargetedSandboxCoverage:
 
         assert result is not None
 
+    def test_build_executor_uses_successful_wasm_path(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        wasm = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        monkeypatch.setattr(pool, "_build_wasm_executor", MagicMock(return_value=wasm))
+
+        result = pool._build_executor(SandboxConfig(level=SandboxLevel.WASM), MagicMock())
+
+        assert result is wasm
+        pool._build_wasm_executor.assert_called_once()
+
+    def test_build_wasm_falls_back_when_dependency_is_missing(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        remote_module = SimpleNamespace()
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        local = SimpleNamespace(__call__=MagicMock(return_value="local"))
+        monkeypatch.setattr(sandbox_module, "_make_local_executor", MagicMock(return_value=local))
+
+        result = pool._build_wasm_executor(SandboxConfig(level=SandboxLevel.WASM), MagicMock())
+
+        assert result is local
+
     def test_recovery_tries_next_connection_host(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
         container = MagicMock()
@@ -2455,6 +2476,47 @@ class TestTargetedSandboxCoverage:
         config.scope = SandboxScope.SESSION
         pool._build_docker_executor(config, MagicMock(), True)
         bridge_installer.assert_called_once_with(executor, ANY)
+
+    def test_system_docker_creates_missing_network(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        networks = SimpleNamespace(
+            get=MagicMock(side_effect=KeyError("missing")),
+            create=MagicMock(),
+        )
+
+        class NotFound(KeyError):
+            pass
+
+        networks.get.side_effect = NotFound("missing")
+        docker_module = SimpleNamespace(
+            from_env=lambda: SimpleNamespace(networks=networks),
+            errors=SimpleNamespace(NotFound=NotFound),
+        )
+        remote_module = SimpleNamespace(DockerExecutor=MagicMock())
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        monkeypatch.setattr(pool, "_build_system_docker_executor", MagicMock(return_value=executor))
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock()
+        )
+
+        assert result is executor
+        networks.create.assert_called_once_with(sandbox_module.SANDBOX_NETWORK_NAME, driver="bridge")
+
+    def test_evictor_loop_runs_maintenance_once(self, monkeypatch):
+        pool = SandboxPoolManager()
+        pool._stop_evict = MagicMock()
+        pool._stop_evict.wait.side_effect = [False, True]
+        monkeypatch.setattr(pool, "_evict_idle", MagicMock())
+        monkeypatch.setattr(pool, "_clean_stale", MagicMock())
+
+        pool._start_evictor()
+        pool._evict_thread.join(timeout=2)
+
+        pool._evict_idle.assert_called_once_with(sandbox_module.logger)
+        pool._clean_stale.assert_called_once_with(sandbox_module.logger)
 
     def test_evict_and_clean_stale_keep_survivors(self):
         pool = SandboxPoolManager.get_instance()
