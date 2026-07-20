@@ -54,6 +54,7 @@ config:
     endpoint: "http://nexent-minio:9000"
     region: "cn-north-1"
     defaultBucket: "nexent"
+    secure: "true"
   elasticsearch:
     host: "http://nexent-elasticsearch:9200"
     javaOpts: "-Xms2g -Xmx2g"
@@ -184,6 +185,30 @@ config:
     logoutUrl: ""
     sslVerify: "true"
     caBundle: ""
+  sandbox:
+    # Default sandbox isolation level: local / docker / wasm.
+    # 'local' preserves backward-compatibility for existing deployments.
+    defaultLevel: "local"
+    # Default sandbox container lifecycle scope: session / system.
+    # session = one container per agent_run, destroyed on run end (strictest isolation).
+    # system  = persistent warm pool shared by all runs (lowest cold-start latency).
+    defaultScope: "session"
+    # Docker image used when level is 'docker'.
+    dockerImage: "nexent/nexent-sandbox:latest"
+    # Sandbox resource limits.
+    memoryLimitMb: "512"
+    cpuQuota: "1.0"
+    # Sandbox execution timeout per step (seconds).
+    timeoutSeconds: "30"
+    # Sandbox network policy: enabled / disabled.
+    network: "disabled"
+    # Shell execution policy: disabled / restricted / boxed.
+    # 'disabled' is recommended — blocks subprocess/os shell calls at AST-parse time.
+    shellPolicy: "disabled"
+    # MinIO bucket for sandbox output file sync.
+    outputBucket: "nexent-artifacts"
+    # Automatically sync sandbox output files to MinIO after each run.
+    autoSyncOutputs: "true"
 
 # Secrets used by common templates
 secrets:

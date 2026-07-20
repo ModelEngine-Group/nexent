@@ -3642,3 +3642,95 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+# =============================================================================
+# Sandbox Policy Builder
+# =============================================================================
+
+
+def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
+    """
+    Assemble a sandbox policy dict from ``NEXENT_SANDBOX_*`` environment variables.
+
+    This is the canonical factory used by the backend service layer to resolve
+    ``SandboxConfig`` for every agent run.  It is called before constructing
+    ``AgentRunInfo`` so that the resolved config flows into ``NexentAgent``.
+
+    Resolution order:
+      1. ``AgentConfig.sandbox_policy`` from the DB (takes precedence).
+      2. ``NEXENT_SANDBOX_*`` environment variables (fallback when DB has no policy).
+
+    Args:
+        tenant_id: tenant identifier (reserved for future per-tenant overrides).
+        agent_type: agent type string (reserved for future per-type overrides).
+
+    Returns:
+        A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
+    """
+    from nexent.core.agents.sandbox import SandboxConfig
+    from consts.const import (
+        NEXENT_SANDBOX_DEFAULT_LEVEL,
+        NEXENT_SANDBOX_DEFAULT_SCOPE,
+        NEXENT_SANDBOX_DOCKER_IMAGE,
+        NEXENT_SANDBOX_MEMORY_LIMIT_MB,
+        NEXENT_SANDBOX_CPU_QUOTA,
+        NEXENT_SANDBOX_TIMEOUT_S,
+        NEXENT_SANDBOX_NETWORK_DISABLED,
+        NEXENT_SANDBOX_SHELL_POLICY,
+        NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+    )
+
+    level = NEXENT_SANDBOX_DEFAULT_LEVEL
+    if level == "local":
+        return None
+
+    return {
+        "level": level,
+        "scope": NEXENT_SANDBOX_DEFAULT_SCOPE,
+        "docker_image": NEXENT_SANDBOX_DOCKER_IMAGE,
+        "memory_limit_mb": NEXENT_SANDBOX_MEMORY_LIMIT_MB,
+        "cpu_quota": NEXENT_SANDBOX_CPU_QUOTA,
+        "timeout_seconds": NEXENT_SANDBOX_TIMEOUT_S,
+        "network_disabled": NEXENT_SANDBOX_NETWORK_DISABLED,
+        "shell_policy": NEXENT_SANDBOX_SHELL_POLICY,
+        "auto_sync_outputs": NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+    }
+
+
+def get_sandbox_minio_client() -> Optional[Any]:
+    """
+    Build and return a MinIO client for sandbox output sync.
+
+    Returns None when MinIO is not configured (safe no-op).
+
+    The caller is responsible for managing the client lifecycle — this function
+    returns a fresh client on each call so the caller can call ``close()`` on it
+    after the run finishes.
+    """
+    from consts.const import (
+        NEXENT_SANDBOX_OUTPUT_BUCKET,
+        MINIO_ENDPOINT,
+        MINIO_ACCESS_KEY,
+        MINIO_SECRET_KEY,
+        MINIO_SECURE,
+    )
+
+    if not MINIO_ENDPOINT:
+        return None
+
+    try:
+        from nexent.storage import MinIOStorageClient
+    except ImportError:
+        return None
+
+    client = MinIOStorageClient(
+        endpoint=MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY or "",
+        secret_key=MINIO_SECRET_KEY or "",
+        region=None,
+        default_bucket=NEXENT_SANDBOX_OUTPUT_BUCKET,
+        secure=MINIO_SECURE,
+    )
+    return client
+

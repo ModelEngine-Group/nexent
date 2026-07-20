@@ -43,6 +43,11 @@ def _tool_name(tool_obj: Any) -> str:
     )
 
 
+def _has_host_tools(tools: List[Any]) -> bool:
+    """Return whether the agent has tools marked for host-process execution."""
+    return any(getattr(tool, "_nexent_execute_on_host", False) for tool in tools)
+
+
 def _is_retriever_tool(tool_obj: Any) -> bool:
     """Classify tools that should use RETRIEVER rather than TOOL semantics."""
     name = type(tool_obj).__name__
@@ -142,14 +147,21 @@ class NexentAgent:
     def __init__(self, observer: MessageObserver,
                  model_config_list: List[ModelConfig],
                  stop_event: Event,
-                 mcp_tool_collection=None):
+                 mcp_tool_collection=None,
+                 sandbox_config=None,
+                 minio_client=None):
         """
-        init the agent create factory
+        Initialize the NexentAgent factory.
 
         Args:
-            mcp_tool_collection:
-            observer:
-            model_config_list:
+            observer: MessageObserver instance for streaming events.
+            model_config_list: List of ModelConfig for model selection.
+            stop_event: threading.Event to interrupt execution.
+            mcp_tool_collection: Optional MCP tool collection.
+            sandbox_config: Optional SandboxConfig for sandbox isolation.
+                When None, uses LocalPythonExecutor (backwards-compatible).
+            minio_client: Optional MinIO client for output file sync.
+                Required when sandbox_config.auto_sync_outputs is True.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -158,6 +170,8 @@ class NexentAgent:
         self.model_config_list = model_config_list
         self.stop_event = stop_event
         self.mcp_tool_collection = mcp_tool_collection
+        self.sandbox_config = sandbox_config
+        self.minio_client = minio_client
 
         self.agent = None
 
@@ -388,11 +402,21 @@ class NexentAgent:
                 tool_obj = self.create_builtin_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
+            if source in {"local", "builtin", "mcp"}:
+                setattr(tool_obj, "_nexent_execute_on_host", True)
             return tool_obj
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
-    def create_single_agent(self, agent_config: AgentConfig):
+    def create_single_agent(self, agent_config: AgentConfig, _managed_context: bool = False):
+        """
+        Build a CoreAgent from ``agent_config``.
+
+        Args:
+            agent_config: AgentConfig describing this agent.
+            _managed_context: Internal flag.  When True, skip sandbox creation so that
+                managed sub-agents share the parent's python_executor (smolagents contract).
+        """
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
 
@@ -422,9 +446,11 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create internal managed agents recursively
+                # Recurse for managed agents.  Mark _managed_context=True so they
+                # do NOT create their own sandbox (smolagents contract: managed
+                # sub-agents share the parent's python_executor).
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config)
+                    self.create_single_agent(sub_agent_config, _managed_context=True)
                     for sub_agent_config in agent_config.managed_agents
                 ]
             except Exception as e:
@@ -466,6 +492,54 @@ class NexentAgent:
 
                 context_runtime = LegacyContextRuntime()
 
+            # Build the code executor unless this is a managed sub-agent that
+            # shares the parent's executor. Generated Python remains in the
+            # configured sandbox; host-marked tools are exposed through proxies.
+            python_executor = None
+            if not _managed_context and self.sandbox_config is not None:
+                from .sandbox import build_python_executor, SandboxLevel
+                has_managed = bool(
+                    agent_config.managed_agents
+                    or getattr(agent_config, "external_a2a_agents", [])
+                )
+                python_executor = build_python_executor(
+                    config=self.sandbox_config,
+                    logger_=logger,
+                    managed_agents_exist=has_managed,
+                    host_tools_exist=_has_host_tools(tool_list),
+                )
+                # Eager warm-up for remote executors (skip for LOCAL which is instant).
+                if self.sandbox_config.level != SandboxLevel.LOCAL:
+                    try:
+                        warm_start = time.time()
+                        python_executor("[0, None]")
+                        warm_dur = time.time() - warm_start
+                        backend = getattr(python_executor, "_nexent_backend", "unknown")
+                        if backend == "local":
+                            logger.warning(
+                                "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
+                                "(scope=%s, warm-up %.2fs)",
+                                self.sandbox_config.level.value,
+                                self.sandbox_config.scope.value,
+                                warm_dur,
+                            )
+                        else:
+                            logger.info(
+                                "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
+                                warm_dur,
+                                backend,
+                                self.sandbox_config.level.value,
+                                self.sandbox_config.scope.value,
+                            )
+                    except Exception as warm_err:
+                        logger.warning(
+                            "Sandbox warm-up failed (%s): %s",
+                            self.sandbox_config.level.value,
+                            warm_err,
+                        )
+                # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                self._sandbox_scope = self.sandbox_config.scope.value
+
             # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
@@ -481,6 +555,7 @@ class NexentAgent:
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
                 context_runtime=context_runtime,
+                executor=python_executor,
             )
             agent.stop_event = self.stop_event
 
@@ -610,6 +685,7 @@ class NexentAgent:
 
                 finally:
                     self._log_step_metrics()
+                    self._cleanup_sandbox()
 
             if final_answer_for_trace is not None:
                 if hasattr(self.agent, "step_metrics"):
@@ -709,3 +785,57 @@ class NexentAgent:
         # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+
+    def _cleanup_sandbox(self) -> None:
+        """
+        Clean up the sandbox executor after an agent run.
+
+        For ``scope=session``: the executor is immediately destroyed.
+        For ``scope=system``: the executor is returned to the warm pool for reuse.
+
+        Must run AFTER any output-sync logic, because the container filesystem
+        is inaccessible after the executor is released / destroyed.
+        """
+        executor = getattr(self.agent, "python_executor", None)
+        if executor is None:
+            return
+
+        scope = getattr(self, "_sandbox_scope", None)
+
+        # Sync outputs to MinIO before destroying the container.
+        if (
+            self.sandbox_config is not None
+            and self.sandbox_config.auto_sync_outputs
+            and self.minio_client is not None
+        ):
+            from .sandbox import _sync_outputs_to_minio
+            agent_run_id = getattr(self.agent, "agent_run_id", None) or "unknown"
+            try:
+                uploaded = _sync_outputs_to_minio(
+                    output_dir=self.sandbox_config.output_dir,
+                    agent_run_id=agent_run_id,
+                    minio_client=self.minio_client,
+                    bucket="nexent-artifacts",
+                    logger_=logger,
+                )
+                if uploaded:
+                    logger.info(
+                        "Synced %d output file(s) to MinIO for run %s",
+                        len(uploaded),
+                        agent_run_id,
+                    )
+            except Exception as exc:
+                logger.error("Output sync to MinIO failed: %s", exc)
+
+        # Release or destroy the executor.
+        if scope == "system":
+            # Return to pool for reuse.
+            from .sandbox import release_python_executor
+            release_python_executor(executor, logger)
+        else:
+            # Session scope or unknown — destroy the container.
+            from .sandbox import cleanup_executor
+            cleanup_executor(executor, logger, timeout=5.0)
+
+        # Clear the reference so GC can collect the wrapper objects.
+        self.agent.python_executor = None

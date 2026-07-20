@@ -276,6 +276,8 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         observer=basic_agent_run_info.observer,
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
+        sandbox_config=None,
+        minio_client=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -373,6 +375,8 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
         mcp_tool_collection=mock_tool_collection,
+        sandbox_config=None,
+        minio_client=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow

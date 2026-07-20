@@ -1302,15 +1302,18 @@ def test_create_tool_with_mcp_source(nexent_agent_instance):
         metadata={},
     )
 
+    mcp_tool = MagicMock()
     with patch.object(
             nexent_agent_instance,
             "create_mcp_tool",
-            return_value="mcp_tool",
+            return_value=mcp_tool,
     ) as mock_create_mcp_tool:
         result = nexent_agent_instance.create_tool(tool_config)
 
     mock_create_mcp_tool.assert_called_once_with("DummyTool")
-    assert result == "mcp_tool"
+    assert result is mcp_tool
+    assert result._nexent_execute_on_host is True
+    assert nexent_agent._wrap_tool_with_monitoring(result, "test-agent")._nexent_execute_on_host is True
 
 
 def test_create_tool_invalid_source(nexent_agent_instance):

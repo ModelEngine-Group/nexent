@@ -160,7 +160,9 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent = NexentAgent(
                 observer=agent_run_info.observer,
                 model_config_list=agent_run_info.model_config_list,
-                stop_event=agent_run_info.stop_event
+                stop_event=agent_run_info.stop_event,
+                sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                minio_client=getattr(agent_run_info, "minio_client", None),
             )
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
@@ -180,7 +182,9 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
                     stop_event=agent_run_info.stop_event,
-                    mcp_tool_collection=tool_collection
+                    mcp_tool_collection=tool_collection,
+                    sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                    minio_client=getattr(agent_run_info, "minio_client", None),
                 )
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)

@@ -20,6 +20,7 @@ from nexent.core.models.capacity_budget import (
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
+from nexent.core.agents.sandbox import SandboxConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
@@ -1477,6 +1478,16 @@ async def create_agent_run_info(
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history)
 
+    # Resolve sandbox config: DB policy overrides env-var defaults.
+    # build_sandbox_policy returns None when level=local (backward-compatible).
+    # Import inside function body to avoid circular dependency.
+    from services.agent_service import build_sandbox_policy, get_sandbox_minio_client
+    sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
+    agent_db_policy = getattr(agent_config, "sandbox_policy", None)
+    merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
+    sandbox_config = SandboxConfig.from_dict(merged_policy) if merged_policy else None
+    minio_client = get_sandbox_minio_client() if sandbox_config and sandbox_config.auto_sync_outputs else None
+
     agent_run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_list,
@@ -1491,5 +1502,7 @@ async def create_agent_run_info(
             "safe_input_budget_snapshot",
             None,
         ),
+        sandbox_config=sandbox_config,
+        minio_client=minio_client,
     )
     return agent_run_info
