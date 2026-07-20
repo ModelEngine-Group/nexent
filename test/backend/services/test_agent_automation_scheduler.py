@@ -2,6 +2,7 @@ import importlib
 import sys
 import types
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -163,3 +164,97 @@ async def test_executor_passes_lease_owner_as_fencing_token(monkeypatch):
         "trigger_type": "SCHEDULED",
         "lease_owner": "scheduler-a",
     }
+
+
+@pytest.mark.asyncio
+async def test_store_pauses_invalid_string_misfire_after_restart(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    updates = []
+    task = {
+        "task_id": 42,
+        "tenant_id": "tenant",
+        "user_id": "user",
+        "schedule_mode": "RECURRING",
+        "next_fire_at": "2026-07-18T02:00:00",
+        "schedule_config": {"mode": "RECURRING", "rule_type": "CRON"},
+    }
+    store = scheduler_module.AgentAutomationLeaseStore()
+    store._recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "update_task_if_lock_owner",
+        lambda *args: updates.append(args[-1]) or None,
+    )
+
+    assert await store._skip_claimed_misfire(task, "scheduler-a") is True
+    assert updates[0]["status"] == "PAUSED_BY_SYSTEM"
+    assert updates[0]["next_fire_at"] is None
+    assert updates[0]["last_error"] == "Invalid schedule configuration during restart recovery."
+
+
+@pytest.mark.asyncio
+async def test_store_completes_misfire_without_future_occurrence(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    updates = []
+    task = {
+        "task_id": 42,
+        "tenant_id": "tenant",
+        "user_id": "user",
+        "schedule_mode": "RECURRING",
+        "next_fire_at": datetime(2026, 7, 18, 2, 0, tzinfo=timezone.utc),
+        "schedule_config": {
+            "mode": "RECURRING",
+            "rule_type": "INTERVAL",
+            "timezone": "UTC",
+            "start_at": "2026-07-01T00:00:00+00:00",
+            "interval_seconds": 60,
+        },
+    }
+    store = scheduler_module.AgentAutomationLeaseStore()
+    store._recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(scheduler_module, "compute_next_fire_at", lambda *args: None)
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "update_task_if_lock_owner",
+        lambda *args: updates.append(args[-1]) or args[-1],
+    )
+
+    assert await store._skip_claimed_misfire(task, "scheduler-a") is True
+    assert updates[0]["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_store_renews_and_releases_owner_lease(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "renew_task_lock", lambda *args: True)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_task_lock", lambda *args: True)
+    store = scheduler_module.AgentAutomationLeaseStore()
+
+    assert await store.renew("42", "scheduler-a", 30) is True
+    assert await store.release("42", "scheduler-a") is True
+
+
+@pytest.mark.asyncio
+async def test_scheduler_wrapper_honors_feature_flag_and_delegates_lifecycle(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    service = scheduler_module.AgentAutomationScheduler()
+    inner = types.SimpleNamespace(
+        owner_id="scheduler-a",
+        is_running=True,
+        start=AsyncMock(),
+        stop=AsyncMock(),
+    )
+    service._scheduler = inner
+
+    assert service.instance_id == "scheduler-a"
+    assert service.is_running is True
+
+    monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", False)
+    await service.start()
+    inner.start.assert_not_awaited()
+
+    monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", True)
+    await service.start()
+    await service.stop()
+    inner.start.assert_awaited_once()
+    inner.stop.assert_awaited_once()
