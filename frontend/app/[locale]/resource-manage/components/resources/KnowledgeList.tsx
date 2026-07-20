@@ -47,7 +47,9 @@ type ProgressWarningLevel =
   | KBQuotaStatus["kb_warning_level"]
   | QuotaUsageResponse["tenant_warning_level"];
 
-function getProgressColor(level: ProgressWarningLevel | null | undefined): string {
+function getProgressColor(
+  level: ProgressWarningLevel | null | undefined
+): string {
   return level ? STROKE_COLORS[level] : STROKE_COLORS.normal;
 }
 
@@ -390,17 +392,25 @@ export default function KnowledgeList({
         // No soft quota: plain text display with inline edit capability
         if (!quotaData || !quotaData.soft_quota_bytes) {
           return (
-            <div
-              style={{ cursor: "pointer", minWidth: 100 }}
+            <button
+              type="button"
+              style={{
+                padding: 0,
+                border: 0,
+                background: "none",
+                cursor: "pointer",
+                minWidth: 100,
+                textAlign: "left",
+              }}
               onClick={() =>
                 startEditQuota(indexName, quotaData?.soft_quota_bytes ?? null)
               }
             >
               <span style={{ color: "#666" }}>{displaySize}</span>
-              <div style={{ fontSize: 10, color: "#999" }}>
+              <span style={{ display: "block", fontSize: 10, color: "#999" }}>
                 {t("quota.unlimited", "No limit")}
-              </div>
-            </div>
+              </span>
+            </button>
           );
         }
 
@@ -416,10 +426,22 @@ export default function KnowledgeList({
 
         return (
           <div
-            style={{ minWidth: 130, cursor: "pointer" }}
+            role="button"
+            tabIndex={0}
+            style={{
+              minWidth: 130,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
             onClick={() =>
               startEditQuota(indexName, quotaData.soft_quota_bytes)
             }
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                startEditQuota(indexName, quotaData.soft_quota_bytes);
+              }
+            }}
           >
             <Progress
               percent={Math.min(usagePct, 100)}
@@ -535,8 +557,16 @@ export default function KnowledgeList({
         <div className="flex items-center justify-between mb-2 px-1">
           {tenantUsagePct != null && tenantTotalReadable ? (
             <div
+              role="button"
+              tabIndex={0}
               className="flex items-center gap-2 cursor-pointer flex-1 mr-4"
               onClick={() => setQuotaModalVisible(true)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setQuotaModalVisible(true);
+                }
+              }}
             >
               <span className="text-sm text-gray-600">
                 {t("quota.tenantUsage", "Tenant Usage")}:

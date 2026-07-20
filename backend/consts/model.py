@@ -547,7 +547,7 @@ class AgentInfoRequest(BaseModel):
     business_description: Optional[str] = None
     author: Optional[str] = None
     model_ids: Optional[List[int]] = None
-    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
+    max_steps: Optional[int] = Field(default=None, ge=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
@@ -717,17 +717,9 @@ class AgentRepositoryListingCreateRequest(BaseModel):
     icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
     downloads: int = Field(0, ge=0, description="Initial download/copy count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
-    category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
     tool_count: Optional[int] = Field(
         None, ge=0, description="Total tool count across all agents in the bundle"
     )
-
-
-class AgentRepositoryCategoryItem(BaseModel):
-    """Marketplace category option for agent repository filtering."""
-    id: int
-    key: str
-    name: str
 
 
 class AgentRepositoryListingDetailResponse(BaseModel):
@@ -746,6 +738,39 @@ class AgentRepositoryListingDetailResponse(BaseModel):
     model_name: Optional[str] = None
     duty_prompt: Optional[str] = None
     tools: List[str] = Field(default_factory=list)
+
+
+class SkillRepositoryListingCreateRequest(BaseModel):
+    """Request body for creating a marketplace listing from a skill snapshot."""
+    icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
+    downloads: int = Field(0, ge=0, description="Initial download count for card display")
+    tags: Optional[List[str]] = Field(None, description="Marketplace tags")
+    category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+
+
+class SkillRepositoryInstallRequest(BaseModel):
+    """Request body for installing a repository skill into current tenant."""
+    target_name: Optional[str] = Field(None, description="Target skill name in current tenant")
+
+
+class SkillRepositoryListingDetailResponse(BaseModel):
+    """Detailed marketplace listing payload for skill repository detail view."""
+    skill_repository_id: int
+    skill_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    source: Optional[str] = None
+    submitted_by: Optional[str] = None
+    icon: Optional[str] = None
+    status: str
+    category_id: Optional[int] = None
+    tags: List[str] = Field(default_factory=list)
+    downloads: int = 0
+    created_at: Optional[str] = None
+    content: Optional[str] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
+    tool_ids: List[int] = Field(default_factory=list)
 
 
 class SkillZipEntry(BaseModel):
@@ -1083,6 +1108,14 @@ class ManageTenantModelCreateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
+    context_window_tokens: Optional[int] = Field(None, description="Total combined input/output context window in tokens")
+    max_input_tokens: Optional[int] = Field(None, description="Provider hard input-token limit")
+    max_output_tokens: Optional[int] = Field(None, description="Provider-supported completion output cap")
+    default_output_reserve_tokens: Optional[int] = Field(None, description="Default output allowance reserved per request")
+    tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
+    capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
+    capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
     # W11 accept-signal fields. Same audit-only contract as ModelRequest:
     # the app layer pops them off model_data before the dict reaches the
     # service/DB layer and forwards them to
@@ -1114,6 +1147,14 @@ class ManageTenantModelUpdateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
+    context_window_tokens: Optional[int] = Field(None, description="Total combined input/output context window in tokens")
+    max_input_tokens: Optional[int] = Field(None, description="Provider hard input-token limit")
+    max_output_tokens: Optional[int] = Field(None, description="Provider-supported completion output cap")
+    default_output_reserve_tokens: Optional[int] = Field(None, description="Default output allowance reserved per request")
+    tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
+    capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
+    capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
     # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
     # contract. The app layer pops them before calling the service so
     # update_model_record never sees them.
@@ -1131,6 +1172,10 @@ class ManageTenantModelHealthcheckRequest(BaseModel):
     """Request model for checking model connectivity in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to check model connectivity")
     display_name: str = Field(..., description="Display name of the model to check")
+    model_type: Optional[str] = Field(
+        None,
+        description="Model type to disambiguate models with the same display name",
+    )
 
 
 class ManageBatchCreateModelsRequest(BaseModel):
@@ -1268,6 +1313,7 @@ class SkillFileData(BaseModel):
 
 class SkillUpdateRequest(BaseModel):
     """Request model for updating a skill."""
+    name: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
     tool_ids: Optional[List[int]] = None
@@ -1330,6 +1376,8 @@ class AddMcpServiceRequest(BaseModel):
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)")
+    market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
@@ -1348,6 +1396,7 @@ class AddContainerMcpServiceRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     port: int = Field(..., ge=1, le=65535, description="Host port for the container")
     mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
 
@@ -1368,8 +1417,11 @@ class UpdateMcpServiceRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+    config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON")
+    version: Optional[str] = Field(None, description="MCP version")
+    market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
 
-    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1390,6 +1442,13 @@ class DisableMcpServiceRequest(BaseModel):
 class HealthcheckMcpServiceRequest(BaseModel):
     """Request model for checking MCP service health"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID to health check")
+
+
+class TestMcpConnectionRequest(BaseModel):
+    """Request model for testing MCP server connectivity (lightweight handshake)"""
+    server_url: str = Field(..., min_length=1, description="MCP server URL to test")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
 
 
 class ListMcpToolsRequest(BaseModel):
@@ -1450,18 +1509,35 @@ class CommunityListRequest(BaseModel):
         return value
 
 
+class CommunityReviewListRequest(CommunityListRequest):
+    """Request model for listing MCP community review submissions"""
+    status: Optional[str] = Field(None, description="Review status filter")
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _strip_status(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityReviewActionRequest(BaseModel):
+    """Request model for approving or rejecting an MCP community submission"""
+    review_id: int = Field(..., gt=0, description="Review record ID")
+
+
 class CommunityPublishRequest(BaseModel):
     """Publish a local MCP to the community; optional fields override the snapshot."""
 
     mcp_id: int = Field(..., gt=0, description="MCP record ID to publish")
     name: Optional[str] = Field(None, description="Community display name override")
     description: Optional[str] = Field(None, description="Description override")
-    version: Optional[str] = Field(None, description="Version override")
     tags: Optional[List[str]] = Field(None, description="Tags override")
     mcp_server: Optional[str] = Field(None, max_length=500, description="Remote MCP server URL override (URL / HTTP / SSE transports)")
     config_json: Optional[Dict[str, Any]] = Field(None, description="Container MCP configuration JSON override")
 
-    @field_validator("name", "description", "version", "mcp_server", mode="before")
+    @field_validator("name", "description", "mcp_server", mode="before")
     @classmethod
     def _strip_publish_optional_text(cls, value: Any):
         if isinstance(value, str):
@@ -1472,24 +1548,30 @@ class CommunityPublishRequest(BaseModel):
 
 class CommunityUpdateRequest(BaseModel):
     """Request model for updating community MCP service"""
-    community_id: int = Field(..., gt=0, description="Community record ID")
+    market_id: int = Field(..., gt=0, description="Market record ID")
     name: Optional[str] = Field(default=None, min_length=1, description="New MCP service name")
     description: Optional[str] = Field(None, description="MCP service description")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
-    version: Optional[str] = Field(None, description="MCP version")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    mcp_server: Optional[str] = Field(None, max_length=500, description="MCP server URL")
+    transport_type: Optional[str] = Field(None, description="Transport type")
     config_json: Optional[Dict[str, Any]] = Field(
         None,
         description="Container MCP configuration JSON (omit to leave unchanged)",
     )
 
-    @field_validator("name", "description", "version", mode="before")
+    @field_validator("name", "description", "mcp_server", "transport_type", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None
         return value
+
+
+class CommunityStatusUpdateRequest(BaseModel):
+    """Request model for changing MCP market listing status (PATCH)."""
+    status: str = Field(..., description="New status: shared / rejected / not_shared / pending_review")
 
 
 class DeleteMcpServiceRequest(BaseModel):

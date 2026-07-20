@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Modal, Button, Switch, App, Tooltip, Input } from "antd";
@@ -406,6 +406,77 @@ export const ModelDeleteDialog = ({
     return anyModelWithUrl?.apiUrl || undefined;
   };
 
+  const overlaySavedModelConfig = useCallback(
+    (
+      providerModel: any,
+      provider: ModelSource,
+      modelType: ModelType | null,
+      options?: { preferProviderValues?: boolean }
+    ) => {
+      const existingModel = models.find(
+        (m) =>
+          m.name === providerModel.id &&
+          m.type === (providerModel.model_type || modelType) &&
+          m.source === provider
+      );
+      if (!existingModel) return providerModel;
+
+      const pickValue = <T,>(
+        providerValue: T | undefined,
+        savedValue: T | undefined
+      ) =>
+        options?.preferProviderValues
+          ? (providerValue ?? savedValue)
+          : (savedValue ?? providerValue);
+
+      return {
+        ...providerModel,
+        saved_model_id: existingModel.id,
+        model_factory: existingModel.source ?? providerModel.model_factory,
+        max_tokens: pickValue(
+          providerModel.max_tokens,
+          existingModel.maxTokens
+        ),
+        timeout_seconds: pickValue(
+          providerModel.timeout_seconds,
+          existingModel.timeoutSeconds
+        ),
+        concurrency_limit: pickValue(
+          providerModel.concurrency_limit,
+          existingModel.concurrencyLimit
+        ),
+        context_window_tokens: pickValue(
+          providerModel.context_window_tokens,
+          existingModel.contextWindowTokens
+        ),
+        max_input_tokens: pickValue(
+          providerModel.max_input_tokens,
+          existingModel.maxInputTokens
+        ),
+        max_output_tokens: pickValue(
+          providerModel.max_output_tokens,
+          existingModel.maxOutputTokens
+        ),
+        default_output_reserve_tokens: pickValue(
+          providerModel.default_output_reserve_tokens,
+          existingModel.defaultOutputReserveTokens
+        ),
+        tokenizer_family: pickValue(
+          providerModel.tokenizer_family,
+          existingModel.tokenizerFamily
+        ),
+        capacity_source: pickValue(
+          providerModel.capacity_source,
+          existingModel.capacitySource
+        ),
+        capability_profile_version:
+          existingModel.capabilityProfileVersion ??
+          providerModel.capability_profile_version,
+      };
+    },
+    [models]
+  );
+
   // Prefetch provider model list (supports Silicon, ModelEngine, DashScope, TokenPony)
   const prefetchProviderModels = async (
     provider: ModelSource,
@@ -449,7 +520,11 @@ export const ModelDeleteDialog = ({
         return;
       }
 
-      setProviderModels(result || []);
+      const providerRows = (result || []).map((providerModel: any) =>
+        overlaySavedModelConfig(providerModel, provider, modelType)
+      );
+
+      setProviderModels(providerRows);
       // Initialize pending selected switch states (based on current models status)
       const currentIds = new Set(
         models
@@ -458,7 +533,7 @@ export const ModelDeleteDialog = ({
       );
       setPendingSelectedProviderIds(
         new Set(
-          (result || [])
+          providerRows
             .map((pm: any) => pm.id)
             .filter((id: string) => currentIds.has(id))
         )
@@ -650,13 +725,12 @@ export const ModelDeleteDialog = ({
   }, [providerModels, providerModelSearchTerm]);
 
   // Per-row required capacity gate for the provider-management batch confirm.
-  // Unlike ModelAddDialog this dialog has no top-level "batch default capacity"
-  // panel, so each enabled row must itself carry positive context_window_tokens
-  // and max_output_tokens (set via the per-row gear modal). Without this gate
-  // the user could batch-confirm an LLM/VLM row whose catalog supplied no W2
-  // metadata, persisting context_window_tokens=NULL, max_output_tokens=NULL,
-  // and only the backend's DEFAULT_LLM_MAX_TOKENS=4096 legacy sentinel -- the
-  // exact glm-5.2 production incident we just root-caused.
+  // Each enabled LLM/VLM row must resolve to positive context_window_tokens
+  // and max_output_tokens. The values may come from the provider catalog, the
+  // saved model record, the per-row gear modal, or the provider bulk config.
+  // Without this gate the user could batch-confirm a row whose catalog
+  // supplied no W2 metadata, persisting context_window_tokens=NULL and
+  // max_output_tokens=NULL.
   //
   // We deliberately don't fall back to model.max_tokens here: per the W1/W2
   // plan the legacy column is unconditionally seeded by the provider
@@ -673,13 +747,28 @@ export const ModelDeleteDialog = ({
     if (modelType === MODEL_TYPES.RERANK) return false;
     return true;
   };
+  const hasPositiveW2Capacity = (model: any): boolean =>
+    Number(model.context_window_tokens) > 0 &&
+    Number(model.max_output_tokens) > 0;
+
   const hasUnconfiguredSelectedRow = useMemo(() => {
     if (!requiresW2Capacity(deletingModelType as ModelType)) return false;
     return providerModels.some((m: any) => {
       if (!pendingSelectedProviderIds.has(m.id)) return false;
-      return !m.context_window_tokens || !m.max_output_tokens;
+      const resolvedModel = selectedSource
+        ? overlaySavedModelConfig(m, selectedSource, deletingModelType, {
+            preferProviderValues: true,
+          })
+        : m;
+      return !hasPositiveW2Capacity(resolvedModel);
     });
-  }, [providerModels, pendingSelectedProviderIds, deletingModelType]);
+  }, [
+    providerModels,
+    pendingSelectedProviderIds,
+    deletingModelType,
+    selectedSource,
+    overlaySavedModelConfig,
+  ]);
 
   // Handle provider config save. In addition to the shared API key /
   // timeoutSeconds / concurrencyLimit, the "modify config" dialog now also
@@ -1531,33 +1620,13 @@ export const ModelDeleteDialog = ({
                                 // row in snake_case so the edit dialog
                                 // pre-fills context_window_tokens etc. instead
                                 // of showing empty fields.
-                                const settingsTarget = existingModel
-                                  ? {
-                                      ...providerModel,
-                                      max_tokens:
-                                        existingModel.maxTokens ??
-                                        providerModel.max_tokens,
-                                      timeout_seconds:
-                                        existingModel.timeoutSeconds ??
-                                        providerModel.timeout_seconds,
-                                      concurrency_limit:
-                                        existingModel.concurrencyLimit ??
-                                        providerModel.concurrency_limit,
-                                      context_window_tokens:
-                                        existingModel.contextWindowTokens,
-                                      max_input_tokens:
-                                        existingModel.maxInputTokens,
-                                      max_output_tokens:
-                                        existingModel.maxOutputTokens,
-                                      default_output_reserve_tokens:
-                                        existingModel.defaultOutputReserveTokens,
-                                      tokenizer_family:
-                                        existingModel.tokenizerFamily,
-                                      capacity_source:
-                                        existingModel.capacitySource,
-                                      capability_profile_version:
-                                        existingModel.capabilityProfileVersion,
-                                    }
+                                const settingsTarget = selectedSource
+                                  ? overlaySavedModelConfig(
+                                      providerModel,
+                                      selectedSource,
+                                      deletingModelType,
+                                      { preferProviderValues: true }
+                                    )
                                   : providerModel;
                                 handleSingleModelSettingsClick(settingsTarget);
                               }}
@@ -1814,6 +1883,16 @@ export const ModelDeleteDialog = ({
         }
         modelType={deletingModelType || undefined}
         showApiKeyField={false}
+        modelName={
+          selectedSingleModel?.model_name ||
+          selectedSingleModel?.name ||
+          selectedSingleModel?.id ||
+          ""
+        }
+        baseUrl={getProviderBaseUrlByType(deletingModelType) || ""}
+        providerHint={
+          selectedSingleModel?.model_factory || selectedSource || ""
+        }
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {
@@ -1837,7 +1916,9 @@ export const ModelDeleteDialog = ({
                   : baseName;
 
             const updatePayload: any = {
-              model_id: qualifiedId,
+              model_id: selectedSingleModel.saved_model_id
+                ? String(selectedSingleModel.saved_model_id)
+                : qualifiedId,
               maxTokens: config.maxTokens,
               timeoutSeconds: config.timeoutSeconds,
               concurrencyLimit: config.concurrencyLimit,
@@ -1847,16 +1928,25 @@ export const ModelDeleteDialog = ({
               defaultOutputReserveTokens: config.defaultOutputReserveTokens,
               tokenizerFamily: config.tokenizerFamily,
               capacitySource: config.capacitySource,
+              ...(config.acceptedSuggestionMatchKind
+                ? {
+                    accepted_suggestion_match_kind:
+                      config.acceptedSuggestionMatchKind,
+                  }
+                : {}),
+              ...(config.acceptedCapabilityProfileVersion
+                ? {
+                    accepted_capability_profile_version:
+                      config.acceptedCapabilityProfileVersion,
+                  }
+                : {}),
             };
 
             if (config.apiKey) {
               updatePayload.apiKey = config.apiKey;
             }
 
-            await modelService.updateBatchModel(
-              [updatePayload],
-              selectedSingleModel.model_factory
-            );
+            await modelService.updateBatchModel([updatePayload], provider);
 
             // Update the model in the list
             setProviderModels((prev) =>
@@ -1874,10 +1964,14 @@ export const ModelDeleteDialog = ({
                         config.defaultOutputReserveTokens,
                       tokenizer_family: config.tokenizerFamily,
                       capacity_source: config.capacitySource,
+                      saved_model_id: selectedSingleModel.saved_model_id,
+                      model_factory: provider || model.model_factory,
                     }
                   : model
               )
             );
+
+            await onSuccess();
 
             message.success(
               t("model.message.updateSuccess") || "Update successful"

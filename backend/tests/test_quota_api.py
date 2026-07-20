@@ -251,7 +251,7 @@ class TestGetTenantQuotaUsage:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_bytes"] == 50 * GB
-        assert data["usage_pct"] == 50.0
+        assert data["usage_pct"] == pytest.approx(50.0)
         assert data["tenant_warning_level"] == "normal"
 
     def test_detail_includes_breakdown(self, client, mock_auth_admin, mock_quota_service):
@@ -479,16 +479,19 @@ class TestQuotaEnforcementAPI:
             hard_limit_bytes=1024,
             exceeded_by_bytes=1024,
         )
+        upload_file = MagicMock()
         with patch(
             "apps.file_management_app.get_current_user_id",
             return_value=("user-id", "tenant-id"),
+        ), patch(
+            "apps.file_management_app.require_knowledge_base_edit_permission"
         ), patch(
             "apps.file_management_app.upload_files_impl",
             side_effect=error,
         ):
             with pytest.raises(QuotaExceededError) as raised:
                 await upload_files(
-                    file=[MagicMock()],
+                    file=[upload_file],
                     destination="minio",
                     folder="knowledge_base",
                     index_name="test-index",

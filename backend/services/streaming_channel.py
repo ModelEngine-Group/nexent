@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import Dict, Optional, AsyncIterator, List
 
+from services.runtime_state_service import runtime_state_service
+
 logger = logging.getLogger(__name__)
 
 # Default history buffer size (kept for backward compatibility with callers).
@@ -84,6 +86,12 @@ class StreamingChannel:
 
         async with self._lock:
             self._history_buffer.append(chunk)
+
+        await runtime_state_service.append_stream_event_async(
+            user_id=self.user_id,
+            conversation_id=self.conversation_id,
+            chunk=chunk,
+        )
 
         # Wake up waiting subscribers immediately
         self._data_event.set()
@@ -276,6 +284,11 @@ class StreamingChannelManager:
         channel = self.get_channel(conversation_id, user_id)
         if channel:
             channel.complete(status)
+        await runtime_state_service.mark_stream_completed_async(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            status=status,
+        )
 
     async def remove_channel(self, conversation_id: int, user_id: str):
         """Remove a channel from the manager."""

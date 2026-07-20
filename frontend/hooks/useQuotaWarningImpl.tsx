@@ -26,7 +26,7 @@ import type {
 } from "@/types/quota";
 
 const DISMISS_PREFIX = "quota_warning_dismissed";
-const DISMISS_TTL_MS = 5 * 1000;
+const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
 
 function getDismissKey(
   userId: string,
@@ -239,9 +239,7 @@ export function useQuotaWarning(
           const wasProgrammatic = programmaticCloseRef.current.delete(key);
           if (!wasProgrammatic) {
             for (const item of items) {
-              setDismissed(
-                getDismissKey(dismissOwner, scope, item.id, level)
-              );
+              setDismissed(getDismissKey(dismissOwner, scope, item.id, level));
             }
           }
           unregisterNotificationKey(key);
@@ -287,20 +285,36 @@ export function useQuotaWarning(
           <div>
             <p>{item.description}</p>
             {scope === "tenant" && (
-              <a
+              <button
+                type="button"
                 onClick={navigateToQuotaManagement}
-                style={{ cursor: "pointer" }}
+                style={{
+                  padding: 0,
+                  border: 0,
+                  background: "none",
+                  color: "#1677ff",
+                  cursor: "pointer",
+                  font: "inherit",
+                }}
               >
                 {t("quota.warning.manageTenant")}
-              </a>
+              </button>
             )}
             {scope === "kb" && userRole === "ADMIN" && (
-              <a
+              <button
+                type="button"
                 onClick={navigateToQuotaManagement}
-                style={{ cursor: "pointer" }}
+                style={{
+                  padding: 0,
+                  border: 0,
+                  background: "none",
+                  color: "#1677ff",
+                  cursor: "pointer",
+                  font: "inherit",
+                }}
               >
                 {t("quota.warning.manageKb")}
-              </a>
+              </button>
             )}
           </div>
         );
@@ -316,14 +330,22 @@ export function useQuotaWarning(
               })}
             </p>
             {(scope === "tenant" || userRole === "ADMIN") && (
-              <a
+              <button
+                type="button"
                 onClick={navigateToQuotaManagement}
-                style={{ cursor: "pointer" }}
+                style={{
+                  padding: 0,
+                  border: 0,
+                  background: "none",
+                  color: "#1677ff",
+                  cursor: "pointer",
+                  font: "inherit",
+                }}
               >
                 {scope === "tenant"
                   ? t("quota.warning.manageTenant")
                   : t("quota.warning.manageKb")}
-              </a>
+              </button>
             )}
           </div>
         );
@@ -331,7 +353,7 @@ export function useQuotaWarning(
 
       const notificationId = activeItems
         .map((item) => item.id)
-        .sort()
+        .sort((left, right) => left.localeCompare(right))
         .join("|");
       notify(level, message, description, scope, notificationId, activeItems);
     },

@@ -1,6 +1,7 @@
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;
+  agent_id?: number | null;
   create_time: number;
   update_time: number;
 }
@@ -33,6 +34,7 @@ export interface ApiMessage {
 export interface ApiConversationDetail {
   create_time: number;
   conversation_id: number;
+  agent_id?: number | null;
   message: ApiMessage[];
 }
 

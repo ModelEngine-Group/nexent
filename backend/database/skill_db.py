@@ -35,7 +35,8 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     Returns:
         Created or updated SkillInstance object
     """
-    skill_info_dict = skill_info.__dict__ if hasattr(skill_info, '__dict__') else skill_info
+    skill_info_dict = skill_info.__dict__ if hasattr(
+        skill_info, '__dict__') else skill_info
     skill_info_dict = skill_info_dict.copy()
     skill_info_dict.setdefault("tenant_id", tenant_id)
     skill_info_dict.setdefault("user_id", user_id)
@@ -178,7 +179,6 @@ def delete_skill_instances_by_tenant(tenant_id: str, user_id: str) -> int:
         return count
 
 
-
 # ============== SkillInfo Repository Functions ==============
 
 
@@ -188,6 +188,46 @@ def _get_tool_ids(session, skill_id: int) -> List[int]:
         SkillToolRelation.skill_id == skill_id
     ).all()
     return [r.tool_id for r in relations]
+
+
+def _build_skill_update_values(
+    skill_data: Dict[str, Any],
+    updated_by: Optional[str],
+) -> Dict[str, Any]:
+    row_values: Dict[str, Any] = {"update_time": datetime.now()}
+    if updated_by:
+        row_values["updated_by"] = updated_by
+
+    field_mapping = {
+        "description": "skill_description",
+        "content": "skill_content",
+        "tags": "skill_tags",
+        "source": "source",
+    }
+    for input_field, model_field in field_mapping.items():
+        if input_field in skill_data:
+            row_values[model_field] = skill_data[input_field]
+
+    for field in ("config_schemas", "config_values"):
+        if field in skill_data:
+            row_values[field] = _params_value_for_db(skill_data[field])
+    return row_values
+
+
+def _replace_skill_tool_relations(
+    session,
+    skill_id: int,
+    tool_ids: List[int],
+) -> None:
+    session.query(SkillToolRelation).filter(
+        SkillToolRelation.skill_id == skill_id
+    ).delete()
+    for tool_id in tool_ids:
+        session.add(SkillToolRelation(
+            skill_id=skill_id,
+            tool_id=tool_id,
+            create_time=datetime.now(),
+        ))
 
 
 def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
@@ -323,8 +363,10 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
             skill_description=skill_data.get("description", ""),
             skill_tags=skill_data.get("tags", []),
             skill_content=skill_data.get("content", ""),
-            config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
-            config_values=_params_value_for_db(skill_data.get("config_values")),
+            config_schemas=_params_value_for_db(
+                skill_data.get("config_schemas")),
+            config_values=_params_value_for_db(
+                skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
@@ -383,23 +425,7 @@ def update_skill(
             raise ValueError(f"Skill not found: {skill_name}")
 
         skill_id = skill.skill_id
-        now = datetime.now()
-        row_values: Dict[str, Any] = {"update_time": now}
-        if updated_by:
-            row_values["updated_by"] = updated_by
-
-        if "description" in skill_data:
-            row_values["skill_description"] = skill_data["description"]
-        if "content" in skill_data:
-            row_values["skill_content"] = skill_data["content"]
-        if "tags" in skill_data:
-            row_values["skill_tags"] = skill_data["tags"]
-        if "source" in skill_data:
-            row_values["source"] = skill_data["source"]
-        if "config_schemas" in skill_data:
-            row_values["config_schemas"] = _params_value_for_db(skill_data["config_schemas"])
-        if "config_values" in skill_data:
-            row_values["config_values"] = _params_value_for_db(skill_data["config_values"])
+        row_values = _build_skill_update_values(skill_data, updated_by)
 
         session.execute(
             sa_update(SkillInfo)
@@ -411,17 +437,11 @@ def update_skill(
         )
 
         if "tool_ids" in skill_data:
-            session.query(SkillToolRelation).filter(
-                SkillToolRelation.skill_id == skill_id
-            ).delete()
-
-            for tool_id in skill_data["tool_ids"]:
-                rel = SkillToolRelation(
-                    skill_id=skill_id,
-                    tool_id=tool_id,
-                    create_time=datetime.now()
-                )
-                session.add(rel)
+            _replace_skill_tool_relations(
+                session,
+                skill_id,
+                skill_data["tool_ids"],
+            )
 
         session.commit()
 
@@ -432,6 +452,74 @@ def update_skill(
         ).first()
         if not refreshed:
             raise ValueError(f"Skill not found after update: {skill_name}")
+
+        result = _to_dict(refreshed)
+        result["tool_ids"] = skill_data.get(
+            "tool_ids",
+            _get_tool_ids(session, skill_id),
+        )
+        return result
+
+
+def update_skill_by_id(
+    skill_id: int,
+    skill_data: Dict[str, Any],
+    tenant_id: str,
+    updated_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update an existing skill by ID for a tenant."""
+    with get_db_session() as session:
+        skill = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != "Y",
+        ).first()
+
+        if not skill:
+            raise ValueError(f"Skill not found: {skill_id}")
+
+        row_values = _build_skill_update_values(skill_data, updated_by)
+
+        if "name" in skill_data:
+            new_name = str(skill_data["name"] or "").strip()
+            if not new_name:
+                raise ValueError("Skill name is required")
+            if new_name != skill.skill_name:
+                duplicate = session.query(SkillInfo).filter(
+                    SkillInfo.skill_name == new_name,
+                    SkillInfo.tenant_id == tenant_id,
+                    SkillInfo.skill_id != skill_id,
+                    SkillInfo.delete_flag != "Y",
+                ).first()
+                if duplicate:
+                    raise ValueError(f"Skill '{new_name}' already exists")
+                row_values["skill_name"] = new_name
+        session.execute(
+            sa_update(SkillInfo)
+            .where(
+                SkillInfo.skill_id == skill_id,
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.delete_flag != "Y",
+            )
+            .values(**row_values)
+        )
+
+        if "tool_ids" in skill_data:
+            _replace_skill_tool_relations(
+                session,
+                skill_id,
+                skill_data["tool_ids"],
+            )
+
+        session.commit()
+
+        refreshed = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != "Y",
+        ).first()
+        if not refreshed:
+            raise ValueError(f"Skill not found after update: {skill_id}")
 
         result = _to_dict(refreshed)
         result["tool_ids"] = skill_data.get(
@@ -600,8 +688,10 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
                 existing.skill_description = skill_data.get("description", "")
                 existing.skill_tags = skill_data.get("tags", [])
                 existing.skill_content = skill_data.get("content", "")
-                existing.config_schemas = _params_value_for_db(skill_data.get("config_schemas"))
-                existing.config_values = _params_value_for_db(skill_data.get("config_values"))
+                existing.config_schemas = _params_value_for_db(
+                    skill_data.get("config_schemas"))
+                existing.config_values = _params_value_for_db(
+                    skill_data.get("config_values"))
                 existing.updated_by = user_id
             else:
                 new_skill = SkillInfo(
@@ -610,8 +700,10 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
                     skill_description=skill_data.get("description", ""),
                     skill_tags=skill_data.get("tags", []),
                     skill_content=skill_data.get("content", ""),
-                    config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
-                    config_values=_params_value_for_db(skill_data.get("config_values")),
+                    config_schemas=_params_value_for_db(
+                        skill_data.get("config_schemas")),
+                    config_values=_params_value_for_db(
+                        skill_data.get("config_values")),
                     source=skill_data.get("source", "official"),
                     created_by=user_id,
                     updated_by=user_id,

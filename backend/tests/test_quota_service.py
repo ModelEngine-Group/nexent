@@ -266,7 +266,7 @@ class TestQuotaSummary:
         assert result["soft_allocated_total_bytes"] == 40 * GB  # 30 + 0 + 10
         assert result["kb_count"] == 3
         assert result["kbs_with_quota"] == 2
-        assert result["oversubscription_ratio"] == 0.4  # 40/100
+        assert result["oversubscription_ratio"] == pytest.approx(0.4)  # 40/100
 
     def test_summary_no_quotas(self, quota_service, mock_knowledge_db):
         mock_knowledge_db["get_knowledge_info_by_tenant_id"].return_value = []

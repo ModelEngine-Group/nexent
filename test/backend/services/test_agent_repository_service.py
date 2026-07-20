@@ -171,7 +171,6 @@ def test_list_repository_listings_passes_agent_id_to_db():
         publisher_tenant_id="tenant_a",
         status="shared",
         agent_id=123,
-        category_id=None,
     )
     assert [item["agent_repository_id"] for item in result["items"]] == [1]
     assert result["pagination"] == {
@@ -258,33 +257,25 @@ def test_list_repository_listings_paginates_filtered_records():
     }
 
 
-def test_list_repository_listings_search_matches_author_and_tags():
+def test_list_repository_listings_search_matches_tags():
     records = [
         {
             **_repository_record(agent_repository_id=1, status="shared"),
-            "author": "alice@example.com",
-            "tags": [],
+            "tags": ["sales"],
         },
         {
             **_repository_record(agent_repository_id=2, status="shared"),
-            "author": "bob@example.com",
             "tags": ["marketing"],
         },
     ]
 
     with patch.object(ars, "list_agent_repository_summaries", return_value=records):
-        by_author = ars.list_agent_repository_listings_impl(
-            "tenant_a",
-            status="shared",
-            search="alice",
-        )
         by_tag = ars.list_agent_repository_listings_impl(
             "tenant_a",
             status="shared",
             search="marketing",
         )
 
-    assert [item["agent_repository_id"] for item in by_author["items"]] == [1]
     assert [item["agent_repository_id"] for item in by_tag["items"]] == [2]
 
 
@@ -325,24 +316,19 @@ def test_validate_card_fields_requires_structural_values():
     with pytest.raises(ValueError, match="icon is required"):
         ars._validate_create_payload(base)
 
-    with pytest.raises(ValueError, match="category_id is required"):
-        ars._validate_create_payload({**base, "icon": "🤖"})
-
     with pytest.raises(ValueError, match="tags is required"):
-        ars._validate_create_payload({**base, "icon": "🤖", "category_id": 1})
+        ars._validate_create_payload({**base, "icon": "🤖"})
 
     with pytest.raises(ValueError, match="non-empty string"):
         ars._validate_create_payload({
             **base,
             "icon": "   ",
-            "category_id": 1,
             "tags": ["marketing"],
         })
 
     ars._validate_create_payload({
         **base,
         "icon": "🤖",
-        "category_id": 99,
         "tags": ["marketing"],
     })
 
@@ -1278,7 +1264,6 @@ def test_count_tools_in_snapshot_invalid_input(snapshot):
 async def test_build_repository_data_from_agent_merges_card_fields():
     card_fields = {
         "icon": "📊",
-        "category_id": 3,
         "tags": [" 数据 ", "数据", "自定义标签"],
         "downloads": 10,
     }
@@ -1306,7 +1291,6 @@ async def test_build_repository_data_from_agent_merges_card_fields():
         )
 
     assert repository_data["icon"] == "📊"
-    assert repository_data["category_id"] == 3
     assert repository_data["tags"] == ["数据", "自定义标签"]
     assert repository_data["downloads"] == 10
     assert repository_data["tool_count"] == 0
@@ -1426,7 +1410,6 @@ async def test_create_agent_repository_listing_impl_success():
             "agent_info_json": agent_info_json,
             "status": "pending_review",
             "icon": "🤖",
-            "category_id": 1,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1488,7 +1471,6 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "agent_info_json": agent_info_json,
             "status": "pending_review",
             "icon": "🤖",
-            "category_id": 1,
             "tags": ["营销"],
             "tool_count": 3,
         }
@@ -1526,7 +1508,6 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "status": "pending_review",
             "icon": "🤖",
             "tags": ["营销"],
-            "category_id": 1,
             "tool_count": 3,
         },
     )
@@ -1561,7 +1542,6 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
             "agent_info_json": agent_info_json,
             "status": "pending_review",
             "icon": "🤖",
-            "category_id": 1,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1702,7 +1682,6 @@ def test_validate_create_payload_requires_agent_info_json():
         "version_no": 1,
         "name": "agent_one",
         "icon": "🤖",
-        "category_id": 1,
         "tags": ["营销"],
     }
 

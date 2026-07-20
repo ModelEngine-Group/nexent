@@ -1,57 +1,24 @@
-import { useEffect, useState } from "react";
-import { App, Modal, Input, Button, Form, Tooltip } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, App, Button, Form, Input, Modal } from "antd";
+import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
-  GitFork,
-  Globe,
-  Link,
-  Package,
-  Zap,
-  Wrench,
-  Calendar,
-  Activity,
-  Server,
-  Tag as TagIcon,
-  ExternalLink,
-  Trash2,
-  Upload,
-  Pencil,
-  Save,
-  X,
-  Settings,
-  Play,
-  Square,
-  RefreshCw,
-  Eye,
-  FileText,
-  Container,
-} from "lucide-react";
-import {
-  McpHealthStatus,
+  McpDeploymentType,
   McpServiceStatus,
   McpTransportType,
   MCP_TOOLS_MODAL_WRAP_CLASS,
   mcpToolsModalChromeStyles,
 } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
-import TransportIcon from "./shared/TransportIcon";
-import {
-  extractRegistryLinks,
-  getContainerStatusKey,
-  getHealthStatusKey,
-  getSourceLabelKey,
-  getTransportLabelKey,
-  toPrettyRegistryJson,
-} from "@/lib/mcpTools";
+import { resolveDeploymentType, toPrettyRegistryJson } from "@/lib/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
-import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
+import ContainerPortField from "./shared/ContainerPortField";
 import TagEditor from "./shared/TagEditor";
 import JsonPreviewModal from "./shared/JsonPreviewModal";
 import PublishConfirmModal from "./PublishConfirmModal";
-import StatusBadge from "./shared/StatusBadge";
 
 interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
@@ -59,10 +26,32 @@ interface McpServiceDetailModalProps {
   onToggled?: (mcpId: number, next: McpServiceStatus) => void;
 }
 
+const DEPLOYMENT_OPTIONS = [
+  {
+    value: McpDeploymentType.REMOTE_LINK,
+    labelKey: "mcpTools.deploymentType.remoteLink",
+    Icon: LinkOutlined,
+  },
+  {
+    value: McpDeploymentType.CONTAINER,
+    labelKey: "mcpTools.deploymentType.container",
+    Icon: ContainerOutlined,
+  },
+  {
+    value: McpDeploymentType.API,
+    labelKey: "mcpTools.deploymentType.api",
+    Icon: ApiOutlined,
+  },
+  {
+    value: McpDeploymentType.LOCAL_IMAGE,
+    labelKey: "mcpTools.deploymentType.localImage",
+    Icon: CloudOutlined,
+  },
+] as const;
+
 export default function McpServiceDetailModal({
   selectedService,
   onClose,
-  onToggled: onStatusChanged,
 }: McpServiceDetailModalProps) {
   const { modal } = App.useApp();
   const { t } = useTranslation("common");
@@ -72,20 +61,49 @@ export default function McpServiceDetailModal({
   const [showServerJson, setShowServerJson] = useState(false);
   const [showConfigJson, setShowConfigJson] = useState(false);
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [deploymentType, setDeploymentType] = useState<McpDeploymentType>(
+    McpDeploymentType.REMOTE_LINK
+  );
+  const [draftTags, setDraftTags] = useState<string[]>([]);
+  const [containerPort, setContainerPort] = useState<number | undefined>();
 
   const detail = useMcpServiceDetail({ selectedService, onClose });
   const { draft } = detail;
-  const toggle = useMcpServiceToggle();
+
+  const originalDeploymentType = useMemo(
+    () =>
+      draft
+        ? resolveDeploymentType({
+            transportType: draft.transportType,
+            deploymentType: draft.deploymentType,
+            configJson: draft.configJson,
+            serverUrl: draft.serverUrl,
+          })
+        : McpDeploymentType.REMOTE_LINK,
+    [draft]
+  );
 
   useEffect(() => {
     if (!draft) return;
+    const nextDeploymentType = resolveDeploymentType({
+      transportType: draft.transportType,
+      deploymentType: draft.deploymentType,
+      configJson: draft.configJson,
+      serverUrl: draft.serverUrl,
+    });
+    setDeploymentType(nextDeploymentType);
+    setDraftTags(draft.tags ?? []);
+    setContainerPort(draft.containerPort);
     form.setFieldsValue({
       name: draft.name,
       description: draft.description,
+      version: draft.version,
       serverUrl: draft.serverUrl,
       authorizationToken: draft.authorizationToken ?? "",
       customHeaders: draft.customHeaders ? JSON.stringify(draft.customHeaders, null, 2) : "",
+      openApiJson: toPrettyRegistryJson(draft.configJson),
+      containerConfigJson: toPrettyRegistryJson(draft.configJson),
+      containerPort: draft.containerPort,
     });
   }, [draft, form]);
 
@@ -93,26 +111,34 @@ export default function McpServiceDetailModal({
     return null;
   }
 
-  const toolsRefreshing = toggle.isRefreshing(selectedService.mcpId);
-  const toggleLoading = toggle.isToggling(selectedService.mcpId);
-  const toggleBusy = toggleLoading || toolsRefreshing;
-
+  const isRemoteLink = deploymentType === McpDeploymentType.REMOTE_LINK;
+  const isContainer = deploymentType === McpDeploymentType.CONTAINER;
+  const isApi = deploymentType === McpDeploymentType.API;
+  const isUnsupported =
+    deploymentType === McpDeploymentType.LOCAL_IMAGE ||
+    deploymentType !== originalDeploymentType;
   const hasRegistryJson = Boolean(draft.registryJson);
   const hasConfigJson = Boolean(draft.configJson);
-  const { websiteUrl, repositoryUrl } = extractRegistryLinks(
-    draft.registryJson
-  );
-  const isHttpLike = draft.transportType !== McpTransportType.CONTAINER;
+
+  const addTag = (tag: string) => {
+    const next = tag.trim();
+    if (!next || draftTags.includes(next)) return;
+    setDraftTags((prev) => [...prev, next]);
+  };
+
+  const removeTag = (index: number) => {
+    setDraftTags((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleSave = async () => {
+    if (isUnsupported) return;
     try {
       await form.validateFields();
     } catch {
       return;
     }
-    // Sync form values to draft before saving
+
     const values = form.getFieldsValue();
-    // Parse custom headers JSON if provided
     let parsedCustomHeaders: Record<string, string> | undefined;
     if (values.customHeaders?.trim()) {
       try {
@@ -124,60 +150,42 @@ export default function McpServiceDetailModal({
         return;
       }
     }
-    detail.setDraft((prev) => prev ? {
-      ...prev,
+
+    let parsedConfigJson = draft.configJson;
+    if (isApi) {
+      try {
+        parsedConfigJson = JSON.parse(String(values.openApiJson || "").trim());
+      } catch {
+        modal.error({
+          content: t("mcpConfig.openApiToMcp.message.invalidJson"),
+        });
+        return;
+      }
+    }
+    if (isContainer) {
+      try {
+        parsedConfigJson = JSON.parse(String(values.containerConfigJson || "").trim());
+      } catch {
+        modal.error({
+          content: t("mcpTools.add.error.containerJsonInvalid"),
+        });
+        return;
+      }
+    }
+
+    const nextDraft = {
+      ...draft,
       name: values.name ?? "",
       description: values.description ?? "",
+      version: values.version ?? "",
       serverUrl: values.serverUrl ?? "",
       authorizationToken: values.authorizationToken ?? "",
       customHeaders: parsedCustomHeaders,
-    } : prev);
-    await detail.save();
-    setIsEditing(false);
-  };
-
-  const handleStartEdit = () => {
-    // Ensure form has current values when entering edit mode
-    form.setFieldsValue({
-      name: draft.name,
-      description: draft.description,
-      serverUrl: draft.serverUrl,
-      authorizationToken: draft.authorizationToken ?? "",
-      customHeaders: draft.customHeaders ? JSON.stringify(draft.customHeaders, null, 2) : "",
-    });
-    setIsEditing(true);
-  };
-
-  const handleCancelEdit = () => {
-    form.setFieldsValue({
-      name: draft.name,
-      description: draft.description,
-      serverUrl: draft.serverUrl,
-      authorizationToken: draft.authorizationToken ?? "",
-      customHeaders: draft.customHeaders ? JSON.stringify(draft.customHeaders, null, 2) : "",
-    });
-    setIsEditing(false);
-  };
-
-  const handleDeleteClick = () => {
-    modal.confirm({
-      title: t("mcpTools.delete.confirmTitle"),
-      centered: true,
-      content: (
-        <div className="space-y-1">
-          <p className="text-sm text-slate-600 break-all">
-            {selectedService.name}
-          </p>
-          <p className="text-xs text-slate-400">
-            {t("mcpTools.delete.confirmDesc")}
-          </p>
-        </div>
-      ),
-      okText: t("mcpTools.delete.confirmOk"),
-      cancelText: t("mcpTools.delete.confirmCancel"),
-      okButtonProps: { danger: true },
-      onOk: () => detail.remove(),
-    });
+      configJson: parsedConfigJson,
+      tags: draftTags,
+    };
+    detail.setDraft(nextDraft);
+    await detail.save(nextDraft);
   };
 
   return (
@@ -187,371 +195,279 @@ export default function McpServiceDetailModal({
         footer={null}
         closable
         centered
-        width={620}
+        width={720}
         style={{ top: 20 }}
         onCancel={onClose}
         wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS}`}
         styles={mcpToolsModalChromeStyles()}
       >
-        <Form
-          form={form}
-          className="bg-gradient-to-b from-slate-50 to-white"
-        >
-          {/* Header - Name, Description, Status and Actions */}
-          <div className="border-b border-slate-200/60 bg-white px-6 py-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                {/* Title and Description */}
-                <div className="min-h-[60px]">
-                  {isEditing ? (
-                    <div className="space-y-2">
-                      <Form.Item name="name" className="mb-0" rules={rules.name}>
-                        <Input
-                          className="rounded-lg font-semibold text-lg"
-                          placeholder={t("mcpTools.detail.name")}
-                        />
-                      </Form.Item>
-                      <Form.Item name="description" className="mb-0" rules={rules.description}>
-                        <Input.TextArea
-                          className="rounded-lg"
-                          placeholder={t("mcpTools.detail.description")}
-                          autoSize={{ minRows: 1, maxRows: 3 }}
-                        />
-                      </Form.Item>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-3">
-                        <TransportIcon
-                          transportType={draft.transportType}
-                          label={draft.transportType}
-                          className="!h-10 !w-10"
-                        />
-                        <div className="flex items-center gap-3 min-w-0">
-                          <h2 className="text-xl font-semibold tracking-tight text-slate-900 truncate">
-                            {draft.name}
-                          </h2>
-                          <StatusBadge status={draft.enabled} />
-                        </div>
-                      </div>
-                      <p className="mt-1.5 text-sm text-slate-500 line-clamp-2">
-                        {draft.description || t("mcpTools.detail.noDescription")}
-                      </p>
-                    </>
-                  )}
-                </div>
-              </div>
+        <div className="bg-white">
+          <div className="border-b border-slate-100 px-6 py-5">
+            <h2 className="text-2xl font-semibold text-slate-900">
+              {t("mcpTools.detail.editTitle")}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {t("mcpTools.detail.editSubtitle")}
+            </p>
+          </div>
 
-              {/* Action Buttons - Edit Mode */}
-              {isEditing ? (
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    onClick={handleCancelEdit}
-                    icon={<X className="h-4 w-4" />}
-                  >
-                    {t("common.cancel")}
-                  </Button>
-                  <Button
-                    type="primary"
-                    loading={detail.saving}
-                    onClick={handleSave}
-                    icon={<Save className="h-4 w-4" />}
-                  >
-                    {t("common.save")}
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    onClick={handleStartEdit}
-                    icon={<Pencil className="h-4 w-4" />}
-                  >
-                    {t("common.edit")}
-                  </Button>
-                </div>
-              )}
+          <Form
+            form={form}
+            layout="vertical"
+            requiredMark={false}
+            className="space-y-5 px-6 py-5"
+          >
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">
+                {t("mcpTools.detail.addMethod")}
+              </label>
+              <div className="grid grid-cols-4 gap-3">
+                {DEPLOYMENT_OPTIONS.map(({ value, labelKey, Icon }) => {
+                  const selected = deploymentType === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setDeploymentType(value)}
+                      className={`flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm transition ${
+                        selected
+                          ? "border-blue-500 bg-blue-50 text-blue-600 shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/40"
+                      }`}
+                    >
+                      <Icon className="text-xl" />
+                      <span>{t(labelKey)}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Action Buttons - Non-Edit Mode */}
-            {!isEditing && (
-              <div className="mt-3 -mx-6 px-6">
-                <div className="flex items-center gap-2">
-                  {/* Enable/Disable Button */}
-                  <Button
-                    type={draft.enabled === McpServiceStatus.ENABLED ? "default" : "primary"}
-                    autoInsertSpace={false}
-                    loading={toggleLoading}
-                    disabled={toggleBusy}
-                    onClick={async () => {
-                      const next = await toggle.toggle(selectedService);
-                      onStatusChanged?.(selectedService.mcpId as number, next);
-                    }}
-                    className={`flex-1 !shadow-none ${draft.enabled === McpServiceStatus.ENABLED ? "!bg-slate-100 !border-slate-200 !text-slate-700 hover:!bg-slate-200" : ""}`}
-                  >
-                    <span className="flex items-center justify-center gap-2">
-                      {draft.enabled === McpServiceStatus.ENABLED ? (
-                        <Square className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                      {draft.enabled === McpServiceStatus.ENABLED
-                        ? t("mcpTools.detail.disable")
-                        : t("mcpTools.detail.enable")}
-                    </span>
-                  </Button>
+            {isUnsupported ? (
+              <Alert
+                type="info"
+                showIcon
+                message={t("mcpTools.addModal.unsupportedTitle")}
+                description={
+                  deploymentType !== originalDeploymentType
+                    ? t("mcpTools.detail.deploymentChangeUnsupported")
+                    : t("mcpTools.addModal.unsupportedDescription")
+                }
+              />
+            ) : null}
 
-                  {/* Health Check Button */}
-                  <Tooltip title={detail.healthChecking ? t("mcpTools.detail.healthChecking") : t("mcpTools.detail.healthCheck")}>
-                    <Button
-                      onClick={detail.runHealthCheck}
-                      loading={detail.healthChecking}
-                      icon={<RefreshCw className={`h-4 w-4 ${detail.healthChecking ? "animate-spin" : ""}`} />}
-                    />
-                  </Tooltip>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("mcpTools.detail.serviceName")}
+              </label>
+              <Form.Item name="name" rules={rules.name} className="mb-0">
+                <Input className="w-full rounded-md" />
+              </Form.Item>
+            </div>
 
-                  {/* Publish and Delete Buttons */}
-                  <div className="flex gap-2 shrink-0">
-                    <Tooltip title={t("mcpTools.community.publish")}>
-                      <Button
-                        loading={detail.publishing}
-                        onClick={() => setPublishConfirmOpen(true)}
-                        icon={<Upload className="h-4 w-4" />}
-                      />
-                    </Tooltip>
-
-                    <Tooltip title={t("common.delete")}>
-                      <Button
-                        danger
-                        autoInsertSpace={false}
-                        loading={detail.deleting}
-                        onClick={handleDeleteClick}
-                        icon={<Trash2 className="h-4 w-4" />}
-                      />
-                    </Tooltip>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Content */}
-          <div className="px-6 py-5 space-y-5">
-            {/* Service Status Section - First */}
-            <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Zap className="h-4 w-4 text-slate-400" />
-                {t("mcpTools.detail.serviceStatus")}
-              </h3>
-              <div className="space-y-3">
-                <InfoRow
-                  icon={<Package className="h-3.5 w-3.5" />}
-                  label={t("mcpTools.detail.source")}
-                  value={t(getSourceLabelKey(draft.source))}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("mcpTools.detail.serviceDescription")}
+              </label>
+              <Form.Item
+                name="description"
+                rules={rules.description}
+                className="mb-0"
+              >
+                <Input.TextArea
+                  autoSize={{ minRows: 4, maxRows: 10 }}
+                  className="w-full rounded-md"
                 />
-                <InfoRow
-                  icon={<GitFork className="h-3.5 w-3.5" />}
-                  label={t("mcpTools.detail.serverType")}
-                  value={t(getTransportLabelKey(draft.transportType))}
-                />
-                {draft.transportType === McpTransportType.CONTAINER ? (
-                  <InfoRow
-                    icon={<Server className="h-3.5 w-3.5" />}
-                    label={t("mcpTools.detail.containerStatus")}
-                    value={t(getContainerStatusKey(draft.containerStatus))}
-                    valueClass={getContainerStatusColor(draft.containerStatus)}
-                  />
-                ) : null}
-                <div className="flex items-center justify-between py-1.5">
-                  <div className="flex items-center gap-2 text-slate-500">
-                    <Activity className="h-3.5 w-3.5" />
-                    <span>{t("mcpTools.detail.health")}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusLamp
-                      variant={healthLampVariant(draft.healthStatus)}
-                    />
-                    <span className={`font-medium ${
-                      draft.healthStatus === McpHealthStatus.HEALTHY
-                        ? "text-emerald-600"
-                        : draft.healthStatus === McpHealthStatus.UNHEALTHY
-                          ? "text-rose-600"
-                          : "text-slate-500"
-                    }`}>
-                      {t(getHealthStatusKey(draft.healthStatus))}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              </Form.Item>
+            </div>
 
-              {/* Action Buttons - removed, now in header */}
-            </section>
-
-            {/* Service Configuration Section */}
-            <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Settings className="h-4 w-4 text-slate-400" />
-                {t("mcpTools.detail.serviceConfig")}
-              </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1.5">
-                    {t("mcpTools.detail.serverUrl")}
-                  </label>
-                  <div className="min-h-[38px]">
-                    {isEditing ? (
-                      <Form.Item name="serverUrl" className="mb-0" rules={rules.httpUrl}>
-                        <Input
-                          className="rounded-lg"
-                          placeholder="https://"
-                        />
-                      </Form.Item>
-                    ) : (
-                      <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg">
-                        {draft.serverUrl || "-"}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {isHttpLike && (
+            {isRemoteLink ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("mcpTools.detail.serviceConfigTitle")}
+                </label>
+                <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1.5">
-                      {t("mcpTools.detail.bearerTokenOptional")}
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
+                      {t("mcpTools.addModal.serverUrl")}
                     </label>
-                    <div className="min-h-[38px]">
-                      {isEditing ? (
-                        <Form.Item name="authorizationToken" className="mb-0" rules={rules.authToken}>
-                          <Input.Password
-                            className="rounded-lg"
-                            placeholder={t("mcpTools.detail.bearerTokenPlaceholder")}
-                          />
-                        </Form.Item>
-                      ) : (
-                        <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg">
-                          {draft.authorizationToken ? "••••••••" : "-"}
-                        </div>
-                      )}
-                    </div>
+                    <Form.Item
+                      name="serverUrl"
+                      rules={rules.httpUrl}
+                      className="mb-0"
+                    >
+                      <Input
+                        className="w-full rounded-md"
+                        placeholder={t("mcpTools.addModal.serverUrl")}
+                      />
+                    </Form.Item>
                   </div>
-                )}
 
-                {isHttpLike && (
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1.5">
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
+                      {t("mcpTools.addModal.bearerTokenOptional")}
+                    </label>
+                    <Form.Item
+                      name="authorizationToken"
+                      rules={rules.authToken}
+                      className="mb-0"
+                    >
+                      <Input
+                        className="w-full rounded-md"
+                        placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
                       {t("mcpTools.addModal.customHeaders")}
                     </label>
-                    <div className="min-h-[38px]">
-                      {isEditing ? (
-                        <Form.Item name="customHeaders" className="mb-0">
-                          <Input.TextArea
-                            className="rounded-lg"
-                            placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
-                            autoSize={{ minRows: 1, maxRows: 3 }}
-                          />
-                        </Form.Item>
-                      ) : (
-                        <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg">
-                          {draft.customHeaders ? JSON.stringify(draft.customHeaders) : "-"}
-                        </div>
-                      )}
-                    </div>
+                    <Form.Item name="customHeaders" className="mb-0">
+                      <Input.TextArea
+                        rows={2}
+                        className="w-full rounded-md"
+                        placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
+                      />
+                    </Form.Item>
                   </div>
-                )}
-              </div>
-            </section>
-
-            {/* Links Section */}
-            {(websiteUrl || repositoryUrl) && (
-              <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
-                <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Link className="h-4 w-4 text-slate-400" />
-                  {t("mcpTools.detail.links")}
-                </h3>
-                <div className="space-y-2">
-                  {websiteUrl && (
-                    <LinkRow
-                      icon={<Globe className="h-3.5 w-3.5" />}
-                      label={t("mcpTools.detail.website")}
-                      href={websiteUrl}
-                    />
-                  )}
-                  {repositoryUrl && (
-                    <LinkRow
-                      icon={<GitFork className="h-3.5 w-3.5" />}
-                      label={t("mcpTools.detail.repository")}
-                      href={repositoryUrl}
-                    />
-                  )}
                 </div>
-              </section>
-            )}
-
-            {/* Tools Section */}
-            <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Wrench className="h-4 w-4 text-slate-400" />
-                {t("mcpTools.detail.tools")}
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {draft.containerId && (
-                  <Button
-                    size="small"
-                    autoInsertSpace={false}
-                    onClick={() => setLogsOpen(true)}
-                    icon={<FileText className="h-3.5 w-3.5" />}
-                  >
-                    {t("mcpTools.detail.viewContainerLogs")}
-                  </Button>
-                )}
-                {hasRegistryJson && (
-                  <Button
-                    size="small"
-                    autoInsertSpace={false}
-                    onClick={() => setShowServerJson(true)}
-                    icon={<FileText className="h-3.5 w-3.5" />}
-                  >
-                    {t("mcpTools.registry.viewServerJson")}
-                  </Button>
-                )}
-                {hasConfigJson && (
-                  <Button
-                    size="small"
-                    autoInsertSpace={false}
-                    onClick={() => setShowConfigJson(true)}
-                    icon={<Container className="h-3.5 w-3.5" />}
-                  >
-                    {t("mcpTools.detail.viewConfigJson")}
-                  </Button>
-                )}
-                <Button
-                  size="small"
-                  autoInsertSpace={false}
-                  loading={detail.loadingTools}
-                  onClick={detail.loadTools}
-                  icon={<Eye className="h-3.5 w-3.5" />}
-                >
-                  {t("mcpTools.detail.viewTools")}
-                </Button>
               </div>
-            </section>
+            ) : null}
 
-            {/* Tags Section */}
-            <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <TagIcon className="h-4 w-4 text-slate-400" />
-                {t("mcpTools.detail.tags")}
-              </h3>
+            {isApi ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("mcpTools.detail.serviceConfigTitle")}
+                </label>
+                <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
+                      {t("mcpConfig.openapiService.form.serverUrl")}
+                    </label>
+                    <Form.Item
+                      name="serverUrl"
+                      rules={rules.httpUrl}
+                      className="mb-0"
+                    >
+                      <Input
+                        className="w-full rounded-md"
+                        placeholder={t("mcpConfig.openapiService.form.serverUrlPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
+                      {t("mcpConfig.addServer.customHeaders")}
+                    </label>
+                    <Form.Item name="customHeaders" className="mb-0">
+                      <Input.TextArea
+                        rows={2}
+                        className="w-full rounded-md"
+                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
+                      {t("mcpConfig.openapiService.form.openapiJson")}
+                    </label>
+                    <Form.Item name="openApiJson" className="mb-0">
+                      <Input.TextArea
+                        rows={6}
+                        className="w-full rounded-md"
+                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {isContainer ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("mcpTools.detail.serviceConfigTitle")}
+                </label>
+                <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-normal text-slate-500">
+                      {t("mcpTools.addModal.containerConfig")}
+                    </label>
+                    <Form.Item name="containerConfigJson" className="mb-0">
+                      <Input.TextArea
+                        rows={5}
+                        className="w-full rounded-md bg-white text-slate-600"
+                        placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+
+                  <Form.Item name="containerPort" className="mb-0">
+                    <ContainerPortField
+                      scope="detail"
+                      enabled={false}
+                      containerPort={containerPort}
+                      setContainerPort={(value) => {
+                        setContainerPort(value);
+                        form.setFieldValue("containerPort", value);
+                      }}
+                    />
+                  </Form.Item>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-col gap-4">
               <TagEditor
-                tags={draft.tags}
-                onAddTag={(tag) => detail.addTag(tag || "")}
-                onRemoveTag={detail.removeTag}
+                title={t("mcpTools.detail.tags")}
+                titleClassName="mb-1 block text-sm font-medium text-slate-700"
+                tags={draftTags}
+                onAddTag={(tag) => addTag(tag || "")}
+                onRemoveTag={removeTag}
                 removeAriaKey="mcpTools.detail.removeTagAria"
                 placeholderKey="mcpTools.detail.tagInputPlaceholder"
-                loading={detail.tagSaving}
               />
-            </section>
+            </div>
+          </Form>
+
+          <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
+            <div className="flex gap-2">
+              {draft.containerId ? (
+                <Button onClick={() => setLogsOpen(true)}>
+                  {t("mcpTools.detail.viewContainerLogs")}
+                </Button>
+              ) : null}
+              {hasRegistryJson ? (
+                <Button onClick={() => setShowServerJson(true)}>
+                  {t("mcpTools.registry.viewServerJson")}
+                </Button>
+              ) : null}
+              {hasConfigJson ? (
+                <Button onClick={() => setShowConfigJson(true)}>
+                  {t("mcpTools.detail.viewConfigJson")}
+                </Button>
+              ) : null}
+              <Button loading={detail.loadingTools} onClick={detail.loadTools}>
+                {t("mcpTools.detail.viewTools")}
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button onClick={onClose}>{t("common.cancel")}</Button>
+              <Button
+                type="primary"
+                loading={detail.saving}
+                disabled={isUnsupported}
+                onClick={handleSave}
+              >
+                {t("mcpTools.detail.save")}
+              </Button>
+            </div>
           </div>
-        </Form>
+        </div>
       </Modal>
 
       <McpToolListModal
@@ -596,97 +512,4 @@ export default function McpServiceDetailModal({
       />
     </>
   );
-}
-
-type StatusLampVariant = "success" | "neutral" | "danger";
-
-/** Green / grey / red dot for run-state and health at a glance. */
-function StatusLamp({ variant }: { variant: StatusLampVariant }) {
-  const cls =
-    variant === "success"
-      ? "bg-emerald-500 shadow-[0_0_0_1px_rgba(16,185,129,0.35),0_0_8px_rgba(16,185,129,0.25)]"
-      : variant === "danger"
-        ? "bg-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.35),0_0_8px_rgba(244,63,94,0.2)]"
-        : "bg-slate-300";
-  return (
-    <span
-      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${cls}`}
-      aria-hidden
-    />
-  );
-}
-
-function healthLampVariant(
-  health: McpServiceItem["healthStatus"]
-): StatusLampVariant {
-  if (health === McpHealthStatus.HEALTHY) return "success";
-  if (health === McpHealthStatus.UNHEALTHY) return "danger";
-  return "neutral";
-}
-
-interface InfoRowProps {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  valueClass?: string;
-}
-
-/**
- * Displays a label with icon on the left and value on the right.
- */
-function InfoRow({ icon, label, value, valueClass }: InfoRowProps) {
-  return (
-    <div className="flex items-center justify-between py-1.5">
-      <div className="flex items-center gap-2 text-slate-500">
-        {icon}
-        <span className="text-sm">{label}</span>
-      </div>
-      <span className={`text-sm font-medium ${valueClass || "text-slate-700"}`}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-interface LinkRowProps {
-  icon: React.ReactNode;
-  label: string;
-  href: string;
-}
-
-/**
- * Displays a label with icon on the left and clickable link on the right.
- */
-function LinkRow({ icon, label, href }: LinkRowProps) {
-  return (
-    <div className="flex items-center justify-between py-1.5">
-      <div className="flex items-center gap-2 text-slate-500">
-        {icon}
-        <span className="text-sm">{label}</span>
-      </div>
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700"
-      >
-        <span className="max-w-[200px] truncate">{href.replace(/^https?:\/\//, "")}</span>
-        <ExternalLink className="h-3 w-3 shrink-0" />
-      </a>
-    </div>
-  );
-}
-
-/**
- * Returns the appropriate color class for container status display.
- */
-function getContainerStatusColor(status: string | undefined): string {
-  switch (status) {
-    case "running":
-      return "text-emerald-600";
-    case "stopped":
-      return "text-rose-600";
-    default:
-      return "text-slate-500";
-  }
 }
