@@ -2806,5 +2806,7 @@
   "aidpKnowledge.createChunkOverlapNum": "分块重叠 Token 数",
   "aidpKnowledge.createChunkOverlapNumRequired": "请输入分块重叠 Token 数",
   "aidpKnowledge.createChunkOverlapNumMin": "分块重叠 Token 数必须 ≥ 0",
+  "aidpKnowledge.createCaptionEnable": "启用多模态",
+  "aidpKnowledge.createCaptionEnableHint": "开启后将对知识库中的图片进行文字描述提取",
   "aidpKnowledge.showTotal": "共 {{count}} 条"
 }

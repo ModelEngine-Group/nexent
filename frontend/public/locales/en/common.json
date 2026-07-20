@@ -2815,5 +2815,7 @@
   "aidpKnowledge.createChunkOverlapNum": "Chunk Overlap Token Count",
   "aidpKnowledge.createChunkOverlapNumRequired": "Please enter the chunk overlap token count",
   "aidpKnowledge.createChunkOverlapNumMin": "Chunk overlap token count must be ≥ 0",
+  "aidpKnowledge.createCaptionEnable": "Enable Multimodal ",
+  "aidpKnowledge.createCaptionEnableHint": "When enabled, text descriptions will be extracted from images in the knowledge base",
   "aidpKnowledge.showTotal": "Total {{count}} items"
 }

@@ -154,14 +154,22 @@ class AidpSearchTool(Tool):
         super().__init__()
 
         self.kds_list: List[str] = _parse_kds_list(kds_list)
-        # Fall back to environment variables when an empty string is passed
-        # explicitly (e.g. from a persisted DB config that no longer stores
-        # these credentials). This complements the Field default_factory which
-        # only triggers when the argument is omitted entirely.
-        _server_url = server_url or os.environ.get("AIDP_SERVER_URL", "")
-        _api_key = api_key or os.environ.get("AIDP_API_KEY", "")
-        self.base_url = _server_url.rstrip("/")
-        self.api_key = _api_key
+
+        # --- credential resolution (defense in depth) ---
+        # Three failure modes must all degrade gracefully to env vars:
+        #  1. Argument omitted  → Field(default_factory=...) fills from env
+        #  2. Explicit empty string ("") from a persisted DB config
+        #  3. Non-string value (e.g. a Pydantic FieldInfo dict/object that
+        #     leaked through when _merge_tool_params read a serialized
+        #     FieldInfo from ag_tool_info_t.init_params). Calling .rstrip()
+        #     on a FieldInfo would raise AttributeError, so we coerce first.
+        def _resolve_credential(raw_value: Any, env_name: str) -> str:
+            if isinstance(raw_value, str) and raw_value:
+                return raw_value
+            return os.environ.get(env_name, "")
+
+        self.base_url = _resolve_credential(server_url, "AIDP_SERVER_URL").rstrip("/")
+        self.api_key = _resolve_credential(api_key, "AIDP_API_KEY")
 
         if not self.base_url:
             raise ValueError("server_url is required and must be a non-empty string")
@@ -221,6 +229,28 @@ class AidpSearchTool(Tool):
             raise ValueError("Invalid AIDP response: result field missing or not a list")
         return records
 
+    def _build_image_url(self, file_url: str) -> str:
+        """Build a fully-qualified image URL from the relative ``file_url``
+        returned in an AIDP FusionSearch chunk.
+
+        AIDP returns ``file_url`` as a path relative to the KnowledgeBases
+        prefix on the AIDP host (e.g. ``"aidp-kb-1/data/img.png"``). The
+        image must be fetched via GET with a Bearer token, so we construct
+        the full URL as::
+
+            {base_url}/KnowledgeBase/Tenants/{TenantId}/KnowledgeBases/{file_url}
+
+        If ``file_url`` is already an absolute ``http``/``https`` URL it is
+        returned unchanged (defensive: avoids double-prefixing when a
+        future AIDP version starts returning full URLs).
+        """
+        if not file_url:
+            return ""
+        if file_url.startswith("http://") or file_url.startswith("https://"):
+            return file_url
+        cleaned = file_url.lstrip("/")
+        return f"{self.base_url}{_LIST_PATH}/{cleaned}"
+
     def _emit_running_prompt(self, query: str) -> None:
         """Push the running prompt + query card to the observer if any."""
         if not self.observer:
@@ -279,8 +309,11 @@ class AidpSearchTool(Tool):
             search_results_return.append(msg.to_model_dict())
             chunk_type = str(chunk.get("chunk_type", "text") or "text")
             file_url = str(chunk.get("file_url") or "")
+            # Images require a fully-qualified URL that the image proxy can
+            # fetch with a Bearer token; text/table chunks keep their raw
+            # value because they aren't rendered as <img> tags.
             if chunk_type == "image" and file_url:
-                images_url.append(file_url)
+                images_url.append(self._build_image_url(file_url))
 
         return search_results_json, search_results_return, images_url
 

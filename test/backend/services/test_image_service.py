@@ -706,5 +706,148 @@ async def test_proxy_image_impl_aidp_and_external_urls_use_proxy_path(external_u
     called_url = mock_session.get.call_args[0][0]
     assert called_url.startswith("http://mock-data-process-service/tasks/load_image")
     assert f"url={external_url}" in called_url
-
     assert result == remote_response
+
+
+class TestIsAidpUrl:
+    """``_is_aidp_url`` recognizes AIDP image URLs by matching both host
+    and the ``/KnowledgeBase/Tenants/`` path prefix against env vars, so
+    the proxy only adds the Bearer header to the intended target."""
+
+    def test_matches_when_host_and_path_match(self, monkeypatch):
+        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._is_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+
+    def test_rejects_wrong_host(self, monkeypatch):
+        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        assert not image_service_module._is_aidp_url(
+            "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+
+    def test_rejects_right_host_wrong_path(self, monkeypatch):
+        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        assert not image_service_module._is_aidp_url(
+            "https://aidp.example.com/some/other/path.png"
+        )
+
+    def test_rejects_when_env_empty(self, monkeypatch):
+        monkeypatch.delenv("AIDP_SERVER_URL", raising=False)
+        assert not image_service_module._is_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+
+    def test_ignores_trailing_slash_in_env(self, monkeypatch):
+        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com/")
+        assert image_service_module._is_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+
+
+class TestFetchAidpImage:
+    """``_fetch_aidp_image`` must attach the Bearer header and disable
+    redirects so credentials never leak to a 30x target."""
+
+    @pytest.mark.asyncio
+    async def test_attaches_bearer_header_and_returns_base64(self, monkeypatch):
+        monkeypatch.setenv("AIDP_API_KEY", "secret-key")
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.read = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfake")
+        mock_response.headers = {"Content-Type": "image/png"}
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.object(
+            image_service_module.aiohttp, "ClientSession", return_value=mock_session
+        ):
+            result = await image_service_module._fetch_aidp_image(
+                "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+            )
+
+        assert result["success"] is True
+        assert result["content_type"] == "image/png"
+        # Header and redirect guards asserted
+        call_kwargs = mock_session.get.call_args.kwargs
+        assert call_kwargs["headers"] == {"Authorization": "Bearer secret-key"}
+        assert call_kwargs["allow_redirects"] is False
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_api_key_missing(self, monkeypatch):
+        monkeypatch.delenv("AIDP_API_KEY", raising=False)
+        result = await image_service_module._fetch_aidp_image(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+        assert result["success"] is False
+        assert "not configured" in result["error"]
+
+
+class TestProxyImageImplAidpPath:
+    """End-to-end: when the URL is AIDP-shaped, proxy_image_impl MUST route
+    through the AIDP fetcher, NOT the data-process-service or loopback
+    paths."""
+
+    @pytest.mark.asyncio
+    async def test_aidp_url_short_circuits_to_fetch_aidp_image(self, monkeypatch):
+        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setenv("AIDP_API_KEY", "secret")
+
+        sentinel = {"success": True, "base64": "abc", "content_type": "image/jpeg"}
+        called = {"aidp": False, "direct": False, "dp": False}
+
+        async def fake_aidp(url):
+            called["aidp"] = True
+            return sentinel
+
+        async def fake_direct(url):
+            called["direct"] = True
+
+        aidp_spy = AsyncMock(side_effect=fake_aidp)
+        direct_spy = AsyncMock(side_effect=fake_direct)
+
+        with patch.object(image_service_module, "_fetch_aidp_image", aidp_spy), patch.object(
+            image_service_module, "_fetch_image_directly", direct_spy
+        ):
+            result = await image_service_module.proxy_image_impl(
+                "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+            )
+
+        assert result is sentinel
+        assert called["aidp"] is True
+        assert called["direct"] is False
+
+    @pytest.mark.asyncio
+    async def test_non_aidp_url_does_not_go_through_aidp_path(self, monkeypatch):
+        # Env says AIDP is at a different host → this URL must NOT be
+        # classified as AIDP and must fall through to the loopback check /
+        # data-process fallback.
+        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.delenv("AIDP_API_KEY", raising=False)
+
+        aidp_spy = AsyncMock()
+        # Force the data-process fallback to exit early by making the
+        # ClientSession context manager raise after entering, so we don't
+        # need to fully stub the aiohttp plumbing. We only care that the
+        # AIDP branch was not taken.
+        class _Boom(Exception):
+            pass
+
+        bad_session = MagicMock()
+        bad_session.__aenter__ = AsyncMock(side_effect=_Boom("stop"))
+        bad_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.object(image_service_module, "_fetch_aidp_image", aidp_spy), patch.object(
+            image_service_module, "_validate_loopback_url", return_value=None
+        ), patch.object(
+            image_service_module.aiohttp, "ClientSession", return_value=bad_session
+        ), pytest.raises(_Boom):
+            await image_service_module.proxy_image_impl("https://other.host/img.png")
+
+        aidp_spy.assert_not_called()
