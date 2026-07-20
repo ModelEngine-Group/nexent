@@ -1,7 +1,7 @@
 import time
 import pytest
 
-from sdk.nexent.core.tools.parallel_executor import _parallel_executor
+from sdk.nexent.core.tools.parallel_executor import _parallel_executor, ParallelExecutorTool
 
 
 # ---------------------------------------------------------------------------
@@ -155,3 +155,39 @@ class TestMaxWorkers:
 
         assert len(result) == 2
         assert elapsed < 0.2
+
+
+# ---------------------------------------------------------------------------
+# ParallelExecutorTool (Tool class wrapper)
+# ---------------------------------------------------------------------------
+
+class TestParallelExecutorTool:
+    def test_forward_delegates_to_parallel_executor(self):
+        """ParallelExecutorTool.forward should delegate to _parallel_executor."""
+        tool = ParallelExecutorTool()
+        result = tool.forward(
+            (_echo, {"key": "value"}),
+            (_echo, {"x": 1}),
+        )
+        assert len(result) == 2
+        assert "key" in result[0]
+        assert "x" in result[1]
+
+
+# ---------------------------------------------------------------------------
+# Wrong tuple length
+# ---------------------------------------------------------------------------
+
+class TestWrongTupleLength:
+    def test_tuple_of_length_1_raises_value_error(self):
+        """A 1-tuple (neither 2 nor 3) raises ValueError."""
+        with pytest.raises(ValueError, match="each task must be a 2-tuple"):
+            _parallel_executor((_echo,))
+
+    def test_mixed_length_without_3tuple_raises_value_error(self):
+        """Providing a 2-tuple and a 4-tuple raises ValueError."""
+        with pytest.raises(ValueError, match="each task must be a 2-tuple"):
+            _parallel_executor(
+                (_echo, {"a": 1}),
+                (_echo, {"b": 1}, "named", "extra"),
+            )
