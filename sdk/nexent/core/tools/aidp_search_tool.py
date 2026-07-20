@@ -142,7 +142,7 @@ class AidpSearchTool(Tool):
         api_key: str = Field(default_factory=lambda: os.environ.get("AIDP_API_KEY", ""), exclude=True, description="AIDP API key"),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
         search_method: str = Field(default="hybrid_search", description="Search method"),
-        reranking_enable: bool = Field(default=False, description="Enable reranking"),
+        reranking_enable: bool = Field(default=True, description="Enable reranking"),
         reranking_mode: str = Field(default="performance", description="Reranking mode"),
         rewrite_enable: bool = Field(default=False, description="Enable query rewrite"),
         related_search_enable: bool = Field(default=False, description="Enable related search"),
@@ -182,7 +182,7 @@ class AidpSearchTool(Tool):
         self.reranking_mode = _coerce_choice(
             reranking_mode, _VALID_RERANK_MODES, "performance", "reranking_mode"
         )
-        self.reranking_enable = bool(_resolve_field_default(reranking_enable, False))
+        self.reranking_enable = bool(_resolve_field_default(reranking_enable, True))
         self.rewrite_enable = bool(_resolve_field_default(rewrite_enable, False))
         self.related_search_enable = bool(_resolve_field_default(related_search_enable, False))
         resolved_score_threshold = _resolve_field_default(score_threshold, 0.0)
