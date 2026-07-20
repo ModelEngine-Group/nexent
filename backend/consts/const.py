@@ -19,14 +19,21 @@ TEST_PCM_PATH = os.path.join(os.path.dirname(
 class VectorDatabaseType(str, Enum):
     ELASTICSEARCH = "elasticsearch"
     DATAMATE = "datamate"
+    QDRANT = "qdrant"
 
 
 # Elasticsearch Configuration
+VECTOR_DATABASE_TYPE = os.getenv("VECTOR_DATABASE_TYPE", VectorDatabaseType.ELASTICSEARCH.value)
 ES_HOST = os.getenv("ELASTICSEARCH_HOST")
 ES_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
 ES_PASSWORD = os.getenv("ELASTIC_PASSWORD")
 ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
+
+# Qdrant
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+QDRANT_TIMEOUT = float(os.getenv("QDRANT_TIMEOUT", "20"))
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")

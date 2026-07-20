@@ -10,12 +10,15 @@ data:
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
 
-  # Elasticsearch Service
+  # Vector Database Services
+  VECTOR_DATABASE_TYPE: {{ .Values.config.vectorDatabase.type | quote }}
   ELASTICSEARCH_HOST: {{ .Values.config.elasticsearch.host | quote }}
   ES_JAVA_OPTS: {{ .Values.config.elasticsearch.javaOpts | quote }}
   ES_DISK_WATERMARK_LOW: {{ .Values.config.elasticsearch.diskWatermarkLow | quote }}
   ES_DISK_WATERMARK_HIGH: {{ .Values.config.elasticsearch.diskWatermarkHigh | quote }}
   ES_DISK_WATERMARK_FLOOD_STAGE: {{ .Values.config.elasticsearch.diskWatermarkFloodStage | quote }}
+  QDRANT_URL: {{ .Values.config.qdrant.url | quote }}
+  QDRANT_TIMEOUT: {{ .Values.config.qdrant.timeout | quote }}
 
   # Service URLs (internal)
   CONFIG_SERVICE_URL: {{ .Values.config.services.configUrl | quote }}

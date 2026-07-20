@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List, Annotated
 from fastapi import APIRouter, Body, File, Form, Path, Path as PathParam, Query, Request, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from consts.const import ASSET_OWNER_TENANT_ID, VectorDatabaseType
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
@@ -65,7 +65,7 @@ async def get_list_indices(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+        vdb_core = get_vector_db_core()
         return ElasticSearchService.list_indices(
             pattern, True, ctx.tenant_id, ctx.user_id, vdb_core
         )
@@ -111,7 +111,7 @@ async def create_new_index(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+        vdb_core = get_vector_db_core()
 
         ingroup_permission = None
         group_ids = None
@@ -163,7 +163,7 @@ async def delete_index(
     logger.debug("Received northbound request to delete knowledge base")
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+        vdb_core = get_vector_db_core()
         return await ElasticSearchService.full_delete_knowledge_base(
             index_name, vdb_core, ctx.user_id
         )
@@ -195,7 +195,7 @@ async def get_index_files(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+        vdb_core = get_vector_db_core()
         logger.debug(
             "Listing files for index %s, tenant_id=%s, user_id=%s",
             index_name,
@@ -370,7 +370,7 @@ async def delete_documents(
     """Delete a document by scope. Restricted to asset administrators."""
     try:
         await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+        vdb_core = get_vector_db_core()
         logger.debug(
             "Deleting documents for index %s scope=%s", index_name, scope
         )

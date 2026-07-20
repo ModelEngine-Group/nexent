@@ -1064,7 +1064,7 @@ deploy_infrastructure() {
   INFRA_SERVICES=""
 
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
-    INFRA_SERVICES="nexent-elasticsearch nexent-postgresql nexent-minio redis"
+    INFRA_SERVICES="nexent-elasticsearch nexent-qdrant nexent-postgresql nexent-minio redis"
   fi
 
   # Add openssh-server if Terminal tool container is enabled

@@ -26,6 +26,7 @@ from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
+from nexent.vector_database.qdrant_core import QdrantCore
 
 from consts.const import (
     ASSET_OWNER_TENANT_ID,
@@ -37,6 +38,10 @@ from consts.const import (
     LANGUAGE,
     PERMISSION_EDIT,
     PERMISSION_READ,
+    QDRANT_API_KEY,
+    QDRANT_TIMEOUT,
+    QDRANT_URL,
+    VECTOR_DATABASE_TYPE,
     VectorDatabaseType,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
@@ -237,7 +242,7 @@ logger = logging.getLogger("vectordatabase_service")
 
 
 def get_vector_db_core(
-    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
+    db_type: Optional[VectorDatabaseType] = None, tenant_id: Optional[str] = None,
 ) -> VectorDatabaseCore:
     """
     Return a VectorDatabaseCore implementation based on the requested type.
@@ -252,7 +257,9 @@ def get_vector_db_core(
     Raises:
         ValueError: If the requested database type is not supported.
     """
-    if db_type == VectorDatabaseType.ELASTICSEARCH:
+    selected_db_type = db_type or VectorDatabaseType(VECTOR_DATABASE_TYPE)
+
+    if selected_db_type == VectorDatabaseType.ELASTICSEARCH:
         return ElasticSearchCore(
             host=ES_HOST,
             api_key=ES_API_KEY,
@@ -260,7 +267,14 @@ def get_vector_db_core(
             ssl_show_warn=False,
         )
 
-    if db_type == VectorDatabaseType.DATAMATE:
+    if selected_db_type == VectorDatabaseType.QDRANT:
+        return QdrantCore(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            timeout=QDRANT_TIMEOUT,
+        )
+
+    if selected_db_type == VectorDatabaseType.DATAMATE:
         if tenant_id:
             datamate_url = tenant_config_manager.get_app_config(
                 DATAMATE_URL, tenant_id=tenant_id)
@@ -271,7 +285,7 @@ def get_vector_db_core(
         else:
             raise ValueError("tenant_id must be provided for DataMate")
 
-    raise ValueError(f"Unsupported vector database type: {db_type}")
+    raise ValueError(f"Unsupported vector database type: {selected_db_type}")
 
 
 def _rethrow_or_plain(exc: Exception) -> None:
