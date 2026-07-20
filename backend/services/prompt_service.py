@@ -807,6 +807,9 @@ def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: s
     logger.info("Fetching tool instances")
     tool_id_list = get_enable_tool_id_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id)
+    # If no tools are enabled, return early — nothing to parallelize.
+    if not tool_id_list:
+        return []
     tool_info_list = query_tools_by_ids(tool_id_list)
 
     # parallel_executor is always built from the SDK class — no DB query.

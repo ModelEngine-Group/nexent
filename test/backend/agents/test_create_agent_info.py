@@ -1833,6 +1833,8 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_uses_raw_components_not_legacy_prompt(self):
         """Managed path should build components and avoid rendering legacy system prompt."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=True,
@@ -1850,6 +1852,8 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
         """Managed path should describe the same builtin tools that AgentConfig exposes."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         builtin_tools = [
             types.SimpleNamespace(name="run_skill_script"),
             types.SimpleNamespace(name="read_skill_md"),
@@ -1878,6 +1882,8 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
         """Legacy path should render the Jinja prompt and not build managed components."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         mocks = await self._run_context_manager_case(
             enable_context_manager=False,
             template="{{duty}} | {{constraint}}",
