@@ -183,7 +183,12 @@ def reset_test_isolation():
     """Reset test isolation state before each test."""
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
-    token_db_mod.log_token_usage.reset_mock()
+    token_db_mod.log_token_usage.reset_mock(side_effect=True)
+    token_db_mod.log_token_usage.return_value = 1
+    agent_version_mod.list_published_agents_impl.reset_mock(side_effect=True)
+    agent_version_mod.list_published_agents_impl.return_value = [
+        {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
+    ]
     yield
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
