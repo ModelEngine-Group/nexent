@@ -1,543 +1,394 @@
 # NL2AGENT 对话式智能体构建设计
 
-> 最近复核：2026-07-16
+> 实现快照：`5375990a0336644b84ddb4307c8d3d4199f1976b`
 >
-> 维护规则：本文描述当前主干实现，不绑定易失效的 commit 或变更文件计数；行为变更必须同步本文、代码走读和契约测试。
+> 对比基线：`4e7d9fe15c78d85c732beb9fe06ac8d439e99327`
+>
+> 最近复核：2026-07-20
 
-本文描述当前代码已经实现的行为，不把未落地的规划、已删除的兼容逻辑或历史测试会话的恢复方案写成现有能力。模块级调用链和函数入口见《[NL2AGENT 代码走读](./nl2agent-code-walkthrough)》，重构状态与仍存问题见《[NL2AGENT 代码坏味道审查](./nl2agent-code-smell-review)》。
+本文描述当前分支已经实现的 NL2AGENT 能力。历史 gap 方案、阶段性代码审查和已删除兼容逻辑不作为当前行为依据；发生行为变更时，应同步更新本文、Canonical Contract 和对应测试。
 
 ---
 
 ## 1. 背景、目标与边界
 
-### 1.1 解决的问题
+传统 Agent 创建页要求用户预先理解模型、Tool、Skill、MCP、Prompt 和运行参数。NL2AGENT 将这一过程改造成受后端确定性工作流约束的对话：
 
-传统 Agent 创建页要求用户先理解模型、Tool、Skill、MCP、提示词和运行参数。NL2AGENT 将创建过程改造成受后端状态机约束的对话流程：模型负责澄清和生成方案，用户在结构化卡片中完成具有副作用的选择，Backend 以数据库和 Redis 的持久化状态决定能否进入下一阶段。
+1. LLM 负责澄清需求、调用只读搜索工具并生成结构化方案。
+2. Frontend 用 Card 展示平台中的真实模型和资源。
+3. 用户只通过 Card 执行确认、安装、绑定和提交等副作用。
+4. Backend 以 PostgreSQL 持久化状态决定当前阶段、允许动作和最终可提交内容。
 
-### 1.2 当前能力
+当前能力包括：
 
-当前实现支持：
+- 收集目标、受众或场景、主要输入、期望输出、关键约束五项需求。
+- 生成只读需求摘要并要求用户点击确认；聊天中的“确认”不产生确认副作用。
+- 选择一个主 LLM 和最多四个有序 fallback。
+- 搜索并配置租户本地 Tool 与 Skill。
+- 搜索 Registry、Community Marketplace MCP 和 official Skill Catalog。
+- 在 Card 中完成 MCP 配置、安装、健康检查、工具发现与绑定。
+- 安装 official Skill；`resource_missing` 项可从 official ZIP 恢复后绑定。
+- 保存 Agent display name，并由 Backend 生成唯一 internal name。
+- 从持久化模型和资源生成最终审核信息，写入完整 Draft 配置。
+- 在刷新、切换会话或浏览器内存状态丢失后恢复 active Session。
+- 对无效、截断、缺失或未成功挂载的 Card 做交付回执与有限自动重试。
 
-1. 收集目标、受众或场景、主要输入、期望输出和关键约束五项需求。
-2. 生成只读需求摘要，由用户通过按钮确认；聊天中的“确认”“继续”不会确认需求。
-3. 仅从平台实时可用 LLM 列表选择一个主模型和最多四个有序备用模型。
-4. 搜索租户本地 Tool 与 Skill，用户可选择应用推荐项或明确跳过。
-5. 搜索官方 Registry 和 Community Marketplace 的 MCP 推荐，卡片内完成配置、安装、健康检查、工具发现、绑定或跳过。
-6. 搜索部署环境 official Skill ZIP Catalog 中尚未安装的 Skill，并由用户逐项安装。
-7. 用一个会话级“完成配置”动作结束 MCP 与 online Skill 审查。
-8. 由 NL2AGENT 生成显示名称建议，用户可修改并保存；内部变量名由 Backend 生成。
-9. 从权威持久化状态解析模型和资源名称，展示最终审核卡并由用户显式提交。
-10. 卡片操作成功后通过隐藏普通 user message 自动继续现有 `/agent/run`，无需用户输入“请继续”。
-11. 对截断、无效或缺失卡片进行交付回执，前两次自动重新生成，之后提供手动恢复。
+明确边界：
 
-### 1.3 明确不做的事情
-
-- 不为已删除的 `NL2AgentApplyLocalResourcesTool` 等旧 action tools 增加兼容。
-- 不为未完成的历史 NL2AGENT 测试 Session 迁移 Redis v1 状态。
-- 不新增数据库表、列或迁移脚本；复用 Agent、Conversation、ToolInstance、SkillInstance 和 MCP 表。
-- SDK 不访问 Redis、不读取环境变量，也不持有跨 Agent Run 的搜索缓存。
-- 模型不能自行安装、绑定、跳过或发布；所有副作用都由用户操作卡片触发 HTTP API。
-- “online Skill 搜索”不是实时公网检索，而是搜索 Backend 启动环境可访问的 official Skill ZIP Catalog。
+- Finalize 完成的是 `version_no=0` Draft，返回 `draft_ready`，不自动创建发布版本。
+- LLM 不能直接确认需求、保存模型、安装资源、绑定工具或 Finalize。
+- SDK 不读环境变量、不访问 Redis，也不持有跨 Agent Run 的进程级搜索状态。
+- online Skill 搜索针对部署环境的 official Skill Catalog，不是任意公网搜索。
+- Redis 不是工作流权威存储；Redis 丢失不应丢失已经提交的 Session。
+- 已删除的旧 action tools 不提供兼容入口。
 
 ---
 
-## 2. 核心术语与身份
+## 2. 基线变更规模
 
-| 术语 | 含义 | 权威标识 |
+统计范围固定为基线 `4e7d9fe15c78d85c732beb9fe06ac8d439e99327` 到功能快照 `5375990a0336644b84ddb4307c8d3d4199f1976b`。统计时工作区干净，因此不包含本文重写自身，结果可通过 `git diff --numstat <baseline> <snapshot>` 复算。
+
+### 2.1 全量差异
+
+| 指标 | 数值 |
+|---|---:|
+| 提交数 | 178 |
+| 变更文件 | 177 |
+| 新增 / 修改 / 删除文件 | 105 / 71 / 1 |
+| 新增行 | 42,236 |
+| 删除行 | 1,400 |
+| 总增删量 | 43,636 |
+
+### 2.2 业务代码与测试代码
+
+代码分类规则：
+
+- 测试代码：`test/**`、Frontend `__tests__/**`、`frontend/vitest.config.ts` 和 `frontend/vitest.setup.ts`。
+- 业务代码：Backend、SDK、Frontend、Contracts、Deploy/SQL 和运维脚本，排除上述测试路径。
+- 文档、SVG 资产、`.gitignore` 和本地工具元数据不计入代码小计。
+
+| 类别 | 文件 | 新增 | 删除 | 总增删量 | 代码占比 |
+|---|---:|---:|---:|---:|---:|
+| 业务代码 | 114 | 25,569 | 1,354 | 26,923 | 65.2% |
+| 测试代码 | 52 | 14,354 | 37 | 14,391 | 34.8% |
+| **代码小计** | **166** | **39,923** | **1,391** | **41,314** | **100%** |
+
+业务代码分布：
+
+| 子系统 | 文件 | 总增删量 |
+|---|---:|---:|
+| Backend | 47 | 11,219 |
+| Frontend | 41 | 9,569 |
+| Canonical Contracts | 2 | 3,983 |
+| SDK | 11 | 1,220 |
+| Deploy / 运维 | 13 | 932 |
+
+测试代码分布：
+
+| 子系统 | 文件 | 总增删量 |
+|---|---:|---:|
+| Backend | 31 | 10,756 |
+| Frontend | 14 | 2,188 |
+| SDK | 4 | 997 |
+| Contract | 2 | 309 |
+| Deploy | 1 | 141 |
+
+另外有 9 个文档/资产文件、2,314 行增删，以及 2 个仓库元数据文件、8 行增删。业务代码主口径包含生成契约；若排除 `contracts/nl2agent-openapi.json`、生成的 Frontend API 类型和 Frontend Schema 副本共 6,026 行，则手写及运维业务代码为 111 个文件、20,897 行增删。
+
+---
+
+## 3. 核心身份与权威边界
+
+| 对象 | 含义 | 权威标识 |
 |---|---|---|
-| NL2AGENT Runner | Config Service seed 的内部默认 Agent，数据库内部名为 `nl2agent`，负责执行构建对话 | `nl2agent_agent_id` |
-| Draft Agent | 每次 Session Start 新建的待配置 Agent，初始内部名为 `draft_<uuid8>` | `draft_agent_id` |
-| Conversation | 本次构建流程使用的聊天会话 | `conversation_id` |
-| Session State | Redis 中严格校验的 v2 工作流状态，决定当前阶段和允许动作 | tenant + draft |
-| Session Catalog | Session Start 时加载并写入 Redis 的搜索候选快照 | tenant + draft |
-| Card Delivery | 对最新完整 assistant 消息中卡片是否成功交付的回执 | conversation + message + card type |
-| Persisted Binding | 数据库中启用的 ToolInstance、SkillInstance、模型选择和 MCP 记录 | tenant + draft |
+| NL2AGENT Runner | 每个 tenant 的内部 Builder Agent，内部名为 `nl2agent` | `runner_agent_id` / `nl2agent_agent_id` |
+| Draft Agent | 本次构建的 `version_no=0` Agent | `draft_agent_id` |
+| Conversation | Runner 执行构建对话所使用的会话 | `conversation_id` |
+| Durable Session | 绑定 tenant、user、Runner、Draft 和 Conversation 的生命周期记录 | `session_id` |
+| Workflow State | 决定阶段和允许动作的 v2 状态 | tenant + draft + revision |
+| Catalog Snapshot | Session Start 时获取的只读资源快照 | tenant + SHA-256 snapshot ID |
+| Card Delivery | 最新完整 assistant 消息中某类 Card 的交付结果 | message + card type + card key |
 
-Runner 和 Draft 是两个不同 Agent。对话由 Runner 执行，但模型选择、资源绑定、身份和最终配置都写入 Draft。Frontend 维护 `conversation_id → draft_agent_id` 映射，不能使用全局“最近一次 Draft ID”替代该映射。
+Runner 与 Draft 是两个不同 Agent：
+
+- `/agent/run` 实际运行持久化在 Session 中的 Runner。
+- 模型、Tool、Skill、身份和最终 Prompt 都写入 Draft。
+- Backend 按 tenant、user、Conversation、Draft 和 persisted Runner 联合验证一次运行。
+- Frontend 切换会话时使用 Backend 返回的 persisted Runner ID，不按名称猜测当前 Runner。
+- 普通 Agent 列表默认隐藏 Runner 和 `draft_*` Agent。
 
 ---
 
-## 3. 总体架构
+## 4. 总体架构
 
 ```text
-Config Service
-  └─ seed nl2agent runner + exactly 3 builtin search tools
+Config Service / Session Provisioning
+  └─ seed or repair one tenant-scoped Runner + exactly 3 search tools
 
-Frontend Agent Builder Entry
+Frontend Agent Builder
   └─ POST /nl2agent/session/start
-       ├─ Backend validates seeded runner and loads catalogs
-       ├─ PostgreSQL creates Draft Agent + Conversation
-       ├─ Redis creates v2 State + Session Catalog
-       └─ Frontend stores conversation → draft mapping
+       ├─ load bounded resource catalogs
+       ├─ transaction: Draft + Conversation + durable Session + Catalog Snapshot
+       └─ best-effort warm Redis projections
 
 Existing Chat /agent/run + SSE
-  ├─ Backend injects structured Current Session summary
-  ├─ Backend constructs exactly 3 per-run SDK search-tool instances
-  ├─ YAML system prompt chooses one action from workflow summary
-  └─ Final assistant message emits fenced NL2AGENT card JSON
+  ├─ authorize persisted Runner/Draft/Conversation ownership
+  ├─ preprocess requirement revisions
+  ├─ inject Current Session workflow summary
+  ├─ construct 3 per-run SDK search-tool instances
+  └─ validate the final NL2AGENT card answer
 
-Frontend Card Runtime
-  ├─ Ajv validates canonical card schema
-  ├─ React card mounts and registers recommendation batch if required
-  ├─ Card Delivery receipt confirms rendered/failed
-  ├─ User action calls /nl2agent/session/{draft}/...
-  └─ Successful stage action injects hidden user text and calls /agent/run again
+Final Assistant Message
+  └─ Frontend Ajv validation + React Card mount
+       ├─ register recommendation/requirements payload
+       ├─ report rendered or failed delivery
+       └─ user action -> /nl2agent API -> optional hidden continuation
 
-Backend Sources of Truth
-  ├─ PostgreSQL: Draft, model selection, bound Tool/Skill, MCP and final proposal
-  └─ Redis: workflow confirmation state, catalogs, recommendation batches,
-             MCP workflow projection and card delivery receipts
+PostgreSQL
+  ├─ authoritative workflow state and lifecycle
+  ├─ immutable content-addressed catalogs
+  └─ persisted Draft/model/resource bindings
+
+Redis
+  ├─ disposable 24-hour state/catalog projections
+  └─ token-owned installation locks
 ```
 
-### 3.1 Backend 服务边界
+Backend 分层：
 
-| 模块 | 当前职责 |
+| 层 | 职责 |
 |---|---|
-| `backend/services/nl2agent_session_service.py` | Session 初始化、Catalog 前置加载、数据库与 Redis 补偿 |
-| `backend/services/nl2agent_catalog_service.py` | 本地、MCP、official Skill Catalog 加载、脱敏和 Skill 安装后刷新 |
-| `backend/services/nl2agent_resource_service.py` | 本地推荐批次注册、事务性 Apply、Skip |
-| `backend/services/nl2agent_mcp_service.py` | MCP 规范化、配置校验、安装锁、可恢复安装、发现、绑定与跳过 |
-| `backend/services/nl2agent_workflow_service.py` | 需求、在线批次、Card Delivery、Session State、身份 |
-| `backend/services/nl2agent_publication_service.py` | 发布前门禁、权威引用校验和 Draft 最终更新 |
-| `backend/services/nl2agent_service.py` | 兼容 facade、依赖装配、seed、模型选择与展示投影等共享辅助逻辑 |
-
-`nl2agent_service.py` 尚未完全退化为薄 facade；它仍承载 seed、模型校验、内部名称生成和 Session State 展示信息解析。这是当前实现边界，而不是文档遗漏。
-
-### 3.2 SDK 运行时边界
-
-运行时只注册三个 builtin tool：
-
-- `NL2AgentSearchLocalResourcesTool` → `nl2agent_search_local_resources`
-- `NL2AgentSearchWebMcpsTool` → `nl2agent_search_web_mcps`
-- `NL2AgentSearchWebSkillsTool` → `nl2agent_search_web_skills`
-
-每个实例拥有独立的 `Nl2AgentContext`。上下文包含 tenant、user、Runner/Draft ID、语言、`requirements_confirmed` 和该工具需要的 Catalog。它不是 module-level global，因此构造某个工具不会覆盖另一个工具的状态；当前 dataclass 和内部 List 并未使用 frozen/深拷贝强制不可变，搜索实现只是按只读快照使用它们。
-
-Skill 是模型执行说明，Card 是最终回复协议；二者都不是 Python 函数。`nl2agent_finalize_proposal` 未注册为 runtime tool，也不会被调用。
+| `backend/apps/nl2agent_app.py` | 鉴权、请求解析、调用 Service、结构化错误映射 |
+| `backend/services/nl2agent_service.py` | Facade 与依赖装配 |
+| Session / Lifecycle Services | Session 创建、恢复、放弃、终态和保留期 |
+| Catalog / Resource / MCP Services | Catalog 加载、本地绑定、Skill 安装、MCP Saga |
+| Workflow / Summary / Publication Services | 状态动作、Card 回执、投影、Finalize |
+| `backend/agents/nl2agent_*` | Workflow 模型、CAS repository 和 Catalog 投影 |
+| `backend/database/nl2agent_session_db.py` | Durable Session 与 Catalog Snapshot repository |
+| `sdk/nexent/core/tools/nl2agent/` | 三个纯 SDK 搜索工具和共享评分内核 |
 
 ---
 
-## 4. 权威数据与一致性模型
+## 5. 持久化与一致性
 
-### 4.1 PostgreSQL 中的权威数据
+### 5.1 PostgreSQL 权威数据
 
-不新增 schema，复用现有表：
+`nl2agent_session_t` 保存 tenant、user、Runner、Draft、Conversation、生命周期、workflow schema/revision/state、Catalog Snapshot 外键和审计字段。`nl2agent_catalog_snapshot_t` 按 tenant + SHA-256 digest 保存不可变 Catalog；内容相同的 Session 共享一份快照。
 
-- Agent：Draft 的显示名称、内部名称、主模型、模型顺序、提示词和运行参数。
-- Conversation：Session 对应会话及消息归属。
-- ToolInstance：Draft 已启用的本地 Tool 或 MCP Tool。
-- SkillInstance：Draft 已启用的本地 Skill 或已安装 official Skill。
-- MCP：已创建的远程或容器 MCP、连接配置和 Registry provenance。
+Agent、Conversation、ToolInstance、SkillInstance、MCP 和模型选择继续使用既有业务表。每个 tenant 通过 partial unique index 最多保留一个未删除的 `nl2agent` Runner。
 
-最终审核和最终提交不信任 LLM payload 中的模型或资源引用。Backend 重新读取上述持久化记录并解析名称、来源和有效性。
-
-### 4.2 Redis Key
-
-| 用途 | Key 形式 | TTL |
-|---|---|---|
-| Session Catalog | `nl2agent:session_catalog:{tenant_id}:{draft_agent_id}` | 24 小时 |
-| Workflow State | `nl2agent:session_state:{tenant_id}:{draft_agent_id}` | 24 小时 |
-| MCP 安装锁 | `nl2agent:mcp_installation_lock:{tenant_id}:{draft_agent_id}:{installation_key}` | 5 分钟 |
-
-Session State 每次成功更新都会刷新 TTL。Catalog 也在 CAS 更新时刷新 TTL。
-
-### 4.3 v2 Workflow State
-
-核心结构如下：
-
-```json
-{
-  "schema_version": 2,
-  "revision": 17,
-  "conversation_id": 301,
-  "requirements_review": {
-    "status": "collecting|awaiting_confirmation|confirmed",
-    "summary": {
-      "goal": "...",
-      "audience_or_scenario": "...",
-      "primary_input": "...",
-      "expected_output": "...",
-      "key_constraints": "..."
-    },
-    "fingerprint": "sha256..."
-  },
-  "model_selection_confirmed": true,
-  "recommendation_batches": {},
-  "online_recommendation_batches": {},
-  "online_configuration_confirmed": false,
-  "mcp_workflows": {},
-  "identity_confirmed": false,
-  "card_delivery": {}
-}
-```
-
-State 使用 Pydantic 严格模型验证。Key 缺失、schema 不是 v2 或 JSON/字段损坏会产生明确的初始化/工作流错误，不会回退为空状态。历史未完成 Session 不自动迁移。
-
-### 4.4 原子更新
-
-所有 State 修改经过同一 CAS mutator：
-
-1. `WATCH` State Key。
-2. 读取并严格解析 v2 State。
-3. 在内存中执行单一 mutator。
-4. `MULTI` 写回完整 JSON，`revision + 1` 并刷新 TTL。
-5. 冲突最多重试 5 次；耗尽后返回 `AGENTSPACE_NL2AGENT_STATE_CONFLICT`。
-
-Catalog 删除已安装 MCP/Skill 推荐也使用 `WATCH/MULTI`，但 Catalog 本身没有 `revision` 字段。
-
----
-
-## 5. 确定性工作流
-
-`backend/agents/nl2agent_workflow.py::evaluate_workflow` 是 Backend、Prompt 和 Frontend 消费的权威阶段评估器。它从持久化 State 生成：
-
-- `current_stage`
-- `expected_card_types`
-- `allowed_actions`
-- requirements/model/local/online/identity 摘要
-- `unresolved_mcp_count`
-
-### 5.1 阶段表
-
-| 优先级 | `current_stage` | 进入条件 | 期望卡片 | 允许动作 / 完成条件 |
-|---:|---|---|---|---|
-| 1 | `requirements_collecting` | 五项需求未形成已注册摘要 | 无；模型每轮只问第一个缺失项 | 生成完整摘要后输出 `requirements_summary` |
-| 2 | `requirements_confirmation` | 摘要已注册，状态为 `awaiting_confirmation` | 未成功交付时为 `requirements_summary` | 用户在卡片点击确认；聊天确认无效 |
-| 3 | `model_selection` | requirements 已确认，模型未确认 | 未成功交付时为 `model_selection` | 保存一个主模型和最多四个 fallback |
-| 4 | `local_resource_search` | 模型已确认，本地批次不存在 | `local_resources` | 调用一次本地搜索并交付结果卡 |
-| 5 | `local_resource_review` | 存在 `recommendations_ready` 批次 | 已交付后为空 | Apply 所选推荐或 Skip；所有批次均 resolved |
-| 6 | `online_resource_search` | 本地完成，但 MCP 或 Skill 批次缺失 | 缺哪类就期望哪类 Card | 每类最多调用一次搜索；空结果也注册批次 |
-| 7 | `online_resource_review` | 两类批次已存在但未全局完成，或 MCP 未解决 | 卡已交付后为空 | MCP connected 必须 bind/skip；然后点击会话级完成配置 |
-| 8 | `agent_identity` | online 完成但身份未确认 | 未成功交付时为 `agent_identity` | 保存 display name，Redis 记录确认 |
-| 9 | `final_review` | 前述关卡全部完成 | 未成功交付时为 `final_review` | 用户显式提交；不自动发布 |
-
-对于处在“等待用户操作”的卡片，只有 `card_delivery` 中存在成功 `rendered` 回执，Evaluator 才会把该 Card 从 `expected_card_types` 中移除。模型尝试输出 Card 不等于 Card 已展示。
-
-### 5.2 Fresh Observation 优先级
-
-Current Session 是一次 Agent Run 开始时的快照。调用搜索工具后，Redis 批次尚未由前端注册，因此快照仍可能显示批次缺失。双语 Prompt 明确规定：
-
-1. 本步骤出现新的搜索 Observation 时，优先把该 Observation 原样封装成对应卡片。
-2. 不得因为旧快照仍显示缺失而再次调用搜索工具。
-3. Card 最终消息验收和批次注册成功后，下一轮才会看到更新后的状态。
-
----
-
-## 6. Session 初始化
-
-### 6.1 启动职责
-
-Config Service 是唯一 seed 入口。启动时先同步 Prompt Template，再 seed：
-
-- 名为 `nl2agent` 的内部默认 Runner；
-- category 为 `nl2agent` 的三个 builtin search tools；
-- Runner 与三个 Tool 的绑定。
-
-Runtime Service 不再 lazy seed，只挂载 NL2AGENT Router。若默认 Runner 不存在，Session Start 明确提示先重启 Config Service。
-
-### 6.2 初始化顺序与补偿
-
-`start_nl2agent_session` 的顺序为：
-
-1. 验证 seed 的 Runner 存在。
-2. 加载并验证全部 Catalog；合法空 Catalog 与加载异常区分。
-3. 在一个数据库事务中创建 Draft Agent 和 Conversation 并取得 ID。
-4. 初始化 Redis v2 State，写入权威 `conversation_id`。
-5. 写入 tenant/draft Session Catalog。
-6. 提交数据库事务并返回 Runner、Draft、Conversation ID。
-
-Catalog 失败发生在创建数据库对象之前。Redis 写入失败会使数据库事务回滚并清理已写 Redis；数据库最终提交失败也会删除刚写入的 Redis Keys。该流程不通过后台补偿任务异步修复。
-
-### 6.3 Catalog 内容
-
-Session Catalog 包含：
-
-- `tool_catalog`
-- `skill_catalog`
-- `registry_results`
-- `community_results`
-- `official_skills`
-
-本地 Tool、租户 Skill 或 official Skill provider 异常返回 503，因为这些目录参与后续权威绑定。Registry 与 Community MCP 使用 cursor 拉取全部页（每页 100 条），两者并发加载且分别 fail-soft：单个外部市场不可用只记录告警并提供空目录，不阻断只依赖本地资源的 Session。合法空数组始终允许创建 Session 并在后续显示空结果卡。
-
----
-
-## 7. Agent Run 与 Prompt 上下文
-
-### 7.1 Draft ID 传播
-
-Frontend 在 `/agent/run` 请求中传递 `draft_agent_id`。Backend 只有在当前 Runner 的内部名为 `nl2agent` 时才构造 NL2AGENT 专用上下文。
-
-在保存本轮用户消息、构造 Prompt 和运行模型之前，Backend 会检查需求修改意图：明确的修改、否定或纠正表达可把 `awaiting_confirmation` 恢复为 `collecting`；“确认”“yes”“继续”等文字不会确认需求。隐藏自动续跑消息不会改写需求状态。
-
-### 7.2 Current Session 摘要
-
-Backend 不把完整 Redis JSON 交给模型解释，而是注入结构化摘要，例如：
-
-```json
-{
-  "schema_version": 2,
-  "revision": 17,
-  "draft_agent_id": 54,
-  "current_stage": "online_resource_search",
-  "expected_card_types": ["web_mcp", "web_skill"],
-  "allowed_actions": ["search_web_mcp", "search_web_skill"],
-  "requirements_review": {
-    "status": "confirmed",
-    "summary": {
-      "goal": "...",
-      "audience_or_scenario": "...",
-      "primary_input": "...",
-      "expected_output": "...",
-      "key_constraints": "..."
-    }
-  },
-  "model_selection_confirmed": true,
-  "local_review_status": "complete",
-  "online_review": {
-    "mcp_batch_registered": false,
-    "skill_batch_registered": false,
-    "configuration_confirmed": false
-  },
-  "unresolved_mcp_count": 0,
-  "identity_confirmed": false
-}
-```
-
-摘要不向模型暴露所选模型 ID、Tool/Skill/MCP ID、凭据或资源配置。
-
-### 7.3 双语 Prompt 约束
-
-英文和中文 YAML 使用同一章节顺序与状态协议：
-
-- 先处理 Fresh Observation，否则只执行 `allowed_actions` 中的一个动作。
-- 需求收集每轮只问第一个缺失项；五项必须来自用户明确表达。
-- 模型阶段只输出说明和模型选择卡，不命名、推荐或比较任何模型。
-- 搜索调用必须放入字面量 `<code>...</code>`，不能把调用表达式直接打印给用户。
-- 同一资源类型在一次审查中最多搜索一次；MCP 与 Skill 都缺失时在同一 code block 各调用一次。
-- Card 是 fenced JSON 最终回复，不通过代码解释器执行。
-- MCP 所有配置，包括非 Secret 和 Secret，都在 Card 中填写；聊天不收集凭据。
-- 身份阶段由模型自行提出 display name，但不能生成 internal name。
-- Final Card 只包含描述、Prompt、示例和受支持的 runtime options，不包含身份、模型或资源引用。
-
----
-
-## 8. 搜索设计
-
-### 8.1 统一关键词规范化
-
-三个工具共享 `sdk/nexent/core/tools/nl2agent/_context.py` 中的规范化和评分：
-
-1. Unicode NFKC。
-2. `casefold` 大小写归一化。
-3. 将 ASCII 字母数字串和连续 CJK 文本切为 token。
-4. 删除中英文常见连接词、空值和重复词，保留首次出现顺序。
-5. 将 token 排序后生成与顺序无关的 canonical query key。
-
-当前 CJK token 化保留“连续中文片段”为一个 token，并不会进一步做语言学分词。
-
-### 8.2 模糊评分
-
-每个关键词独立匹配：
-
-- name 权重最高；
-- description 与 tags 合并为 metadata，乘以 `0.9`；
-- 子串命中得分为 `1.0`；
-- 长度不超过 3 的 token 不进行 fuzzy；
-- fuzzy 优先 RapidFuzz `partial_ratio`，缺失时回退 `SequenceMatcher`；
-- 最低候选阈值为 `0.62`；
-- 总分为 `0.85 × 最佳命中 + 0.15 × 关键词覆盖率`。
-
-采用 OR 语义：命中任一关键词即可成为候选，多关键词命中通过 coverage 加分。结果 `reason` 记录实际命中关键词。弱相关项允许被全部过滤，空结果是合法结果。
-
-### 8.3 本地 Tool 与 Skill
-
-本地工具输入为完整需求提炼出的原子关键词字符串。搜索过程：
-
-1. 分别评分 `local_tools` 和 `local_skills`。
-2. 先按稳定 ID 去重，再按规范化名称去重。
-3. 合并两个类型并按得分排序；同分时 Tool 排在 Skill 前。
-4. Tool + Skill 合计最多返回 5 条。
-
-结果包含稳定 `recommendation_batch_id`：
+### 5.2 Redis 可丢弃投影
 
 ```text
-local_<sha256(draft id + canonical query + sorted result ids)[:24]>
+nl2agent:session_state:{tenant}:{draft}
+nl2agent:session_catalog:{tenant}:{draft}
+nl2agent:catalog_snapshot:{tenant}:{snapshot_id}
+nl2agent:mcp_installation_lock:{tenant}:{draft}:{installation_key}
 ```
 
-等价关键词集合和相同结果产生稳定批次；SDK 不缓存结果。
+State 和 Catalog Cache TTL 为 24 小时。Workflow 读取以数据库为准并 best-effort 刷新 Cache；Catalog 优先使用 Cache，缺失或 Redis 不可用时从数据库快照恢复。Redis 提交失败不会反转数据库事务；Redis 仍是安装锁的运行依赖。
 
-### 8.4 MCP 搜索到底搜索什么
+### 5.3 Workflow CAS
 
-MCP 候选来自 Session Start 时 Backend 拉取的两个来源：
+每次状态变更从数据库读取 active Session，用严格 Pydantic v2 State 解析，执行 mutator 并重新验证。实际变更使 revision 恰好加一，再以旧 revision 条件更新；冲突时重读最新状态，最多重试五次。无变化不增加 revision，terminal Session 立即拒绝。
 
-1. official Registry：调用现有 Registry service，`search=None, limit=100`，沿 `metadata.nextCursor` 拉取全部页。
-2. Community Marketplace：调用现有 Community service，`search=None, limit=100`，沿 `nextCursor` 拉取全部页。
+### 5.4 跨聚合副作用
 
-SDK 不直接访问互联网。它在注入的快照上搜索规范化后的 MCP 名称和描述。当前 normalizer 不把 tags 保留到评分候选，因此 MCP tags 实际不参与评分。
-
-Registry 候选先于 Community 处理；按 `recommendation_id` 和规范化名称去重，所以同名重复项优先 official Registry。最终最多返回 5 条。
-
-每条推荐携带稳定 `recommendation_id`、来源、描述和规范化安装选项。批次 ID 由 Draft、资源类型、canonical query 和去重后的 item keys 生成，空结果也有批次 ID。
-
-### 8.5 online Skill 搜索到底搜索什么
-
-online Skill 候选来自部署环境的 official Skill ZIP 目录，而非实时公网搜索。Backend 的 Catalog 加载顺序为：
-
-1. 当前 tenant 的 Skill 元数据；
-2. 全局 official Skill 元数据；
-3. ZIP 内 `SKILL.md` 元数据。
-
-最终候选同时提供 `skill_id`、`skill_name`、兼容 `name`、description、tags、source 和 status。写入 Session Catalog 前：
-
-- 只保留 `status="installable"`；
-- 过滤 `installed`，避免重复推荐；
-- 过滤 `resource_missing`，并以 tenant/draft/Skill 名称记录 warning。
-
-SDK 再做一次 status 防御过滤，使用 `skill_name or name`、description 和 tags 评分，按 Skill ID 与规范化名称去重，最多返回 5 条。安装成功后 Backend 使用 Catalog CAS 删除同 ID 或同名推荐；下一次 Agent Run 重建工具实例，自然读取更新后的 Catalog。
+- Session Start 在一个事务内创建 Draft、Conversation、Session 和 Catalog Snapshot，提交后才暖 Cache。
+- Local Apply 先预留 operation，再用一个事务写全部 Tool/Skill binding；提交后按 operation ID 对账。
+- MCP/Skill 安装使用稳定 key、token-owned lock 和 heartbeat，重复请求可恢复。
+- Finalize 在同一事务中更新 Draft 并把 Session 从 active 改为 completed。
+- 模型、资源和身份等步骤依靠预留、幂等写和补偿恢复，不承诺跨所有表的一次全局事务。
 
 ---
 
-## 9. MCP 安装选项与可恢复 Saga
+## 6. Session 生命周期与恢复
 
-### 9.1 统一安装模型
+### 6.1 初始化
 
-`normalize_mcp_candidate` 将 Registry 和 Community 数据归一为相同语义：
+Session Start 先查找 tenant Runner，缺失时幂等 provision，再校验 Prompt、模型和三个 builtin search tools。Backend 加载有界 Catalog，随后在事务内创建 `draft_<uuid8>`、Conversation、Workflow State、Catalog Snapshot 和 active Session，提交后 best-effort 写 Redis，最终返回 Runner、Draft、Conversation ID 和 Draft name。
 
-- 远程 URL 或 URL 模板；
-- transport；
-- package runtime、package、runtime arguments 和 package arguments；
-- environment、headers、变量、JSON、port 和 container 配置；
-- 每个字段的 key、label、description、type、default、required、secret、choices；
-- 无法安全构造选项时的 `unsupported_reason`。
+本地 Tool/Skill 或 official Skill provider 失败会阻断创建。Registry 与 Community 独立 fail-soft；合法空 Catalog 允许创建 Session。
 
-Registry 读取嵌套 `server.remotes` 与 `server.packages`。Community 优先利用嵌套 `registryJson`，再用 `serverUrl`、`transportType` 和 `configJson` 显式覆盖。元数据不足时会生成必须由用户填写的 URL 或 container 字段，而不是猜测。
+### 6.2 恢复与发现
 
-Secret 根据声明和字段名启发式识别。Secret default 会在写入搜索响应、Redis 或 API 响应前清空；用户值只通过安装请求进入现有 credential/MCP 保存链路。
+sessionStorage 只负责首次页面 handoff。进入或切换 Conversation 后，Frontend 调用 `GET /nl2agent/session/by-conversation/{conversation_id}`，按 tenant + user 恢复 active Session，再通过 `/state` 恢复阶段、Card 回执、模型、资源和交互状态。`GET /nl2agent/sessions` 默认列出 50 个、最多 100 个 active Session。
 
-### 9.2 安装流程
+### 6.3 终态与清理
 
-稳定安装键为：
+- Finalize 成功后 Session 为 `completed`，Draft 保留为 `draft_ready`。
+- 显式放弃或删除对应 Conversation 后 Session 为 `abandoned`，并清理 Redis 投影。
+- terminal Session 不允许 `/agent/run` 或状态变更。
 
-```text
-sha256(draft_agent_id + recommendation_id + option_id)
-```
-
-它不包含用户配置或 Secret，并写入 MCP `registry_json.nl2agent_installation_key`。流程为：
-
-1. 只从当前 tenant/draft Redis Catalog 解析 `recommendation_id` 和 `option_id`，不信任 LLM/客户端提交的 URL、命令或包。
-2. 使用 `SET NX EX` 获取 5 分钟分布式安装锁。
-3. 把 workflow 设为 `installing`。
-4. 只合并用户提交的 `config_values.fields`，按 option 声明验证 required、JSON、number、URL、choice、port 和未解析模板变量。
-5. 按 installation key 查找已有 MCP，支持幂等重试。
-6. 创建或复用 remote/container MCP；内部创建接口直接返回 `mcp_id`。
-7. 执行健康检查和工具发现，upsert MCP Tool Catalog。
-8. workflow 设为 `connected`，记录发现的稳定 Tool ID，但不记录 Secret。
-9. 从 Session Catalog 删除已安装推荐。
-10. 释放安装锁。
-
-### 9.3 失败与恢复
-
-- 并发安装因锁冲突被拒绝，不会创建重复 MCP。
-- 容器已启动但数据库持久化失败时立即停止并删除容器。
-- 工具发现失败时保留已创建 MCP，workflow 记录 `failed + mcp_id`；Retry 从健康检查/发现恢复。
-- Redis workflow 更新失败时可根据数据库中的 installation provenance 恢复，不依赖按名称反查。
-- 安装成功只表示 `connected`，不会自动绑定工具。
-- 用户必须至少绑定一个发现工具，或显式 `skip-tools`，才能解决该 MCP。
+active、abandoned、completed 默认各保留 30 天，批量上限默认 100：active 超期先转 abandoned；abandoned 超期软删除 Draft、Conversation、消息和资源 binding；completed 超期清理 Session 与无引用 Catalog Snapshot，但保留 Draft。清理由 Session Start opportunistic 触发。
 
 ---
 
-## 10. 各交互阶段
+## 7. 确定性工作流
+
+Workflow State 固定为 schema version 2，旧 schema 不自动迁移。
+
+| 阶段 | 进入条件 | 允许动作 | 期望 Card |
+|---|---|---|---|
+| `requirements_collecting` | 需求未形成可确认摘要 | 澄清或生成摘要 | 五项齐全后 `requirements_summary` |
+| `requirements_confirmation` | 摘要待确认 | 确认或修改 | 未 rendered 时为 `requirements_summary` |
+| `model_selection` | 需求已确认、模型未确认 | 保存模型 | `model_selection` |
+| `local_resource_search` | 本地批次不存在 | 搜索本地资源 | `local_resources` |
+| `local_resource_review` | 本地批次待处理 | Apply 或 Skip | 未 rendered 时为 `local_resources` |
+| `online_resource_search` | MCP 或 Skill 批次缺失 | 搜索缺失目录 | `web_mcp` / `web_skill` |
+| `online_resource_review` | 两类批次已注册但未完成 | 配置或完成 online 阶段 | 未 rendered 的 online Card |
+| `agent_identity` | online 完成、身份未确认 | 保存身份 | `agent_identity` |
+| `final_review` | 前置门禁全部完成 | Finalize | `final_review` |
+
+Evaluator 只根据持久化 State 计算 `current_stage`、`expected_card_types` 和 `allowed_actions`。LLM 的文字、工具调用意图或 Card 尝试都不能直接推进阶段。
+
+等待 Card 的阶段只有在持久化 `rendered` 回执后才认为 Card 已交付。需求发生修改时，旧摘要 fingerprint 和对应 Card Delivery 周期一起失效，必须重新注册并交付新摘要。
+
+---
+
+## 8. Agent Run 与双语 Prompt
+
+`AgentRequest` 增加可选 `draft_agent_id`。只有当前 Agent 是 persisted NL2AGENT Runner 时，Backend 才：
+
+- 校验 active Session 的 tenant、user、Runner、Draft 和 Conversation；
+- 在保存本轮消息和运行模型前识别需求修改；
+- 加载 Workflow State、持久化 Draft 和 Session Catalog；
+- 注入精简的 Current Session；
+- 构造三个 per-run 搜索工具；
+- 对最终答案执行 Backend Card Contract 校验。
+
+Current Session 只暴露模型决策需要的阶段、允许动作、需求摘要、批次状态和未解决 MCP 数量，不暴露 Secret、资源配置或可由 LLM 伪造的持久化 ID 集合。
+
+英文和中文 YAML 保持相同章节、阶段和 Card 示例。Prompt 使用 `|-` 多行系统文本、稳定标题层级、平行列表和语言内一致术语。项目执行器要求字面量 `<code>...</code>` 才执行工具，因此这是对通用“Prompt 中避免 HTML tag”规则的有意协议例外。
+
+Prompt 的关键约束：
+
+1. 只执行 `allowed_actions` 中的一个动作。
+2. 只有当前轮成功且动作被允许的搜索 Observation 才可优先输出。
+3. 含 `error` 的 Observation 不是结果 Card。
+4. 工具 Observation 必须原样复制，不能增删、重排或改写候选。
+5. `[[NL2AGENT_AUTO_CONTINUE]]` 和 `[[NL2AGENT_CARD_RETRY]]` 只触发重新读状态。
+6. 状态缺失或矛盾时 fail closed，不猜测。
+
+---
+
+## 9. 搜索与可信结果
+
+### 9.1 共享规范化和评分
+
+三个 SDK 工具共享：
+
+1. Unicode NFKC 和 `casefold`。
+2. ASCII token 提取；连续 CJK 文本使用 jieba 分词。
+3. 删除中英文 stop words 和重复词。
+4. 排序 token 得到与输入顺序无关的 Canonical Query。
+5. 名称、description 以及候选中实际存在的 tags/labels 参与匹配。
+6. 名称权重最高，metadata 相似度乘 0.9。
+7. 长度不超过 3 的 token 不做 fuzzy。
+8. RapidFuzz 不可用时回退 SequenceMatcher。
+9. 最低单关键词分数 0.62，结果采用 OR 匹配和 coverage 加权。
+
+本地搜索 Prompt 使用 2–6 个原子能力关键词；MCP 和 official Skill 使用 1–3 个英文索引词。中文需求会转换为英文 online query，同时保留 `docx`、`pdf` 等准确格式。
+
+### 9.2 本地资源
+
+- Catalog 包含来源为 local、MCP 或 LangChain 的 Tool，以及 tenant 已有 Skill。
+- Tool 与 Skill 分别评分后按稳定 ID、规范化名称去重。
+- 两类合计最多返回 5 条。
+- 结果带 `recommendation_batch_id`、Tool/Skill ID、分数和原因。
+- Tool 参数 Schema 在注册后由 Backend 重新读取并脱敏，Card 可收集声明过的配置。
+
+### 9.3 MCP
+
+- Registry 和 Community 每页 100 条，最多 20 页、2,000 条、5 MiB、15 秒。
+- SDK 只搜索 Session Catalog，不直接访问市场或互联网。
+- Registry 优先于 Community；按稳定 recommendation ID 和名称去重，最多返回 5 条。
+- normalizer 将 remote、package、container、environment、header、JSON、port 和模板变量统一为 install options。
+- 无法安全推导的字段必须由用户在 Card 中填写，不从 LLM 猜测。
+
+### 9.4 official Skill
+
+- official Catalog 同时保留 `installable` 和 `resource_missing` 项。
+- `resource_missing` 项从本地 Skill 搜索中排除，但可在 online Card 中通过 official ZIP 恢复。
+- 已安装项通过持久化 installation result 投影为 `installed`，后续搜索不再推荐。
+- 结果按 ID 和规范化名称去重，最多返回 5 条。
+
+### 9.5 Trusted Search Proof
+
+搜索工具返回结果前，必须通过注入的 Backend callback 持久化 batch ID、resource type，以及完整排序后的 Tool IDs、Skill IDs 或 online item keys。
+
+持久化失败时工具返回 error，不生成可操作 Card。Backend 最终答案校验、Card 注册和 Card Delivery 都会核对这份 proof；模型或客户端删除、替换、过滤或添加资源都会被拒绝，包括伪造的空批次。
+
+---
+
+## 10. 业务阶段与副作用
 
 ### 10.1 需求摘要
 
-五项摘要 Card 渲染时调用 register API。Backend 对文本做 NFKC 和空白规范化，并对规范化、排序后的 JSON 计算 SHA-256 fingerprint。
-
-- 相同摘要重复注册幂等。
-- 不同摘要注册会替换当前 fingerprint，状态回到 `awaiting_confirmation`。
-- 历史 Card 携带旧 fingerprint 时得到 `is_current=false`，不能覆盖或确认新版摘要。
-- Confirm API 必须携带与 Redis 当前值完全一致的 fingerprint。
-- 相同 fingerprint 的重复确认幂等。
+- 五项内容做 NFKC 和空白规范化。
+- 对排序后的 Canonical JSON 计算 SHA-256 fingerprint。
+- 相同摘要重复注册幂等；不同摘要替换当前摘要并重新进入待确认。
+- Confirm 必须携带当前 fingerprint；历史 Card 不能确认新摘要。
+- 明确修改、否定或纠正可把状态恢复为 collecting；“确认”“yes”“继续”不会确认。
 
 ### 10.2 模型选择
 
-Card 调用现有 `/model/llm_list`，Frontend 只显示 `connect_status === "available"` 的项；Backend 仍执行最终 tenant、存在性、模型类型、连接状态、重复和数量校验。
+- Frontend 只展示平台 API 中 available 的 LLM。
+- Backend 再验证 tenant、存在性、LLM 类型、连接状态、重复和数量。
+- `business_logic_model_id` 保存 primary，`model_ids` 保存 primary + ordered fallbacks。
+- 总数最多 5 个；Finalize 时再次验证模型仍可用。
+- `requested_output_tokens` 不得超过 primary model 能力。
 
-保存后：
+### 10.3 本地 Apply / Skip
 
-- `business_logic_model_id = primary_model_id`
-- `model_ids = [primary_model_id, ...fallback_model_ids]`
-- 最多 5 个模型，不能重复
-- Redis `model_selection_confirmed=true`
+- Card 注册前按钮不可执行。
+- 用户可选择推荐批次中的 Tool/Skill，并为 Tool 填写声明过的参数。
+- Backend 拒绝未知字段、错误类型、非法 choice、缺失 required 和未选 Tool 的配置。
+- Secret default 不下发；持久化摘要只返回“已配置”而不回显值。
+- Apply 对本次选中项全有或全无；数据库提交失败时不保留部分 binding。
+- operation fingerprint 包含批次、资源和配置，用于并发与重试对账。
+- Skip 只解决指定批次。
 
-Finalization 会再次验证模型仍存在、仍为 LLM 且仍 available。
+### 10.4 MCP 安装与绑定
 
-### 10.3 本地资源 Apply / Skip
+安装流程：
 
-Card 注册成功前操作按钮禁用。Apply 可选择推荐批次的 Tool/Skill 子集，语义为全有或全无：
+1. 从 trusted Session Catalog 解析 recommendation 和 option。
+2. 获取 recommendation 级 5 分钟锁；不同 option 不能并发安装同一推荐。
+3. heartbeat 每 60 秒续租并验证 token 所有权。
+4. 只接受 option 声明过的 `config_values.fields`。
+5. 创建或复用带 installation provenance 的 MCP。
+6. 执行健康检查、工具发现并 upsert Tool Catalog。
+7. 标记 `connected`，但不自动绑定。
+8. 用户至少绑定一个已发现 Tool，或显式 skip-tools。
 
-1. 验证 Draft 归属、批次状态和所选 ID 均属于推荐结果。
-2. 在写入前查询并验证所有资源。
-3. ToolInstance 与 SkillInstance 使用同一个 SQLAlchemy Session。
-4. 任一失败导致数据库事务整体回滚。
-5. 数据库成功后把 Redis 批次标记 `applied`，只记录实际成功绑定的 ID。
+容器在数据库写失败后立即补偿删除。工具发现失败可保留已创建 MCP 并从该步骤恢复。绑定使用独立 operation reservation，重复请求不会创建重复 ToolInstance。
 
-若数据库提交成功而 Redis 更新失败，客户端重试时持久化实例 upsert 保持幂等，再完成批次对账。完全失败不返回自动续跑文本。Skip 将指定批次标记 `skipped`。
+### 10.5 online Skill 与完成栏
 
-### 10.4 online 审查
+- Skill 安装按 canonical ID/name 生成稳定 installation key。
+- 同一项并发安装被锁拒绝；完成结果可幂等返回。
+- 安装成功后解析 tenant Skill 并立即绑定 Draft。
+- MCP 和 Skill 两类 batch 都注册后才可完成 online 配置。
+- `installing`、`connected` 或 `binding` MCP 尚未解决时不能完成。
+- 未安装或失败的推荐可统一放弃；已 connected MCP 必须 bind 或 skip。
 
-MCP 与 Skill Card 分别注册自己的 online batch。只有两类批次都存在时，会话级“完成配置”按钮才可能启用；两类空结果批次也算已展示。
+### 10.6 身份与 Finalize
 
-按钮还要求没有处于 `installing` 或 `connected` 的未解决 MCP。未尝试安装、安装失败的推荐可以统一放弃；已连接 MCP 必须 bind 或 skip。完成 API 将当前全部 online batches 标为 completed，并设置 `online_configuration_confirmed=true`。
-
-### 10.5 身份
-
-模型根据已确认需求自行建议 display name，Card 允许用户修改并保存。保存只更新 Draft 的显示名称并把 Redis `identity_confirmed=true`；Draft 数据库内部名仍保持 `draft_*`。
-
-内部名预览由 Backend 生成：
-
-1. NFKD 转 ASCII，非字母数字替换并规范为 snake_case。
-2. 若结果为空或数字开头，使用 `agent_{agent_id}`。
-3. 限制 50 字符，满足 `^[A-Za-z_][A-Za-z0-9_]*$`。
-4. 若另一个 Agent 已使用候选名，追加 Draft ID 后缀。
-
-查询返回精确 `ValueError("agent not found")` 时表示名称可用；其他数据库异常继续抛出。
-
-### 10.6 最终审核与提交
-
-Final Card 的 LLM proposal 只允许描述和 Prompt 内容：
-
-- `business_description`
-- `description`
-- `duty_prompt`
-- `constraint_prompt`
-- `few_shots_prompt`
-- `greeting_message`
-- `example_questions`
-- `prompt_template_id`
-- 现有受支持 runtime options
-
-Request model `extra="forbid"`，旧的 name/display name、模型 ID、Tool/Skill/Sub-agent ID、知识库和资源配置字段会被拒绝。
-
-审核 Card 从 Session State 显示：
-
-- 主模型名称与逐行 fallback 名称；
-- 本地 Tool/Skill 名称；
-- online MCP Tool/official Skill 名称；
-- Backend 解析的 display/internal name；
-- 无法解析的引用类型和 ID。
-
-模型名称使用 `display_name`，回退 `model_name`；Tool 使用 `origin_name`，回退 `name`；Skill 使用持久化名称。正常行不显示数字 ID，只有 `invalid_references` 用 ID 排查。
-
-提交前 Backend 再次检查 requirements、模型、本地 review、两类 online batch、MCP resolved、identity、proposal 必填字段和全部持久化引用。所有校验发生在更新 Draft 前，避免失败留下部分字段。成功响应当前使用 `status="draft_ready"`。
+- LLM 根据已确认需求建议 2–50 字符 display name，用户可修改。
+- Backend 保持 Draft 的 `draft_*` internal name，直到 Finalize。
+- Finalize 时规范化为 snake_case；空值或数字开头使用 `agent_{id}`，冲突时追加 Draft ID。
+- Final Card 的 proposal 只允许描述、Prompt、示例和受支持运行参数。
+- 身份、模型、Tool、Skill、MCP 和配置始终取持久化状态；旧的模型/资源字段和未知字段被拒绝。
+- 提交前重新解析所有模型和 enabled resource reference；悬空、跨 tenant 或不可用引用阻断提交。
 
 ---
 
-## 11. Card Contract、渲染和交付验收
+## 11. Card Contract 与交付
 
-### 11.1 七类 Card
+### 11.1 七类逻辑 Card
 
-Canonical Schema 位于 `contracts/nl2agent-card.schema.json`，覆盖：
+Canonical Schema 位于 `contracts/nl2agent-card.schema.json`：
 
 1. `nl2agent-requirements-summary`
 2. `nl2agent-model-selection`
@@ -547,235 +398,214 @@ Canonical Schema 位于 `contracts/nl2agent-card.schema.json`，覆盖：
 6. `nl2agent-agent-identity`
 7. `nl2agent-finalize`
 
-Schema 对 payload `agent_id` 保持可选，因为 Frontend 允许使用 conversation-scoped trusted draft ID；若 payload ID 存在则必须与 trusted ID 一致。两边都没有有效 ID，或存在冲突时，Card 拒绝渲染。
+逻辑上是七类 Card；MCP 和 Skill 各允许单数/复数 fence，因此 Frontend 共识别九个 Card language tag。`nl2agent-search-*` 是工具调用标签，不渲染为 Card。
 
-搜索调用标签 `nl2agent-search-local-resources`、`nl2agent-search-web-mcps` 等不是 Card tag，Frontend 明确不渲染它们。
+Payload `agent_id` 可选，以支持 Conversation-scoped trusted Draft fallback；若存在则必须与当前 Draft 完全相同。两边都没有可信 ID、ID 冲突、附加字段、Schema 不匹配或同类 Card 重复时拒绝渲染。
 
-### 11.2 流式门禁
+### 11.2 流式与最终消息
 
-- SSE 流式输出和 Task Window 只显示“正在生成卡片”占位。
-- 只有完整 final assistant message 才进入 Ajv 解析和 React 挂载。
-- 必须存在闭合 fence、有效 JSON、对应 schema、唯一同类型 Card 和可信 Draft ID。
-- Local/MCP/Skill 空结果合法，但批次 ID 和必须字段不能缺失。
-- 历史消息、分享模式、只读模式、非最新消息和组件重挂载不提交回执，也不自动继续。
+- SSE 和 Task Window 在生成期只显示“正在生成 Card”占位。
+- 只有完整 final assistant message 才进行一次完整 Card AST 解析。
+- Backend 在消息持久化前验证 fence、JSON、Schema、Draft ID、唯一性和 trusted proof。
+- Frontend 用 Ajv 再校验并挂载 React Card。
+- 历史消息、只读/分享模式、非最新消息和组件重挂载不触发副作用。
 
-### 11.3 Rendered 回执
+### 11.3 Delivery Receipt
 
-Card Delivery 请求使用数据库数字 `message_id`。Backend 验证：
+`POST /session/{draft}/card-delivery` 使用数据库数字 `message_id`。Backend 验证 Session 主体、Conversation、assistant/completed 状态、最新 completed assistant message、当前 expected card、Schema、Draft、card key 和 trusted proof。
 
-- 消息属于 State 保存的 Conversation；
-- role 是 assistant；
--状态是 completed；
-- 是当前 Conversation 最新 completed assistant message；
-- `card_type` 属于当前 `expected_card_types`。
+Requirements、Local、MCP 和 Skill Card 需要完成业务注册或与注册状态一致，再记录 rendered。回执本身按 message、type、status 和 card key 幂等。
 
-需要批次注册的 Requirements、Local、MCP、Skill Card，必须在 schema 校验、真实挂载和注册成功后回执 `rendered`。Model、Identity、Final Card 可在挂载后直接回执。
+### 11.4 失败与恢复
 
-相同 `message_id + card_type + status + card_key` 幂等；过期消息返回 stale-card 409。
+失败原因限定为 `truncated_fence`、`invalid_json`、`invalid_schema`、`missing_card`。失败只更新 Delivery，不删除已确认业务状态。前两次返回 `[[NL2AGENT_CARD_RETRY]]` 并允许自动重跑；第三次起停止自动执行并提供手动重新生成。
 
-### 11.4 Failed 回执和恢复
-
-失败原因限定为：
-
-- `truncated_fence`
-- `invalid_json`
-- `invalid_schema`
-- `missing_card`
-
-`failed` 只记录原因和连续次数，不删除需求摘要、推荐批次或其他业务状态。前两次失败返回 `auto_retry_allowed=true` 和 `[[NL2AGENT_CARD_RETRY]]` 隐藏文本；Frontend 通过现有 `/agent/run` 自动重试。第三次起停止自动运行并显示“重新生成卡片”。
-
-回执 API 本身失败时显示“重试回执”，不会把 API 故障误当成模型输出故障，也不会生成新 Card。
+回执 API 自身失败只显示“重试回执”，不会误计为模型 Card 失败。Card Delivery 持久化在 Durable Workflow State，因此刷新后不会重复消费已成功交付的 Card。
 
 ---
 
-## 12. Frontend 会话与自动继续
+## 12. Frontend 交互与自动继续
 
-### 12.1 入口和 Draft 映射
+Agent 管理页和 Agent Selector Header 都提供 Builder 入口。`Nl2AgentWorkflowProvider` 以 Conversation + Draft 为 scope，管理 active Session、Backend State、action/registration/Delivery/continuation 并发、聊天输入 blocker、状态刷新和显式重试。
 
-Agent 管理页和 Agent Selector Header 都提供 Agent Builder 入口。Session Start 响应暂存于 sessionStorage，进入聊天页后建立持久到当前浏览器 Session 的：
+`useNl2AgentSessionRecovery` 在切换 Conversation 时从 Backend 恢复 Session，缓存已确认的普通 Conversation，并避免把一个 Draft 复用到另一个 Conversation。
 
-```text
-conversation_id → draft_agent_id
-```
+以下动作成功后返回固定 `chat_injection_text` 并通过现有 `/agent/run` 自动继续：
 
-解析优先使用 Conversation 映射；一次性 handoff 只在 active conversation 与 handoff conversation 一致时回退。切换会话不会复用另一个会话的 Draft ID。
+- 确认需求；
+- 保存模型；
+- Apply 或 Skip 本地资源；
+- 完成 online 配置；
+- 保存身份；
+- Card 自动重试。
 
-### 12.2 Workflow Provider
+这些消息进入正常历史和 message index，但 Frontend 不显示 user bubble，也不参与分享。MCP/Skill 单项安装、MCP bind/skip 和失败不会自动进入下一阶段；用户在统一完成栏结束 online review。
 
-`Nl2AgentWorkflowContext` 以 conversation/draft 为 scope，统一管理：
-
-- 进行中的 Card action 计数；
-- 聊天输入 blocker；
-- continuation 并发与 retry；
-- Card Delivery 的 conversation/draft scoped `Map`（pending/succeeded/failed）；
-- Session State 刷新通知。
-
-模块级全局 `processed messages` 集合已经删除。只有 API 成功后回执才标为 completed；失败可重试。
-
-### 12.3 隐藏普通消息
-
-以下阶段操作成功返回固定 `chat_injection_text`：
-
-- 需求按钮确认；
-- 模型保存；
-- 本地 Apply/Skip；
-- online 全局完成；
-- 身份保存。
-
-Frontend 将文本作为普通 user message 持久化并再次调用 `/agent/run`。两个保留前缀为：
-
-- `[[NL2AGENT_AUTO_CONTINUE]]`
-- `[[NL2AGENT_CARD_RETRY]]`
-
-这类消息计入正常历史和 message index，但不显示气泡、不参与分享；其后的 assistant 回复和工具过程正常显示。Backend 文本只触发模型重新读取权威状态，不指定下一阶段、不调用搜索工具。
-
-单个 MCP/Skill 安装、MCP bind/skip 和失败不会自动进入下一轮；用户在统一 online 完成栏结束整个 online 阶段。
-
-### 12.4 Card Lifecycle
-
-`useNl2AgentCardLifecycle` 为各 Card 统一处理 action、busy、blocker、retry、continuation 和 unmount cleanup。Card 组件仍负责自己的展示和业务输入，例如模型下拉、MCP 动态字段、资源勾选。
-
-Card Parser 使用 Ajv 和 canonical schema 产生按九种 fence language 判别的 typed Card AST。Final Message Delivery 对完整消息只解析一次，并把同一组 AST 节点传给 Markdown Renderer；非 Final Message 的独立 Markdown 场景才使用单卡 fallback parser。单数/复数 online tag 与 payload 形态不匹配时在解析边界直接拒绝。
+刷新后 Card 根据 `/state` 返回的 persisted selection、batch、installation、binding、Delivery 和参数摘要恢复展示。Secret 只恢复“是否已配置”，不恢复值。
 
 ---
 
 ## 13. Public API
 
-所有路径均位于 `/nl2agent` Router 下。
+所有专用接口位于 `/nl2agent`：
 
-| 方法 | 路径 | 主要作用 | 成功后自动继续 |
+| 方法 | 路径 | 作用 | 自动继续 |
 |---|---|---|---|
-| POST | `/session/start` | 创建 Draft、Conversation、State 与 Catalog | 否 |
-| POST | `/session/{id}/requirements/register` | 注册五项摘要和 fingerprint | 否 |
-| POST | `/session/{id}/requirements/confirm` | 按钮确认当前 fingerprint | 是 |
-| POST | `/session/{id}/card-delivery` | 记录 rendered/failed 回执 | failed 前两次可重试 |
-| PUT | `/session/{id}/models` | 保存主模型与 fallback | 是 |
-| POST | `/session/{id}/local-resources/register` | 注册本地推荐批次 | 否 |
-| POST | `/session/{id}/apply-local-resources` | 事务性绑定所选本地资源 | 是 |
-| POST | `/session/{id}/local-resources/skip` | 跳过指定本地批次 | 是 |
-| POST | `/session/{id}/online-recommendations/register` | 注册 MCP/Skill online batch | 否 |
-| POST | `/session/{id}/mcp/install` | 安装、检查并发现 MCP Tools | 否 |
-| POST | `/session/{id}/mcp/{mcp_id}/bind-tools` | 绑定选中 MCP Tools | 否 |
-| POST | `/session/{id}/mcp/{mcp_id}/skip-tools` | 显式跳过已连接 MCP 工具绑定 | 否 |
-| POST | `/session/{id}/install-web-skill` | 安装 official Skill 并刷新 Catalog | 否 |
-| POST | `/session/{id}/online-configuration/complete` | 结束两类 online 审查 | 是 |
-| GET | `/session/{id}/state` | 读取 Workflow 摘要、身份、模型、资源和失效引用 | 否 |
-| PUT | `/session/{id}/identity` | 保存 display name 并确认身份 | 是 |
-| POST | `/session/{id}/finalize` | 校验权威状态并写入最终 Draft 方案 | 否 |
+| GET | `/sessions` | 列出当前用户 active Sessions | 否 |
+| GET | `/session/by-conversation/{conversation_id}` | 按 Conversation 恢复 Session | 否 |
+| POST | `/session/start` | 创建 Draft、Conversation 和 Durable Session | 否 |
+| POST | `/session/{agent_id}/abandon` | 显式终止 active Session | 否 |
+| POST | `/session/{agent_id}/requirements/register` | 注册需求摘要与 fingerprint | 否 |
+| POST | `/session/{agent_id}/requirements/confirm` | 确认当前摘要 | 是 |
+| PUT | `/session/{agent_id}/models` | 保存 primary 和 fallback LLM | 是 |
+| POST | `/session/{agent_id}/local-resources/register` | 注册可信本地批次 | 否 |
+| POST | `/session/{agent_id}/apply-local-resources` | 配置并绑定本地资源 | 是 |
+| POST | `/session/{agent_id}/local-resources/skip` | 跳过本地批次 | 是 |
+| POST | `/session/{agent_id}/online-recommendations/register` | 注册 MCP/Skill 批次 | 否 |
+| POST | `/session/{agent_id}/mcp/install` | 安装、检查和发现 MCP Tool | 否 |
+| POST | `/session/{agent_id}/mcp/{mcp_id}/bind-tools` | 绑定 MCP Tool | 否 |
+| POST | `/session/{agent_id}/mcp/{mcp_id}/skip-tools` | 跳过 MCP Tool 绑定 | 否 |
+| POST | `/session/{agent_id}/install-web-skill` | 安装/恢复 official Skill 并绑定 | 否 |
+| POST | `/session/{agent_id}/online-configuration/complete` | 完成 online review | 是 |
+| GET | `/session/{agent_id}/state` | 返回可恢复 Workflow 和资源投影 | 否 |
+| PUT | `/session/{agent_id}/identity` | 保存 display name | 是 |
+| POST | `/session/{agent_id}/card-delivery` | 记录 Card rendered/failed | failed 前两次 |
+| POST | `/session/{agent_id}/finalize` | 写入完整 Draft 并完成 Session | 否 |
 
-`/agent/run` 请求结构保持不变，只兼容增加可选 `draft_agent_id`；所有 Card 操作使用上述专用 API。
+既有 `/agent/run` 增加可选 `draft_agent_id`，用于绑定 Runner Run 与 Durable Session。所有 NL2AGENT Request model 使用 `extra="forbid"`、严格正整数和集合容量限制。
 
-### 13.1 结构化错误
+结构化错误：
 
 | ErrorCode | HTTP | 含义 |
 |---|---:|---|
-| `030201` | 404 | Draft 不存在或不属于 tenant |
-| `030202` | 409 | 当前工作流不允许该动作 |
-| `030203` | 409 | Card 回执来自历史/过期消息 |
-| `030204` | 409 | Redis CAS 冲突重试耗尽 |
-| `030205` | 503 | Session Catalog provider 不可用 |
-| `030206` | 400 | 请求或建议配置不合法 |
-| `030207` | 500 | 数据库或内部持久化操作失败 |
-| `030208` | 502 | 外部安装、连接或工具发现失败 |
-
-所有 NL2AGENT App 入口统一透传结构化 `AppException`。服务层分别抛出校验、工作流、外部服务和内部操作错误；未知异常才降级为不暴露内部细节的 `SYSTEM_INTERNAL_ERROR`。
+| `030201` | 404 | Draft/Session 不存在、非 active 或不属于当前主体 |
+| `030202` | 409 | 当前 Workflow 不允许该动作 |
+| `030203` | 409 | Card 来自过期消息或旧状态 |
+| `030204` | 409 | Workflow CAS 冲突重试耗尽 |
+| `030205` | 503 | 必需 Catalog provider 不可用 |
+| `030206` | 400 | 请求、配置或引用不合法 |
+| `030207` | 500 | 内部数据库或持久化操作失败 |
+| `030208` | 502 | 外部安装、连接或发现失败 |
 
 ---
 
 ## 14. 安全与隔离
 
-### 14.1 Tenant / Draft 隔离
+### 14.1 身份与租户
 
-- 每个 API 在变更前验证 Draft 属于当前 tenant。
-- Redis State、Catalog 和安装锁都包含 tenant/draft。
-- Card payload ID 必须与 Conversation 映射得到的 trusted Draft ID 一致。
-- MCP 推荐和 option 必须从当前 tenant/draft Catalog 解析。
-- Tool/Skill/MCP 绑定校验资源 provenance 和 tenant。
-- Skill 名称解析使用 tenant-scoped 批量查询，避免跨 tenant 泄漏。
+- 所有 API 在业务变更前验证 tenant + user + active Session。
+- Agent Run 额外验证 persisted Runner、Draft 和 Conversation。
+- 对不存在、终态和他人 Session 使用相同不可见语义。
+- Tool/Skill/MCP 查询与 binding 均 tenant scoped。
+- Recommendation、option、resource ID 必须来自当前 Session 的 trusted snapshot/proof。
 
-### 14.2 Secret 边界
+### 14.2 Secret
 
-Secret 不进入：
+Secret 不进入 Prompt、Current Session、SDK 搜索默认值、Durable Catalog/Workflow、installation key、日志、成功响应和 Final Review 可见值。Secret 只从密码型 Card 字段进入既有 credential/MCP 或 ToolInstance 保存链路；Backend 可返回 `configured=true`，但值始终为 null。
 
-- Prompt / Current Session；
-- SDK 搜索结果；
-- Redis Session Catalog 的 default；
-- Redis MCP workflow；
-- installation key；
--日志；
-- API 成功响应和测试快照。
+### 14.3 MCP 网络
 
-Secret 只在 MCP Card 密码输入框收集，并提交到现有 credential/MCP 配置保存路径。失败后 Card 保留可编辑输入状态，但后端不会回显已存 Secret。
+- remote URL 只允许 HTTP/HTTPS，不允许 URL 内嵌 credentials。
+- 默认拒绝 private、loopback、link-local 和其他非 global 地址；仅通过 `NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS` 集中配置允许时放开。
+- 连接前解析全部地址并固定到验证过的 DNS 快照，防止 DNS rebinding。
+- pinned transport 保留原始 Host/SNI，TLS 使用系统可信链并保持 `verify=true`。
+- 禁止 proxy、`trust_env` 和 Unix socket；redirect 到其他 host/port 会失败。
 
-### 14.3 不信任 LLM 引用
+### 14.4 容量与并发
 
-- Model Card 选项来自 live platform API。
-- MCP URL、命令、包和 option 从 Redis recommendation 解析。
-- Finalize 忽略并拒绝旧模型/资源/身份字段。
--最终资源集来自 enabled ToolInstance 和 SkillInstance。
+- Workflow collection 每类最多 100 项。
+- 本地 Catalog 各最多 2,000 条。
+- Marketplace 有页数、条数、字节和超时预算。
+- Card、Request、字段长度、数组和 map 都有 Contract 上限。
+- 安装与 binding 使用 token-owned reservation/lock，释放和续租都检查所有权。
 
 ---
 
-## 15. Contract 生成与测试
+## 15. Contract 与生成链路
 
-### 15.1 Contract 单一来源
+单一来源：
 
-- Card：`contracts/nl2agent-card.schema.json`
-- HTTP：FastAPI OpenAPI 中 `/nl2agent` 路径及递归依赖 schema
-- Frontend 生成物：
-  - `frontend/contracts/generated/nl2agent-card.schema.json`
-  - `frontend/contracts/generated/nl2agent-api.ts`
+- Card：`contracts/nl2agent-card.schema.json`。
+- HTTP：FastAPI `/nl2agent` routes、Pydantic Request/Response 和递归依赖 Schema。
+- Workflow：Backend Pydantic state model。
 
-`frontend/scripts/sync-nl2agent-contracts.mjs` 复制 Card Schema、调用 Backend 导出脚本、执行 `openapi-typescript` 和 Prettier。`npm run contracts:check` 通过临时生成与仓库文件比较检测漂移。
+生成物：
 
-### 15.2 测试分层
+- `contracts/nl2agent-openapi.json`
+- `frontend/contracts/generated/nl2agent-card.schema.json`
+- `frontend/contracts/generated/nl2agent-api.ts`
 
-| 层 | 重点覆盖 |
+`frontend/scripts/sync-nl2agent-contracts.mjs` 复制 Card Schema、调用 Backend OpenAPI exporter、生成 TypeScript 并格式化。`npm run contracts:check` 在临时目录重建并比较，防止 Request、Response、Schema 和 Frontend 类型漂移。
+
+---
+
+## 16. 数据库迁移与部署
+
+Fresh install schema 位于 `deploy/sql/init.sql`。升级脚本按顺序包括：
+
+1. `v2.3.0_0716_add_nl2agent_session.sql`：Durable Session。
+2. `v2.3.0_0717_index_nl2agent_session_cleanup.sql`：生命周期清理索引。
+3. `v2.3.0_0717_share_nl2agent_catalog_snapshots.sql`：共享 Catalog Snapshot。
+4. `v2.3.0_0717_unique_nl2agent_builder.sql`：tenant Runner 唯一约束。
+5. `v2.3.0_0718_persist_nl2agent_runner.sql`：持久化 Runner ID 和回填。
+
+Docker 与 Kubernetes 使用现有 checksum + advisory lock migration 机制。SQL 文件名是 migration ID；checksum 相同跳过，checksum 变化时重放幂等 SQL 并更新记录。
+
+本地源码运行前必须执行：
+
+```bash
+python deploy/common/run_local_sql_migrations.py
+```
+
+本地 runner 会应用 init/migrations，并验证 `runner_agent_id` 列、v0718 migration 记录，以及不存在 runner 为空的 active Session。
+
+根目录 `repair_nl2agent_tables.py` 是迁移接入期间留下的临时诊断/修复工具，不包含完整的当前 migration provenance，也不能替代 v0718 runner migration 和标准 schema guard；正常安装与升级只使用统一 migration runner。
+
+部署时 Backend、SDK 和 Frontend 应使用同一 Contract 版本。无需手工删除 Redis Session Key；数据库快照会在 Cache miss 时恢复。
+
+---
+
+## 17. 测试策略
+
+| 层 | 覆盖重点 |
 |---|---|
-| Redis/Workflow | v2 解析、CAS 并发、revision、阶段向量、需求 fingerprint、批次和 MCP 状态 |
-| Backend Service/API | Session 补偿、模型门禁、本地原子 Apply、MCP Saga、Card Delivery、Finalize |
-| SDK | 三工具构造隔离、关键词规范化、评分、去重、空结果、批次稳定性 |
-| Prompt | 双语 YAML 加载、阶段一致、只允许三个 callable、Card 协议与 retry 前缀 |
-| Contract | Prompt 示例与 SDK 结果符合 canonical Schema、OpenAPI 生成物不漂移 |
-| Frontend | Ajv parser、Card lifecycle、busy/blocker、continuation、卡片状态与会话隔离 |
+| Workflow/Repository | 严格 v2 State、DB CAS、终态拒绝、Cache miss/Redis failure 恢复 |
+| Session Lifecycle | owner 隔离、Conversation 恢复、列表、abandon、retention |
+| Backend Services | 模型校验、本地配置、MCP Saga、Skill 恢复、Finalize 事务 |
+| Card Delivery | Backend/Frontend Schema、trusted proof、最新消息、retry 和刷新恢复 |
+| SDK | 分词、评分、稳定 batch、隔离 context、空结果、proof recorder |
+| Contract | 七类 Card、20 个 typed API、Prompt 示例与边界一致 |
+| Frontend | Card 行为、注册时序、busy/blocker、自动继续、会话切换 |
+| Deploy | migration 顺序、checksum、advisory lock 和 schema guard |
 
-Frontend 已加入 Vitest、React Testing Library 和 jsdom。`npm run check-all` 的顺序为 contract check、test、type-check、lint、format check 和 build。
+主要门禁：
 
----
+```bash
+backend/.venv/bin/pytest \
+  test/contracts/test_nl2agent_card_contract.py \
+  test/contracts/test_nl2agent_session_contract.py \
+  test/backend/services/test_nl2agent_session_persistence.py \
+  test/backend/services/test_nl2agent_session_lifecycle_service.py \
+  test/deploy/test_local_sql_migrations.py
 
-## 16. 部署与运维
+npm --prefix frontend run contracts:check
+```
 
-本次实现没有数据库迁移。Backend、Frontend 和 Runtime SDK 需要作为同一版本部署，因为 Card Contract、State v2 和工具上下文必须一致。
-
-部署前由用户手工清理未完成测试 Session 的：
-
-- `nl2agent:session_state:*`
-- `nl2agent:session_catalog:*`
-
-不删除已发布普通 Agent、现有 MCP 或已安装 Skill。
-
-启动顺序：
-
-1. 先启动或重启 Config Service，让它 seed 默认 Runner 和三个 builtin tools。
-2. 确认 seed 无错误。
-3. 再启动或重启 Runtime Service。
-4. 更新 Frontend。
-5. 创建新的 Agent Builder Session 验证，不复用未完成旧测试会话。
+完整 Frontend 门禁仍为 `npm run check-all`；完整 Backend/SDK 门禁仍由 `test/run_all_test.py` 执行。
 
 ---
 
-## 17. 当前实现限制
+## 18. 当前实现约束
 
-以下是复核后仍然存在、但不构成本轮代码坏味道缺陷的架构约束：
+以下约束不改变主流程，但维护时必须明确：
 
-1. `nl2agent_service.py` 仍有约千行，虽然已拆出六个专用 Service，但 seed、模型投影和若干辅助逻辑仍集中在 facade。
-2. Session Catalog 的 CAS 更新没有像 Workflow State 一样公开 `revision`。
-3. MCP normalizer 当前未把 tags 带入评分候选，所以 MCP 搜索实际按 name + description 匹配。
-4. 资源分组只把 `source == "official"` 的 Skill 识别为 online；若持久化 source 使用中文“官方”，最终卡可能误归为 local。
-5. 部分 Card UI 文案仍为硬编码英文，尚未全部收敛到中英文 i18n。
-6. Canonical Card Schema 为兼容可信 Conversation Draft ID，允许 payload 不含 `agent_id`；所有对象均禁止附加字段，ID 冲突和唯一卡片检查由 Frontend parser 完成。
-7. `FinalizeCard` 的客户端 `canPublish` 只做即时 UX 门禁；完整 workflow 与持久化引用校验始终由 Backend Finalization 负责。
-8. official Skill 的 `resource_missing` 当前只过滤并告警，没有重新安装或修复入口。
-9. `Nl2AgentContext` 已做到每 Tool 实例隔离，但 dataclass 不是 frozen，Catalog List 也未深拷贝；“只读”目前依赖搜索代码不修改输入，而不是类型系统强制。
+1. official Skill 的同步安装函数当前在 async Service 内执行，耗时 ZIP/文件操作可能占用 worker event loop。
+2. 模型选择、本地 binding 和部分 Workflow 更新通过 reservation/补偿保证恢复，不是跨所有业务表的一次数据库事务。
+3. Session 清理由 Session Start opportunistic 触发，没有独立定时调度器。
+4. Redis 虽不是持久化权威源，但 MCP/Skill 分布式安装锁仍依赖 Redis 可用。
+5. 部分 Card 业务文案仍为硬编码英文，尚未完全收敛到 i18n。
+6. 资源最终分组依赖持久化 `source` 的规范值；非规范 source 可能影响 local/online 展示分组。
+7. `Nl2AgentContext` 为 per-run 实例，但其 dataclass 和注入列表并未在类型层强制 immutable。
+8. 临时 `repair_nl2agent_tables.py` 不是当前完整迁移路径，不应用于常规部署。
 
-这些限制不影响本文描述的主流程，但属于维护和后续重构时必须考虑的真实实现约束。
+这些是当前代码的真实边界；历史审查文档只记录当时快照，不能替代本文和现行测试结果。
