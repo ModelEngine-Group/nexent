@@ -151,7 +151,7 @@ class StoreMemoryTool(Tool):
             )
 
         try:
-            from ..memory import MemoryLayer, MemoryType
+            from ...memory import MemoryLayer, MemoryType
 
             async def _store():
                 return await self.memory_service.store_memory(

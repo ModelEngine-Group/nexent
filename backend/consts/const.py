@@ -297,15 +297,11 @@ DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
-# ===== New Memory System (Phase 1) =====
-# These constants back the Nexent Memory framework defined in
-# ``sdk/nexent/memory``. They mirror the environment variables catalogued in
-# the implementation plan at
-# ``.cursor/plans/memory_&_dreaming_implementation_*.plan.md`` §Phase 6.
+# ===== Memory System =====
 
 # MMR (Maximal Marginal Relevance) configuration
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
-MMR_CANDIDATE_TOP_K = int(os.getenv("MMR_CANDIDATE_TOP_K", "30"))
+MMR_CANDIDATE_TOP_K = int(os.getenv("MMR_CANDIDATE_TOP_K", "10"))
 MMR_FINAL_TOP_K = int(os.getenv("MMR_FINAL_TOP_K", "5"))
 MMR_DUPLICATE_THRESHOLD = float(os.getenv("MMR_DUPLICATE_THRESHOLD", "0.92"))
 

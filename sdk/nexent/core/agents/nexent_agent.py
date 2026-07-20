@@ -294,6 +294,19 @@ class NexentAgent:
                 # ``memory_config`` based path.
                 tools_obj.memory_service = metadata.get(
                     "memory_service", None) if metadata else None
+                # Phase 4 pipeline wiring. When the backend supplies a
+                # ``memory_context_service`` in metadata, SearchMemoryTool
+                # delegates retrieval to its ``build_context`` so that
+                # normalize / fusion / decay / MMR / token-budget
+                # selection are all applied to the agent's active
+                # ``search_memory`` calls (not only the prompt injection
+                # path). Absent or non-Phase-4 contexts gracefully fall
+                # back to the legacy ``memory_service`` path.
+                if class_name == "SearchMemoryTool":
+                    tools_obj.memory_context_service = metadata.get(
+                        "memory_context_service", None) if metadata else None
+                else:
+                    tools_obj.memory_context_service = None
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
