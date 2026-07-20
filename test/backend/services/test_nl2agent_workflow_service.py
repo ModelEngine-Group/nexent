@@ -1219,6 +1219,78 @@ def test_process_requirements_revision_text_updates_nl2agent_draft(monkeypatch):
     assert result["status"] == "collecting"
 
 
+@pytest.mark.asyncio
+async def test_revised_requirements_card_starts_new_delivery_cycle(monkeypatch):
+    nl2agent_session_catalog.register_requirements_summary(
+        "tenant_1", 202, _REQUIREMENTS_SUMMARY
+    )
+    nl2agent_session_catalog.record_card_delivery(
+        "tenant_1", 202, 10, "requirements_summary", "rendered"
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "find_agent_info_by_agent_id",
+        MagicMock(return_value={"agent_id": 1, "name": "nl2agent"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+
+    nl2agent_service.process_requirements_revision_text(
+        1, 202, "tenant_1", "user_1", "change the expected output"
+    )
+    revised_summary = {
+        **_REQUIREMENTS_SUMMARY,
+        "expected_output": "A presentation with speaker notes",
+    }
+    registration = await nl2agent_service.register_requirements_review(
+        202, revised_summary, "tenant_1", "user_1"
+    )
+    message_content = (
+        "```nl2agent-requirements-summary\n"
+        + json.dumps({"agent_id": 202, **revised_summary})
+        + "\n```"
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 11,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": message_content,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=11),
+    )
+
+    delivery = await nl2agent_service.report_card_delivery(
+        agent_id=202,
+        message_id=11,
+        card_type="requirements_summary",
+        status="rendered",
+        card_key=None,
+        reason=None,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert registration["status"] == "awaiting_confirmation"
+    assert registration["is_current"] is True
+    assert delivery["message_id"] == 11
+    assert delivery["status"] == "rendered"
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["card_delivery"]["requirements_summary"]["message_id"] == 11
+
+
 def test_process_requirements_revision_ignores_non_nl2agent_runner(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,

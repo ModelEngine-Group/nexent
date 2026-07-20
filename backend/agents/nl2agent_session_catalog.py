@@ -263,6 +263,7 @@ def apply_requirements_revision_text(
     def mutate(workflow: Nl2AgentWorkflowState) -> Dict[str, Any]:
         if workflow.requirements_review.status == "awaiting_confirmation":
             workflow.requirements_review.status = "collecting"
+            workflow.card_delivery.pop("requirements_summary", None)
         return {
             "intent": intent,
             **workflow.requirements_review.model_dump(mode="json"),

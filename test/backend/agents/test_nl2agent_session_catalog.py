@@ -851,6 +851,48 @@ def test_requirements_modification_returns_to_collecting(fake_redis):
     assert result["status"] == "collecting"
 
 
+def test_requirements_modification_invalidates_only_summary_delivery(fake_redis):
+    catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 10, "requirements_summary", "rendered"
+    )
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 9, "model_selection", "rendered"
+    )
+
+    catalog_module.apply_requirements_revision_text(
+        "tenant_1", 202, "change the expected output"
+    )
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert "requirements_summary" not in state["card_delivery"]
+    assert state["card_delivery"]["model_selection"]["message_id"] == 9
+
+    catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation and notes",
+            "key_constraints": "No invented facts",
+        },
+    )
+    workflow = catalog_module.get_workflow_summary("tenant_1", 202)
+    assert workflow["expected_card_types"] == ["requirements_summary"]
+
+
 @pytest.mark.parametrize("text", ["确认需求", "yes", "可以继续"])
 def test_text_confirmation_requires_button(fake_redis, text):
     catalog_module.register_requirements_summary(
@@ -869,6 +911,30 @@ def test_text_confirmation_requires_button(fake_redis, text):
 
     assert result["intent"] == "confirmation_requires_button"
     assert result["status"] == "awaiting_confirmation"
+
+
+def test_non_revision_text_preserves_requirements_delivery(fake_redis):
+    catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Create presentations",
+            "audience_or_scenario": "Office users",
+            "primary_input": "DOCX files",
+            "expected_output": "Presentation",
+            "key_constraints": "No invented facts",
+        },
+    )
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 10, "requirements_summary", "rendered"
+    )
+
+    catalog_module.apply_requirements_revision_text(
+        "tenant_1", 202, "confirm requirements"
+    )
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert state["card_delivery"]["requirements_summary"]["message_id"] == 10
 
 
 @pytest.mark.parametrize("text", ["No change, looks good", "无需修改，可以继续"])
