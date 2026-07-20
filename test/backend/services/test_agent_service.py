@@ -15181,3 +15181,44 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_ids"] == []
     assert result["model_names"] == []
     assert result["model_name"] is None
+
+
+# =============================================================================
+# Tests for Sandbox Policy Builder (lines 3671-3686)
+# =============================================================================
+
+
+class TestBuildSandboxPolicy:
+    """Tests for build_sandbox_policy function.
+
+    Note: The function imports consts.const inside the function body,
+    so we test the function signature and basic existence here.
+    Integration tests would require mocking at the consts module level.
+    """
+
+    def test_build_sandbox_policy_function_exists(self):
+        """Test that build_sandbox_policy function exists and is callable."""
+        from backend.services.agent_service import build_sandbox_policy
+
+        assert callable(build_sandbox_policy)
+
+    def test_build_sandbox_policy_accepts_required_args(self):
+        """Test that build_sandbox_policy accepts tenant_id and agent_type arguments."""
+        from backend.services.agent_service import build_sandbox_policy
+        import inspect
+
+        sig = inspect.signature(build_sandbox_policy)
+        params = list(sig.parameters.keys())
+
+        assert "tenant_id" in params
+        assert "agent_type" in params
+
+
+class TestGetSandboxMinioClient:
+    """Tests for get_sandbox_minio_client function."""
+
+    def test_get_sandbox_minio_client_function_exists(self):
+        """Test that get_sandbox_minio_client function exists and is callable."""
+        from backend.services.agent_service import get_sandbox_minio_client
+
+        assert callable(get_sandbox_minio_client)

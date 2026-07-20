@@ -341,7 +341,7 @@ with patch.dict("sys.modules", module_mocks):
     sys.modules["nexent.utils.http_client_manager"] = mock_http_client_manager_module
 
     from sdk.nexent.core.agents import nexent_agent
-    from sdk.nexent.core.agents.nexent_agent import NexentAgent, ActionStep, TaskStep
+    from sdk.nexent.core.agents.nexent_agent import NexentAgent, ActionStep, TaskStep, _has_host_tools, _is_retriever_tool
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
 
     # Clean up after import
@@ -477,6 +477,74 @@ def mock_core_agent():
     agent.stop_event = MagicMock()
     agent.run = MagicMock()  # Ensure .run exists and is mockable
     return agent
+
+
+# ----------------------------------------------------------------------------
+# Tests for helper functions (_has_host_tools, _is_retriever_tool)
+# ----------------------------------------------------------------------------
+
+
+def test_has_host_tools_with_host_tool():
+    """Test _has_host_tools returns True when a tool has _nexent_execute_on_host flag."""
+    mock_tool = MagicMock()
+    mock_tool._nexent_execute_on_host = True
+    result = _has_host_tools([mock_tool])
+    assert result is True
+
+
+def test_has_host_tools_without_host_tool():
+    """Test _has_host_tools returns False when no tool has _nexent_execute_on_host flag."""
+    mock_tool = MagicMock()
+    mock_tool._nexent_execute_on_host = False
+    result = _has_host_tools([mock_tool])
+    assert result is False
+
+
+def test_has_host_tools_with_mixed_tools():
+    """Test _has_host_tools returns True when at least one tool has the flag."""
+    mock_host_tool = MagicMock()
+    mock_host_tool._nexent_execute_on_host = True
+    mock_normal_tool = MagicMock()
+    mock_normal_tool._nexent_execute_on_host = False
+    result = _has_host_tools([mock_normal_tool, mock_host_tool])
+    assert result is True
+
+
+def test_has_host_tools_empty_list():
+    """Test _has_host_tools returns False for empty list."""
+    result = _has_host_tools([])
+    assert result is False
+
+
+def test_has_host_tools_no_execute_on_host_attr():
+    """Test _has_host_tools returns False when tool has no _nexent_execute_on_host attribute."""
+    mock_tool = MagicMock(spec=[])
+    result = _has_host_tools([mock_tool])
+    assert result is False
+
+
+def test_is_retriever_tool_knowledge_base_search():
+    """Test _is_retriever_tool returns True for KnowledgeBaseSearchTool."""
+    mock_tool = MagicMock()
+    type(mock_tool).__name__ = "KnowledgeBaseSearchTool"
+    result = _is_retriever_tool(mock_tool)
+    assert result is True
+
+
+def test_is_retriever_tool_search_memory():
+    """Test _is_retriever_tool returns True for SearchMemoryTool."""
+    mock_tool = MagicMock()
+    type(mock_tool).__name__ = "SearchMemoryTool"
+    result = _is_retriever_tool(mock_tool)
+    assert result is True
+
+
+def test_is_retriever_tool_other_tool():
+    """Test _is_retriever_tool returns False for other tool types."""
+    mock_tool = MagicMock()
+    type(mock_tool).__name__ = "SomeOtherTool"
+    result = _is_retriever_tool(mock_tool)
+    assert result is False
 
 
 # ----------------------------------------------------------------------------
@@ -3398,6 +3466,155 @@ class TestAgentRunWithObserverEdgeCases:
 
         # Verify duration was rounded to 2 decimal places
         mock_core_agent.observer.add_message.assert_any_call("", ProcessType.TOKEN_COUNT, ANY)
+
+
+# ----------------------------------------------------------------------------
+# Tests for sandbox warm-up logic (lines 502-544)
+# ----------------------------------------------------------------------------
+
+
+class TestSandboxWarmUp:
+    """Tests for sandbox warm-up logic in create_single_agent.
+
+    These tests verify the sandbox configuration handling logic without
+    requiring the actual sandbox module to be loaded.
+    """
+
+    def test_has_host_tools_detects_host_tools_in_tool_list(
+        self, nexent_agent_instance
+    ):
+        """Test that _has_host_tools correctly identifies tools with host execution flag."""
+        mock_host_tool = MagicMock()
+        mock_host_tool._nexent_execute_on_host = True
+        mock_normal_tool = MagicMock()
+        mock_normal_tool._nexent_execute_on_host = False
+
+        result_with_host = _has_host_tools([mock_host_tool, mock_normal_tool])
+        assert result_with_host is True
+
+        result_without_host = _has_host_tools([mock_normal_tool])
+        assert result_without_host is False
+
+    def test_create_single_agent_sandbox_config_none_skips_executor(
+        self, nexent_agent_instance, mock_model_config, mock_core_agent
+    ):
+        """Test that when sandbox_config is None, no executor is created."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        nexent_agent_instance.sandbox_config = None
+
+        mock_agent_config = AgentConfig(
+            name="no_sandbox_agent",
+            description="Agent without sandbox",
+            prompt_templates={"system": "You are a test agent"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[]
+        )
+
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
+            result = nexent_agent_instance.create_single_agent(mock_agent_config)
+
+            mock_core_agent_fn.assert_called_once()
+            call_kwargs = mock_core_agent_fn.call_args[1]
+            assert call_kwargs.get("executor") is None
+
+    def test_create_single_agent_managed_context_skips_executor(
+        self, nexent_agent_instance, mock_model_config, mock_core_agent
+    ):
+        """Test that _managed_context=True skips executor creation even with sandbox_config."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+
+        mock_sandbox_config = MagicMock()
+        mock_sandbox_config.level = "remote"
+        nexent_agent_instance.sandbox_config = mock_sandbox_config
+
+        mock_agent_config = AgentConfig(
+            name="managed_agent",
+            description="Managed agent",
+            prompt_templates={"system": "You are a test agent"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[]
+        )
+
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
+            result = nexent_agent_instance.create_single_agent(
+                mock_agent_config, _managed_context=True
+            )
+
+            mock_core_agent_fn.assert_called_once()
+            call_kwargs = mock_core_agent_fn.call_args[1]
+            assert call_kwargs.get("executor") is None
+
+
+# ----------------------------------------------------------------------------
+# Tests for _log_step_metrics file writing (lines 789-790)
+# ----------------------------------------------------------------------------
+
+
+class TestLogStepMetrics:
+    """Tests for _log_step_metrics method."""
+
+    def test_log_step_metrics_with_empty_metrics(self, nexent_agent_instance, mock_core_agent):
+        """Test _log_step_metrics handles empty step_metrics gracefully."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.step_metrics = []
+        mock_core_agent.context_manager = None
+
+        # Should not raise any exception
+        nexent_agent_instance._log_step_metrics()
+
+    def test_log_step_metrics_without_step_metrics_attribute(self, nexent_agent_instance, mock_core_agent):
+        """Test _log_step_metrics handles missing step_metrics attribute."""
+        nexent_agent_instance.agent = mock_core_agent
+        if hasattr(mock_core_agent, "step_metrics"):
+            delattr(mock_core_agent, "step_metrics")
+        mock_core_agent.context_manager = None
+
+        # Should not raise any exception
+        nexent_agent_instance._log_step_metrics()
+
+
+# ----------------------------------------------------------------------------
+# Tests for _cleanup_sandbox method (lines 806-831)
+# ----------------------------------------------------------------------------
+
+
+class TestCleanupSandbox:
+    """Tests for _cleanup_sandbox method.
+
+    Note: Full sandbox cleanup tests (session scope, system scope, MinIO sync)
+    require the actual sandbox module to be loaded since the functions are
+    imported inside the method. The tests below cover the easily testable
+    early return case and leave the complex cases as integration tests.
+    """
+
+    def test_cleanup_sandbox_no_executor(self, nexent_agent_instance, mock_core_agent):
+        """Test _cleanup_sandbox returns early when no executor exists."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.python_executor = None
+
+        nexent_agent_instance._cleanup_sandbox()
+
+    def test_cleanup_sandbox_with_none_python_executor_attribute(self, nexent_agent_instance, mock_core_agent):
+        """Test _cleanup_sandbox handles getattr returning None gracefully."""
+        nexent_agent_instance.agent = mock_core_agent
+        # Simulate getattr returning None
+        mock_core_agent.python_executor = None
+
+        nexent_agent_instance._cleanup_sandbox()
+
+    def test_cleanup_sandbox_no_sandbox_scope(self, nexent_agent_instance, mock_core_agent):
+        """Test _cleanup_sandbox when _sandbox_scope is None."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.python_executor = MagicMock()
+        nexent_agent_instance._sandbox_scope = None
+
+        nexent_agent_instance._cleanup_sandbox()
 
 
 if __name__ == "__main__":
