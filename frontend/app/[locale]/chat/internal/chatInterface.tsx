@@ -654,7 +654,7 @@ export function ChatInterface() {
             t,
             "agentAutomation.proposal.createFailed"
           );
-          message.warning(errorMessage);
+          message.error(errorMessage);
           setSessionMessages((prev) => {
             const existingMessages = prev[id] || [];
             const nextMessages = existingMessages.filter(

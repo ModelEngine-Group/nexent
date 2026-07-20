@@ -3004,7 +3004,7 @@
   "agentAutomation.errors.capabilityBindingInvalid": "The task capability binding is invalid. Reconfigure it and try again.",
   "agentAutomation.errors.scheduleInvalid": "The schedule is invalid. Check the time and recurrence rule.",
   "agentAutomation.errors.taskNotFound": "The automation task does not exist or is no longer available.",
-  "agentAutomation.errors.conversationAlreadyBound": "This conversation already has an automation task.",
+  "agentAutomation.errors.conversationAlreadyBound": "This conversation already has an automation task and cannot create another one.",
   "common.toolSource.local": "Local Tool",
   "common.toolSource.mcp": "MCP Tool",
   "common.toolSource.langchain": "LangChain Tool",

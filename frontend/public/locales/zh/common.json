@@ -2883,7 +2883,7 @@
   "agentAutomation.errors.capabilityBindingInvalid": "任务能力绑定无效，请重新配置。",
   "agentAutomation.errors.scheduleInvalid": "执行计划无效，请检查时间和重复规则。",
   "agentAutomation.errors.taskNotFound": "自动任务不存在或已不可用。",
-  "agentAutomation.errors.conversationAlreadyBound": "该会话已绑定自动任务。",
+  "agentAutomation.errors.conversationAlreadyBound": "当前会话已经绑定一个自动任务了，无法重复创建。",
   "common.toolSource.local": "本地工具",
   "common.toolSource.mcp": "MCP工具",
   "common.toolSource.langchain": "LangChain工具",

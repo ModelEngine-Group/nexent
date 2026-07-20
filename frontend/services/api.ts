@@ -659,13 +659,17 @@ export const fetchWithErrorHandling = async (
       let errorMessage = `Request failed: ${response.status}`;
       const errorText = await response.text();
 
-      let parsedErrorData = null;
       try {
         const errorData = JSON.parse(errorText);
-        if (errorData && errorData.code) {
-          parsedErrorData = errorData;
-          errorCode = errorData.code;
-          errorMessage = errorData.message || errorMessage;
+        const errorDetail =
+          errorData?.detail && typeof errorData.detail === "object"
+            ? errorData.detail
+            : errorData?.message && typeof errorData.message === "object"
+              ? errorData.message
+              : errorData;
+        if (errorDetail?.code) {
+          errorCode = errorDetail.code;
+          errorMessage = errorDetail.message || errorMessage;
         } else {
           errorMessage = errorText || errorMessage;
         }
