@@ -764,6 +764,29 @@ async def create_agent_config(
                     "Memory tools will fall back to legacy path.", exc
                 )
 
+            # Hand the SearchMemoryTool a backend
+            # ``MemoryContextService`` so active search calls run
+            # through the retrieval pipeline (normalize / fusion /
+            # decay / MMR / token-budget selection) instead of
+            # bypassing it. The service is reused for prompt injection,
+            # so a single instance per agent is sufficient.
+            try:
+                from services.memory_context_service import get_memory_context_service
+
+                memory_metadata["memory_context_service"] = (
+                    get_memory_context_service()
+                )
+                logger.debug(
+                    "MemoryContextService attached to memory tools "
+                    "for agent_id=%s", memory_context.agent_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to attach MemoryContextService to memory "
+                    "tools: %s. Active search_memory will fall back to "
+                    "the legacy MemoryService path.", exc
+                )
+
             memory_tool_names = {"store_memory", "search_memory"}
             tool_list = [t for t in tool_list if t.name not in memory_tool_names]
 
