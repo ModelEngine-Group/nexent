@@ -429,6 +429,7 @@ class TestPoolManagerLogic:
             return executor
 
         monkeypatch.setattr(pm, "_build_executor", lambda *args: owner)
+        monkeypatch.setattr(pm, "_recover_docker_container", lambda *args: None)
         monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: next(leases))
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", install_bridge)
 

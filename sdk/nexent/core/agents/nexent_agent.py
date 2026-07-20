@@ -403,7 +403,10 @@ class NexentAgent:
             else:
                 raise ValueError(f"unsupported tool source: {source}")
             if source in {"local", "builtin", "mcp"}:
-                setattr(tool_obj, "_nexent_execute_on_host", True)
+                try:
+                    setattr(tool_obj, "_nexent_execute_on_host", True)
+                except (AttributeError, TypeError):
+                    pass
             return tool_obj
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")

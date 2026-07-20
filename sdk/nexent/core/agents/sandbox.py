@@ -332,17 +332,18 @@ class _ToolBridge:
         """Return the runtime address reachable from the sandbox container."""
         return "nexent-runtime" if _is_containerized_runtime() else "host.docker.internal"
 
-    def proxy_code(self, tools: dict[str, Any]) -> str:
+    def proxy_code(self, tools: dict[str, Any], bridge_host: Optional[str] = None) -> str:
         definitions = []
         for name in tools:
             definitions.append(
                 f"def {name}(*args, **kwargs):\n"
                 f"    return _nexent_call_host_tool({name!r}, args, kwargs)"
             )
+        host = bridge_host or self._bridge_host()
         return (
             "import json as _nexent_json\n"
             "import urllib.request as _nexent_urllib\n"
-            f"_NEXENT_TOOL_BRIDGE_URL = 'http://{self._bridge_host()}:{self.port}/invoke'\n"
+            f"_NEXENT_TOOL_BRIDGE_URL = 'http://{host}:{self.port}/invoke'\n"
             f"_NEXENT_TOOL_BRIDGE_TOKEN = {self._token!r}\n"
             "def _nexent_call_host_tool(name, args, kwargs):\n"
             "    payload = _nexent_json.dumps({'tool': name, 'args': args, 'kwargs': kwargs}).encode('utf-8')\n"
@@ -382,7 +383,12 @@ def _install_host_tool_bridge(executor: Any, logger_: logging.Logger) -> Any:
         original_send_tools(remote_tools)
         if host_tools:
             bridge.register(host_tools)
-            output = executor.run_code_raise_errors(bridge.proxy_code(host_tools))
+            bridge_host = (
+                bridge._bridge_host()
+                if getattr(executor, "container", None) is not None
+                else "127.0.0.1"
+            )
+            output = executor.run_code_raise_errors(bridge.proxy_code(host_tools, bridge_host))
             logger_.debug("Registered %d host tool proxy/proxies: %s", len(host_tools), sorted(host_tools))
             if getattr(output, "logs", None):
                 logger_.debug("Host tool proxy registration output: %s", output.logs)
