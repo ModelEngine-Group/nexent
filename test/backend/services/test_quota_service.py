@@ -19,6 +19,64 @@ from services.quota_service import (
 )
 from consts.exceptions import PlatformQuotaConflictError
 
+
+@pytest.fixture
+def mock_tenant_config_db():
+    """Mock tenant configuration persistence used by QuotaService."""
+    with patch("services.quota_service.get_single_config_info") as mock_get, \
+         patch("services.quota_service.insert_config") as mock_insert, \
+         patch("services.quota_service.update_config_by_tenant_config_id") as mock_update, \
+         patch("services.quota_service.delete_config_by_tenant_config_id") as mock_delete:
+        yield {
+            "get_single_config_info": mock_get,
+            "insert_config": mock_insert,
+            "update_config_by_tenant_config_id": mock_update,
+            "delete_config_by_tenant_config_id": mock_delete,
+        }
+
+
+@pytest.fixture
+def mock_knowledge_db():
+    """Mock knowledge base persistence used by QuotaService."""
+    with patch("services.quota_service.get_knowledge_info_by_tenant_id") as mock_list, \
+         patch("services.quota_service.update_knowledge_record") as mock_update:
+        yield {
+            "get_knowledge_info_by_tenant_id": mock_list,
+            "update_knowledge_record": mock_update,
+        }
+
+
+@pytest.fixture
+def quota_service():
+    """Create a quota service for an isolated test tenant."""
+    return QuotaService("test-tenant-id", "test-user-id")
+
+
+@pytest.fixture
+def sample_kb_list():
+    """Return representative knowledge bases with mixed quota settings."""
+    return [
+        {
+            "knowledge_id": 1,
+            "index_name": "kb-1-abc123",
+            "knowledge_name": "Research Docs",
+            "quota_limit_bytes": 30 * GB,
+        },
+        {
+            "knowledge_id": 2,
+            "index_name": "kb-2-def456",
+            "knowledge_name": "Sales Docs",
+            "quota_limit_bytes": None,
+        },
+        {
+            "knowledge_id": 3,
+            "index_name": "kb-3-ghi789",
+            "knowledge_name": "Ops Docs",
+            "quota_limit_bytes": 10 * GB,
+        },
+    ]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Task 11.5 — Warning Level Computation (pure logic, no DB mocks needed)
 # ═══════════════════════════════════════════════════════════════════════
@@ -97,6 +155,25 @@ class TestBytesToReadable:
 
     def test_zero(self):
         assert _bytes_to_readable(0) == "0 B"
+
+
+class TestStoreSizeParsing:
+    @pytest.mark.parametrize(
+        ("raw_value", "expected"),
+        [
+            (None, 0),
+            (1024, 1024),
+            ("", 0),
+            ("invalid", 0),
+            ("1 MB", 1024 * 1024),
+            ("2 KB", 2 * 1024),
+            ("3 B", 3),
+            ("1 XB", 0),
+            ("not-a-number MB", 0),
+        ],
+    )
+    def test_parse_store_size(self, raw_value, expected):
+        assert QuotaService._parse_store_size(raw_value) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════

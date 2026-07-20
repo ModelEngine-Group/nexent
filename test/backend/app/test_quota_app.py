@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
 from fastapi import HTTPException
+import apps.quota_app as quota_app
 from apps.app_factory import create_app
 from apps.file_management_app import upload_files
 from apps.quota_app import tenant_quota_router, platform_quota_router
@@ -461,6 +462,190 @@ class TestTenantIsolation:
             json={"hard_limit_gb": 100},
         )
         assert resp.status_code == 403
+
+
+class TestQuotaRoleHelpers:
+    """Unit tests for quota role resolution and developer KB visibility."""
+
+    def test_get_user_role_handles_missing_and_invalid_auth(self):
+        assert quota_app._get_user_role(None) == "USER"
+
+        with patch(
+            "apps.quota_app.get_current_user_id", side_effect=ValueError("bad token")
+        ):
+            assert quota_app._get_user_role("Bearer invalid") == "USER"
+
+    def test_get_user_role_normalizes_database_role(self):
+        with patch(
+            "apps.quota_app.get_current_user_id",
+            return_value=("user-id", "tenant-id"),
+        ), patch(
+            "apps.quota_app.get_user_tenant_by_user_id",
+            return_value={"user_role": "admin"},
+        ):
+            assert quota_app._get_user_role("Bearer token") == "ADMIN"
+
+    def test_role_requirements_accept_and_reject_expected_roles(self):
+        with patch("apps.quota_app._get_user_role", return_value="ADMIN"):
+            assert quota_app._require_admin_or_su("token") == "ADMIN"
+            with pytest.raises(HTTPException) as raised:
+                quota_app._require_su_or_asset_owner("token")
+            assert raised.value.status_code == 403
+
+        with patch("apps.quota_app._get_user_role", return_value="SU"):
+            assert quota_app._require_su_or_asset_owner("token") == "SU"
+
+    def test_manageable_indices_only_include_edit_permissions(self):
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core"
+        ), patch(
+            "services.vectordatabase_service.ElasticSearchService.list_indices",
+            return_value={
+                "index_permissions": {
+                    "editable": "EDIT",
+                    "created": "CREATOR",
+                    "readonly": "READ_ONLY",
+                }
+            },
+        ):
+            assert quota_app._get_manageable_index_names("tenant", "user") == {
+                "editable",
+                "created",
+            }
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core"
+        ), patch(
+            "services.vectordatabase_service.ElasticSearchService.list_indices",
+            return_value=[],
+        ):
+            assert quota_app._get_manageable_index_names("tenant", "user") == set()
+
+
+class TestQuotaEndpointErrors:
+    """Verify quota endpoints preserve their documented error contracts."""
+
+    def test_get_tenant_quota_maps_service_error(self, client, mock_auth_admin):
+        with patch(
+            "apps.quota_app.QuotaService", side_effect=RuntimeError("database down")
+        ):
+            response = client.get("/api/tenants/test-tenant/quota")
+
+        assert response.status_code == 500
+        assert "database down" in response.json()["message"]
+
+    def test_update_tenant_quota_maps_invalid_warning(self, client, mock_auth_admin, mock_quota_service):
+        mock_quota_service.set_warning_config.side_effect = ValueError(
+            "warning threshold must be lower"
+        )
+
+        response = client.put(
+            "/api/tenants/test-tenant/quota",
+            json={"warning_threshold_pct": 95},
+        )
+
+        assert response.status_code == 400
+        assert "warning threshold" in response.json()["message"]
+
+    def test_update_tenant_quota_maps_unexpected_error(self, client, mock_auth_admin, mock_quota_service):
+        mock_quota_service.get_hard_limit.side_effect = RuntimeError("database down")
+
+        response = client.put(
+            "/api/tenants/test-tenant/quota",
+            json={"hard_limit_gb": 10},
+        )
+
+        assert response.status_code == 500
+        assert "database down" in response.json()["message"]
+
+    def test_su_updates_tenant_limit_through_platform_service(self, client, mock_auth_su):
+        with patch("apps.quota_app.QuotaService") as service_class:
+            service_class.return_value.get_hard_limit.return_value = {
+                "hard_limit_editable": False
+            }
+            service_class.return_value.get_warning_config.return_value = {}
+            service_class.set_tenant_hard_limit.return_value = {
+                "hard_limit_bytes": 10 * GB
+            }
+
+            response = client.put(
+                "/api/tenants/target-tenant/quota",
+                json={"hard_limit_gb": 10},
+            )
+
+        assert response.status_code == 200
+        service_class.set_tenant_hard_limit.assert_called_once()
+
+    def test_delete_tenant_quota_success_and_service_error(self, client, mock_auth_admin, mock_quota_service):
+        response = client.delete("/api/tenants/test-tenant/quota")
+        assert response.status_code == 200
+        mock_quota_service.delete_hard_limit.assert_called_once()
+
+        mock_quota_service.delete_hard_limit.side_effect = RuntimeError("delete failed")
+        response = client.delete("/api/tenants/test-tenant/quota")
+        assert response.status_code == 500
+        assert "delete failed" in response.json()["message"]
+
+    def test_delete_tenant_quota_rejects_cross_tenant_admin(self, client, mock_auth_admin):
+        response = client.delete("/api/tenants/other-tenant/quota")
+        assert response.status_code == 403
+
+    def test_platform_overview_maps_service_error(self, client, mock_auth_su):
+        with patch(
+            "apps.quota_app.QuotaService.get_platform_overview",
+            side_effect=RuntimeError("overview failed"),
+        ):
+            response = client.get("/api/platform/quota/overview")
+
+        assert response.status_code == 500
+        assert "overview failed" in response.json()["message"]
+
+    def test_platform_capacity_error_and_delete_paths(self, client, mock_auth_su):
+        with patch(
+            "apps.quota_app.QuotaService.set_platform_capacity",
+            side_effect=RuntimeError("capacity failed"),
+        ):
+            response = client.put(
+                "/api/platform/quota/capacity", json={"capacity_gb": 100}
+            )
+            assert response.status_code == 500
+
+        with patch(
+            "apps.quota_app.QuotaService.set_platform_capacity",
+            return_value={"capacity_bytes": None},
+        ) as set_capacity:
+            response = client.delete("/api/platform/quota/capacity")
+            assert response.status_code == 200
+            set_capacity.assert_called_once_with(
+                None, quota_app.ASSET_OWNER_TENANT_ID, "su-user-id"
+            )
+
+        with patch(
+            "apps.quota_app.QuotaService.set_platform_capacity",
+            side_effect=RuntimeError("delete failed"),
+        ):
+            response = client.delete("/api/platform/quota/capacity")
+            assert response.status_code == 500
+
+    def test_tenant_platform_routes_map_service_errors(self, client, mock_auth_su):
+        with patch(
+            "apps.quota_app.QuotaService.set_tenant_hard_limit",
+            side_effect=RuntimeError("set failed"),
+        ):
+            response = client.put(
+                "/api/platform/quota/tenants/target-tenant",
+                json={"hard_limit_gb": 10},
+            )
+            assert response.status_code == 500
+
+        with patch(
+            "apps.quota_app.QuotaService.delete_tenant_hard_limit",
+            side_effect=RuntimeError("delete failed"),
+        ):
+            response = client.delete(
+                "/api/platform/quota/tenants/target-tenant"
+            )
+            assert response.status_code == 500
 
 
 # ═══════════════════════════════════════════════════════════════════════
