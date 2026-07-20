@@ -1,15 +1,4 @@
-"""Memory module providing memory management functionality.
-
-This module exposes the new Memory system framework as outlined in the
-memory design document. The new architecture supports:
-
-- Three-layer memory hierarchy: tenant / user / agent
-- Layer-based access policies
-- Embedding-model-aware metadata for the backend to derive index names
-  (the SDK itself never talks to Elasticsearch)
-- External provider integration via ``SearchableMemoryProvider`` /
-  ``IngestibleMemoryProvider``
-"""
+"""Memory module providing memory management functionality."""
 
 from .embedding_model import (
     EmbeddingModelInfo,
@@ -26,12 +15,15 @@ from .models import (
     MemorySearchResult,
     MemoryStatus,
     MemoryType,
-    StoreMemoryResult,
-    UnitIngestResult,
-    UnitIngestStatus,
+    PipelineConfig,
+    PipelineMemoryRecord,
     ProviderError,
     ProviderErrorCode,
     ProviderErrorSeverity,
+    RetrievalSource,
+    StoreMemoryResult,
+    UnitIngestResult,
+    UnitIngestStatus,
 )
 from .policy import (
     MemoryAccessPolicy,
@@ -40,7 +32,6 @@ from .policy import (
 )
 from .service import MemoryService, get_memory_service, reset_memory_service
 
-# Providers
 from .providers import (
     BaseMemoryProvider,
     DegradableProviderError,
@@ -56,10 +47,21 @@ from .providers import (
     reset_provider_registry,
 )
 
-# Provider adapters
 from .providers.adapters import (
     A800Adapter,
     Mem0Adapter,
+)
+
+from .retrieval import (
+    MMRDeduplicator,
+    Normalizer,
+    PipelineResult,
+    RetrievalPipeline,
+    ScoreFusion,
+    TemporalDecayer,
+    TokenBudgetSelector,
+    count_tokens,
+    count_tokens_from_records,
 )
 
 __all__ = [
@@ -79,6 +81,10 @@ __all__ = [
     "ProviderError",
     "ProviderErrorCode",
     "ProviderErrorSeverity",
+    # Phase 4 models
+    "RetrievalSource",
+    "PipelineMemoryRecord",
+    "PipelineConfig",
     # Service
     "MemoryService",
     "get_memory_service",
@@ -107,4 +113,14 @@ __all__ = [
     # Provider adapters
     "A800Adapter",
     "Mem0Adapter",
+    # Retrieval pipeline (Phase 4)
+    "Normalizer",
+    "ScoreFusion",
+    "TemporalDecayer",
+    "MMRDeduplicator",
+    "TokenBudgetSelector",
+    "RetrievalPipeline",
+    "PipelineResult",
+    "count_tokens",
+    "count_tokens_from_records",
 ]
