@@ -235,6 +235,8 @@ ALLOWED_CHUNK_FIELDS = {
 # Configure logging
 logger = logging.getLogger("vectordatabase_service")
 
+_QUOTA_LIMIT_UNSET = object()
+
 
 def get_vector_db_core(
     db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
@@ -861,7 +863,7 @@ class ElasticSearchService:
             group_ids: Optional[List[int]] = None,
             tenant_id: Optional[str] = None,
             user_id: Optional[str] = None,
-            quota_limit_bytes: Optional[int] = None,
+            quota_limit_bytes: Any = _QUOTA_LIMIT_UNSET,
     ) -> bool:
         """
         Update knowledge base information (name, group permission, group assignments).
@@ -873,6 +875,7 @@ class ElasticSearchService:
             group_ids: List of group IDs to assign (optional)
             tenant_id: ID of the tenant (optional, for validation)
             user_id: ID of the user making the update
+            quota_limit_bytes: New soft quota in bytes; None removes the quota
 
         Returns:
             bool: Whether the update was successful
@@ -902,7 +905,7 @@ class ElasticSearchService:
             # Convert list to string for database storage
             update_data["group_ids"] = convert_list_to_string(group_ids)
 
-        if quota_limit_bytes is not None:
+        if quota_limit_bytes is not _QUOTA_LIMIT_UNSET:
             update_data["quota_limit_bytes"] = quota_limit_bytes
 
         # Call database update function

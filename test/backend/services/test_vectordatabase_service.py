@@ -3267,6 +3267,23 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_args["knowledge_name"], "New Name")
         self.assertNotIn("ingroup_permission", call_args)
         self.assertNotIn("group_ids", call_args)
+        self.assertNotIn("quota_limit_bytes", call_args)
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_clear_quota(self, mock_update_record):
+        """Test that an explicit None clears the knowledge base quota."""
+        mock_update_record.return_value = True
+
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            quota_limit_bytes=None,
+            user_id="test_user"
+        )
+
+        self.assertTrue(result)
+        call_args = mock_update_record.call_args[0][0]
+        self.assertIn("quota_limit_bytes", call_args)
+        self.assertIsNone(call_args["quota_limit_bytes"])
 
     @patch('backend.services.vectordatabase_service.update_knowledge_record')
     def test_update_knowledge_base_partial_update_permission(self, mock_update_record):

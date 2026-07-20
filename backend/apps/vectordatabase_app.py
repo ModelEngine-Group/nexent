@@ -160,18 +160,19 @@ async def update_index(
         knowledge_name = request.get("knowledge_name")
         ingroup_permission = request.get("ingroup_permission")
         group_ids = request.get("group_ids")
-        quota_limit_bytes = request.get("quota_limit_bytes")
-
         # Call service layer to update knowledge base
-        result = ElasticSearchService.update_knowledge_base(
-            index_name=index_name,
-            knowledge_name=knowledge_name,
-            ingroup_permission=ingroup_permission,
-            group_ids=group_ids,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            quota_limit_bytes=quota_limit_bytes,
-        )
+        update_kwargs = {
+            "index_name": index_name,
+            "knowledge_name": knowledge_name,
+            "ingroup_permission": ingroup_permission,
+            "group_ids": group_ids,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+        if "quota_limit_bytes" in request:
+            update_kwargs["quota_limit_bytes"] = request["quota_limit_bytes"]
+
+        result = ElasticSearchService.update_knowledge_base(**update_kwargs)
 
         if result:
             return JSONResponse(
