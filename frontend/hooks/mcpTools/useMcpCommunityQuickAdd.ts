@@ -12,6 +12,7 @@ import {
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
+import { getMcpAddErrorMessage } from "@/lib/mcpTools";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
 import type { CommunityMcpCard, CommunityQuickAddDraft } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
@@ -124,14 +125,7 @@ export function useMcpCommunityQuickAdd({
   }
 
   function handleAddError(error: unknown) {
-    const msg = error instanceof Error ? error.message : "";
-    if (/already exists|name conflict|name already used/i.test(msg)) {
-      message.error(t("mcpTools.add.error.nameExists"));
-    } else if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
-      message.error(t("mcpTools.add.error.connectionFailed"));
-    } else {
-      message.error(msg || t("mcpTools.add.failed"));
-    }
+    message.error(getMcpAddErrorMessage(error, t));
   }
 
   const confirm = useCallback(async () => {
