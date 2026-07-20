@@ -17,6 +17,7 @@ from services.quota_service import (
     DEFAULT_CRITICAL_THRESHOLD,
     _usage_cache,
 )
+from consts.exceptions import PlatformQuotaConflictError
 
 # ═══════════════════════════════════════════════════════════════════════
 # Task 11.5 — Warning Level Computation (pure logic, no DB mocks needed)
@@ -144,7 +145,14 @@ class TestConfigMethods:
         mock_tenant_config_db["get_single_config_info"].return_value = {}
         mock_tenant_config_db["insert_config"].return_value = True
 
-        result = quota_service.set_hard_limit(50)  # 50 GB
+        with patch.object(
+            quota_service, "get_usage", return_value={"total_bytes": 0}
+        ), patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": None},
+        ):
+            result = quota_service.set_hard_limit(50)  # 50 GB
         assert result["hard_limit_bytes"] == 50 * GB
         assert "50" in result["hard_limit_readable"]
 
@@ -405,7 +413,11 @@ class TestPlatformQuota:
             assert "500" in result["capacity_readable"]
 
     def test_set_platform_capacity(self):
-        with patch.object(QuotaService, "_set_tenant_config") as mock_set:
+        with patch.object(QuotaService, "_set_tenant_config") as mock_set, patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={"total_allocated_bytes": 0},
+        ):
             mock_set.return_value = True
             result = QuotaService.set_platform_capacity(500)
             assert result["capacity_bytes"] == 500 * GB
@@ -417,7 +429,13 @@ class TestPlatformQuota:
             assert result["capacity_bytes"] is None
 
     def test_set_tenant_hard_limit_by_su(self):
-        with patch.object(QuotaService, "_set_tenant_config") as mock_set:
+        with patch.object(QuotaService, "_set_tenant_config") as mock_set, patch.object(
+            QuotaService, "get_usage", return_value={"total_bytes": 0}
+        ), patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": None},
+        ):
             mock_set.return_value = True
             result = QuotaService.set_tenant_hard_limit("target-tenant", 200)
             assert result["hard_limit_bytes"] == 200 * GB
@@ -425,6 +443,83 @@ class TestPlatformQuota:
             editable_call = any(
                 "KB_QUOTA_HARD_LIMIT_EDITABLE" in str(call) for call in mock_set.call_args_list
             )
+            assert editable_call
+
+    def test_rejects_tenant_quota_below_actual_usage(self):
+        with patch.object(
+            QuotaService, "get_usage", return_value={"total_bytes": 2 * GB}
+        ), patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": None},
+        ):
+            with pytest.raises(PlatformQuotaConflictError) as raised:
+                QuotaService.set_tenant_hard_limit("target-tenant", limit_gb=1)
+
+        assert raised.value.error == "TenantQuotaBelowUsage"
+        assert raised.value.details["actual_usage_bytes"] == 2 * GB
+
+    def test_rejects_tenant_quota_above_remaining_platform_capacity(self):
+        with patch.object(
+            QuotaService, "get_usage", return_value={"total_bytes": 0}
+        ), patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": 100 * GB},
+        ), patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={
+                "hard_limits": {"target-tenant": 50 * GB},
+                "total_allocated_bytes": 90 * GB,
+            },
+        ):
+            with pytest.raises(PlatformQuotaConflictError) as raised:
+                QuotaService.set_tenant_hard_limit("target-tenant", limit_gb=70)
+
+        assert raised.value.error == "PlatformCapacityExceeded"
+        assert raised.value.details["remaining_allocatable_bytes"] == 10 * GB
+
+    def test_rejects_platform_capacity_below_existing_allocations(self):
+        with patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={"total_allocated_bytes": 200 * GB},
+        ):
+            with pytest.raises(PlatformQuotaConflictError) as raised:
+                QuotaService.set_platform_capacity(100)
+
+        assert raised.value.error == "PlatformCapacityBelowAllocation"
+
+    def test_platform_overview_marks_legacy_unmanaged_tenants(self):
+        with patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": 100 * GB, "capacity_readable": "100.0 GB"},
+        ), patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={
+                "tenant_ids": ["managed", "legacy"],
+                "hard_limits": {"managed": 40 * GB, "legacy": None},
+                "total_allocated_bytes": 40 * GB,
+                "unmanaged_tenant_count": 1,
+            },
+        ), patch.object(
+            QuotaService,
+            "get_usage",
+            return_value={
+                "total_bytes": 10 * GB,
+                "warning_enabled": True,
+                "tenant_warning_level": "normal",
+            },
+        ), patch("database.tenant_config_db.get_single_config_info", return_value={}):
+            result = QuotaService.get_platform_overview()
+
+        assert result["remaining_allocatable_bytes"] == 60 * GB
+        assert result["allocation_percentage"] == 40
+        assert result["unmanaged_tenant_count"] == 1
+        assert result["capacity_management_enforced"] is False
 
     def test_delete_tenant_hard_limit(self):
         with patch.object(QuotaService, "_delete_tenant_config") as mock_del:

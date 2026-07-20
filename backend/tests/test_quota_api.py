@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from apps.app_factory import create_app
 from apps.file_management_app import upload_files
 from apps.quota_app import tenant_quota_router, platform_quota_router
-from consts.exceptions import QuotaExceededError
+from consts.exceptions import PlatformQuotaConflictError, QuotaExceededError
 
 GB = 1024 * 1024 * 1024
 
@@ -397,6 +397,38 @@ class TestPlatformEndpoints:
             json={"hard_limit_gb": 100},
         )
         assert resp.status_code == 200
+
+    def test_put_capacity_returns_conflict_details(self, client, mock_auth_su, mock_platform_static):
+        mock_platform_static["set_platform_capacity"].side_effect = PlatformQuotaConflictError(
+            "Platform capacity cannot be lower than existing tenant allocations",
+            "PlatformCapacityBelowAllocation",
+            {"total_allocated_bytes": 200 * GB},
+        )
+
+        resp = client.put("/api/platform/quota/capacity", json={"capacity_gb": 100})
+
+        assert resp.status_code == 409
+        assert resp.json() == {
+            "error": "PlatformCapacityBelowAllocation",
+            "message": "Platform capacity cannot be lower than existing tenant allocations",
+            "total_allocated_bytes": 200 * GB,
+        }
+
+    def test_put_tenant_quota_returns_conflict_details(self, client, mock_auth_su, mock_platform_static):
+        mock_platform_static["set_tenant_hard_limit"].side_effect = PlatformQuotaConflictError(
+            "Tenant hard quota exceeds remaining platform capacity",
+            "PlatformCapacityExceeded",
+            {"remaining_allocatable_bytes": 10 * GB},
+        )
+
+        resp = client.put(
+            "/api/platform/quota/tenants/target-tenant",
+            json={"hard_limit_gb": 100},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["error"] == "PlatformCapacityExceeded"
+        assert resp.json()["remaining_allocatable_bytes"] == 10 * GB
 
     def test_delete_tenant_hard_quota(self, client, mock_auth_su, mock_platform_static):
         mock_platform_static["delete_tenant_hard_limit"].return_value = True

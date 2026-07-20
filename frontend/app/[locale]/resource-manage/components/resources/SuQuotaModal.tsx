@@ -20,7 +20,7 @@ import {
 } from "antd";
 import { CloudOutlined, DatabaseOutlined } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
-import type { QuotaUsageResponse } from "@/types/quota";
+import type { PlatformQuotaOverview, QuotaUsageResponse } from "@/types/quota";
 
 interface SuQuotaModalProps {
   open: boolean;
@@ -45,6 +45,8 @@ export function SuQuotaModal({
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [usageData, setUsageData] = useState<any>(null);
+  const [platformOverview, setPlatformOverview] =
+    useState<PlatformQuotaOverview | null>(null);
   const [saving, setSaving] = useState(false);
   const [unit, setUnit] = useState<"GB" | "MB">("GB");
   const [quotaValue, setQuotaValue] = useState<number | null>(null);
@@ -56,6 +58,7 @@ export function SuQuotaModal({
     // Reset on open
     setConfig(null);
     setUsageData(null);
+    setPlatformOverview(null);
     setUnit("GB");
     setQuotaValue(null);
 
@@ -64,14 +67,16 @@ export function SuQuotaModal({
 
     (async () => {
       try {
-        const [cfg, usage] = await Promise.all([
+        const [cfg, usage, overview] = await Promise.all([
           quotaService.getQuotaConfig(tenantId),
           quotaService.getQuotaUsage(tenantId, true, false),
+          quotaService.getPlatformOverview(),
         ]);
         if (cancelled) return;
 
         setConfig(cfg);
         setUsageData(usage);
+        setPlatformOverview(overview);
         onUsageChange?.(usage);
 
         const currentBytes: number | null = cfg?.hard_limit_bytes ?? null;
@@ -121,6 +126,29 @@ export function SuQuotaModal({
     usageBytes >= GB
       ? `${(usageBytes / GB).toFixed(1)} GB`
       : `${(usageBytes / MB).toFixed(1)} MB`;
+  const unitBytes = unit === "GB" ? GB : MB;
+  const minimumQuota = Math.ceil(usageBytes / unitBytes);
+  const currentQuotaBytes = hardLimitBytes || 0;
+  const maximumQuota =
+    platformOverview?.platform_capacity_bytes == null
+      ? undefined
+      : Math.floor(
+          ((platformOverview.remaining_allocatable_bytes || 0) + currentQuotaBytes) /
+            unitBytes
+        );
+  const validMaximumQuota =
+    maximumQuota == null || maximumQuota < minimumQuota
+      ? undefined
+      : maximumQuota;
+
+  const changeUnit = (nextUnit: "GB" | "MB") => {
+    if (nextUnit === unit) return;
+    const valueBytes = quotaValue == null ? null : quotaValue * unitBytes;
+    setUnit(nextUnit);
+    setQuotaValue(
+      valueBytes == null ? null : Math.round(valueBytes / (nextUnit === "GB" ? GB : MB))
+    );
+  };
 
   return (
     <Modal
@@ -196,21 +224,32 @@ export function SuQuotaModal({
               onChange={(v) => setQuotaValue(v ?? null)}
               addonAfter={unit}
               placeholder={t("quota.unlimited", "Unlimited")}
-              min={0}
+              min={minimumQuota}
+              max={validMaximumQuota}
               precision={0}
               size="large"
             />
             <Segmented
               options={["GB", "MB"]}
               value={unit}
-              onChange={(val) => setUnit(val as "GB" | "MB")}
+              onChange={(val) => changeUnit(val as "GB" | "MB")}
             />
           </Space>
           <div style={{ marginTop: 4, fontSize: 12, color: "#999" }}>
-            {t(
-              "quota.suHint",
-              "Set to empty for unlimited. This tenant cannot exceed this limit."
-            )}
+            {platformOverview?.platform_capacity_bytes == null
+              ? t(
+                  "quota.suHint",
+                  "Set to empty for unlimited. This tenant cannot exceed this limit."
+                )
+              : t("quota.suAllocationHint", {
+                  minimum: `${minimumQuota} ${unit}`,
+                  maximum:
+                    validMaximumQuota == null
+                      ? t("quota.unlimited", "Unlimited")
+                      : `${validMaximumQuota} ${unit}`,
+                  defaultValue:
+                    "Allowed range: {{minimum}} to {{maximum}}, based on current usage and remaining platform capacity.",
+                })}
           </div>
         </div>
       </div>

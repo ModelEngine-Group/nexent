@@ -8,10 +8,12 @@ Provides three-tier quota management:
 """
 
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from consts.exceptions import QuotaExceededError
+from consts.const import ASSET_OWNER_TENANT_ID
+from consts.exceptions import PlatformQuotaConflictError, QuotaExceededError
 from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
     update_knowledge_record,
@@ -41,6 +43,10 @@ DEFAULT_CRITICAL_THRESHOLD = 95
 
 # In-memory cache for usage data
 _usage_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+# Config helpers use independent database sessions, so serialize allocation
+# validation and writes within a config-service process.
+_platform_allocation_lock = threading.RLock()
 
 
 def _bytes_to_readable(size_bytes: Optional[int]) -> Optional[str]:
@@ -150,13 +156,11 @@ class QuotaService:
             self._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "true")
             return {"hard_limit_bytes": None, "hard_limit_readable": None}
 
-        if limit_mb is not None:
-            limit_bytes = _mb_to_bytes(int(limit_mb))
-        else:
-            limit_bytes = _gb_to_bytes(int(limit_gb))
-
-        self._set_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES, str(limit_bytes))
-        self._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "true")
+        limit_bytes = self._quota_input_to_bytes(limit_gb, limit_mb)
+        with _platform_allocation_lock:
+            self._validate_tenant_hard_limit(limit_bytes)
+            self._set_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES, str(limit_bytes))
+            self._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "true")
         return {
             "hard_limit_bytes": limit_bytes,
             "hard_limit_readable": _bytes_to_readable(limit_bytes),
@@ -612,7 +616,92 @@ class QuotaService:
     # ── Platform-Level Methods (tasks 9.1–9.3) ─────────────────────────
 
     @staticmethod
-    def get_platform_capacity(asset_owner_tenant_id: str = "asset_owner_tenant_id") -> Dict[str, Any]:
+    def _quota_input_to_bytes(limit_gb: Optional[int], limit_mb: Optional[int]) -> int:
+        """Convert an API quota value to bytes."""
+        if limit_mb is not None:
+            return _mb_to_bytes(int(limit_mb))
+        return _gb_to_bytes(int(limit_gb))
+
+    @staticmethod
+    def _get_allocation_state(asset_owner_tenant_id: str) -> Dict[str, Any]:
+        """Return finite tenant allocations and unmanaged tenant count."""
+        from database.tenant_config_db import get_all_tenant_ids, get_single_config_info
+
+        tenant_ids = [
+            tenant_id
+            for tenant_id in get_all_tenant_ids()
+            if tenant_id != asset_owner_tenant_id
+        ]
+        hard_limits: Dict[str, Optional[int]] = {}
+        total_allocated_bytes = 0
+        unmanaged_tenant_count = 0
+        for tenant_id in tenant_ids:
+            record = get_single_config_info(tenant_id, KEY_TENANT_HARD_LIMIT_BYTES)
+            try:
+                hard_limit_bytes = int(record["config_value"]) if record and record.get("config_value") else None
+            except (TypeError, ValueError):
+                hard_limit_bytes = None
+            hard_limits[tenant_id] = hard_limit_bytes
+            if hard_limit_bytes is None:
+                unmanaged_tenant_count += 1
+            else:
+                total_allocated_bytes += hard_limit_bytes
+        return {
+            "tenant_ids": tenant_ids,
+            "hard_limits": hard_limits,
+            "total_allocated_bytes": total_allocated_bytes,
+            "unmanaged_tenant_count": unmanaged_tenant_count,
+        }
+
+    def _validate_tenant_hard_limit(
+        self,
+        limit_bytes: int,
+        asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
+    ) -> None:
+        """Validate a finite tenant quota against usage and platform allocation."""
+        usage = self.get_usage(force_refresh=True)
+        actual_bytes = usage.get("total_bytes", 0)
+        if limit_bytes < actual_bytes:
+            raise PlatformQuotaConflictError(
+                "Tenant hard quota cannot be lower than current usage",
+                "TenantQuotaBelowUsage",
+                {
+                    "tenant_id": self.tenant_id,
+                    "requested_limit_bytes": limit_bytes,
+                    "requested_limit_readable": _bytes_to_readable(limit_bytes),
+                    "actual_usage_bytes": actual_bytes,
+                    "actual_usage_readable": _bytes_to_readable(actual_bytes),
+                },
+            )
+
+        capacity_bytes = QuotaService.get_platform_capacity(asset_owner_tenant_id).get("capacity_bytes")
+        if capacity_bytes is None:
+            return
+
+        allocation_state = QuotaService._get_allocation_state(asset_owner_tenant_id)
+        current_limit_bytes = allocation_state["hard_limits"].get(self.tenant_id) or 0
+        proposed_total_bytes = allocation_state["total_allocated_bytes"] - current_limit_bytes + limit_bytes
+        if proposed_total_bytes > capacity_bytes:
+            raise PlatformQuotaConflictError(
+                "Tenant hard quota exceeds remaining platform capacity",
+                "PlatformCapacityExceeded",
+                {
+                    "tenant_id": self.tenant_id,
+                    "requested_limit_bytes": limit_bytes,
+                    "requested_limit_readable": _bytes_to_readable(limit_bytes),
+                    "platform_capacity_bytes": capacity_bytes,
+                    "platform_capacity_readable": _bytes_to_readable(capacity_bytes),
+                    "total_allocated_bytes": allocation_state["total_allocated_bytes"],
+                    "total_allocated_readable": _bytes_to_readable(allocation_state["total_allocated_bytes"]),
+                    "remaining_allocatable_bytes": max(capacity_bytes - allocation_state["total_allocated_bytes"], 0),
+                    "remaining_allocatable_readable": _bytes_to_readable(
+                        max(capacity_bytes - allocation_state["total_allocated_bytes"], 0)
+                    ),
+                },
+            )
+
+    @staticmethod
+    def get_platform_capacity(asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID) -> Dict[str, Any]:
         """Get platform-level declared storage capacity."""
         from database.tenant_config_db import get_single_config_info
         record = get_single_config_info(asset_owner_tenant_id, KEY_PLATFORM_CAPACITY_BYTES)
@@ -633,7 +722,7 @@ class QuotaService:
     @staticmethod
     def set_platform_capacity(
         capacity_gb: Optional[int],
-        asset_owner_tenant_id: str = "asset_owner_tenant_id",
+        asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
         user_id: str = "system",
     ) -> Dict[str, Any]:
         """Set platform-level declared storage capacity. None = no tracking."""
@@ -643,7 +732,21 @@ class QuotaService:
             return {"capacity_bytes": None, "capacity_readable": None}
 
         capacity_bytes = _gb_to_bytes(int(capacity_gb))
-        service._set_tenant_config(KEY_PLATFORM_CAPACITY_BYTES, str(capacity_bytes))
+        with _platform_allocation_lock:
+            allocation_state = QuotaService._get_allocation_state(asset_owner_tenant_id)
+            allocated_bytes = allocation_state["total_allocated_bytes"]
+            if capacity_bytes < allocated_bytes:
+                raise PlatformQuotaConflictError(
+                    "Platform capacity cannot be lower than existing tenant allocations",
+                    "PlatformCapacityBelowAllocation",
+                    {
+                        "requested_capacity_bytes": capacity_bytes,
+                        "requested_capacity_readable": _bytes_to_readable(capacity_bytes),
+                        "total_allocated_bytes": allocated_bytes,
+                        "total_allocated_readable": _bytes_to_readable(allocated_bytes),
+                    },
+                )
+            service._set_tenant_config(KEY_PLATFORM_CAPACITY_BYTES, str(capacity_bytes))
         return {
             "capacity_bytes": capacity_bytes,
             "capacity_readable": _bytes_to_readable(capacity_bytes),
@@ -651,19 +754,16 @@ class QuotaService:
 
     @staticmethod
     def get_platform_overview(
-        asset_owner_tenant_id: str = "asset_owner_tenant_id",
+        asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
     ) -> Dict[str, Any]:
         """
         Aggregate all tenants' hard limits and actual usage.
         Returns per-tenant breakdown + platform totals.
         """
-        from database.tenant_config_db import get_all_tenant_ids, get_single_config_info
-
         capacity_info = QuotaService.get_platform_capacity(asset_owner_tenant_id)
 
-        all_tenant_ids = get_all_tenant_ids()
-        # Exclude the asset owner virtual tenant
-        tenant_ids = [t for t in all_tenant_ids if t != asset_owner_tenant_id]
+        allocation_state = QuotaService._get_allocation_state(asset_owner_tenant_id)
+        tenant_ids = allocation_state["tenant_ids"]
 
         tenants = []
         total_allocated_bytes = 0
@@ -671,15 +771,8 @@ class QuotaService:
 
         for tid in tenant_ids:
             # Get hard limit for this tenant
-            limit_record = get_single_config_info(tid, KEY_TENANT_HARD_LIMIT_BYTES)
-            hard_limit_bytes = None
-            if limit_record and limit_record.get("config_value"):
-                try:
-                    hard_limit_bytes = int(limit_record["config_value"])
-                except (ValueError, TypeError):
-                    pass
-
-            if hard_limit_bytes:
+            hard_limit_bytes = allocation_state["hard_limits"].get(tid)
+            if hard_limit_bytes is not None:
                 total_allocated_bytes += hard_limit_bytes
 
             # Get actual usage for this tenant
@@ -725,8 +818,15 @@ class QuotaService:
 
         platform_capacity = capacity_info.get("capacity_bytes")
         oversubscription_ratio = None
-        if platform_capacity and platform_capacity > 0:
-            oversubscription_ratio = round(total_allocated_bytes / platform_capacity, 4)
+        remaining_allocatable_bytes = None
+        allocation_percentage = None
+        if platform_capacity is not None:
+            remaining_allocatable_bytes = max(platform_capacity - total_allocated_bytes, 0)
+            if platform_capacity > 0:
+                oversubscription_ratio = round(total_allocated_bytes / platform_capacity, 4)
+                allocation_percentage = round(total_allocated_bytes / platform_capacity * 100, 2)
+            elif total_allocated_bytes == 0:
+                allocation_percentage = 0
 
         return {
             "platform_capacity_bytes": platform_capacity,
@@ -738,6 +838,13 @@ class QuotaService:
             "total_actual_readable": _bytes_to_readable(total_actual_bytes),
             "tenant_count": len(tenants),
             "oversubscription_ratio": oversubscription_ratio,
+            "remaining_allocatable_bytes": remaining_allocatable_bytes,
+            "remaining_allocatable_readable": _bytes_to_readable(remaining_allocatable_bytes),
+            "allocation_percentage": allocation_percentage,
+            "unmanaged_tenant_count": allocation_state["unmanaged_tenant_count"],
+            "capacity_management_enforced": (
+                platform_capacity is not None and allocation_state["unmanaged_tenant_count"] == 0
+            ),
         }
 
     @staticmethod
@@ -757,14 +864,12 @@ class QuotaService:
             service._delete_tenant_config(KEY_HARD_LIMIT_EDITABLE)
             return {"hard_limit_bytes": None, "hard_limit_readable": None}
 
-        if limit_mb is not None:
-            limit_bytes = _mb_to_bytes(int(limit_mb))
-        else:
-            limit_bytes = _gb_to_bytes(int(limit_gb))
-
-        service._set_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES, str(limit_bytes))
-        # Mark as SU-managed (not editable by tenant admin)
-        service._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "false")
+        limit_bytes = QuotaService._quota_input_to_bytes(limit_gb, limit_mb)
+        with _platform_allocation_lock:
+            service._validate_tenant_hard_limit(limit_bytes)
+            service._set_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES, str(limit_bytes))
+            # Mark as SU-managed (not editable by tenant admin)
+            service._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "false")
         return {
             "hard_limit_bytes": limit_bytes,
             "hard_limit_readable": _bytes_to_readable(limit_bytes),

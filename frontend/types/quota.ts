@@ -106,6 +106,11 @@ export interface PlatformQuotaOverview {
   total_actual_readable: string | null;
   tenant_count: number;
   oversubscription_ratio: number | null;
+  remaining_allocatable_bytes: number | null;
+  remaining_allocatable_readable: string | null;
+  allocation_percentage: number | null;
+  unmanaged_tenant_count: number;
+  capacity_management_enforced: boolean;
 }
 
 // Request payloads

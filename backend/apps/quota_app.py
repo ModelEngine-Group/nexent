@@ -11,8 +11,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 
-from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID
-from consts.exceptions import QuotaExceededError
+from consts.const import ASSET_OWNER_TENANT_ID
+from consts.exceptions import PlatformQuotaConflictError
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.quota_service import QuotaService
 from utils.auth_utils import get_current_user_id
@@ -24,6 +24,14 @@ tenant_quota_router = APIRouter(prefix="/tenants")
 
 # Platform-level quota router
 platform_quota_router = APIRouter(prefix="/platform/quota")
+
+
+def _platform_quota_conflict_response(exc: PlatformQuotaConflictError) -> JSONResponse:
+    """Serialize allocation conflicts consistently for quota clients."""
+    return JSONResponse(
+        status_code=HTTPStatus.CONFLICT,
+        content={"error": exc.error, "message": str(exc), **exc.details},
+    )
 
 
 # ── Role Helpers ────────────────────────────────────────────────────────
@@ -215,6 +223,8 @@ def update_tenant_quota(
                 "message": "Quota configuration updated successfully",
             },
         )
+    except PlatformQuotaConflictError as exc:
+        return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
     except Exception as exc:
@@ -251,6 +261,8 @@ def delete_tenant_quota(
             status_code=HTTPStatus.OK,
             content={"message": "Quota configuration removed successfully"},
         )
+    except PlatformQuotaConflictError as exc:
+        return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
     except Exception as exc:
@@ -354,6 +366,8 @@ def set_platform_capacity(
             status_code=HTTPStatus.OK,
             content={**result, "message": "Platform capacity updated successfully"},
         )
+    except PlatformQuotaConflictError as exc:
+        return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
     except Exception as exc:
@@ -421,6 +435,8 @@ def set_tenant_hard_quota(
                 "message": "Tenant hard quota updated successfully",
             },
         )
+    except PlatformQuotaConflictError as exc:
+        return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
     except Exception as exc:
