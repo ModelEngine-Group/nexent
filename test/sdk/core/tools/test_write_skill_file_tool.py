@@ -479,7 +479,7 @@ class TestGetWriteSkillFileTool:
 
     def test_get_tool_creates_instance(self):
         """Test get_write_skill_file_tool creates instance."""
-        write_skill_file_tool_module._global_tool_instance = None
+        write_skill_file_tool_module._tool_cache.clear()
 
         tool = get_write_skill_file_tool("/path/to/skills", agent_id=1)
         assert tool is not None
@@ -487,7 +487,7 @@ class TestGetWriteSkillFileTool:
 
     def test_get_tool_reuses_instance(self):
         """Test get_write_skill_file_tool reuses existing instance."""
-        write_skill_file_tool_module._global_tool_instance = None
+        write_skill_file_tool_module._tool_cache.clear()
 
         tool1 = get_write_skill_file_tool()
         tool2 = get_write_skill_file_tool()
@@ -504,7 +504,7 @@ class TestWriteSkillFileToolDecorator:
 
     def test_write_skill_file_with_params(self, temp_skills_dir):
         """Test write_skill_file function with parameters - @tool returns wrapper."""
-        write_skill_file_tool_module._global_tool_instance = None
+        write_skill_file_tool_module._tool_cache.clear()
         # The @tool decorator returns a wrapper, so we just verify it exists
         assert hasattr(write_skill_file, '__call__')
 
@@ -589,7 +589,7 @@ class TestGetWriteSkillFileToolReuse:
 
     def test_get_tool_reuses_with_different_params(self):
         """Test get_write_skill_file_tool returns same instance even with different params."""
-        write_skill_file_tool_module._global_tool_instance = None
+        write_skill_file_tool_module._tool_cache.clear()
 
         tool1 = get_write_skill_file_tool("/path/one", agent_id=1)
         tool2 = get_write_skill_file_tool("/path/two", agent_id=2)
@@ -602,7 +602,7 @@ class TestGetWriteSkillFileToolReuse:
 
     def test_get_tool_with_all_params(self):
         """Test get_write_skill_file_tool with all parameters."""
-        write_skill_file_tool_module._global_tool_instance = None
+        write_skill_file_tool_module._tool_cache.clear()
 
         tool = get_write_skill_file_tool(
             local_skills_dir="/skills",

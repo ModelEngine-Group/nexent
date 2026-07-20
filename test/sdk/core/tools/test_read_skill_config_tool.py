@@ -336,7 +336,7 @@ class TestGetReadSkillConfigTool:
 
     def test_get_tool_creates_instance(self):
         """Test get_read_skill_config_tool creates instance."""
-        read_skill_config_tool_module._global_tool_instance = None
+        read_skill_config_tool_module._tool_cache.clear()
 
         tool = get_read_skill_config_tool("/path/to/skills", agent_id=1)
         assert tool is not None
@@ -344,7 +344,7 @@ class TestGetReadSkillConfigTool:
 
     def test_get_tool_reuses_instance(self):
         """Test get_read_skill_config_tool reuses existing instance."""
-        read_skill_config_tool_module._global_tool_instance = None
+        read_skill_config_tool_module._tool_cache.clear()
 
         tool1 = get_read_skill_config_tool()
         tool2 = get_read_skill_config_tool()
@@ -361,7 +361,7 @@ class TestReadSkillConfigToolDecorator:
 
     def test_read_skill_config_with_skill_name(self, temp_skills_dir):
         """Test read_skill_config function with skill name - @tool returns wrapper."""
-        read_skill_config_tool_module._global_tool_instance = None
+        read_skill_config_tool_module._tool_cache.clear()
         # The @tool decorator returns a wrapper, so we just verify it exists
         assert hasattr(read_skill_config, '__call__')
 
@@ -371,7 +371,7 @@ class TestGetSkillConfigToolReuse:
 
     def test_get_tool_reuses_with_different_params(self):
         """Test get_read_skill_config_tool returns same instance even with different params."""
-        read_skill_config_tool_module._global_tool_instance = None
+        read_skill_config_tool_module._tool_cache.clear()
 
         tool1 = get_read_skill_config_tool("/path/one", agent_id=1)
         tool2 = get_read_skill_config_tool("/path/two", agent_id=2)
@@ -384,7 +384,7 @@ class TestGetSkillConfigToolReuse:
 
     def test_get_tool_with_all_params(self):
         """Test get_read_skill_config_tool with all parameters."""
-        read_skill_config_tool_module._global_tool_instance = None
+        read_skill_config_tool_module._tool_cache.clear()
 
         tool = get_read_skill_config_tool(
             local_skills_dir="/skills",
