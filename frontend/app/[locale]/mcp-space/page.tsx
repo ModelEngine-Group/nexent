@@ -682,12 +682,15 @@ function MineView({
     onlineService: CommunityMcpCard
   ) => {
     if (!onlineService.communityId) return;
+    const isPendingReview = onlineService.reviewStatus === "pending";
     modal.confirm({
-      title: t("mcpTools.mine.unpublishOnlineVersionTitle"),
-      content: t("mcpTools.mine.unpublishOnlineVersionDescription", {
-        name: onlineService.name || item.service.name,
-      }),
-      okText: t("mcpTools.mine.unpublishOnlineVersion"),
+      title: isPendingReview ? "确认撤回审核？" : t("mcpTools.mine.unpublishOnlineVersionTitle"),
+      content: isPendingReview
+        ? t("mcpTools.mine.reviewModal.cancelApply")
+        : t("mcpTools.mine.unpublishOnlineVersionDescription", {
+            name: onlineService.name || item.service.name,
+          }),
+      okText: isPendingReview ? t("mcpTools.mine.reviewModal.cancelApply") : t("mcpTools.mine.unpublishOnlineVersion"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       centered: true,
@@ -696,10 +699,18 @@ function MineView({
         setUnpublishingKey(key);
         try {
           await deleteCommunityMcpTool(onlineService.communityId!);
-          message.success(t("mcpTools.mine.unpublishOnlineVersionSuccess"));
+          message.success(
+            isPendingReview
+              ? t("mcpTools.mine.cancelApplySuccess")
+              : t("mcpTools.mine.unpublishOnlineVersionSuccess")
+          );
           await refreshMineData();
         } catch {
-          message.error(t("mcpTools.mine.unpublishOnlineVersionFailed"));
+          message.error(
+            isPendingReview
+              ? t("mcpTools.mine.cancelApplyFailed")
+              : t("mcpTools.mine.unpublishOnlineVersionFailed")
+          );
         } finally {
           setUnpublishingKey(null);
         }
@@ -897,9 +908,9 @@ function getDeduplicatedMineItems(
   localServices: McpServiceItem[],
   publishedServices: CommunityMcpCard[]
 ): MineMcpCardItem[] {
-  // Only show local MCPs that belong to the current user
+  // Only show local MCPs that belong to the current user or are shared via groups
   const myLocalServices = localServices.filter(
-    (s) => s.permission === "EDIT"
+    (s) => s.permission === "EDIT" || s.groupIds
   );
   const linkedCommunityIds = new Set<number>();
   const localNames = new Set<string>();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Button, Form, Input, Modal } from "antd";
+import { Alert, App, Button, Form, Input, Modal, Select } from "antd";
 import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
@@ -13,6 +13,9 @@ import type { McpServiceItem } from "@/types/mcpTools";
 import { resolveDeploymentType, toPrettyRegistryJson } from "@/lib/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { Can } from "@/components/permission/Can";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import ContainerPortField from "./shared/ContainerPortField";
@@ -68,7 +71,11 @@ export default function McpServiceDetailModal({
   const [containerPort, setContainerPort] = useState<number | undefined>();
 
   const detail = useMcpServiceDetail({ selectedService, onClose });
-  const { draft } = detail;
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+  const { data: groupData } = useGroupList(tenantId);
+  const groups = groupData?.groups || [];
+  const { draft, setDraft } = detail;
 
   const originalDeploymentType = useMemo(
     () =>
@@ -104,6 +111,8 @@ export default function McpServiceDetailModal({
       openApiJson: toPrettyRegistryJson(draft.configJson),
       containerConfigJson: toPrettyRegistryJson(draft.configJson),
       containerPort: draft.containerPort,
+      group_ids: draft.groupIds ? draft.groupIds.split(",").map(Number).filter(Boolean) : undefined,
+      ingroup_permission: draft.ingroupPermission || "READ_ONLY",
     });
   }, [draft, form]);
 
@@ -117,6 +126,7 @@ export default function McpServiceDetailModal({
   const isUnsupported =
     deploymentType === McpDeploymentType.LOCAL_IMAGE ||
     deploymentType !== originalDeploymentType;
+  const isReadOnly = selectedService?.permission === "READ_ONLY";
   const hasRegistryJson = Boolean(draft.registryJson);
   const hasConfigJson = Boolean(draft.configJson);
 
@@ -131,7 +141,7 @@ export default function McpServiceDetailModal({
   };
 
   const handleSave = async () => {
-    if (isUnsupported) return;
+    if (isUnsupported || isReadOnly) return;
     try {
       await form.validateFields();
     } catch {
@@ -261,7 +271,7 @@ export default function McpServiceDetailModal({
                 {t("mcpTools.detail.serviceName")}
               </label>
               <Form.Item name="name" rules={rules.name} className="mb-0">
-                <Input className="w-full rounded-md" />
+                <Input className="w-full rounded-md" disabled={isReadOnly} />
               </Form.Item>
             </div>
 
@@ -277,6 +287,7 @@ export default function McpServiceDetailModal({
                 <Input.TextArea
                   autoSize={{ minRows: 4, maxRows: 10 }}
                   className="w-full rounded-md"
+                  disabled={isReadOnly}
                 />
               </Form.Item>
             </div>
@@ -299,6 +310,7 @@ export default function McpServiceDetailModal({
                       <Input
                         className="w-full rounded-md"
                         placeholder={t("mcpTools.addModal.serverUrl")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -315,6 +327,7 @@ export default function McpServiceDetailModal({
                       <Input
                         className="w-full rounded-md"
                         placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -328,6 +341,7 @@ export default function McpServiceDetailModal({
                         rows={2}
                         className="w-full rounded-md"
                         placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -353,6 +367,7 @@ export default function McpServiceDetailModal({
                       <Input
                         className="w-full rounded-md"
                         placeholder={t("mcpConfig.openapiService.form.serverUrlPlaceholder")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -366,6 +381,7 @@ export default function McpServiceDetailModal({
                         rows={2}
                         className="w-full rounded-md"
                         placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -379,6 +395,7 @@ export default function McpServiceDetailModal({
                         rows={6}
                         className="w-full rounded-md"
                         placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -401,6 +418,7 @@ export default function McpServiceDetailModal({
                         rows={5}
                         className="w-full rounded-md bg-white text-slate-600"
                         placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+                        disabled={isReadOnly}
                       />
                     </Form.Item>
                   </div>
@@ -419,6 +437,55 @@ export default function McpServiceDetailModal({
                 </div>
               </div>
             ) : null}
+
+            <Can permission="group:read">
+              <div className="grid grid-cols-2 gap-4">
+                <Form.Item
+                  name="group_ids"
+                  label={t("tenantResources.knowledgeBase.groupNames")}
+                  className="mb-0"
+                >
+                  <Select
+                    mode="multiple"
+                    placeholder={t("tenantResources.knowledgeBase.groupNames")}
+                    disabled={isReadOnly}
+                    value={draft.groupIds ? draft.groupIds.split(",").map(Number) : []}
+                    options={groups.map((g: { group_id: number; group_name: string }) => ({
+                      label: g.group_name,
+                      value: g.group_id,
+                    }))}
+                    notFoundContent={t("knowledgeBase.create.permission.groupPlaceholder") || "暂无分组"}
+                    onChange={(values: number[]) => {
+                      const next = values.join(",");
+                      setDraft((prev) => prev ? { ...prev, groupIds: next } : prev);
+                      form.setFieldValue("group_ids", values);
+                    }}
+                    className="rounded-md"
+                  />
+                </Form.Item>
+                <Can permission="kb.groups:read">
+                  <Form.Item
+                    name="ingroup_permission"
+                    label={t("tenantResources.knowledgeBase.permission")}
+                    className="mb-0"
+                  >
+                    <Select
+                      value={draft.ingroupPermission ?? "READ_ONLY"}
+                      disabled={isReadOnly}
+                      onChange={(value) => {
+                        setDraft((prev) => prev ? { ...prev, ingroupPermission: value as "EDIT" | "READ_ONLY" | "PRIVATE" } : prev);
+                        form.setFieldValue("ingroup_permission", value);
+                      }}
+                      options={[
+                        { value: "READ_ONLY", label: t("knowledgeBase.ingroup.permission.READ_ONLY") },
+                        { value: "EDIT", label: t("knowledgeBase.ingroup.permission.EDIT") },
+                        { value: "PRIVATE", label: t("knowledgeBase.ingroup.permission.PRIVATE") },
+                      ]}
+                    />
+                  </Form.Item>
+                </Can>
+              </div>
+            </Can>
 
             <div className="flex flex-col gap-4">
               <TagEditor
@@ -460,10 +527,10 @@ export default function McpServiceDetailModal({
               <Button
                 type="primary"
                 loading={detail.saving}
-                disabled={isUnsupported}
+                disabled={isUnsupported || isReadOnly}
                 onClick={handleSave}
               >
-                {t("mcpTools.detail.save")}
+                {isReadOnly ? "无编辑权限" : t("mcpTools.detail.save")}
               </Button>
             </div>
           </div>
@@ -504,6 +571,7 @@ export default function McpServiceDetailModal({
         open={publishConfirmOpen}
         source={selectedService}
         publishing={detail.publishing}
+        tenantId={tenantId}
         onCancel={() => setPublishConfirmOpen(false)}
         onConfirm={async (override) => {
           const ok = await detail.publish(override);

@@ -36,6 +36,7 @@ from database.remote_mcp_db import (
     get_mcp_custom_headers_by_name_and_url,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
 from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
@@ -351,6 +352,8 @@ async def add_mcp_service(
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
 ) -> None:
     """Add an MCP service record.
 
@@ -371,6 +374,8 @@ async def add_mcp_service(
         enabled: Whether the MCP is enabled
         container_id: Docker container ID
         container_port: Container port
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
     """
     status: bool | None = None
     normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
@@ -407,6 +412,8 @@ async def add_mcp_service(
             "tags": tags,
             "description": description,
             "config_json": resolved_config_json,
+            "group_ids": group_ids,
+            "ingroup_permission": ingroup_permission,
         },
         tenant_id=tenant_id,
         user_id=user_id,
@@ -426,6 +433,8 @@ async def add_container_mcp_service(
     market_id: int | None,
     port: int,
     mcp_config: MCPConfigRequest,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
 ) -> dict:
     """Add a container-based MCP service.
 
@@ -441,6 +450,8 @@ async def add_container_mcp_service(
         community_id: Linked community record ID
         port: Host port for the container
         mcp_config: MCP server configuration
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
 
     Returns:
         Container information dictionary
@@ -513,6 +524,8 @@ async def add_container_mcp_service(
             enabled=True,
             container_id=container_info.get("container_id"),
             container_port=container_info.get("host_port"),
+            group_ids=group_ids,
+            ingroup_permission=ingroup_permission,
         )
     except Exception as exc:
         logger.warning(f"Failed to start container MCP service: {exc}")
@@ -586,6 +599,8 @@ def update_mcp_service(
     config_json: dict | None,
     tags: list | None,
     market_id: int | None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -601,6 +616,8 @@ def update_mcp_service(
         config_json: MCP configuration JSON
         tags: MCP tags
         market_id: Linked market record ID
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
 
     Raises:
         McpNotFoundError: If MCP record is not found
@@ -627,6 +644,8 @@ def update_mcp_service(
         config_json=next_config_json,
         tags=tags,
         market_id=next_market_id,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
     )
 
 
@@ -884,10 +903,43 @@ async def get_remote_mcp_server_list(
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     mcp_records_list = []
     can_edit_all = False
+    user_groups: list[str] | None = None
     if user_id:
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
         user_role = str(user_tenant_record.get("user_role") or "").upper()
         can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+        if not can_edit_all:
+            try:
+                raw_groups = query_group_ids_by_user(user_id) or []
+                user_groups = [str(g) for g in raw_groups]
+            except Exception:
+                user_groups = []
+
+    if not can_edit_all and user_groups is not None:
+        filtered_records = []
+        for record in mcp_records:
+            record_group_ids = (record.get("group_ids") or "").strip()
+            # User can see MCPs they created
+            if str(record.get("created_by") or record.get("user_id") or "") == user_id:
+                filtered_records.append(record)
+                continue
+            # User can see MCPs with no group restriction
+            if not record_group_ids:
+                filtered_records.append(record)
+                continue
+            # User can see MCPs where they belong to at least one allowed group
+            if user_groups:
+                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
+                if any(g in allowed for g in user_groups):
+                    # Hide PRIVATE MCPs from non-creator group members (like agent behavior)
+                    ingroup_perm = (record.get("ingroup_permission") or "").upper()
+                    if ingroup_perm == "PRIVATE":
+                        continue
+                    filtered_records.append(record)
+                    continue
+        logger.info(f"[MCP group filter] user_id={user_id}, groups={user_groups}, "
+                     f"total={len(mcp_records)}, filtered={len(filtered_records)}")
+        mcp_records = filtered_records
 
     container_status_map = {}
     try:
@@ -910,6 +962,15 @@ async def get_remote_mcp_server_list(
             permission = PERMISSION_READ
         else:
             permission = PERMISSION_EDIT if can_edit_all or str(created_by) == str(user_id) else PERMISSION_READ
+        # For group-shared MCPs, respect ingroup_permission
+        if permission == PERMISSION_READ and user_groups:
+            record_group_ids = (record.get("group_ids") or "").strip()
+            if record_group_ids:
+                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
+                if any(g in allowed for g in user_groups):
+                    ingroup_perm = (record.get("ingroup_permission") or "READ_ONLY").upper()
+                    if ingroup_perm == "EDIT":
+                        permission = PERMISSION_EDIT
 
         config_json = record.get("config_json")
         container_id = record.get("container_id")
@@ -941,6 +1002,8 @@ async def get_remote_mcp_server_list(
             "market_id": record.get("market_id"),
             "is_listed_in_repository": record.get("market_id") is not None,
             "container_status": container_status,
+            "group_ids": record.get("group_ids"),
+            "ingroup_permission": record.get("ingroup_permission"),
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")

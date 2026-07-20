@@ -661,6 +661,9 @@ class McpRecord(TableBase):
     enabled = Column(Boolean, default=True, doc="Enabled")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+    group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
+    ingroup_permission = Column(String(30), default="READ_ONLY",
+                                 doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
 
 
 class McpCommunityRecord(TableBase):
@@ -721,6 +724,9 @@ class McpMarketRecord(TableBase):
                            doc="Listing status: not_shared / pending_review / rejected / shared")
     submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
     source_mcp_id = Column(Integer, doc="Local MCP record ID that created this market record")
+    group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
+    ingroup_permission = Column(String(30), default="READ_ONLY",
+                                 doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
 
 
 class UserTenant(TableBase):

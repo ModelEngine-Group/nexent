@@ -65,7 +65,10 @@ export default function MineMcpServiceCard({
   const reviewStatus = onlineService?.reviewStatus || service.reviewStatus;
   const isPending = reviewStatus === "pending";
   const isInRepository = isLocal
-    ? Boolean(localService?.isListedInRepository)
+    ? Boolean(onlineService) && onlineService?.reviewStatus === "approved"
+    : reviewStatus === "approved";
+  const hasOnlineRecord = isLocal
+    ? Boolean(onlineService) && (onlineService?.reviewStatus === "approved" || onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
   const updatedAt = formatRegistryDate(service.updatedAt || "");
@@ -118,10 +121,10 @@ export default function MineMcpServiceCard({
       });
     }
 
-    if (isInRepository) {
+    if (hasOnlineRecord) {
       items.push({
         key: "unpublish-online-version",
-        label: t("mcpTools.mine.unpublishOnlineVersion"),
+        label: isPending ? "撤回审核" : t("mcpTools.mine.unpublishOnlineVersion"),
         icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
         danger: true,
         disabled: unpublishing,

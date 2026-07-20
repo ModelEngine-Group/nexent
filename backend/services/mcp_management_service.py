@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
+from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     MCPConnectionError,
     McpNameConflictError,
@@ -38,6 +39,8 @@ from database.remote_mcp_db import (
     update_mcp_record_market_id_by_id,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
 
@@ -130,6 +133,8 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "reviewType": "initial_listing",
         "installCount": row.get("download_count") or 0,
         "authorDisplayName": _resolve_author_display_name(row.get("user_id")),
+        "groupIds": row.get("group_ids"),
+        "ingroupPermission": row.get("ingroup_permission"),
     }
 
 
@@ -192,13 +197,22 @@ def _validate_market_status_transition(
 async def list_community_mcp_services(
     *,
     tenant_id: str,
+    user_id: str,
     search: str | None = None,
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
-    """List shared (approved) community MCP services scoped to a tenant."""
+    """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
+    user_role = _get_user_role(user_id)
+    user_group_ids = None
+    if user_role not in CAN_EDIT_ALL_USER_ROLES:
+        try:
+            user_group_ids = list(query_group_ids_by_user(user_id) or [])
+        except Exception as e:
+            logger.warning(f"Failed to query user group ids: user_id={user_id}, err={e}")
+
     db_result = get_mcp_market_records(
         tenant_id=tenant_id,
         search=search,
@@ -206,6 +220,8 @@ async def list_community_mcp_services(
         transport_type=transport_type,
         cursor=cursor,
         limit=limit,
+        user_id=user_id if user_role not in CAN_EDIT_ALL_USER_ROLES else None,
+        user_group_ids=user_group_ids,
     )
     return {
         "count": db_result.get("count", 0),
@@ -228,6 +244,8 @@ async def publish_community_mcp_service(
     tags: List[str] | None = None,
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
+    group_ids: List[int] | None = None,
+    ingroup_permission: str | None = None,
 ) -> int:
     """Submit a local MCP service for review.
 
@@ -273,6 +291,8 @@ async def publish_community_mcp_service(
             "submitted_by": _resolve_user_email(user_id),
             "tags": final_tags,
             "description": final_description,
+            "group_ids": convert_list_to_string(group_ids) if group_ids else None,
+            "ingroup_permission": ingroup_permission,
         },
         tenant_id=tenant_id,
         user_id=user_id,
@@ -292,6 +312,8 @@ async def update_community_mcp_service(
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
     transport_type: str | None = None,
+    group_ids: List[int] | None = None,
+    ingroup_permission: str | None = None,
 ) -> None:
     """Update a published market MCP and set it back to pending_review for re-approval."""
     current = get_mcp_market_record_by_id(market_id=market_id)
@@ -326,6 +348,8 @@ async def update_community_mcp_service(
         mcp_server=mcp_server,
         config_json=next_config_json,
         transport_type=next_transport_type,
+        group_ids=convert_list_to_string(group_ids) if group_ids else None,
+        ingroup_permission=ingroup_permission,
     )
 
     # Set back to pending_review for re-approval

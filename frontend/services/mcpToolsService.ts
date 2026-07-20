@@ -50,6 +50,8 @@ type AddContainerMcpToolPayload = {
   market_id?: number;
   port: number;
   mcp_config: McpContainerConfigPayload;
+  group_ids?: string;
+  ingroup_permission?: string;
 };
 
 type PortConflictResult = {
@@ -315,6 +317,8 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       communityId: s.market_id ?? undefined,
       isListedInRepository: s.is_listed_in_repository ?? undefined,
       permission: s.permission ?? undefined,
+      groupIds: s.group_ids ?? undefined,
+      ingroupPermission: s.ingroup_permission ?? undefined,
     } as McpServiceItem;
   });
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
@@ -505,6 +509,8 @@ export type PublishCommunityMcpToolPayload = {
   tags?: string[];
   mcp_server?: string;
   config_json?: McpContainerConfigPayload;
+  group_ids?: number[];
+  ingroup_permission?: string;
 };
 
 export const publishCommunityMcpTool = async (
@@ -562,6 +568,8 @@ export const updateCommunityMcpTool = async (payload: {
   mcp_server?: string;
   transport_type?: McpTransportType;
   config_json?: McpContainerConfigPayload;
+  group_ids?: number[];
+  ingroup_permission?: string;
 }) => {
   try {
     const response = await fetchWithAuth(
