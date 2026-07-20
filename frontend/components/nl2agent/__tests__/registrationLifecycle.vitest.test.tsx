@@ -146,6 +146,23 @@ describe("online recommendation registration lifecycle", () => {
     ).not.toHaveClass("pointer-events-none");
   });
 
+  it("keeps a recovered completed online batch read-only", async () => {
+    vi.mocked(registerOnlineResourceRecommendations).mockResolvedValueOnce({
+      recommendation_batch_id: "online_mcp",
+      resource_type: "mcp",
+      item_keys: [],
+      status: "completed",
+    });
+    const view = renderGroup(vi.fn(async () => undefined));
+
+    await waitFor(() =>
+      expect(registerOnlineResourceRecommendations).toHaveBeenCalledOnce()
+    );
+    expect(view.container.querySelector("span")?.parentElement).toHaveClass(
+      "pointer-events-none"
+    );
+  });
+
   it("keeps a local card registration retryable when its receipt fails", async () => {
     const onRegistered = vi
       .fn<() => Promise<void>>()

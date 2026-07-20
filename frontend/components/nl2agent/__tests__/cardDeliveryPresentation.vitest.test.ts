@@ -12,7 +12,6 @@ describe("NL2AGENT final-message card delivery presentation", () => {
         hasValidationFailure: false,
         isLatestMessage: true,
         readOnly: false,
-        recoveryEnabled: true,
       })
     ).toEqual({ renderMode: "interactive", registrationEnabled: false });
 
@@ -24,7 +23,6 @@ describe("NL2AGENT final-message card delivery presentation", () => {
         hasValidationFailure: false,
         isLatestMessage: true,
         readOnly: false,
-        recoveryEnabled: true,
       })
     ).toEqual({ renderMode: "interactive", registrationEnabled: false });
   });
@@ -37,7 +35,6 @@ describe("NL2AGENT final-message card delivery presentation", () => {
       hasValidationFailure: false,
       isLatestMessage: true,
       readOnly: false,
-      recoveryEnabled: true,
     };
     expect(resolveNl2AgentCardPresentation(readyMessage)).toEqual({
       renderMode: "interactive",
@@ -48,20 +45,12 @@ describe("NL2AGENT final-message card delivery presentation", () => {
     ).toEqual({ renderMode: "interactive", registrationEnabled: false });
     expect(
       resolveNl2AgentCardPresentation({
-        ...readyMessage,
-        recoveryEnabled: false,
-      })
-    ).toEqual({ renderMode: "interactive", registrationEnabled: false });
-
-    expect(
-      resolveNl2AgentCardPresentation({
         isComplete: true,
         isStreaming: true,
         hasMessageId: true,
         hasValidationFailure: false,
         isLatestMessage: false,
         readOnly: false,
-        recoveryEnabled: true,
       })
     ).toEqual({ renderMode: "readonly", registrationEnabled: false });
   });
@@ -75,7 +64,6 @@ describe("NL2AGENT final-message card delivery presentation", () => {
         hasValidationFailure: true,
         isLatestMessage: true,
         readOnly: false,
-        recoveryEnabled: true,
       })
     ).toEqual({ renderMode: "placeholder", registrationEnabled: false });
   });

@@ -134,7 +134,6 @@ function ChatStreamFinalMessageInner({
     hasValidationFailure: Boolean(finalCardValidation.failure),
     isLatestMessage,
     readOnly,
-    recoveryEnabled: enableNl2AgentCardRecovery,
   });
 
   const handleCardRegistered = useCallback(

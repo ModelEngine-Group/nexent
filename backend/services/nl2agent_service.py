@@ -657,8 +657,7 @@ async def register_local_resource_recommendations(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Delegate local recommendation registration to the resource service."""
-    _require_workflow_action(agent_id, tenant_id, user_id, "search_local_resources")
+    """Register or recover one trusted local recommendation batch."""
     return await register_local_recommendations(
         _local_resource_dependencies(user_id),
         agent_id=agent_id,
@@ -736,8 +735,7 @@ async def register_online_resource_recommendations(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
-    """Delegate online recommendation registration to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, user_id, "search_online_resources")
+    """Register or recover one trusted online recommendation batch."""
     return await register_online_recommendations_workflow(
         _workflow_dependencies(user_id),
         agent_id=agent_id,
@@ -789,10 +787,7 @@ async def confirm_online_resource_configuration(
 async def register_requirements_review(
     agent_id: int, summary: Dict[str, Any], tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
-    """Delegate requirements registration to the workflow service."""
-    _require_workflow_action(
-        agent_id, tenant_id, user_id, "render_requirements_summary"
-    )
+    """Register or recover one persisted requirements summary."""
     return await register_requirements_review_workflow(
         _workflow_dependencies(user_id),
         agent_id=agent_id,

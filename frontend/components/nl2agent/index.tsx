@@ -49,6 +49,7 @@ export const OnlineRecommendationGroup: React.FC<{
   );
   const serializedKeys = JSON.stringify(itemKeys);
   const [registered, setRegistered] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const [registrationRetryable, setRegistrationRetryable] = useState(true);
 
   const register = useCallback(async () => {
@@ -69,7 +70,8 @@ export const OnlineRecommendationGroup: React.FC<{
             item_keys: JSON.parse(serializedKeys),
           }),
         {
-          onSuccess: async () => {
+          onSuccess: async (result) => {
+            setCompleted(result.status === "completed");
             await onRegistered?.({
               cardType: resourceType === "mcp" ? "web_mcp" : "web_skill",
               cardKey: recommendationBatchId,
@@ -120,7 +122,11 @@ export const OnlineRecommendationGroup: React.FC<{
           }
         />
       )}
-      <div className={!registered ? "pointer-events-none opacity-60" : ""}>
+      <div
+        className={
+          !registered || completed ? "pointer-events-none opacity-60" : ""
+        }
+      >
         {children}
       </div>
     </div>

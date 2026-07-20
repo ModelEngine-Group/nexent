@@ -28,6 +28,7 @@ from consts.nl2agent_response import (
     Nl2AgentFinalizeResponse,
     Nl2AgentLocalRecommendationResponse,
     Nl2AgentModelSelectionResponse,
+    Nl2AgentOnlineRecommendationResponse,
     Nl2AgentSessionStartResponse,
     Nl2AgentSessionStateResponse,
     Nl2AgentWebSkillInstallResponse,

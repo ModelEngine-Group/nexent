@@ -712,9 +712,9 @@ export interface components {
       skill_ids: number[];
       /**
        * Status
-       * @constant
+       * @enum {string}
        */
-      status: "recommendations_ready";
+      status: "recommendations_ready" | "applying" | "applied" | "skipped";
       /** Tool Ids */
       tool_ids: number[];
       /** Tool Parameter Schemas */
@@ -901,9 +901,9 @@ export interface components {
       resource_type: "mcp" | "skill";
       /**
        * Status
-       * @constant
+       * @enum {string}
        */
-      status: "recommendations_ready";
+      status: "recommendations_ready" | "completed";
     };
     /** Nl2AgentPersistedModel */
     Nl2AgentPersistedModel: {

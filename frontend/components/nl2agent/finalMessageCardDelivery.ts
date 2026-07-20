@@ -5,7 +5,6 @@ export interface Nl2AgentCardPresentationInput {
   hasValidationFailure: boolean;
   isLatestMessage: boolean;
   readOnly: boolean;
-  recoveryEnabled: boolean;
 }
 
 export const resolveNl2AgentCardPresentation = ({
@@ -15,7 +14,6 @@ export const resolveNl2AgentCardPresentation = ({
   hasValidationFailure,
   isLatestMessage,
   readOnly,
-  recoveryEnabled,
 }: Nl2AgentCardPresentationInput): {
   renderMode: "placeholder" | "readonly" | "interactive";
   registrationEnabled: boolean;
@@ -28,7 +26,6 @@ export const resolveNl2AgentCardPresentation = ({
       : !isLatestMessage
         ? "readonly"
         : "interactive",
-    registrationEnabled:
-      deliveryReady && !readOnly && recoveryEnabled && isLatestMessage,
+    registrationEnabled: deliveryReady && !readOnly && isLatestMessage,
   };
 };

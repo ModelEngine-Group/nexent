@@ -162,6 +162,56 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("resolved_status", ["applying", "applied", "skipped"])
+async def test_register_local_resources_recovers_resolved_batch_without_stage_gate(
+    monkeypatch,
+    resolved_status,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    _register_local_batch("recover_batch", [], [])
+    if resolved_status == "applying":
+        nl2agent_session_catalog.reserve_recommendation_batch_apply(
+            "tenant_1", 202, "recover_batch", "pending-operation", [], []
+        )
+    elif resolved_status == "applied":
+        _complete_local_apply("recover_batch", [], [])
+    else:
+        nl2agent_session_catalog.resolve_recommendation_batch(
+            "tenant_1", 202, "recover_batch", "skipped"
+        )
+    revision = nl2agent_session_catalog.get_nl2agent_session_state(
+        "tenant_1", 202
+    )["revision"]
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_require_workflow_action",
+        MagicMock(side_effect=AssertionError("registration must be replayable")),
+    )
+
+    result = await nl2agent_service.register_local_resource_recommendations(
+        agent_id=202,
+        recommendation_batch_id="recover_batch",
+        tool_ids=[],
+        skill_ids=[],
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    Nl2AgentLocalRecommendationResponse.model_validate(result)
+    assert result["status"] == resolved_status
+    assert (
+        nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)[
+            "revision"
+        ]
+        == revision
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("missing_resource", "error_message"),
     [

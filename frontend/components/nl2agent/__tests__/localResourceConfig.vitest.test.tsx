@@ -175,4 +175,28 @@ describe("local Tool configuration", () => {
 
     await waitFor(() => expect(applyLocalResources).toHaveBeenCalledOnce());
   });
+
+  it.each([
+    ["applied", /Applied/],
+    ["skipped", /Skipped/],
+  ] as const)(
+    "restores a %s batch as completed",
+    async (status, buttonName) => {
+      vi.mocked(registerLocalResourceRecommendations).mockResolvedValueOnce({
+        recommendation_batch_id: "local_tools",
+        status,
+        tool_ids: [42],
+        skill_ids: [],
+        applied_tool_ids: status === "applied" ? [42] : [],
+        applied_skill_ids: [],
+        tool_parameter_schemas: {},
+      });
+
+      renderCard();
+
+      const button = await screen.findByRole("button", { name: buttonName });
+      expect(button).toBeDisabled();
+      expect(applyLocalResources).not.toHaveBeenCalled();
+    }
+  );
 });

@@ -108,7 +108,7 @@ class Nl2AgentToolParameterSchema(Nl2AgentResponse):
 
 class Nl2AgentLocalRecommendationResponse(Nl2AgentResponse):
     recommendation_batch_id: str
-    status: Literal["recommendations_ready"]
+    status: Literal["recommendations_ready", "applying", "applied", "skipped"]
     tool_ids: List[int]
     skill_ids: List[int]
     applied_tool_ids: List[int]
@@ -130,7 +130,7 @@ class Nl2AgentOnlineRecommendationResponse(Nl2AgentResponse):
     recommendation_batch_id: str
     resource_type: Literal["mcp", "skill"]
     item_keys: List[str]
-    status: Literal["recommendations_ready"]
+    status: Literal["recommendations_ready", "completed"]
 
 
 class Nl2AgentRequirementsData(Nl2AgentResponse):

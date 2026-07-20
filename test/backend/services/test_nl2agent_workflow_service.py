@@ -1068,6 +1068,90 @@ async def test_register_requirements_review_returns_normalized_state(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_register_requirements_review_recovers_confirmed_state_without_stage_gate(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    review = nl2agent_session_catalog.register_requirements_summary(
+        "tenant_1", 202, _REQUIREMENTS_SUMMARY
+    )
+    nl2agent_session_catalog.confirm_requirements_summary(
+        "tenant_1", 202, review["fingerprint"]
+    )
+    revision = nl2agent_session_catalog.get_nl2agent_session_state(
+        "tenant_1", 202
+    )["revision"]
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_require_workflow_action",
+        MagicMock(side_effect=AssertionError("registration must be replayable")),
+    )
+
+    result = await nl2agent_service.register_requirements_review(
+        202,
+        _REQUIREMENTS_SUMMARY,
+        "tenant_1",
+        "user_1",
+    )
+
+    assert result["status"] == "confirmed"
+    assert result["is_current"] is True
+    assert (
+        nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)[
+            "revision"
+        ]
+        == revision
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed", [False, True])
+async def test_register_online_resources_recovers_batch_without_stage_gate(
+    monkeypatch,
+    completed,
+):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_owned_draft",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    if completed:
+        _complete_required_online_review()
+    else:
+        _prepare_required_online_review()
+    revision = nl2agent_session_catalog.get_nl2agent_session_state(
+        "tenant_1", 202
+    )["revision"]
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_require_workflow_action",
+        MagicMock(side_effect=AssertionError("registration must be replayable")),
+    )
+
+    result = await nl2agent_service.register_online_resource_recommendations(
+        202,
+        "online_mcp",
+        "mcp",
+        [],
+        "tenant_1",
+        "user_1",
+    )
+
+    Nl2AgentOnlineRecommendationResponse.model_validate(result)
+    assert result["status"] == ("completed" if completed else "recommendations_ready")
+    assert (
+        nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)[
+            "revision"
+        ]
+        == revision
+    )
+
+
+@pytest.mark.asyncio
 async def test_confirm_requirements_review_returns_auto_continue(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,

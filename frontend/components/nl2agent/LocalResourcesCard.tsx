@@ -112,6 +112,8 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         {
           onSuccess: async (result) => {
             setToolParameterSchemas(result.tool_parameter_schemas ?? {});
+            setApplied(result.status === "applied");
+            setSkipped(result.status === "skipped");
             await onRegistered?.({
               cardType: "local_resources",
               cardKey: recommendationBatchId,

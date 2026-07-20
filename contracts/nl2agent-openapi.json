@@ -766,7 +766,12 @@
             "type": "array"
           },
           "status": {
-            "const": "recommendations_ready",
+            "enum": [
+              "recommendations_ready",
+              "applying",
+              "applied",
+              "skipped"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -1274,7 +1279,10 @@
             "type": "string"
           },
           "status": {
-            "const": "recommendations_ready",
+            "enum": [
+              "recommendations_ready",
+              "completed"
+            ],
             "title": "Status",
             "type": "string"
           }
