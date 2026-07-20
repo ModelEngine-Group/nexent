@@ -842,6 +842,28 @@ class TestGetAgentInfoList:
         assert len(result["data"]) == 2
         agent_version_mod.list_published_agents_impl.assert_called()
 
+    async def test_get_agent_info_by_name_success(self):
+        """Test exact-name lookup returns one published agent without its internal ID."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {"agent_id": 42, "name": "target_agent", "description": "Target"},
+            {"agent_id": 43, "name": "other_agent", "description": "Other"},
+        ]
+
+        result = await ns.get_agent_info_by_name_for_northbound(ctx, "target_agent")
+
+        assert result["message"] == "success"
+        assert result["data"]["name"] == "target_agent"
+        assert "agent_id" not in result["data"]
+
+    async def test_get_agent_info_by_name_not_found(self):
+        """Test lookup rejects unpublished or unavailable agent names."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.return_value = []
+
+        with pytest.raises(LookupError, match="Published agent not found"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "missing_agent")
+
 
 @pytest.mark.asyncio
 class TestUpdateConversationTitle:
