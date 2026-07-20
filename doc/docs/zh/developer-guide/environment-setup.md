@@ -73,6 +73,18 @@ pnpm install
 pnpm dev
 ```
 
+### 🗄️ 数据库迁移
+
+本地启动后端服务前，需要先应用所有待执行的数据库迁移。每次拉取包含 `deploy/sql/migrations` 变更的代码后，都应重新执行以下命令：
+
+```bash
+# 在项目根目录执行并加载环境变量
+source .env
+bash deploy/common/run-local-sql-migrations.sh
+```
+
+该命令可重复安全执行，并与 Docker、Kubernetes 使用相同的 checksum 和 advisory lock 迁移机制。Windows 环境请使用 Git Bash，并确保 PostgreSQL 的 `psql` 已加入 `PATH`。
+
 ### 🏃 服务启动
 
 先激活后端虚拟环境：
@@ -86,7 +98,7 @@ source .venv/bin/activate
 Windows 请使用 `source .venv/Scripts/activate`。
 ::::
 
-在项目根依次启动核心服务：
+数据库迁移成功后，在项目根依次启动核心服务：
 
 ```bash
 source .env && python backend/mcp_service.py

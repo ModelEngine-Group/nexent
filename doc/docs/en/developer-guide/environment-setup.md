@@ -77,7 +77,19 @@ pnpm install
 pnpm dev
 ```
 
-### 4. Service Startup
+### 4. Database Migrations
+
+Apply all pending database migrations before starting local backend services. Run this command after pulling any change that adds or updates files under `deploy/sql/migrations`.
+
+```bash
+# Run from the repository root with environment variables loaded
+source .env
+bash deploy/common/run-local-sql-migrations.sh
+```
+
+The command is idempotent and uses the same checksum and advisory-lock migration mechanism as Docker and Kubernetes. On Windows, run it from Git Bash with PostgreSQL `psql` available on `PATH`.
+
+### 5. Service Startup
 
 Activate the backend virtual environment before starting services.
 
@@ -91,7 +103,7 @@ source .venv/bin/activate
 On Windows, activate the environment with `source .venv/Scripts/activate`.
 ::::
 
-Start the backend services from the project root, in order:
+After migrations succeed, start the backend services from the project root, in order:
 
 ```bash
 # Always run from project root with environment variables loaded
