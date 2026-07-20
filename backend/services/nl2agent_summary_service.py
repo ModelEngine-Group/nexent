@@ -4,6 +4,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from consts.exceptions import AgentRunException, Nl2AgentValidationError
 from consts.model import ModelConnectStatusEnum
+from services.nl2agent_resource_service import (
+    redact_tool_parameter_defaults,
+    tool_parameter_is_secret,
+)
 from services.nl2agent_seed_service import is_llm_model_type, normalize_model_ids
 
 
@@ -126,6 +130,32 @@ def resolve_resource_summaries(
         name_resolver=lambda info: info.get("origin_name") or info.get("name"),
         online_source="mcp",
     )
+    tool_instances_by_id = {
+        int(instance["tool_id"]): instance for instance in tool_instances
+    }
+    tool_records_by_id = {int(record["tool_id"]): record for record in tool_records}
+    for summary in tools:
+        tool_id = int(summary["tool_id"])
+        instance_params = tool_instances_by_id[tool_id].get("params")
+        values = instance_params if isinstance(instance_params, dict) else {}
+        parameter_schema = redact_tool_parameter_defaults(
+            tool_records_by_id[tool_id].get("params")
+        )
+        summary["parameter_schema"] = parameter_schema
+        summary["configuration"] = {
+            str(field["name"]): {
+                "value": None
+                if tool_parameter_is_secret(field)
+                else values.get(str(field["name"])),
+                "configured": (
+                    str(field["name"]) in values
+                    and values.get(str(field["name"])) not in (None, "")
+                ),
+                "secret": tool_parameter_is_secret(field),
+            }
+            for field in parameter_schema
+            if isinstance(field, dict) and field.get("name")
+        }
     skills, invalid_skills = _resolve_resource_type(
         skill_instances,
         skill_records,
@@ -165,7 +195,7 @@ def _resolve_resource_type(
         source = str(info.get("source") or "").lower()
         summaries.append(
             {
-                **instance,
+                id_key: resource_id,
                 "name": name,
                 "source": source,
                 "origin": "online" if source == online_source else "local",

@@ -80,6 +80,8 @@ def test_resolve_resource_summaries_preserves_origin_and_reports_dangling_ids():
             "name": "Remote Search",
             "source": "mcp",
             "origin": "online",
+            "parameter_schema": [],
+            "configuration": {},
         }
     ]
     assert skills == [
@@ -93,6 +95,51 @@ def test_resolve_resource_summaries_preserves_origin_and_reports_dangling_ids():
     assert invalid == [
         {"reference_type": "tool", "reference_id": 2, "reason": "not_found"}
     ]
+
+
+def test_resolve_resource_summaries_redacts_persisted_tool_secrets():
+    tools, _, invalid = resolve_resource_summaries(
+        [
+            {
+                "tool_id": 1,
+                "params": {"api_key": "never-return-this", "limit": 25},
+                "tenant_id": "tenant_1",
+            }
+        ],
+        [],
+        [
+            {
+                "tool_id": 1,
+                "origin_name": "Local Search",
+                "source": "local",
+                "params": [
+                    {"name": "api_key", "isSecret": True, "default": "unsafe"},
+                    {"name": "limit", "type": "integer", "default": 10},
+                ],
+            }
+        ],
+        [],
+    )
+
+    assert invalid == []
+    assert tools == [
+        {
+            "tool_id": 1,
+            "name": "Local Search",
+            "source": "local",
+            "origin": "local",
+            "parameter_schema": [
+                {"name": "api_key", "isSecret": True, "default": None},
+                {"name": "limit", "type": "integer", "default": 10},
+            ],
+            "configuration": {
+                "api_key": {"value": None, "configured": True, "secret": True},
+                "limit": {"value": 25, "configured": True, "secret": False},
+            },
+        }
+    ]
+    assert "never-return-this" not in str(tools)
+    assert "tenant_1" not in str(tools)
 
 
 def test_invalid_resource_references_block_publication():

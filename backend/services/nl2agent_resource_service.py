@@ -19,6 +19,16 @@ from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
 logger = logging.getLogger(__name__)
 
 
+def tool_parameter_is_secret(field: Dict[str, Any]) -> bool:
+    """Return whether a Tool parameter must never be echoed to the browser."""
+    name = str(field.get("name") or "")
+    return bool(
+        field.get("isSecret")
+        or field.get("is_secret")
+        or re.search(r"password|authorization|api[_-]?key|secret|token", name, re.I)
+    )
+
+
 _TOOL_VALUE_TYPE_CHECKS: Dict[str, Callable[[Any], bool]] = {
     "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
     "number": lambda item: (
@@ -39,12 +49,7 @@ def redact_tool_parameter_defaults(params: Any) -> List[Dict[str, Any]]:
     for field in sanitized:
         if not isinstance(field, dict):
             continue
-        name = str(field.get("name") or "")
-        if (
-            field.get("isSecret")
-            or field.get("is_secret")
-            or re.search(r"password|authorization|api[_-]?key|secret|token", name, re.I)
-        ):
+        if tool_parameter_is_secret(field):
             field["default"] = None
     return sanitized
 

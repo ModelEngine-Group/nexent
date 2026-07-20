@@ -52,6 +52,21 @@ export const OnlineRecommendationGroup: React.FC<{
   const [completed, setCompleted] = useState(false);
   const [registrationRetryable, setRegistrationRetryable] = useState(true);
 
+  useEffect(() => {
+    const batch =
+      workflow.sessionState?.resource_review.online_recommendation_batches?.[
+        recommendationBatchId
+      ];
+    if (!batch || batch.resource_type !== resourceType) return;
+    setCompleted(batch.status === "completed");
+    if (!registrationEnabled) setRegistered(true);
+  }, [
+    recommendationBatchId,
+    registrationEnabled,
+    resourceType,
+    workflow.sessionState,
+  ]);
+
   const register = useCallback(async () => {
     if (
       registered ||
@@ -119,6 +134,21 @@ export const OnlineRecommendationGroup: React.FC<{
                 Retry registration
               </Button>
             ) : undefined
+          }
+        />
+      )}
+      {!error && workflow.active && workflow.sessionStateError && (
+        <Alert
+          className="my-2"
+          type="error"
+          message="Failed to restore online resource state."
+          action={
+            <Button
+              size="small"
+              onClick={() => void workflow.refreshSessionState()}
+            >
+              Retry
+            </Button>
           }
         />
       )}
@@ -320,8 +350,12 @@ export const renderValidatedNl2AgentCard = (
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
-          {items.map((item, i) => (
-            <WebMcpCard key={i} agentId={agentId} item={item} />
+          {items.map((item) => (
+            <WebMcpCard
+              key={item.recommendation_id}
+              agentId={agentId}
+              item={item}
+            />
           ))}
         </OnlineRecommendationGroup>
       );
@@ -352,8 +386,12 @@ export const renderValidatedNl2AgentCard = (
           onRegistered={onRegistered}
           registrationEnabled={registrationEnabled}
         >
-          {items.map((item, i) => (
-            <WebSkillCard key={i} agentId={agentId} item={item} />
+          {items.map((item) => (
+            <WebSkillCard
+              key={webSkillRecommendationKey(item)}
+              agentId={agentId}
+              item={item}
+            />
           ))}
         </OnlineRecommendationGroup>
       );

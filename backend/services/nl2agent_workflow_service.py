@@ -88,6 +88,7 @@ class WorkflowDependencies:
         tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]],
     ]
     query_tools_by_ids: Callable[..., List[Dict[str, Any]]]
+    sanitize_tool_parameter_schema: Callable[[Any], List[Dict[str, Any]]]
     normalize_model_ids: Callable[[Any], List[int]]
     generate_internal_agent_name: Callable[..., str]
     get_db_session: Callable[[], Any]
@@ -395,6 +396,36 @@ async def get_session_state(
             }
             for tool_id in discovered_ids
         ]
+    recommendation_batches = workflow_state.get("recommendation_batches", {})
+    recommended_ids_by_batch = {
+        batch_id: [int(tool_id) for tool_id in batch.get("tool_ids", [])]
+        for batch_id, batch in recommendation_batches.items()
+    }
+    all_recommended_tool_ids = sorted(
+        {
+            tool_id
+            for tool_ids in recommended_ids_by_batch.values()
+            for tool_id in tool_ids
+        }
+    )
+    recommended_rows = (
+        dependencies.query_tools_by_ids(all_recommended_tool_ids, tenant_id)
+        if all_recommended_tool_ids
+        else []
+    )
+    recommended_rows_by_id = {
+        int(row["tool_id"]): row for row in recommended_rows
+    }
+    local_tool_parameter_schemas = {
+        batch_id: {
+            str(tool_id): dependencies.sanitize_tool_parameter_schema(
+                recommended_rows_by_id[tool_id].get("params")
+            )
+            for tool_id in tool_ids
+            if tool_id in recommended_rows_by_id
+        }
+        for batch_id, tool_ids in recommended_ids_by_batch.items()
+    }
     return {
         "agent_id": agent_id,
         "schema_version": workflow_state["schema_version"],
@@ -413,6 +444,7 @@ async def get_session_state(
         "models": models,
         "tools": tools,
         "skills": skills,
+        "local_tool_parameter_schemas": local_tool_parameter_schemas,
         "invalid_references": invalid_model_references + invalid_resource_references,
         "identity_confirmed": workflow_state.get("identity_confirmed", False),
         "resource_review": workflow_state,

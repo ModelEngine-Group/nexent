@@ -45,6 +45,8 @@ export interface LocalResourcesCardProps {
   registrationEnabled?: boolean;
 }
 
+const MASKED_SECRET_VALUE = "••••••••";
+
 /**
  * Renders recommended local tools and skills with per-item checkboxes and a
  * single "Apply All" button that bulk-binds the selected resources to the
@@ -97,6 +99,57 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     [skills, tools]
   );
 
+  useEffect(() => {
+    const state = workflow.sessionState;
+    if (state?.agent_id !== agentId) return;
+    const batch =
+      state.resource_review.recommendation_batches?.[recommendationBatchId];
+    if (!batch) return;
+
+    setRegistered(true);
+    setToolParameterSchemas(
+      state.local_tool_parameter_schemas?.[recommendationBatchId] ?? {}
+    );
+    if (batch.status === "applied") {
+      const appliedToolIds = batch.applied_tool_ids ?? [];
+      const appliedSkillIds = batch.applied_skill_ids ?? [];
+      setSelected(
+        new Set([
+          ...appliedToolIds.map((toolId) => `t:${toolId}`),
+          ...appliedSkillIds.map((skillId) => `s:${skillId}`),
+        ])
+      );
+      const summariesById = new Map(
+        state.tools.map((tool) => [tool.tool_id, tool])
+      );
+      setToolConfigValues(
+        Object.fromEntries(
+          appliedToolIds.map((toolId) => {
+            const configuration =
+              summariesById.get(toolId)?.configuration ?? {};
+            return [
+              toolId,
+              Object.fromEntries(
+                Object.entries(configuration).flatMap(([name, field]) => {
+                  if (!field.configured) return [];
+                  return [
+                    [name, field.secret ? MASKED_SECRET_VALUE : field.value],
+                  ];
+                })
+              ),
+            ];
+          })
+        )
+      );
+      setApplied(true);
+      setSkipped(false);
+    } else if (batch.status === "skipped") {
+      setSelected(new Set());
+      setApplied(false);
+      setSkipped(true);
+    }
+  }, [agentId, recommendationBatchId, workflow.sessionState]);
+
   const register = React.useCallback(async () => {
     if (registered || !recommendationBatchId || !active || !registrationEnabled)
       return;
@@ -114,6 +167,20 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             setToolParameterSchemas(result.tool_parameter_schemas ?? {});
             setApplied(result.status === "applied");
             setSkipped(result.status === "skipped");
+            if (result.status === "applied") {
+              setSelected(
+                new Set([
+                  ...(result.applied_tool_ids ?? []).map(
+                    (toolId) => `t:${toolId}`
+                  ),
+                  ...(result.applied_skill_ids ?? []).map(
+                    (skillId) => `s:${skillId}`
+                  ),
+                ])
+              );
+            } else if (result.status === "skipped") {
+              setSelected(new Set());
+            }
             await onRegistered?.({
               cardType: "local_resources",
               cardKey: recommendationBatchId,
@@ -233,6 +300,12 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                 toolCount: result.bound_tool_count,
                 skillCount: result.bound_skill_count,
               })
+            );
+            setSelected(
+              new Set([
+                ...result.tool_ids.map((toolId) => `t:${toolId}`),
+                ...result.skill_ids.map((skillId) => `s:${skillId}`),
+              ])
             );
             setApplied(true);
           },
@@ -469,6 +542,18 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           }
         />
       )}
+      {!registrationError && workflow.active && workflow.sessionStateError && (
+        <Alert
+          className="m-3"
+          type="error"
+          message="Failed to restore saved resource selection."
+          action={
+            <Button onClick={() => void workflow.refreshSessionState()}>
+              Retry
+            </Button>
+          }
+        />
+      )}
       <div className="px-3 py-2 border-t border-gray-200 bg-white flex gap-2">
         <Button
           type="primary"
@@ -479,6 +564,8 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             !recommendationBatchId ||
             !registered ||
             pending ||
+            workflow.sessionStateLoading ||
+            Boolean(workflow.sessionStateError) ||
             applied ||
             skipped ||
             (selectedToolIds.length === 0 && selectedSkillIds.length === 0)
@@ -506,6 +593,8 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             !recommendationBatchId ||
             !registered ||
             pending ||
+            workflow.sessionStateLoading ||
+            Boolean(workflow.sessionStateError) ||
             applied ||
             skipped
           }

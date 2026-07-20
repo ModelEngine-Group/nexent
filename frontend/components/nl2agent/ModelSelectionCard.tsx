@@ -6,11 +6,13 @@ import {
   getAvailablePlatformLlms,
   selectNl2AgentModels,
 } from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
   agentId,
 }) => {
+  const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(`models:${agentId}`);
   const [models, setModels] = useState<
     Array<{ id: number; displayName: string }>
@@ -21,6 +23,22 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string>();
   const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const state = workflow.sessionState;
+    if (
+      state?.agent_id !== agentId ||
+      !state.resource_review.model_selection_confirmed
+    )
+      return;
+    setPrimary(state.business_logic_model_id ?? undefined);
+    setFallbacks(
+      state.models
+        .filter((model) => model.role === "fallback")
+        .map((model) => model.model_id)
+    );
+    setSaved(true);
+  }, [agentId, workflow.sessionState]);
 
   useEffect(() => {
     let active = true;
@@ -63,6 +81,7 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
             setSaved(true);
             message.success("LLM selection saved.");
           },
+          notifyStateChanged: true,
           continuationText: (result) => result.chat_injection_text ?? undefined,
         }
       );
@@ -89,6 +108,21 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
           }
         />
       )}
+      {workflow.active && workflow.sessionStateError && (
+        <Alert
+          className="mb-2"
+          type="error"
+          message="Failed to restore saved model selection."
+          action={
+            <Button
+              size="small"
+              onClick={() => void workflow.refreshSessionState()}
+            >
+              Retry
+            </Button>
+          }
+        />
+      )}
       {!loading && !loadError && models.length === 0 && (
         <Alert
           className="mb-2"
@@ -102,7 +136,14 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
         options={options}
         value={primary}
         onChange={setPrimary}
-        disabled={saved || loading || Boolean(loadError) || models.length === 0}
+        disabled={
+          saved ||
+          loading ||
+          workflow.sessionStateLoading ||
+          Boolean(loadError) ||
+          Boolean(workflow.sessionStateError) ||
+          models.length === 0
+        }
       />
       <Select
         mode="multiple"
@@ -112,7 +153,14 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
         options={options.filter((option) => option.value !== primary)}
         value={fallbacks}
         onChange={setFallbacks}
-        disabled={saved || loading || Boolean(loadError) || models.length === 0}
+        disabled={
+          saved ||
+          loading ||
+          workflow.sessionStateLoading ||
+          Boolean(loadError) ||
+          Boolean(workflow.sessionStateError) ||
+          models.length === 0
+        }
       />
       <Button
         type="primary"
@@ -120,7 +168,9 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
         disabled={
           saved ||
           loading ||
+          workflow.sessionStateLoading ||
           Boolean(loadError) ||
+          Boolean(workflow.sessionStateError) ||
           models.length === 0 ||
           !primary
         }

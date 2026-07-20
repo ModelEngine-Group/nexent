@@ -1076,6 +1076,12 @@ export interface components {
       internal_name: string;
       /** Invalid References */
       invalid_references: components["schemas"]["Nl2AgentInvalidReference"][];
+      /** Local Tool Parameter Schemas */
+      local_tool_parameter_schemas?: {
+        [key: string]: {
+          [key: string]: components["schemas"]["Nl2AgentToolParameterSchema"][];
+        };
+      };
       /** Model Ids */
       model_ids: number[];
       /** Models */
@@ -1124,8 +1130,21 @@ export interface components {
       skill_id: number;
       /** Source */
       source: string;
-    } & {
-      [key: string]: unknown;
+    };
+    /** Nl2AgentToolConfigurationField */
+    Nl2AgentToolConfigurationField: {
+      /**
+       * Configured
+       * @default false
+       */
+      configured?: boolean;
+      /**
+       * Secret
+       * @default false
+       */
+      secret?: boolean;
+      /** Value */
+      value?: unknown | null;
     };
     /** Nl2AgentToolParameterSchema */
     Nl2AgentToolParameterSchema: {
@@ -1152,6 +1171,10 @@ export interface components {
     };
     /** Nl2AgentToolSummary */
     Nl2AgentToolSummary: {
+      /** Configuration */
+      configuration?: {
+        [key: string]: components["schemas"]["Nl2AgentToolConfigurationField"];
+      };
       /** Name */
       name: string;
       /**
@@ -1159,12 +1182,12 @@ export interface components {
        * @enum {string}
        */
       origin: "local" | "online";
+      /** Parameter Schema */
+      parameter_schema?: components["schemas"]["Nl2AgentToolParameterSchema"][];
       /** Source */
       source: string;
       /** Tool Id */
       tool_id: number;
-    } & {
-      [key: string]: unknown;
     };
     /** Nl2AgentWebSkillInstallResponse */
     Nl2AgentWebSkillInstallResponse: {

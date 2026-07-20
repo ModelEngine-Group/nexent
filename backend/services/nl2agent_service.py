@@ -148,6 +148,7 @@ from services.nl2agent_publication_service import (
 from services.nl2agent_resource_service import (
     LocalResourceDependencies,
     apply_local_resources,
+    redact_tool_parameter_defaults,
     register_local_recommendations,
     skip_local_recommendations,
 )
@@ -716,6 +717,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         resolve_model_summaries=_resolve_model_summaries,
         resolve_resource_summaries=_resolve_resource_summaries,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
+        sanitize_tool_parameter_schema=redact_tool_parameter_defaults,
         normalize_model_ids=normalize_model_ids,
         generate_internal_agent_name=_generate_internal_agent_name,
         get_db_session=get_db_session,

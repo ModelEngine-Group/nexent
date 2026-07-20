@@ -10,6 +10,10 @@ import React, {
   useState,
 } from "react";
 import { NL2AGENT_AUTO_CONTINUE_PREFIX } from "@/lib/chat/nl2agentContinuation";
+import {
+  getNl2AgentSessionState,
+  type Nl2AgentSessionState,
+} from "@/services/nl2agentService";
 
 export { NL2AGENT_AUTO_CONTINUE_PREFIX };
 
@@ -22,6 +26,10 @@ interface Nl2AgentWorkflowContextValue {
   notifyStateChanged: () => void;
   busy: boolean;
   stateVersion: number;
+  sessionState?: Nl2AgentSessionState;
+  sessionStateLoading: boolean;
+  sessionStateError?: string;
+  refreshSessionState: () => Promise<void>;
   continuationError?: string;
   retryContinuation: () => Promise<void>;
   claimCardDelivery: (key: string) => boolean;
@@ -38,6 +46,8 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   notifyStateChanged: () => {},
   busy: false,
   stateVersion: 0,
+  sessionStateLoading: false,
+  refreshSessionState: async () => {},
   retryContinuation: async () => {},
   claimCardDelivery: () => false,
   completeCardDelivery: () => {},
@@ -49,15 +59,20 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   onContinue: (text: string) => Promise<void>;
   enabled: boolean;
   scopeKey: string;
-}> = ({ children, onContinue, enabled, scopeKey }) => {
+  agentId?: number | null;
+}> = ({ children, onContinue, enabled, scopeKey, agentId }) => {
   const [actionCount, setActionCount] = useState(0);
   const [continuing, setContinuing] = useState(false);
   const [inputBlockers, setInputBlockers] = useState<Set<string>>(new Set());
   const [stateVersion, setStateVersion] = useState(0);
+  const [sessionState, setSessionState] = useState<Nl2AgentSessionState>();
+  const [sessionStateLoading, setSessionStateLoading] = useState(false);
+  const [sessionStateError, setSessionStateError] = useState<string>();
   const [retries, setRetries] = useState<
     Record<string, { text: string; error: string }>
   >({});
   const continuingRef = useRef(false);
+  const sessionRequestRef = useRef(0);
   const cardDeliveriesRef = useRef<
     Map<string, "pending" | "succeeded" | "failed">
   >(new Map());
@@ -66,6 +81,46 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     setInputBlockers(new Set());
     cardDeliveriesRef.current.clear();
   }, [scopeKey]);
+
+  const refreshSessionState = useCallback(async () => {
+    if (!enabled || !agentId) return;
+    const requestId = ++sessionRequestRef.current;
+    setSessionStateLoading(true);
+    setSessionStateError(undefined);
+    try {
+      const nextState = await getNl2AgentSessionState(agentId);
+      if (sessionRequestRef.current === requestId) setSessionState(nextState);
+    } catch (error) {
+      if (sessionRequestRef.current !== requestId) return;
+      setSessionStateError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load NL2AGENT session state."
+      );
+    } finally {
+      if (sessionRequestRef.current === requestId)
+        setSessionStateLoading(false);
+    }
+  }, [agentId, enabled]);
+
+  useEffect(() => {
+    if (!enabled || !agentId) {
+      sessionRequestRef.current += 1;
+      setSessionState(undefined);
+      setSessionStateError(undefined);
+      setSessionStateLoading(false);
+      return;
+    }
+    setSessionState(undefined);
+  }, [agentId, enabled, scopeKey]);
+
+  useEffect(() => {
+    if (!enabled || !agentId) return;
+    void refreshSessionState();
+    return () => {
+      sessionRequestRef.current += 1;
+    };
+  }, [agentId, enabled, refreshSessionState, scopeKey, stateVersion]);
 
   const claimCardDelivery = useCallback((key: string) => {
     const status = cardDeliveriesRef.current.get(key);
@@ -149,6 +204,10 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       notifyStateChanged,
       busy: continuing || actionCount > 0 || inputBlockers.size > 0,
       stateVersion,
+      sessionState,
+      sessionStateLoading,
+      sessionStateError,
+      refreshSessionState,
       continuationError,
       retryContinuation,
       claimCardDelivery,
@@ -165,11 +224,15 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       enabled,
       inputBlockers,
       notifyStateChanged,
+      refreshSessionState,
       retryContinuation,
       claimCardDelivery,
       completeCardDelivery,
       failCardDelivery,
       setInputBlocked,
+      sessionState,
+      sessionStateError,
+      sessionStateLoading,
       stateVersion,
     ]
   );

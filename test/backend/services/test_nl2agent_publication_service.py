@@ -786,14 +786,30 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
     monkeypatch.setattr(
         nl2agent_service,
         "query_all_enabled_tool_instances",
-        MagicMock(return_value=[{"tool_id": 11}, {"tool_id": 12}]),
+        MagicMock(
+            return_value=[
+                {
+                    "tool_id": 11,
+                    "params": {"api_key": "never-return-this", "limit": 20},
+                },
+                {"tool_id": 12},
+            ]
+        ),
     )
     monkeypatch.setattr(
         nl2agent_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
-                {"tool_id": 11, "origin_name": "Local Reader", "source": "local"},
+                {
+                    "tool_id": 11,
+                    "origin_name": "Local Reader",
+                    "source": "local",
+                    "params": [
+                        {"name": "api_key", "isSecret": True},
+                        {"name": "limit", "type": "integer", "default": 10},
+                    ],
+                },
                 {"tool_id": 12, "name": "Web Fetch", "source": "mcp"},
             ]
         ),
@@ -813,6 +829,7 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
             ]
         ),
     )
+    _register_local_batch("restore_batch", [11], [])
 
     result = await nl2agent_service.get_session_state(202, "tenant_1", "user_1")
 
@@ -829,6 +846,18 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
         ("Local Skill", "local"),
         ("Official Skill", "online"),
     ]
+    local_reader = result["tools"][0]
+    assert local_reader["configuration"]["api_key"] == {
+        "value": None,
+        "configured": True,
+        "secret": True,
+    }
+    assert local_reader["configuration"]["limit"]["value"] == 20
+    assert result["local_tool_parameter_schemas"]["restore_batch"]["11"] == [
+        {"name": "api_key", "isSecret": True, "default": None},
+        {"name": "limit", "type": "integer", "default": 10},
+    ]
+    assert "never-return-this" not in str(result)
     assert result["invalid_references"] == []
 
 

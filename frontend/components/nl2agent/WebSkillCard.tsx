@@ -9,6 +9,7 @@ import {
   type Nl2AgentInstallWebSkillPayload,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import type { WebSkillCardItem } from "./cardPayloadTypes";
 
 export type { WebSkillCardItem } from "./cardPayloadTypes";
@@ -30,11 +31,23 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
   agentId,
   item,
 }) => {
+  const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(
     `web-skill:${agentId}:${item.skill_id ?? item.skill_name ?? item.name}`
   );
   const { t } = useTranslation("common");
   const [installed, setInstalled] = useState(item.status === "installed");
+
+  React.useEffect(() => {
+    const normalizedName = (item.skill_name || item.name).trim().toLowerCase();
+    const restored = workflow.sessionState?.skills.some(
+      (skill) =>
+        skill.origin === "online" &&
+        (skill.skill_id === item.skill_id ||
+          skill.name.trim().toLowerCase() === normalizedName)
+    );
+    if (restored) setInstalled(true);
+  }, [item.name, item.skill_id, item.skill_name, workflow.sessionState]);
 
   const handleInstall = async () => {
     try {

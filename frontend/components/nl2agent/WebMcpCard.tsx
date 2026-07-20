@@ -6,11 +6,11 @@ import { Alert, Button, Checkbox, message } from "antd";
 import { Download } from "lucide-react";
 import {
   bindNl2AgentMcpTools,
-  getNl2AgentSessionState,
   installNl2AgentMcp,
   skipNl2AgentMcpTools,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { WebMcpInstallConfiguration } from "./WebMcpInstallConfiguration";
 import type { WebMcpCardItem } from "./webMcpTypes";
 
@@ -68,6 +68,7 @@ const fieldValueIsValid = (
 
 /** Renders the in-chat MCP configuration, installation, and tool-binding flow. */
 export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
+  const workflowState = useNl2AgentWorkflow().sessionState;
   const lifecycle = useNl2AgentCardLifecycle(
     `web-mcp:${agentId}:${item.recommendation_id ?? item.name}`
   );
@@ -103,43 +104,33 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
 
   React.useEffect(() => {
     if (!item.recommendation_id) return;
-    let active = true;
-    void getNl2AgentSessionState(agentId)
-      .then((state) => {
-        if (!active) return;
-        const workflow =
-          state.resource_review.mcp_workflows?.[item.recommendation_id!];
-        if (!workflow) return;
-        if (workflow.option_id) setOptionId(workflow.option_id);
-        if (workflow.status === "failed")
-          setInstallError(workflow.error || "MCP installation failed.");
-        if (
-          workflow.mcp_id &&
-          ["connected", "tools_bound", "binding_skipped"].includes(
-            workflow.status || ""
-          )
-        ) {
-          const tools = (workflow.discovered_tools ?? []).map((tool) => ({
-            ...tool,
-            description: tool.description ?? undefined,
-          }));
-          setInstalled({ mcp_id: workflow.mcp_id, tools });
-          setSelectedTools(
-            workflow.status === "tools_bound"
-              ? (workflow.bound_tool_ids ?? [])
-              : tools.map((tool) => tool.tool_id)
-          );
-          setBound(workflow.status === "tools_bound");
-          setSkipped(workflow.status === "binding_skipped");
-        }
-      })
-      .catch(() => {
-        // Installation remains available; the API will still validate authoritative state.
-      });
-    return () => {
-      active = false;
-    };
-  }, [agentId, item.recommendation_id]);
+    if (workflowState?.agent_id !== agentId) return;
+    const workflow =
+      workflowState.resource_review.mcp_workflows?.[item.recommendation_id];
+    if (!workflow) return;
+    if (workflow.option_id) setOptionId(workflow.option_id);
+    if (workflow.status === "failed")
+      setInstallError(workflow.error || "MCP installation failed.");
+    if (
+      workflow.mcp_id &&
+      ["connected", "tools_bound", "binding_skipped"].includes(
+        workflow.status || ""
+      )
+    ) {
+      const tools = (workflow.discovered_tools ?? []).map((tool) => ({
+        ...tool,
+        description: tool.description ?? undefined,
+      }));
+      setInstalled({ mcp_id: workflow.mcp_id, tools });
+      setSelectedTools(
+        workflow.status === "tools_bound"
+          ? (workflow.bound_tool_ids ?? [])
+          : tools.map((tool) => tool.tool_id)
+      );
+      setBound(workflow.status === "tools_bound");
+      setSkipped(workflow.status === "binding_skipped");
+    }
+  }, [agentId, item.recommendation_id, workflowState]);
 
   const chooseOption = (nextOptionId: string) => {
     setOptionId(nextOptionId);

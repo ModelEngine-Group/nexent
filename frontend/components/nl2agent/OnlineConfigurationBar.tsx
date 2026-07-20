@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React from "react";
 import { Alert, Button, Spin, message } from "antd";
 
 import {
   completeOnlineResourceConfiguration,
-  getNl2AgentSessionState,
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
@@ -49,30 +48,9 @@ export const OnlineConfigurationBar: React.FC<{
   const lifecycle = useNl2AgentCardLifecycle(
     `online-configuration:${agentId ?? "none"}`
   );
-  const [state, setState] = useState<Nl2AgentSessionState>();
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string>();
-
-  const load = useCallback(async () => {
-    if (!agentId) return;
-    setLoading(true);
-    setLoadError(undefined);
-    try {
-      setState(await getNl2AgentSessionState(agentId));
-    } catch (error) {
-      setLoadError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load online configuration."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [agentId]);
-
-  useEffect(() => {
-    void load();
-  }, [load, workflow.stateVersion]);
+  const state = workflow.sessionState;
+  const loading = workflow.sessionStateLoading;
+  const loadError = workflow.sessionStateError;
 
   if (!agentId || !workflow.active) return null;
   if (loading && !state)
@@ -84,7 +62,11 @@ export const OnlineConfigurationBar: React.FC<{
         type="error"
         message="Unable to load online configuration state."
         description={loadError}
-        action={<Button onClick={() => void load()}>Retry</Button>}
+        action={
+          <Button onClick={() => void workflow.refreshSessionState()}>
+            Retry
+          </Button>
+        }
       />
     );
   }

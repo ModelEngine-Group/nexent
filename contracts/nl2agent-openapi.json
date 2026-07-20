@@ -1718,6 +1718,19 @@
             "title": "Invalid References",
             "type": "array"
           },
+          "local_tool_parameter_schemas": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "$ref": "#/components/schemas/Nl2AgentToolParameterSchema"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "title": "Local Tool Parameter Schemas",
+            "type": "object"
+          },
           "model_ids": {
             "items": {
               "type": "integer"
@@ -1837,7 +1850,7 @@
         "type": "object"
       },
       "Nl2AgentSkillSummary": {
-        "additionalProperties": true,
+        "additionalProperties": false,
         "properties": {
           "name": {
             "title": "Name",
@@ -1867,6 +1880,32 @@
           "origin"
         ],
         "title": "Nl2AgentSkillSummary",
+        "type": "object"
+      },
+      "Nl2AgentToolConfigurationField": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "default": false,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "Nl2AgentToolConfigurationField",
         "type": "object"
       },
       "Nl2AgentToolParameterSchema": {
@@ -1971,8 +2010,15 @@
         "type": "object"
       },
       "Nl2AgentToolSummary": {
-        "additionalProperties": true,
+        "additionalProperties": false,
         "properties": {
+          "configuration": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Nl2AgentToolConfigurationField"
+            },
+            "title": "Configuration",
+            "type": "object"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1984,6 +2030,13 @@
             ],
             "title": "Origin",
             "type": "string"
+          },
+          "parameter_schema": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentToolParameterSchema"
+            },
+            "title": "Parameter Schema",
+            "type": "array"
           },
           "source": {
             "title": "Source",

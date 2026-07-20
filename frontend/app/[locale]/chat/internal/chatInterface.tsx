@@ -1899,6 +1899,7 @@ export function ChatInterface() {
 
               <Nl2AgentWorkflowProvider
                 enabled={activeNl2AgentDraftAgentId != null}
+                agentId={activeNl2AgentDraftAgentId}
                 scopeKey={nl2AgentContinuationScopeKey(
                   conversationManagement.selectedConversationId,
                   activeNl2AgentDraftAgentId

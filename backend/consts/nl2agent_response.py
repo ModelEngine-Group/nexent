@@ -222,18 +222,24 @@ class Nl2AgentPersistedModel(Nl2AgentResponse):
     valid: bool
 
 
-class Nl2AgentToolSummary(Nl2AgentResponse):
-    model_config = ConfigDict(extra="allow")
+class Nl2AgentToolConfigurationField(Nl2AgentResponse):
+    value: Optional[Any] = None
+    configured: bool = False
+    secret: bool = False
 
+
+class Nl2AgentToolSummary(Nl2AgentResponse):
     tool_id: int
     name: str
     source: str
     origin: Literal["local", "online"]
+    parameter_schema: List[Nl2AgentToolParameterSchema] = Field(default_factory=list)
+    configuration: Dict[str, Nl2AgentToolConfigurationField] = Field(
+        default_factory=dict
+    )
 
 
 class Nl2AgentSkillSummary(Nl2AgentResponse):
-    model_config = ConfigDict(extra="allow")
-
     skill_id: int
     name: str
     source: str
@@ -277,6 +283,9 @@ class Nl2AgentSessionStateResponse(Nl2AgentResponse):
     models: List[Nl2AgentPersistedModel]
     tools: List[Nl2AgentToolSummary]
     skills: List[Nl2AgentSkillSummary]
+    local_tool_parameter_schemas: Dict[
+        str, Dict[str, List[Nl2AgentToolParameterSchema]]
+    ] = Field(default_factory=dict)
     invalid_references: List[Nl2AgentInvalidReference]
     resource_review: Nl2AgentWorkflowStateResponse
 
