@@ -82,12 +82,11 @@ pnpm dev
 Apply all pending database migrations before starting local backend services. Run this command after pulling any change that adds or updates files under `deploy/sql/migrations`.
 
 ```bash
-# Run from the repository root with environment variables loaded
-source .env
-bash deploy/common/run-local-sql-migrations.sh
+# Run from the repository root with the backend virtual environment activated
+python deploy/common/run_local_sql_migrations.py
 ```
 
-The command is idempotent and uses the same checksum and advisory-lock migration mechanism as Docker and Kubernetes. On Windows, run it from Git Bash with PostgreSQL `psql` available on `PATH`.
+The command loads the repository `.env`, connects through the backend PostgreSQL driver, and is safe to run repeatedly. It uses the same checksum and advisory-lock migration policy as Docker and Kubernetes and does not require Bash or the `psql` command-line client.
 
 ### 5. Service Startup
 

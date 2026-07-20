@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MIGRATION_SCRIPT="$DEPLOY_ROOT/common/run-sql-migrations.sh"
-LOCAL_MIGRATION_SCRIPT="$DEPLOY_ROOT/common/run-local-sql-migrations.sh"
 TMP_DIR="${TMPDIR:-/tmp}/nexent-sql-migration-test-$$"
 SQL_DIR="$TMP_DIR/sql/migrations"
 BIN_DIR="$TMP_DIR/bin"
@@ -53,9 +52,6 @@ for arg in "$@"; do
       printf '%s\n' "$arg" >> "$CAPTURE_QUERY"
     fi
     case "$arg" in
-      *information_schema.columns*)
-        printf '%s\n' "${FAKE_LOCAL_VALIDATION_STATUS:-ready}"
-        ;;
       "SELECT 1")
         printf '1\n'
         ;;
@@ -154,39 +150,6 @@ assert_file_contains "$WAIT_QUERY_FILE" "v2_test.sql" "wait query should include
 assert_file_contains "$WAIT_QUERY_FILE" "actual_checksum = expected_checksum" "wait query should wait for current checksums"
 assert_file_contains "$WAIT_QUERY_FILE" "status IN ('applied', 'baselined')" "wait query should accept applied and prior baselined records"
 assert_file_not_contains "$WAIT_QUERY_FILE" "checksum_mismatch" "wait mode should allow migrator to reapply checksum changes"
-
-LOCAL_PLAN_FILE="$TMP_DIR/local-plan.sql"
-PATH="$BIN_DIR:$PATH" \
-CAPTURE_PLAN="$LOCAL_PLAN_FILE" \
-CAPTURE_QUERY="" \
-FAKE_LOCAL_VALIDATION_STATUS="ready" \
-NEXENT_SQL_INIT_FILE="$INIT_SQL_FILE" \
-NEXENT_SQL_MIGRATION_DIR="$SYMLINK_SQL_DIR" \
-NEXENT_SQL_WAIT_TIMEOUT_SECONDS=1 \
-  bash "$LOCAL_MIGRATION_SCRIPT" >/tmp/nexent-local-sql-migration-test.log
-
-[ -f "$LOCAL_PLAN_FILE" ] || fail "local migration entrypoint should invoke the shared runner"
-assert_file_contains "/tmp/nexent-local-sql-migration-test.log" "Database schema is ready" "local migration entrypoint should validate the migrated schema"
-
-if PATH="$BIN_DIR:$PATH" \
-  CAPTURE_PLAN="$LOCAL_PLAN_FILE" \
-  CAPTURE_QUERY="" \
-  FAKE_LOCAL_VALIDATION_STATUS="active_session_without_runner" \
-  NEXENT_SQL_INIT_FILE="$INIT_SQL_FILE" \
-  NEXENT_SQL_MIGRATION_DIR="$SYMLINK_SQL_DIR" \
-  NEXENT_SQL_WAIT_TIMEOUT_SECONDS=1 \
-    bash "$LOCAL_MIGRATION_SCRIPT" >/tmp/nexent-local-sql-migration-invalid-test.log 2>&1; then
-  fail "local migration entrypoint should reject active sessions without a runner"
-fi
-assert_file_contains "/tmp/nexent-local-sql-migration-invalid-test.log" "active_session_without_runner" "local migration validation should report the failed invariant"
-
-NO_PSQL_BIN="$TMP_DIR/no-psql-bin"
-mkdir -p "$NO_PSQL_BIN"
-ln -s "$(command -v dirname)" "$NO_PSQL_BIN/dirname"
-if PATH="$NO_PSQL_BIN" /bin/bash "$LOCAL_MIGRATION_SCRIPT" >/tmp/nexent-local-sql-migration-no-psql-test.log 2>&1; then
-  fail "local migration entrypoint should require psql"
-fi
-assert_file_contains "/tmp/nexent-local-sql-migration-no-psql-test.log" "psql is required on PATH" "local migration entrypoint should explain its psql prerequisite"
 
 if grep -R -n '^-- nexent-migration-' "$DEPLOY_ROOT/sql/migrations" --include='*.sql' >/tmp/nexent-sql-marker-check.log; then
   cat /tmp/nexent-sql-marker-check.log
