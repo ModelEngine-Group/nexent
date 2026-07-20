@@ -95,6 +95,37 @@ def test_claim_due_tasks_uses_db_lease_and_skip_locked(monkeypatch):
     }
 
 
+def test_get_active_run_task_ids_filters_owner_and_active_statuses(monkeypatch):
+    class ScalarRows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [1, 3]
+
+    class ActiveRunSession(_FakeSession):
+        def execute(self, statement, params=None):
+            self.statement = statement
+            return ScalarRows()
+
+    fake_session = ActiveRunSession()
+
+    @contextmanager
+    def fake_get_db_session():
+        yield fake_session
+
+    monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
+
+    task_ids = agent_automation_db.get_active_run_task_ids([1, 2, 3], "tenant", "user")
+    statement = str(fake_session.statement)
+
+    assert task_ids == {1, 3}
+    assert "tenant_id" in statement
+    assert "user_id" in statement
+    assert "status" in statement
+    assert "delete_flag" in statement
+
+
 def test_renew_rejects_expired_or_reassigned_lease(monkeypatch):
     class ScalarResult:
         def scalar_one_or_none(self):

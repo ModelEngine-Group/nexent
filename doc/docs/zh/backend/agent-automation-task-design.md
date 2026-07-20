@@ -380,7 +380,7 @@ AutomationRun
 | `consecutive_failures` | INT DEFAULT 0 | 连续失败次数 |
 | `timeout_seconds` | INT | 单次运行超时 |
 | `overlap_policy` | VARCHAR(16) | v1 固定 `SKIP` |
-| `misfire_policy` | VARCHAR(16) | v1 固定 `RUN_ONCE` |
+| `misfire_policy` | VARCHAR(16) | 周期任务固定 `SKIP`；一次性任务保持 `RUN_ONCE` |
 | `lock_owner` | VARCHAR(128) NULL | 调度抢占 owner |
 | `lock_until` | TIMESTAMPTZ NULL | lease 过期时间 |
 | `created_by` / `updated_by` / `delete_flag` | 复用现有审计字段 | 软删除与审计 |
@@ -659,7 +659,7 @@ sequenceDiagram
 执行策略：
 
 - `overlap_policy=SKIP`：同一 conversation 已有运行中的 Agent 时，本次 run 记为 `SKIPPED`。
-- `misfire_policy=RUN_ONCE`：服务停机期间错过多次触发时，恢复后只补执行一次，然后计算下一次。
+- `misfire_policy=SKIP`：周期任务在服务停机期间错过的触发不补跑；Runtime 恢复时直接推进到当前时间之后的最近计划点。一次性任务保持原有到期执行语义。
 - `timeout_seconds` 默认 1800 秒，Runner 使用异步超时控制强制终止超时执行并记录 `TIMEOUT`。
 - Scheduler 在任务运行期间按 lease 周期续租，避免长任务被其他实例重复抢占。
 - 用户取消任务运行后，Runner 只能从 `RUNNING` 原子更新到终态，迟到结果不能覆盖 `CANCELED`。
@@ -746,7 +746,7 @@ WHERE (SELECT count(*) FROM orphaned_runs) >= 0;
 - lease 续期和有效性判断统一使用 PostgreSQL `now()`；已过期 lease 不允许“复活”。续期持续失败或 owner 已变化时，SDK 会设置 `lease.lost` 并取消旧执行器。
 - Runner 完成计划任务时必须通过 `task_id + lock_owner + lock_until > now()` fencing 条件提交任务游标；旧实例即使晚返回，也不能覆盖新 owner 的 `fire_count`、`next_fire_at` 或状态。
 - `uq_agent_automation_active_occurrence(task_id, scheduled_fire_at)` 部分唯一索引阻止同一计划时间同时存在两个活动 run。
-- 对 `ACTIVE` 且 `next_fire_at` 已过期的任务按 `misfire_policy=RUN_ONCE` 补一次；成功、失败、超时和跳过都只推进一个计划周期。
+- Runtime 恢复阶段会先处理 `ACTIVE` 且 `next_fire_at` 已过期的周期任务：不创建补跑记录，直接把 `next_fire_at` 推进到未来最近一次；正常运行期间到期的任务仍由租约调度器按时认领。
 
 交付保证：
 
@@ -759,7 +759,8 @@ WHERE (SELECT count(*) FROM orphaned_runs) >= 0;
 
 页面能力：
 
-- 列表：任务名、状态、类型、计划、绑定会话、Agent、下次执行、上次结果。
+- 列表：任务名、独立智能体列、状态、类型、计划、绑定会话、下次执行、上次结果；任务名和智能体名称均支持筛选。
+- 状态：任务表 `ACTIVE` 在没有活动 run 时显示“已启用”；存在 `QUEUED/RUNNING` run 时才显示带运行图标的“运行中”。
 - 操作：打开会话、暂停、恢复、立即运行、编辑、删除。
 - 详情抽屉：任务配置、最近运行记录、生成提示词、错误信息、关联消息。
 - 创建入口：跳转聊天页，由用户在当前会话中用自然语言描述任务并确认提案。
@@ -855,7 +856,7 @@ frontend/types/agentAutomation.ts
   - 每次运行原样复用创建时已确认的执行指令；Agent 配置、能力和会话历史只通过结构化运行参数传入。
 - Scheduler：
   - 启动恢复 timeout run。
-  - 停机错过多次触发后按 `RUN_ONCE` 只补一次。
+  - 停机期间错过的周期触发按 `SKIP` 不补跑，恢复时直接推进到未来最近一次。
   - 连续失败 5 次后任务进入 `PAUSED_BY_SYSTEM`。
 
 前端测试：

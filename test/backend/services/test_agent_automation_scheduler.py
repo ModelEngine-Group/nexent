@@ -1,6 +1,7 @@
 import importlib
 import sys
 import types
+from datetime import datetime, timezone
 
 import pytest
 
@@ -38,10 +39,92 @@ async def test_store_recovers_orphans_before_releasing_expired_locks(monkeypatch
         "release_expired_locks",
         lambda: calls.append("release"),
     )
-
     await scheduler_module.AgentAutomationLeaseStore().recover()
 
     assert calls == ["recover", "release"]
+
+
+@pytest.mark.asyncio
+async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
+    missed_fire = datetime(2026, 7, 18, 2, 0, tzinfo=timezone.utc)
+    claimed_task = {
+        "task_id": 42,
+        "tenant_id": "tenant",
+        "user_id": "user",
+        "schedule_config": {
+            "mode": "RECURRING",
+            "rule_type": "CRON",
+            "timezone": "Asia/Shanghai",
+            "start_at": "2026-07-01T10:00:00+08:00",
+            "cron_expr": "0 10 * * *",
+        },
+        "fire_count": 3,
+        "schedule_mode": "RECURRING",
+        "next_fire_at": missed_fire,
+    }
+    update = {}
+
+    monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_expired_locks", lambda: None)
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "claim_due_tasks",
+        lambda owner_id, limit, lease_seconds: [claimed_task],
+    )
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "update_task_if_lock_owner",
+        lambda task_id, tenant_id, user_id, owner_id, values: update.update(values) or values,
+    )
+
+    store = scheduler_module.AgentAutomationLeaseStore()
+    await store.recover()
+    jobs = await store.claim_due("scheduler-a", 2, 120)
+
+    assert jobs == []
+    assert update["next_fire_at"] == datetime(2026, 7, 21, 2, 0, tzinfo=timezone.utc)
+    assert update["misfire_policy"] == "SKIP"
+    assert update["status"] == "ACTIVE"
+    assert update["lock_owner"] is None
+    assert update["lock_until"] is None
+    assert "fire_count" not in update
+    assert "last_error" not in update
+
+
+@pytest.mark.asyncio
+async def test_store_keeps_once_and_post_recovery_occurrences_runnable(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
+    tasks = [
+        {
+            "task_id": 1,
+            "schedule_mode": "ONCE",
+            "next_fire_at": datetime(2026, 7, 18, 2, 0, tzinfo=timezone.utc),
+        },
+        {
+            "task_id": 2,
+            "schedule_mode": "RECURRING",
+            "next_fire_at": recovery_time,
+        },
+    ]
+
+    monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_expired_locks", lambda: None)
+    monkeypatch.setattr(
+        scheduler_module.agent_automation_db,
+        "claim_due_tasks",
+        lambda owner_id, limit, lease_seconds: tasks,
+    )
+
+    store = scheduler_module.AgentAutomationLeaseStore()
+    await store.recover()
+    jobs = await store.claim_due("scheduler-a", 2, 120)
+
+    assert [job.job_id for job in jobs] == [1, 2]
 
 
 @pytest.mark.asyncio

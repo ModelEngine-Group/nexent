@@ -23,6 +23,7 @@ import type { TableProps } from "antd";
 import type { MenuProps } from "antd";
 import {
   CalendarClock,
+  LoaderCircle,
   History,
   MessageCirclePlus,
   MoreHorizontal,
@@ -40,12 +41,14 @@ import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessa
 import type {
   AgentAutomationRun,
   AgentAutomationTask,
-  AutomationTaskStatus,
+  AutomationTaskListStatus,
   UpdateAutomationTaskPayload,
 } from "@/types/agentAutomation";
 
 const statusColor: Record<string, string> = {
-  ACTIVE: "green",
+  ACTIVE: "blue",
+  ENABLED: "blue",
+  RUNNING: "green",
   PAUSED: "gold",
   PAUSED_BY_SYSTEM: "red",
   COMPLETED: "blue",
@@ -129,8 +132,9 @@ export default function AgentTasksPage() {
   const [tasks, setTasks] = useState<AgentAutomationTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskNameSearch, setTaskNameSearch] = useState("");
+  const [agentNameSearch, setAgentNameSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<
-    AutomationTaskStatus | undefined
+    AutomationTaskListStatus | undefined
   >();
   const [modalOpen, setModalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -157,6 +161,12 @@ export default function AgentTasksPage() {
 
   const formatTaskStatus = (status: string) =>
     t(`agentAutomation.status.${status}`, { defaultValue: status });
+
+  const getTaskDisplayStatus = (task: AgentAutomationTask) => {
+    if (task.is_running) return "RUNNING";
+    if (task.status === "ACTIVE") return "ENABLED";
+    return task.status;
+  };
 
   const formatRunStatus = (status?: string | null) =>
     status
@@ -190,6 +200,7 @@ export default function AgentTasksPage() {
       const loadedTasks = await agentAutomationService.list({
         status: statusFilter,
         search: taskNameSearch,
+        agentName: agentNameSearch,
       });
       if (requestId === loadRequestIdRef.current) {
         setTasks(loadedTasks);
@@ -205,7 +216,7 @@ export default function AgentTasksPage() {
         setLoading(false);
       }
     }
-  }, [statusFilter, taskNameSearch, t]);
+  }, [agentNameSearch, statusFilter, taskNameSearch, t]);
 
   useEffect(() => {
     void loadTasks();
@@ -216,13 +227,17 @@ export default function AgentTasksPage() {
     filters
   ) => {
     const nextTaskName = filters.title?.[0];
+    const nextAgentName = filters.agent_name?.[0];
     const nextStatus = filters.status?.[0];
     setTaskNameSearch(
       typeof nextTaskName === "string" ? nextTaskName.trim() : ""
     );
+    setAgentNameSearch(
+      typeof nextAgentName === "string" ? nextAgentName.trim() : ""
+    );
     setStatusFilter(
       typeof nextStatus === "string"
-        ? (nextStatus as AutomationTaskStatus)
+        ? (nextStatus as AutomationTaskListStatus)
         : undefined
     );
   };
@@ -316,14 +331,22 @@ export default function AgentTasksPage() {
   };
 
   const runTask = async (task: AgentAutomationTask) => {
+    setTasks((currentTasks) =>
+      currentTasks.map((currentTask) =>
+        currentTask.task_id === task.task_id
+          ? { ...currentTask, is_running: true }
+          : currentTask
+      )
+    );
     try {
       await agentAutomationService.run(task.task_id);
       message.success(t("agentAutomation.page.runSuccess"));
-      await loadTasks();
     } catch (error) {
       message.error(
         getAutomationErrorMessage(error, t, "agentAutomation.page.runFailed")
       );
+    } finally {
+      await loadTasks();
     }
   };
 
@@ -454,19 +477,13 @@ export default function AgentTasksPage() {
         <div className="min-w-0">
           <Link
             href={`/${params.locale}/chat?conversation_id=${task.conversation_id}`}
-            className="block w-fit max-w-full truncate font-medium text-blue-600 hover:text-blue-700 hover:underline"
+            className="block w-fit max-w-full truncate font-medium text-gray-900 transition-colors hover:text-blue-600 hover:underline"
             title={t("agentAutomation.page.openConversation")}
           >
             {task.title}
           </Link>
           <div className="text-xs text-gray-500 truncate">
-            {t("agentAutomation.page.agentConversation", {
-              agentName:
-                task.agent_name ||
-                t("agentAutomation.page.agentFallback", {
-                  agentId: task.agent_id,
-                }),
-              agentId: task.agent_id,
+            {t("agentAutomation.page.conversationValue", {
               conversationId: task.conversation_id,
             })}
           </div>
@@ -474,23 +491,98 @@ export default function AgentTasksPage() {
       ),
     },
     {
+      title: t("agentAutomation.page.agent"),
+      dataIndex: "agent_name",
+      width: 190,
+      filteredValue: agentNameSearch ? [agentNameSearch] : null,
+      filterIcon: (filtered) => (
+        <Search
+          size={14}
+          className={filtered ? "text-blue-600" : "text-gray-500"}
+        />
+      ),
+      filterDropdown: ({ selectedKeys, setSelectedKeys, confirm, close }) => (
+        <div
+          className="w-72 p-3"
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <Input
+            autoFocus
+            allowClear
+            value={String(selectedKeys[0] || "")}
+            placeholder={t("agentAutomation.page.agentSearchPlaceholder")}
+            onChange={(event) =>
+              setSelectedKeys(event.target.value ? [event.target.value] : [])
+            }
+            onPressEnter={() => confirm()}
+          />
+          <div className="mt-3 flex justify-end gap-2">
+            <Button
+              size="small"
+              onClick={() => {
+                setSelectedKeys([]);
+                confirm();
+              }}
+            >
+              {t("agentAutomation.page.reset")}
+            </Button>
+            <Button size="small" onClick={() => close()}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              icon={<Search size={14} />}
+              onClick={() => confirm()}
+            >
+              {t("agentAutomation.page.search")}
+            </Button>
+          </div>
+        </div>
+      ),
+      render: (_, task) => (
+        <div className="min-w-0">
+          <div className="truncate text-sm text-gray-900">
+            {task.agent_name ||
+              t("agentAutomation.page.agentFallback", {
+                agentId: task.agent_id,
+              })}
+          </div>
+          <div className="truncate text-xs text-gray-500">
+            Agent #{task.agent_id}
+          </div>
+        </div>
+      ),
+    },
+    {
       title: t("agentAutomation.page.status"),
       dataIndex: "status",
-      width: 140,
+      width: 130,
       filters: [
         "DRAFT",
-        "ACTIVE",
+        "ENABLED",
+        "RUNNING",
         "PAUSED",
         "PAUSED_BY_SYSTEM",
         "COMPLETED",
       ].map((status) => ({ text: formatTaskStatus(status), value: status })),
       filteredValue: statusFilter ? [statusFilter] : null,
       filterMultiple: false,
-      render: (status) => (
-        <Tag color={statusColor[status] || "default"}>
-          {formatTaskStatus(status)}
-        </Tag>
-      ),
+      render: (_, task) => {
+        const displayStatus = getTaskDisplayStatus(task);
+        return (
+          <Tag
+            color={statusColor[displayStatus] || "default"}
+            icon={
+              displayStatus === "RUNNING" ? (
+                <LoaderCircle size={12} className="animate-spin" />
+              ) : undefined
+            }
+          >
+            {formatTaskStatus(displayStatus)}
+          </Tag>
+        );
+      },
     },
     {
       title: t("agentAutomation.page.schedule"),
@@ -535,7 +627,14 @@ export default function AgentTasksPage() {
         <Space>
           <Button
             size="small"
-            icon={<Play size={14} />}
+            icon={
+              task.is_running ? (
+                <LoaderCircle size={14} className="animate-spin" />
+              ) : (
+                <Play size={14} />
+              )
+            }
+            disabled={task.is_running}
             onClick={() => runTask(task)}
           >
             {t("agentAutomation.page.run")}

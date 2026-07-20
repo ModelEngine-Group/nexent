@@ -658,7 +658,35 @@ def test_delete_run_rejects_active_record(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_task_requires_and_reuses_bound_conversation(monkeypatch):
+@pytest.mark.parametrize(
+    ("schedule_trigger", "expected_misfire_policy"),
+    [
+        (
+            ScheduleTrigger(
+                mode=ScheduleMode.ONCE,
+                rule_type=ScheduleRuleType.AT,
+                timezone="Asia/Shanghai",
+                start_at="2030-01-01T09:00:00+08:00",
+            ),
+            "RUN_ONCE",
+        ),
+        (
+            ScheduleTrigger(
+                mode=ScheduleMode.RECURRING,
+                rule_type=ScheduleRuleType.CRON,
+                timezone="Asia/Shanghai",
+                start_at="2030-01-01T09:00:00+08:00",
+                cron_expr="0 9 * * *",
+            ),
+            "SKIP",
+        ),
+    ],
+)
+async def test_create_task_requires_and_reuses_bound_conversation(
+    monkeypatch,
+    schedule_trigger,
+    expected_misfire_policy,
+):
     created_task = {}
 
     async def fake_resolve_agent_capabilities(*args, **kwargs):
@@ -698,12 +726,7 @@ async def test_create_task_requires_and_reuses_bound_conversation(monkeypatch):
             original_instruction="总结销售线索变化",
             model_id=55,
             tool_params={"tools": {"search": {"top_k": 5}}},
-            schedule_trigger=ScheduleTrigger(
-                mode=ScheduleMode.ONCE,
-                rule_type=ScheduleRuleType.AT,
-                timezone="Asia/Shanghai",
-                start_at="2030-01-01T09:00:00+08:00",
-            ),
+            schedule_trigger=schedule_trigger,
         ),
         "tenant",
         "user",
@@ -711,6 +734,7 @@ async def test_create_task_requires_and_reuses_bound_conversation(monkeypatch):
 
     assert task["conversation_id"] == 123
     assert task["status"] == "ACTIVE"
+    assert created_task["misfire_policy"] == expected_misfire_policy
     assert created_task["runtime_snapshot"] == {
         "agent_id": 3,
         "display_name": "Agent #3",
@@ -742,10 +766,11 @@ def test_conversation_deleted_soft_deletes_task_and_cancels_runs(monkeypatch):
 
 
 def test_list_tasks_enriches_agent_display_name(monkeypatch):
+    captured = {}
     monkeypatch.setattr(
         facade_module.agent_automation_db,
         "list_tasks",
-        lambda tenant_id, user_id, status, search: [
+        lambda tenant_id, user_id, status, search: captured.update(status=status) or [
             {
                 "task_id": 1,
                 "agent_id": 3,
@@ -759,15 +784,51 @@ def test_list_tasks_enriches_agent_display_name(monkeypatch):
         "resolve_agent_display_names",
         lambda references, tenant_id: {(3, 0): "天气查询助手"},
     )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda task_ids, tenant_id, user_id: {1},
+    )
 
     tasks = AgentAutomationFacade().list_tasks(
         "tenant",
         "user",
-        status="ACTIVE",
+        status="RUNNING",
         search="天气",
+        agent_name="查询助",
     )
 
     assert tasks[0]["agent_name"] == "天气查询助手"
+    assert tasks[0]["is_running"] is True
+    assert captured["status"] is None
+
+
+def test_list_tasks_enabled_filter_excludes_active_runs(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_tasks",
+        lambda tenant_id, user_id, status, search: captured.update(status=status) or [
+            {"task_id": 1, "agent_id": 3, "agent_version_no": 0},
+            {"task_id": 2, "agent_id": 4, "agent_version_no": 0},
+        ],
+    )
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {(3, 0): "天气助手", (4, 0): "周报助手"},
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda task_ids, tenant_id, user_id: {2},
+    )
+
+    tasks = AgentAutomationFacade().list_tasks("tenant", "user", status="ENABLED")
+
+    assert captured["status"] == "ACTIVE"
+    assert [task["task_id"] for task in tasks] == [1]
+    assert tasks[0]["is_running"] is False
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ import type {
   AgentAutomationRun,
   AgentAutomationProposalData,
   AgentAutomationTask,
-  AutomationTaskStatus,
+  AutomationTaskListStatus,
   UpdateAutomationProposalPayload,
   UpdateAutomationTaskPayload,
 } from "@/types/agentAutomation";
@@ -12,8 +12,9 @@ import type {
 const fetch = fetchWithAuth;
 
 interface AutomationTaskListFilters {
-  status?: AutomationTaskStatus;
+  status?: AutomationTaskListStatus;
   search?: string;
+  agentName?: string;
 }
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -37,6 +38,8 @@ export const agentAutomationService = {
     const query = new URLSearchParams();
     if (filters.status) query.set("status", filters.status);
     if (filters.search?.trim()) query.set("search", filters.search.trim());
+    if (filters.agentName?.trim())
+      query.set("agent_name", filters.agentName.trim());
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     const response = await fetch(
       `${API_ENDPOINTS.agentAutomation.list}${suffix}`,

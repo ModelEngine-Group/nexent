@@ -117,11 +117,20 @@ async def update_proposal(
 async def list_tasks(
     status: Optional[str] = Query(default=None),
     search: Optional[str] = Query(default=None, max_length=200),
+    agent_name: Optional[str] = Query(default=None, max_length=200),
     authorization: Optional[str] = Header(None),
 ):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.list_tasks(tenant_id, user_id, status, search))
+        return AutomationResponse(
+            data=agent_automation_facade.list_tasks(
+                tenant_id,
+                user_id,
+                status,
+                search,
+                agent_name,
+            )
+        )
     except HTTPException:
         raise
     except Exception as exc:

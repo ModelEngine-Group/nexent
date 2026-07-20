@@ -7,6 +7,10 @@ export type AutomationTaskStatus =
   | "PAUSED_BY_SYSTEM"
   | "COMPLETED"
   | "DELETED";
+export type AutomationTaskListStatus =
+  | AutomationTaskStatus
+  | "ENABLED"
+  | "RUNNING";
 
 export interface ScheduleTrigger {
   mode: ScheduleMode;
@@ -35,6 +39,7 @@ export interface AgentAutomationTask {
   conversation_id: number;
   agent_id: number;
   agent_name?: string;
+  is_running?: boolean;
   agent_version_no?: number | null;
   title: string;
   instruction: string;

@@ -27,19 +27,20 @@ def test_list_tasks_http_smoke(monkeypatch):
     monkeypatch.setattr(
         agent_automation_app.agent_automation_facade,
         "list_tasks",
-        lambda tenant_id, user_id, status=None, search=None: [
+        lambda tenant_id, user_id, status=None, search=None, agent_name=None: [
             {
                 "task_id": 1,
                 "tenant_id": tenant_id,
                 "user_id": user_id,
                 "status": status or "ACTIVE",
                 "search": search,
+                "agent_name": agent_name,
             }
         ],
     )
 
     response = _client().get(
-        "/agent/automations?status=PAUSED&search=%E5%A4%A9%E6%B0%94",
+        "/agent/automations?status=PAUSED&search=%E5%A4%A9%E6%B0%94&agent_name=%E5%8A%A9%E6%89%8B",
         headers={"Authorization": "Bearer token"},
     )
 
@@ -50,6 +51,7 @@ def test_list_tasks_http_smoke(monkeypatch):
         "user_id": "user",
         "status": "PAUSED",
         "search": "天气",
+        "agent_name": "助手",
     }
 
 

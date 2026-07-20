@@ -71,6 +71,7 @@ def _agent_reference(task: Dict[str, Any]) -> tuple[int, int]:
 def _enrich_tasks_with_agent_names(
     tasks: List[Dict[str, Any]],
     tenant_id: str,
+    user_id: str,
 ) -> List[Dict[str, Any]]:
     if not tasks:
         return []
@@ -82,6 +83,15 @@ def _enrich_tasks_with_agent_names(
     except Exception:
         logger.warning("Failed to resolve Agent display names", exc_info=True)
         names = {}
+    try:
+        active_run_task_ids = agent_automation_db.get_active_run_task_ids(
+            [int(task["task_id"]) for task in tasks],
+            tenant_id,
+            user_id,
+        )
+    except Exception:
+        logger.warning("Failed to resolve active automation runs", exc_info=True)
+        active_run_task_ids = set()
     enriched = []
     for task in tasks:
         snapshot = task.get("runtime_snapshot") or {}
@@ -92,12 +102,16 @@ def _enrich_tasks_with_agent_names(
             or snapshot.get("name")
             or f"Agent #{agent_id}"
         )
-        enriched.append({**task, "agent_name": agent_name})
+        enriched.append({
+            **task,
+            "agent_name": agent_name,
+            "is_running": int(task["task_id"]) in active_run_task_ids,
+        })
     return enriched
 
 
-def _enrich_task_with_agent_name(task: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
-    return _enrich_tasks_with_agent_names([task], tenant_id)[0]
+def _enrich_task_with_agent_name(task: Dict[str, Any], tenant_id: str, user_id: str) -> Dict[str, Any]:
+    return _enrich_tasks_with_agent_names([task], tenant_id, user_id)[0]
 
 
 def _parse_trigger(raw: Dict[str, Any] | ScheduleTrigger) -> ScheduleTrigger:
@@ -524,7 +538,7 @@ class AgentAutomationFacade:
                 "consecutive_failures": 0,
                 "timeout_seconds": request.timeout_seconds or AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS,
                 "overlap_policy": "SKIP",
-                "misfire_policy": "RUN_ONCE",
+                "misfire_policy": "SKIP" if trigger.mode.value == "RECURRING" else "RUN_ONCE",
             }, user_id)
         except IntegrityError as exc:
             constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
@@ -533,7 +547,7 @@ class AgentAutomationFacade:
                     "Conversation already has an active automation task."
                 ) from exc
             raise
-        return _enrich_task_with_agent_name(task, tenant_id)
+        return _enrich_task_with_agent_name(task, tenant_id, user_id)
 
     def list_tasks(
         self,
@@ -541,15 +555,33 @@ class AgentAutomationFacade:
         user_id: str,
         status: Optional[str] = None,
         search: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        tasks = agent_automation_db.list_tasks(tenant_id, user_id, status, search)
-        return _enrich_tasks_with_agent_names(tasks, tenant_id)
+        if status == "ENABLED":
+            db_status = "ACTIVE"
+        elif status == "RUNNING":
+            db_status = None
+        else:
+            db_status = status
+        tasks = agent_automation_db.list_tasks(tenant_id, user_id, db_status, search)
+        enriched_tasks = _enrich_tasks_with_agent_names(tasks, tenant_id, user_id)
+        if status == "ENABLED":
+            enriched_tasks = [task for task in enriched_tasks if not task["is_running"]]
+        elif status == "RUNNING":
+            enriched_tasks = [task for task in enriched_tasks if task["is_running"]]
+        normalized_agent_name = (agent_name or "").strip().casefold()
+        if normalized_agent_name:
+            enriched_tasks = [
+                task for task in enriched_tasks
+                if normalized_agent_name in str(task.get("agent_name") or "").casefold()
+            ]
+        return enriched_tasks
 
     def get_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         task = agent_automation_db.get_task(task_id, tenant_id, user_id)
         if not task:
             raise AutomationNotFoundError("Automation task not found.")
-        return _enrich_task_with_agent_name(task, tenant_id)
+        return _enrich_task_with_agent_name(task, tenant_id, user_id)
 
     def get_task_for_conversation(
         self,
@@ -558,7 +590,7 @@ class AgentAutomationFacade:
         user_id: str,
     ) -> Optional[Dict[str, Any]]:
         task = agent_automation_db.get_task_by_conversation(conversation_id, user_id)
-        return _enrich_task_with_agent_name(task, tenant_id) if task else None
+        return _enrich_task_with_agent_name(task, tenant_id, user_id) if task else None
 
     async def patch_task(
         self,
@@ -616,7 +648,7 @@ class AgentAutomationFacade:
         updated = agent_automation_db.update_task(task_id, tenant_id, user_id, values)
         if not updated:
             raise AutomationNotFoundError("Automation task not found.")
-        return _enrich_task_with_agent_name(updated, tenant_id)
+        return _enrich_task_with_agent_name(updated, tenant_id, user_id)
 
     def pause_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         task = agent_automation_db.update_task(
@@ -627,7 +659,7 @@ class AgentAutomationFacade:
         )
         if not task:
             raise AutomationNotFoundError("Automation task not found.")
-        return _enrich_task_with_agent_name(task, tenant_id)
+        return _enrich_task_with_agent_name(task, tenant_id, user_id)
 
     def resume_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         task = self.get_task(task_id, tenant_id, user_id)
@@ -641,7 +673,7 @@ class AgentAutomationFacade:
         })
         if not updated:
             raise AutomationNotFoundError("Automation task not found.")
-        return _enrich_task_with_agent_name(updated, tenant_id)
+        return _enrich_task_with_agent_name(updated, tenant_id, user_id)
 
     def delete_task(self, task_id: int, tenant_id: str, user_id: str) -> bool:
         task = self.get_task(task_id, tenant_id, user_id)

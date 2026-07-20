@@ -391,6 +391,25 @@ def list_runs(task_id: int, tenant_id: str, user_id: str, limit: int = 50) -> Li
         return [as_dict(row) for row in rows]
 
 
+def get_active_run_task_ids(task_ids: List[int], tenant_id: str, user_id: str) -> set[int]:
+    """Return task IDs that currently have a queued or running execution."""
+    if not task_ids:
+        return set()
+    with get_db_session() as session:
+        rows = session.execute(
+            select(AgentAutomationRun.task_id)
+            .where(
+                AgentAutomationRun.task_id.in_(task_ids),
+                AgentAutomationRun.tenant_id == tenant_id,
+                AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
+                AgentAutomationRun.delete_flag == "N",
+            )
+            .distinct()
+        ).scalars().all()
+        return {int(task_id) for task_id in rows}
+
+
 def has_active_run_for_conversation(conversation_id: int) -> bool:
     with get_db_session() as session:
         run = session.execute(
