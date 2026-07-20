@@ -2,7 +2,7 @@
 import logging
 import os
 import re
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 from smolagents import tool
 
 logger = logging.getLogger(__name__)
@@ -179,8 +179,8 @@ class ReadSkillMdTool:
             return f"[Error] Failed to read '{file_path}': {e}"
 
 
-# Global instance for tool execution
-_skill_md_tool = None
+# Cache by tenant_id to ensure correct skill directory isolation
+_tool_cache: Dict[str, "ReadSkillMdTool"] = {}
 
 
 def get_read_skill_md_tool(
@@ -188,19 +188,27 @@ def get_read_skill_md_tool(
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> ReadSkillMdTool:
-    """Get or create the skill md tool instance.
+) -> "ReadSkillMdTool":
+    """Get or create the skill md tool instance, cached by tenant_id.
 
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id.
     """
-    global _skill_md_tool
-    if _skill_md_tool is None:
-        _skill_md_tool = ReadSkillMdTool(local_skills_dir, agent_id, tenant_id, version_no)
-    return _skill_md_tool
+    cache_key = tenant_id or ""
+    if cache_key not in _tool_cache:
+        _tool_cache[cache_key] = ReadSkillMdTool(
+            local_skills_dir=local_skills_dir,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+    return _tool_cache[cache_key]
 
 
 @tool

@@ -1,6 +1,6 @@
 """Skill script execution tool."""
 import logging
-from typing import Optional
+from typing import Dict, Optional
 from smolagents import tool
 
 logger = logging.getLogger(__name__)
@@ -100,8 +100,8 @@ class RunSkillScriptTool:
             return f"[UnexpectedError] Failed to execute skill script: {type(e).__name__}: {str(e)}"
 
 
-# Global instance for tool execution
-_skill_script_tool = None
+# Cache by tenant_id to ensure correct skill directory isolation
+_tool_cache: Dict[str, "RunSkillScriptTool"] = {}
 
 
 def get_run_skill_script_tool(
@@ -109,19 +109,27 @@ def get_run_skill_script_tool(
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> RunSkillScriptTool:
-    """Get or create the skill script tool instance.
+) -> "RunSkillScriptTool":
+    """Get or create the skill script tool instance, cached by tenant_id.
 
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id.
     """
-    global _skill_script_tool
-    if _skill_script_tool is None:
-        _skill_script_tool = RunSkillScriptTool(local_skills_dir, agent_id, tenant_id, version_no)
-    return _skill_script_tool
+    cache_key = tenant_id or ""
+    if cache_key not in _tool_cache:
+        _tool_cache[cache_key] = RunSkillScriptTool(
+            local_skills_dir=local_skills_dir,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+    return _tool_cache[cache_key]
 
 
 @tool

@@ -1,7 +1,7 @@
 """Skill file writing tool."""
 import logging
 import os
-from typing import Optional
+from typing import Dict, Optional
 from smolagents import tool
 
 logger = logging.getLogger(__name__)
@@ -168,7 +168,8 @@ class WriteSkillFileTool:
             return f"[Error] Failed to write '{relative_path}': {e}"
 
 
-_global_tool_instance: Optional[WriteSkillFileTool] = None
+# Cache by tenant_id to ensure correct skill directory isolation
+_tool_cache: Dict[str, "WriteSkillFileTool"] = {}
 
 
 def get_write_skill_file_tool(
@@ -176,24 +177,27 @@ def get_write_skill_file_tool(
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> WriteSkillFileTool:
-    """Get or create the write skill file tool instance.
+) -> "WriteSkillFileTool":
+    """Get or create the write skill file tool instance, cached by tenant_id.
 
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id.
     """
-    global _global_tool_instance
-    if _global_tool_instance is None:
-        _global_tool_instance = WriteSkillFileTool(
-            local_skills_dir,
-            agent_id,
-            tenant_id,
-            version_no,
+    cache_key = tenant_id or ""
+    if cache_key not in _tool_cache:
+        _tool_cache[cache_key] = WriteSkillFileTool(
+            local_skills_dir=local_skills_dir,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
         )
-    return _global_tool_instance
+    return _tool_cache[cache_key]
 
 
 @tool

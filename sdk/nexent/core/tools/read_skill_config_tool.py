@@ -73,7 +73,8 @@ class ReadSkillConfigTool:
             return f"[Error] Failed to read config.yaml: {e}"
 
 
-_global_tool_instance: Optional[ReadSkillConfigTool] = None
+# Cache by tenant_id to ensure correct skill directory isolation
+_tool_cache: Dict[str, "ReadSkillConfigTool"] = {}
 
 
 def get_read_skill_config_tool(
@@ -81,24 +82,27 @@ def get_read_skill_config_tool(
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> ReadSkillConfigTool:
-    """Get or create the read skill config tool instance.
+) -> "ReadSkillConfigTool":
+    """Get or create the read skill config tool instance, cached by tenant_id.
 
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id.
     """
-    global _global_tool_instance
-    if _global_tool_instance is None:
-        _global_tool_instance = ReadSkillConfigTool(
-            local_skills_dir,
+    cache_key = tenant_id or ""
+    if cache_key not in _tool_cache:
+        _tool_cache[cache_key] = ReadSkillConfigTool(
+            local_skills_dir=local_skills_dir,
             agent_id=agent_id,
             tenant_id=tenant_id,
             version_no=version_no,
         )
-    return _global_tool_instance
+    return _tool_cache[cache_key]
 
 
 @tool
