@@ -374,6 +374,16 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         bool: Whether the deletion was successful
     """
     try:
+        try:
+            from services.agent_automation.facade import agent_automation_facade
+            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+        except Exception as automation_error:
+            logging.warning(
+                "Failed to cleanup automation task for conversation %s: %s",
+                conversation_id,
+                automation_error,
+            )
+
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
