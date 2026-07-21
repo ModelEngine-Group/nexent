@@ -2113,6 +2113,164 @@ class TestCreateBuiltinTool:
         with pytest.raises(ValueError, match="Unknown builtin tool: RunSkillScript"):
             nexent_agent_instance.create_builtin_tool(tool_config)
 
+    def test_create_builtin_tool_run_skill_script_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates RunSkillScriptTool with the correct arguments.
+
+        Covers the RunSkillScriptTool branch in create_builtin_tool, including
+        the dynamic import (line 327) and the metadata defaulting (line 328).
+        """
+        mock_tool_instance = MagicMock(name="RunSkillScriptToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="RunSkillScriptTool")
+        mock_run_skill_script_tool_module = MagicMock()
+        mock_run_skill_script_tool_module.RunSkillScriptTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="RunSkillScriptTool",
+            name="run_skill_script",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 42,
+                "tenant_id": "tenant_abc",
+                "version_no": 7,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.run_skill_script_tool": mock_run_skill_script_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=42,
+            tenant_id="tenant_abc",
+            version_no=7,
+            observer=nexent_agent_instance.observer,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_run_skill_script_tool_no_metadata(self, nexent_agent_instance):
+        """Test create_builtin_tool defaults version_no to 0 when metadata is absent.
+
+        Verifies that ``metadata = tool_config.metadata or {}`` substitutes an
+        empty dict when ``metadata`` is None and version_no defaults to 0.
+        """
+        mock_tool_instance = MagicMock(name="RunSkillScriptToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="RunSkillScriptTool")
+        mock_run_skill_script_tool_module = MagicMock()
+        mock_run_skill_script_tool_module.RunSkillScriptTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="RunSkillScriptTool",
+            name="run_skill_script",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata=None,
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.run_skill_script_tool": mock_run_skill_script_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=None,
+            tenant_id=None,
+            version_no=0,
+            observer=nexent_agent_instance.observer,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_read_skill_md_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates ReadSkillMdTool with the correct arguments.
+
+        Covers the ReadSkillMdTool branch (line 337) and verifies that the
+        observer is NOT passed to ReadSkillMdTool (per the source signature).
+        """
+        mock_tool_instance = MagicMock(name="ReadSkillMdToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="ReadSkillMdTool")
+        mock_read_skill_md_tool_module = MagicMock()
+        mock_read_skill_md_tool_module.ReadSkillMdTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="ReadSkillMdTool",
+            name="read_skill_md",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 11,
+                "tenant_id": "tenant_read",
+                "version_no": 3,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.read_skill_md_tool": mock_read_skill_md_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=11,
+            tenant_id="tenant_read",
+            version_no=3,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_write_skill_file_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates WriteSkillFileTool with the correct arguments.
+
+        Covers the WriteSkillFileTool branch (lines 345-353) and verifies that
+        all four constructor parameters are forwarded correctly.
+        """
+        mock_tool_instance = MagicMock(name="WriteSkillFileToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="WriteSkillFileTool")
+        mock_write_skill_file_tool_module = MagicMock()
+        mock_write_skill_file_tool_module.WriteSkillFileTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="WriteSkillFileTool",
+            name="write_skill_file",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 21,
+                "tenant_id": "tenant_write",
+                "version_no": 5,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.write_skill_file_tool": mock_write_skill_file_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=21,
+            tenant_id="tenant_write",
+            version_no=5,
+        )
+        assert result is mock_tool_instance
+
 
 class TestCreateToolExceptionHandling:
     """Tests for exception handling in create_tool method."""

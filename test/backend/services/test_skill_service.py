@@ -516,6 +516,23 @@ class TestLocalSkillConfigYamlPath:
 
 
 # ===== SkillService Tests =====
+
+
+def _configure_local_dir_mock(mock_manager, local_dir=None):
+    """Configure a MagicMock skill_manager so resolve_tenant_dir returns a valid path.
+
+    The SkillService._local_skills_dir method calls
+    self.skill_manager.resolve_tenant_dir(...). When the manager is a bare
+    MagicMock, this returns a MagicMock object that breaks downstream path
+    resolution. This helper ensures the mock returns a real string path that
+    matches CONTAINER_SKILLS_PATH so _resolve_local_skill_path succeeds.
+    """
+    path = local_dir if local_dir is not None else skill_service.CONTAINER_SKILLS_PATH
+    mock_manager.resolve_tenant_dir.return_value = path
+    mock_manager.local_skills_dir = path
+    return mock_manager
+
+
 class TestSkillServiceInit:
     """Test SkillService initialization."""
 
@@ -829,6 +846,9 @@ class TestSkillServiceUpdateSkill:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -857,6 +877,9 @@ class TestSkillServiceUpdateSkill:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -1714,6 +1737,7 @@ description: A ZIP skill
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1744,6 +1768,7 @@ description: Explicit ZIP type
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1781,6 +1806,7 @@ allowed-tools:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1836,6 +1862,7 @@ allowed-tools:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1861,6 +1888,7 @@ name: existing_skill
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -1897,6 +1925,7 @@ class TestSkillServiceUpdateSkillFromFile:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -1940,6 +1969,7 @@ description: Updated via ZIP
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -2211,6 +2241,7 @@ class TestSkillServiceCreateSkillFromMdEdgeCases:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2240,6 +2271,7 @@ description: No allowed tools
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2273,6 +2305,7 @@ class TestSkillServiceUpdateFromMdEdgeCases:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2313,6 +2346,7 @@ class TestSkillServiceUpdateFromZipEdgeCases:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2340,6 +2374,7 @@ class TestSkillServiceUpdateFromZipEdgeCases:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2861,6 +2896,7 @@ class TestSkillServiceCreateSkillFromFileAutoDetect:
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "auto_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.repository = mock_repo
@@ -2887,6 +2923,7 @@ class TestSkillServiceCreateSkillFromFileEdgeCases:
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "bio_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.repository = mock_repo
@@ -2909,6 +2946,8 @@ description: BytesIO input
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "str_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
+        mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.repository = mock_repo
@@ -2954,6 +2993,7 @@ description: Updated via ZIP
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -2983,6 +3023,7 @@ class TestSkillServiceUpdateFromFileStringInput:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -3026,6 +3067,7 @@ description: Root level SKILL.md
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3072,6 +3114,7 @@ allowed-tools:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3112,6 +3155,7 @@ description: Updated
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3151,6 +3195,7 @@ description: Renamed skill
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3186,6 +3231,7 @@ class TestSkillServiceUpdateFromZipEmptyContent:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3239,6 +3285,7 @@ class TestSkillServiceCreateFromMdWithUserId:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3283,6 +3330,7 @@ description: With user
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3312,6 +3360,7 @@ class TestSkillServiceUpdateFromMdWithUserId:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3356,6 +3405,7 @@ description: Updated
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3409,6 +3459,7 @@ description: Some content
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3595,6 +3646,8 @@ class TestSkillServiceUpdateSkillWithExistingTags:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -3624,6 +3677,8 @@ class TestSkillServiceUpdateSkillWithExistingContent:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -3653,6 +3708,8 @@ class TestSkillServiceUpdateSkillWithFiles:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -3715,6 +3772,8 @@ class TestSkillServiceUpdateSkillParamsWriteError:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -3746,6 +3805,8 @@ class TestSkillServiceUpdateSkillSaveSkillError:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
         mock_manager.save_skill.side_effect = Exception("Save error")
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
@@ -3795,6 +3856,7 @@ class TestSkillServiceCreateFromFileWithSource:
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "source_skill"}
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.repository = mock_repo
@@ -3834,6 +3896,7 @@ class TestSkillServiceUpdateFromFileWithTenantId:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3882,6 +3945,7 @@ allowed-tools:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -4422,6 +4486,7 @@ description: Exists
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -4646,6 +4711,8 @@ class TestSkillServiceUpdateSkillLocalWriteError:
         )
 
         mock_manager = MagicMock()
+        mock_manager.resolve_tenant_dir.return_value = "/tmp"
+        mock_manager.local_skills_dir = "/tmp"
 
         with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', "/tmp"):
             service = SkillService(tenant_id="test-tenant")
@@ -5053,6 +5120,7 @@ class TestSkillServiceUpdateById:
         service = SkillService(tenant_id="tenant-1")
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
+        service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         (tmp_path / "Skill A").mkdir()
         mocker.patch(
             "backend.services.skill_service.CONTAINER_SKILLS_PATH",
@@ -5160,6 +5228,7 @@ class TestSkillServiceUpdateById:
         service = SkillService(tenant_id="tenant-1")
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
+        service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         mocker.patch(
             "backend.services.skill_service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
@@ -5215,6 +5284,7 @@ class TestSkillServiceUpdateById:
         service = SkillService(tenant_id="tenant-1")
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
+        service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         mocker.patch(
             "backend.services.skill_service.CONTAINER_SKILLS_PATH",
             str(tmp_path),

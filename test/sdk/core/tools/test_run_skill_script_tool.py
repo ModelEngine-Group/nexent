@@ -11,7 +11,7 @@ import types
 import tempfile
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -122,34 +122,11 @@ _mock_nexent_skills.SkillManager = MockSkillManager
 from sdk.nexent.core.tools.run_skill_script_tool import (
     RunSkillScriptTool,
     _uncached_run_skill_script_tool,
-    _run_skill_script_without_context,
 )
-
-for name, original_module in _original_modules.items():
-    if original_module is None:
-        sys.modules.pop(name, None)
-    else:
-        sys.modules[name] = original_module
-
-RunSkillScriptTool = run_skill_script_tool_module.RunSkillScriptTool
-get_run_skill_script_tool = run_skill_script_tool_module.get_run_skill_script_tool
-run_skill_script = run_skill_script_tool_module.run_skill_script
 
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def mock_skill_dependencies():
-    with patch.dict(
-        sys.modules,
-        {
-            "nexent": mock_nexent,
-            "nexent.skills": mock_nexent_skills,
-            "nexent.skills.skill_manager": mock_skill_manager_module,
-        },
-    ):
-        yield
 
 
 @pytest.fixture
@@ -304,7 +281,7 @@ class TestExecute:
 
         result = tool.execute("test-skill", "script.py")
 
-        assert "[ScriptNotFoundError]" in result
+        assert "[SkillScriptNotFoundError]" in result
         assert "script.py" in result
 
     def test_execute_handles_file_not_found(self, temp_skills_dir):
@@ -559,7 +536,7 @@ class TestFileArtifactValidation:
         output_path.write_bytes(b"pdf")
         tool = RunSkillScriptTool()
 
-        with caplog.at_level(logging.WARNING, logger=run_skill_script_tool_module.__name__):
+        with caplog.at_level(logging.WARNING, logger="nexent.core.tools.run_skill_script_tool"):
             artifacts = tool._extract_file_artifacts(
                 self._manager(),
                 "report-skill",
@@ -577,7 +554,7 @@ class TestFileArtifactValidation:
         output_path.write_bytes(b"pdf")
         tool = RunSkillScriptTool()
 
-        with caplog.at_level(logging.WARNING, logger=run_skill_script_tool_module.__name__):
+        with caplog.at_level(logging.WARNING, logger="nexent.core.tools.run_skill_script_tool"):
             artifacts = tool._extract_file_artifacts(
                 self._manager(),
                 "report-skill",
@@ -600,14 +577,6 @@ class TestModuleFunctions:
         assert tool.local_skills_dir == "/path/to/skills"
         assert tool.agent_id == 1
         assert tool.tenant_id == "t1"
-
-    def test_run_skill_script_without_context(self, temp_skills_dir):
-        """Test _run_skill_script_without_context creates tool and executes."""
-        # The function creates a tool with default local_skills_dir=None
-        # which means the script will fail to find the skill
-        result = _run_skill_script_without_context("test-skill", "script.py")
-        # Should handle the error gracefully
-        assert isinstance(result, str)
 
     def test_forward_delegates_to_execute(self, temp_skills_dir):
         """Test forward method delegates to execute."""
