@@ -15,6 +15,8 @@ import {
   Typography,
   message,
   Modal,
+  Row,
+  Col,
 } from "antd";
 import {
   CheckOutlined,
@@ -30,7 +32,7 @@ import {
   type PlatformTenantQuota,
 } from "@/types/quota";
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 const STROKE_COLORS = {
   normal: "#52c41a",
@@ -206,11 +208,13 @@ export function PlatformQuotaPanel() {
       title: t("quota.tenantName", "Tenant Name"),
       dataIndex: "tenant_name",
       key: "name",
+      width: 220,
     },
     {
       title: t("quota.hardLimit", "Hard Quota"),
       dataIndex: "hard_limit_bytes",
       key: "quota",
+      width: 300,
       render: (val: number | null, record: PlatformTenantQuota) => {
         const bounds = tenantQuotaBounds(record);
         if (editingTenant === record.tenant_id) {
@@ -270,6 +274,7 @@ export function PlatformQuotaPanel() {
     {
       title: t("quota.usage", "Usage"),
       key: "usage",
+      width: 250,
       render: (_: any, record: PlatformTenantQuota) => (
         <div style={{ minWidth: 140 }}>
           <Progress
@@ -291,6 +296,7 @@ export function PlatformQuotaPanel() {
       title: t("quota.status", "Status"),
       dataIndex: "warning_level",
       key: "status",
+      width: 120,
       render: (level: string) => getWarningTag(level),
     },
   ];
@@ -299,51 +305,96 @@ export function PlatformQuotaPanel() {
     <div style={{ padding: 16 }}>
       {/* Platform Capacity Header */}
       <Card size="small" style={{ marginBottom: 16 }}>
-        <Space style={{ width: "100%", justifyContent: "space-between" }}>
-          <Space direction="vertical" size={0}>
-            <Text strong>
-              {t("quota.platformCapacity", "Platform Capacity")}:{" "}
-              {capacityGb != null
-                ? `${capacityGb} GB`
-                : t("quota.unlimited", "Not set")}
-              {" | "}
-              {t("quota.allocated", "Allocated")}:{" "}
-              {data?.total_allocated_readable || "0 B"}
-              {" | "}
-              {t("quota.used", "Used")}: {data?.total_actual_readable || "0 B"}
+        <Row gutter={[32, 20]} align="middle">
+          <Col xs={24} lg={15}>
+            <Text strong style={{ fontSize: 16 }}>
+              {t("quota.platformOverview", "Platform Quota Overview")}
             </Text>
+            <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.platformCapacity", "Platform Capacity")}
+                  </Text>
+                  <Text strong style={{ fontSize: 20 }}>
+                    {capacityGb != null
+                      ? `${capacityGb} GB`
+                      : t("quota.unlimited", "Unlimited")}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.allocated", "Allocated")}
+                  </Text>
+                  <Text strong style={{ fontSize: 20 }}>
+                    {data?.total_allocated_readable || "0 B"}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.used", "Used")}
+                  </Text>
+                  <Text strong style={{ fontSize: 20 }}>
+                    {data?.total_actual_readable || "0 B"}
+                  </Text>
+                </Space>
+              </Col>
+            </Row>
             {fairShareDisplay != null && (
-              <Text type="secondary">
+              <Text
+                type="secondary"
+                style={{ display: "block", marginTop: 16, fontSize: 12 }}
+              >
                 <InfoCircleOutlined style={{ marginRight: 4 }} />
                 {t("quota.fairShare", "Fair Share")}: {capacityGb} GB &divide;{" "}
                 {tenantCount} = {fairShareDisplay}{" "}
                 {t("quota.gbPerTenant", "GB/tenant")}
               </Text>
             )}
-          </Space>
-          <Button
-            icon={<SettingOutlined />}
-            onClick={() => {
-              setCapacityValue(capacityGb);
-              setCapacityModalOpen(true);
-            }}
-          >
-            {t("quota.quotaManagement", "Capacity Settings")}
-          </Button>
-        </Space>
-        {data?.platform_capacity_bytes != null && (
-          <div style={{ marginTop: 12, maxWidth: 560 }}>
-            <Progress
-              percent={Math.min(allocationPercentage, 100)}
-              strokeColor={STROKE_COLORS.normal}
-              format={() => `${allocationPercentage}%`}
-            />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("quota.remainingCapacity", "Remaining capacity")}:{" "}
-              {data.remaining_allocatable_readable || "0 B"}
-            </Text>
-          </div>
-        )}
+          </Col>
+          <Col xs={24} lg={9}>
+            <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              <Space style={{ width: "100%", justifyContent: "space-between" }}>
+                <Text strong>{t("quota.allocated", "Allocated")}</Text>
+                {data?.platform_capacity_bytes != null && (
+                  <Text type="secondary">{allocationPercentage}%</Text>
+                )}
+              </Space>
+              {data?.platform_capacity_bytes != null ? (
+                <>
+                  <Progress
+                    percent={Math.min(allocationPercentage, 100)}
+                    strokeColor={STROKE_COLORS.normal}
+                    strokeWidth={10}
+                    showInfo={false}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.remainingCapacity", "Remaining capacity")}:{" "}
+                    {data.remaining_allocatable_readable || "0 B"}
+                  </Text>
+                </>
+              ) : (
+                <Text type="secondary" style={{ minHeight: 30 }}>
+                  {t("quota.unlimited", "Unlimited")}
+                </Text>
+              )}
+              <Button
+                icon={<SettingOutlined />}
+                onClick={() => {
+                  setCapacityValue(capacityGb);
+                  setCapacityModalOpen(true);
+                }}
+                style={{ alignSelf: "flex-end" }}
+              >
+                {t("quota.quotaManagement", "Capacity Settings")}
+              </Button>
+            </Space>
+          </Col>
+        </Row>
       </Card>
 
       {data?.platform_capacity_bytes != null &&
@@ -392,6 +443,7 @@ export function PlatformQuotaPanel() {
         loading={loading}
         pagination={false}
         size="small"
+        scroll={{ x: 890 }}
       />
 
       {/* Capacity Settings Modal */}
