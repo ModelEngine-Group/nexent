@@ -1156,16 +1156,24 @@ async def _stream_agent_chunks(
                     # and inserts each search result as a source_search row
                     # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        placeholder_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type="search_content_placeholder",
-                            unit_content='{"placeholder": true}',
-                            user_id=user_id,
-                            unit_status="completed",
-                        ).result()
+                        try:
+                            placeholder_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type="search_content_placeholder",
+                                unit_content='{"placeholder": true}',
+                                user_id=user_id,
+                                unit_status="completed",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist search_content placeholder: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                            placeholder_unit_id = None
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
@@ -1214,24 +1222,32 @@ async def _stream_agent_chunks(
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
-                        new_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type=chunk_type,
-                            unit_content=chunk_content,
-                            user_id=user_id,
-                            unit_status="streaming",
-                        ).result()
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": chunk_content,
-                            "unit_id": new_unit_id,
-                            "unit_index": next_unit_index,
-                            "mergeable": mergeable,
-                        }
-                        next_unit_index += 1
+                        try:
+                            new_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type=chunk_type,
+                                unit_content=chunk_content,
+                                user_id=user_id,
+                                unit_status="streaming",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist streaming message unit: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                        else:
+                            current_unit = {
+                                "type": chunk_type,
+                                "content": chunk_content,
+                                "unit_id": new_unit_id,
+                                "unit_index": next_unit_index,
+                                "mergeable": mergeable,
+                            }
+                            next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
