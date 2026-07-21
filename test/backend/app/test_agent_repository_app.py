@@ -336,6 +336,8 @@ def test_update_agent_repository_status_api_success(mocker, mock_auth_header):
         status="shared",
         user_id="test_user_id",
         tenant_id="test_tenant_id",
+        notify_content=None,
+        content=None,
     )
     assert response.json()["status"] == "shared"
 

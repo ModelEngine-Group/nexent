@@ -50,6 +50,7 @@ export function MineApplyListingModal({
   const [iconError, setIconError] = useState<string | null>(null);
   const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [listingContent, setListingContent] = useState("");
 
   const agentId = agent?.agent_id;
   const {
@@ -113,6 +114,7 @@ export function MineApplyListingModal({
     if (!agent || !isListingsSuccess) {
       clearIconState();
       setSelectedTags([]);
+      setListingContent("");
       return;
     }
 
@@ -127,6 +129,7 @@ export function MineApplyListingModal({
     if (!prefill) {
       clearIconState();
       setSelectedTags([]);
+      setListingContent("");
       return;
     }
 
@@ -138,6 +141,7 @@ export function MineApplyListingModal({
     }
 
     setSelectedTags(prefill.tags);
+    setListingContent("");
   }, [
     open,
     agent,
@@ -226,6 +230,7 @@ export function MineApplyListingModal({
     onSubmit({
       icon: selectedIcon,
       tags,
+      content: listingContent.trim(),
     });
   };
 
@@ -323,6 +328,20 @@ export function MineApplyListingModal({
                 count: MAX_TAGS,
               })}
             </p>
+          </section>
+
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.content")}
+            </p>
+            <Input.TextArea
+              value={listingContent}
+              onChange={(event) => setListingContent(event.target.value)}
+              rows={4}
+              placeholder={t(
+                "agentRepository.mine.applyModal.contentPlaceholder"
+              )}
+            />
           </section>
         </div>
       </Spin>

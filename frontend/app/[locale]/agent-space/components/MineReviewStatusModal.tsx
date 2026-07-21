@@ -46,6 +46,7 @@ export function MineReviewStatusModal({
   const canTakeDown = isTakeDownableRepositoryStatus(repositoryInfo.status);
   const versionLabel = formatRepositoryVersionLabel(repositoryInfo);
   const submittedAt = formatMineDate(repositoryInfo.create_time);
+  const listingContent = repositoryInfo.content?.trim() ?? "";
 
   const statusConfig = isPending
     ? {
@@ -174,6 +175,17 @@ export function MineReviewStatusModal({
           <p className="text-sm leading-relaxed opacity-90">
             {statusConfig.description}
           </p>
+          {listingContent ? (
+            <p className="text-sm leading-relaxed opacity-90">
+              {isPending
+                ? t("agentRepository.mine.reviewModal.pendingNote", {
+                    content: listingContent,
+                  })
+                : t("agentRepository.mine.reviewModal.reviewOpinion", {
+                    content: listingContent,
+                  })}
+            </p>
+          ) : null}
         </div>
       </div>
 

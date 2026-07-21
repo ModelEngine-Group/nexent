@@ -17,7 +17,6 @@ sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
 _agent_repo_db_mock = MagicMock()
 _agent_repo_db_mock.get_agent_repository_by_id = MagicMock()
-_agent_repo_db_mock.get_agent_repository_by_id_and_publisher = MagicMock()
 _agent_repo_db_mock.get_agent_repository_by_agent_id = MagicMock()
 _agent_repo_db_mock.insert_agent_repository_record = MagicMock()
 _agent_repo_db_mock.update_agent_repository_by_id = MagicMock()
@@ -782,7 +781,7 @@ async def test_list_my_editable_agents_impl_rejects_invalid_ownership():
 @pytest.fixture
 def mock_status_update_deps():
     with patch.object(ars, "get_user_tenant_by_user_id") as mock_get_role, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "update_agent_repository_status_by_id"
     ) as mock_update_status, patch.object(
@@ -848,6 +847,7 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
     deps["reset_status"].assert_called_once_with(
         agent_repository_id=1,
@@ -1004,6 +1004,7 @@ def test_update_status_admin_pending_review_to_shared(mock_status_update_deps):
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
 
 
@@ -1067,6 +1068,7 @@ def test_update_status_admin_pending_review_to_not_shared(mock_status_update_dep
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
 
 
@@ -1144,6 +1146,7 @@ def test_update_status_same_status_noop(mock_status_update_deps):
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
     deps["reset_status"].assert_called_once_with(
         agent_repository_id=1,
@@ -1162,6 +1165,7 @@ def test_list_repository_listings_includes_submitted_by():
                 status="pending_review",
             ),
             "submitted_by": "reviewer@example.com",
+            "content": "Please review this listing",
         }
     ]
 
@@ -1172,6 +1176,7 @@ def test_list_repository_listings_includes_submitted_by():
         )
 
     assert result["items"][0]["submitted_by"] == "reviewer@example.com"
+    assert result["items"][0]["content"] == "Please review this listing"
     assert result["pagination"]["total"] == 1
 
 
@@ -1191,7 +1196,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ) as mock_get:
         result = ars.get_agent_repository_listing_detail_impl(42, "tenant_a")
@@ -1203,7 +1208,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=None,
     ):
         with pytest.raises(ValueError, match="Repository listing not found"):
@@ -1399,7 +1404,7 @@ async def test_create_agent_repository_listing_impl_success():
     ) as mock_get_by_agent_id, patch.object(
         ars, "insert_agent_repository_record"
     ) as mock_insert, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1460,7 +1465,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
     ) as mock_get_by_agent_id, patch.object(
         ars, "update_agent_repository_by_id"
     ) as mock_update_by_id, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1531,7 +1536,7 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
     ) as mock_get_by_agent_id, patch.object(
         ars, "insert_agent_repository_record"
     ) as mock_insert, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1877,7 +1882,7 @@ def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ), patch.object(
         ars,
@@ -1929,7 +1934,7 @@ async def test_import_agent_from_repository_increments_downloads():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ), patch.object(
         ars,
@@ -1964,7 +1969,7 @@ async def test_import_agent_from_repository_skips_increment_on_import_failure():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ), patch.object(
         ars,
