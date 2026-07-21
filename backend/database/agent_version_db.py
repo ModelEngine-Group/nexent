@@ -502,13 +502,16 @@ def get_next_version_no(
     tenant_id: str,
 ) -> int:
     """
-    Calculate the next version number for an agent
+    Calculate the next version number from all historical published snapshots.
+
+    Soft-deleted snapshots remain in the table and retain the composite primary
+    key, so their version numbers must not be reused.
     """
     with get_db_session() as session:
         max_version = session.query(func.max(AgentInfo.version_no)).filter(
             AgentInfo.agent_id == agent_id,
             AgentInfo.tenant_id == tenant_id,
-            AgentInfo.delete_flag == 'N',
+            AgentInfo.version_no > 0,
         ).scalar()
         return (max_version or 0) + 1
 
