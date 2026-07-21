@@ -839,6 +839,13 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
+            # AIDP reads server_url / api_key from environment variables.
+            # Strip any empty-string values persisted in the database so
+            # the Tool's Field default_factory picks up the env vars.
+            if tool_name == "aidp_search":
+                for _cred_key in ("server_url", "api_key"):
+                    if not filtered_params.get(_cred_key):
+                        filtered_params.pop(_cred_key, None)
             tool_instance = tool_class(**filtered_params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:

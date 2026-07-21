@@ -2,7 +2,7 @@
  * AIDP Knowledge Base Management Service
  *
  * Wraps the 8 AIDP management backend endpoints.
- * Credentials (server_url, api_key) are passed per-call from localStorage.
+ * Credentials (server_url, api_key) are read by the backend from environment variables.
  */
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
@@ -92,14 +92,10 @@ class AidpKnowledgeService {
    * List knowledge bases (paginated).
    */
   async listKbs(
-    serverUrl: string,
-    apiKey: string,
     page: number = 1,
     pageSize: number = 10
   ): Promise<AidpKnowledgeBaseListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {
-      server_url: serverUrl,
-      api_key: apiKey,
       page,
       page_size: pageSize,
     });
@@ -128,14 +124,8 @@ class AidpKnowledgeService {
   /**
    * Count knowledge bases (used as connection test).
    */
-  async countKbs(
-    serverUrl: string,
-    apiKey: string
-  ): Promise<{ count: number }> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbCount, {
-      server_url: serverUrl,
-      api_key: apiKey,
-    });
+  async countKbs(): Promise<{ count: number }> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbCount, {});
 
     const response = await fetchWithErrorHandling(url, {
       method: "GET",
@@ -157,14 +147,9 @@ class AidpKnowledgeService {
    * Get a single knowledge base detail.
    */
   async getKb(
-    serverUrl: string,
-    apiKey: string,
     id: string
   ): Promise<AidpKbDetail> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {
-      server_url: serverUrl,
-      api_key: apiKey,
-    });
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {});
 
     const response = await fetchWithErrorHandling(url, {
       method: "GET",
@@ -179,14 +164,9 @@ class AidpKnowledgeService {
    * Create a knowledge base.
    */
   async createKb(
-    serverUrl: string,
-    apiKey: string,
     payload: AidpCreateKbPayload
   ): Promise<AidpKbDetail> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {
-      server_url: serverUrl,
-      api_key: apiKey,
-    });
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {});
 
     const response = await fetchWithErrorHandling(url, {
       method: "POST",
@@ -205,15 +185,10 @@ class AidpKnowledgeService {
    * Update a knowledge base (name / description only).
    */
   async updateKb(
-    serverUrl: string,
-    apiKey: string,
     id: string,
     payload: AidpUpdateKbPayload
   ): Promise<AidpKbDetail> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {
-      server_url: serverUrl,
-      api_key: apiKey,
-    });
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {});
 
     const response = await fetchWithErrorHandling(url, {
       method: "PUT",
@@ -232,14 +207,9 @@ class AidpKnowledgeService {
    * Delete a knowledge base.
    */
   async deleteKb(
-    serverUrl: string,
-    apiKey: string,
     id: string
   ): Promise<void> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {
-      server_url: serverUrl,
-      api_key: apiKey,
-    });
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {});
 
     await fetchWithErrorHandling(url, {
       method: "DELETE",
@@ -252,15 +222,10 @@ class AidpKnowledgeService {
    * Bypasses fetchWithErrorHandling since it expects JSON.
    */
   async uploadDocs(
-    serverUrl: string,
-    apiKey: string,
     id: string,
     files: File[]
   ): Promise<{ success: number; failed: number; errors: string[] }> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
-      server_url: serverUrl,
-      api_key: apiKey,
-    });
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
 
     const formData = new FormData();
     for (const file of files) {
@@ -303,15 +268,11 @@ class AidpKnowledgeService {
    * List documents for a knowledge base.
    */
   async listDocs(
-    serverUrl: string,
-    apiKey: string,
     id: string,
     page: number = 1,
     pageSize: number = 10
   ): Promise<AidpDocumentListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
-      server_url: serverUrl,
-      api_key: apiKey,
       page,
       page_size: pageSize,
     });

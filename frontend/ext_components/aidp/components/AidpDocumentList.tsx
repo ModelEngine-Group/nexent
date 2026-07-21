@@ -19,8 +19,6 @@ interface AidpDocumentListProps {
   totalReliable: boolean;
   hasMore: boolean;
   isLoading: boolean;
-  serverUrl: string;
-  apiKey: string;
   currentPage: number;
   pageSize: number;
   onPageChange: (page: number) => void;
@@ -35,8 +33,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   totalReliable,
   hasMore,
   isLoading,
-  serverUrl,
-  apiKey,
   currentPage,
   pageSize,
   onPageChange,
@@ -58,8 +54,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
       setUploading(true);
       try {
         const result = await aidpKnowledgeService.uploadDocs(
-          serverUrl,
-          apiKey,
           activeKb.kds_id,
           fileList
         );
@@ -86,7 +80,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         setUploading(false);
       }
     },
-    [activeKb, serverUrl, apiKey, onDocsUploaded, t]
+    [activeKb, onDocsUploaded, t]
   );
 
   // Format file size for display

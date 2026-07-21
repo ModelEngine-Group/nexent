@@ -287,6 +287,17 @@ class NexentAgent:
                     "agent_id", "") if tool_config.metadata else ""
                 tools_obj.memory_user_config = tool_config.metadata.get(
                     "memory_user_config", None) if tool_config.metadata else None
+            elif class_name == "AidpSearchTool":
+                # AidpSearchTool reads server_url / api_key from environment
+                # variables (AIDP_SERVER_URL / AIDP_API_KEY). Do NOT pass them
+                # to __init__ — the DB may contain stale strings or, worse,
+                # serialized Pydantic FieldInfo dicts that fail with
+                # "'FieldInfo' object has no attribute 'rstrip'". Strip them
+                # so the Field(default_factory=...) picks up the env values.
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["server_url", "api_key"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

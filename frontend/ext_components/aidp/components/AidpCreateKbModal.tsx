@@ -15,8 +15,10 @@ import {
   Space,
   Divider,
   Collapse,
+  Switch,
+  Tooltip,
 } from "antd";
-import { InboxOutlined } from "@ant-design/icons";
+import { InboxOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
@@ -46,8 +48,6 @@ const AIDP_CREATE_DEFAULTS = {
 
 interface AidpCreateKbModalProps {
   open: boolean;
-  serverUrl: string;
-  apiKey: string;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
   onSuccess: (newKdsId: string) => void;
@@ -55,8 +55,6 @@ interface AidpCreateKbModalProps {
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   open,
-  serverUrl,
-  apiKey,
   existingKbs,
   onCancel,
   onSuccess,
@@ -72,10 +70,12 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     embedding_model?: string;
     chunk_token_num: number;
     chunk_overlap_num: number;
+    caption_enable: number;
   }>({
     name: "",
     chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
     chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+    caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
   });
 
   // Duplicate name check against existing KBs
@@ -109,6 +109,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num,
         chunk_overlap_num:
           values.chunk_overlap_num ?? AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+        caption_enable: values.caption_enable ? 1 : 0,
       });
       setCurrent(1);
     } catch {
@@ -136,7 +137,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
 
       // Step 1: Create KB
       // Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload
-      const created = await aidpKnowledgeService.createKb(serverUrl, apiKey, {
+      const created = await aidpKnowledgeService.createKb({
         name: formValues.name.trim(),
         description: formValues.description || "",
         chunk_token_num: String(formValues.chunk_token_num),
@@ -148,14 +149,12 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         topk: AIDP_CREATE_DEFAULTS.topk,
         similarity: AIDP_CREATE_DEFAULTS.similarity,
         smartsplit: AIDP_CREATE_DEFAULTS.smartsplit,
-        caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
+        caption_enable: formValues.caption_enable,
       });
 
       // Step 2: Upload files (if any and not skipped)
       if (!skipUpload && fileList.length > 0 && created.kds_id) {
         const result = await aidpKnowledgeService.uploadDocs(
-          serverUrl,
-          apiKey,
           created.kds_id,
           fileList
         );
@@ -204,6 +203,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       name: "",
       chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
       chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+      caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
     });
   };
 
@@ -236,10 +236,20 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           />
         </Form.Item>
         <Form.Item
-          name="embedding_model"
-          label={t("aidpKnowledge.embeddingModel")}
+          name="caption_enable"
+          required
+          initialValue={AIDP_CREATE_DEFAULTS.caption_enable === 1}
+          valuePropName="checked"
+          label={
+            <Space>
+              <span>{t("aidpKnowledge.createCaptionEnable")}</span>
+              <Tooltip title={t("aidpKnowledge.createCaptionEnableHint")}>
+                <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+              </Tooltip>
+            </Space>
+          }
         >
-          <Input placeholder={t("aidpKnowledge.embeddingModelPlaceholder")} />
+          <Switch />
         </Form.Item>
 
         <Collapse
@@ -251,6 +261,12 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
               label: t("aidpKnowledge.createAdvancedOptions"),
               children: (
                 <>
+                  <Form.Item
+                    name="embedding_model"
+                    label={t("aidpKnowledge.embeddingModel")}
+                  >
+                    <Input placeholder={t("aidpKnowledge.embeddingModelPlaceholder")} />
+                  </Form.Item>
                   <Form.Item
                     name="chunk_token_num"
                     label={t("aidpKnowledge.createChunkTokenNum")}

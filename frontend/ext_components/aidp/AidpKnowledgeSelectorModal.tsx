@@ -27,8 +27,6 @@ interface AidpKnowledgeSelectorModalProps {
   readonly onClose: () => void;
   readonly onConfirm: (selected: { datasetIds: string[]; displayNames: string[] }) => void;
   readonly selectedDatasetIds: string[];
-  readonly serverUrl: string;
-  readonly apiKey: string;
   readonly title?: string;
   readonly maxSelect?: number;
 }
@@ -40,8 +38,6 @@ export default function AidpKnowledgeSelectorModal({
   onClose,
   onConfirm,
   selectedDatasetIds,
-  serverUrl,
-  apiKey,
   title,
   maxSelect = 10,
 }: AidpKnowledgeSelectorModalProps) {
@@ -104,30 +100,13 @@ export default function AidpKnowledgeSelectorModal({
   }, [isOpen, selectedDatasetIds]);
 
   // ------------------------------------------------------------------
-  // Fetch a single page (page 1 on open/credentials change; next/prev on nav)
-  // Use refs to ensure we always use the latest credentials
+  // Fetch a single page (page 1 on open; next/prev on nav)
   // ------------------------------------------------------------------
-  const serverUrlRef = useRef(serverUrl);
-  const apiKeyRef = useRef(apiKey);
-  serverUrlRef.current = serverUrl;
-  apiKeyRef.current = apiKey;
-
   const loadPage = useCallback(
     async (pageNum: number, nextUrl: string | null = null) => {
-      const currentServerUrl = serverUrlRef.current;
-      const currentApiKey = apiKeyRef.current;
-
-      if (!currentServerUrl || !currentApiKey) {
-        setPageItems([]);
-        setNextLink(null);
-        return;
-      }
-
       setLoading(true);
       try {
         const result = await knowledgeBaseService.getAidpKnowledgeBases(
-          currentServerUrl,
-          currentApiKey,
           pageNum,
           DEFAULT_PAGE_SIZE
         );
@@ -162,12 +141,12 @@ export default function AidpKnowledgeSelectorModal({
   );
 
   // ------------------------------------------------------------------
-  // Load first page when modal opens or credentials change
+  // Load first page when modal opens
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
     loadPage(1);
-  }, [isOpen, serverUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
   // Keyword filter (client-side on current page)

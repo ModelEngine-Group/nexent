@@ -9,8 +9,6 @@ import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeSe
 interface AidpUpdateKbModalProps {
   open: boolean;
   knowledgeBase: AidpKnowledgeBaseItem | null;
-  serverUrl: string;
-  apiKey: string;
   onCancel: () => void;
   onSuccess: () => void;
 }
@@ -18,8 +16,6 @@ interface AidpUpdateKbModalProps {
 const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   open,
   knowledgeBase,
-  serverUrl,
-  apiKey,
   onCancel,
   onSuccess,
 }) => {
@@ -44,7 +40,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       const values = await form.validateFields();
       setLoading(true);
 
-      await aidpKnowledgeService.updateKb(serverUrl, apiKey, knowledgeBase.kds_id, {
+      await aidpKnowledgeService.updateKb(knowledgeBase.kds_id, {
         name: values.name.trim(),
         description: values.description?.trim() || "",
       });

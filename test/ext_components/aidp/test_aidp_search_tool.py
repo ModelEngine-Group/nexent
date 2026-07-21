@@ -374,3 +374,81 @@ class TestAidpSearchToolForward:
             aidp_tool.forward("query")
 
         assert "AIDP search error: Invalid AIDP response" in str(exc_info.value)
+
+
+class TestAidpBuildImageUrl:
+    """``_build_image_url`` joins the AIDP base URL, the KnowledgeBases path
+    prefix, and the relative ``file_url`` returned by FusionSearch into a
+    fully-qualified URL that the image proxy can GET with a Bearer token.
+    """
+
+    def test_relative_path_is_joined_under_knowledge_bases_prefix(self, aidp_tool):
+        url = aidp_tool._build_image_url("kb-1/files/img.png")
+        assert (
+            url
+            == "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/files/img.png"
+        )
+
+    def test_leading_slash_on_relative_path_is_stripped(self, aidp_tool):
+        url = aidp_tool._build_image_url("/kb-1/files/img.png")
+        assert (
+            url
+            == "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/files/img.png"
+        )
+
+    def test_already_absolute_http_url_is_returned_unchanged(self, aidp_tool):
+        # Real AIDP currently returns relative paths, but if a future
+        # version starts returning full URLs we must not double-prefix.
+        url = aidp_tool._build_image_url("https://aidp.example.com/full/img.png")
+        assert url == "https://aidp.example.com/full/img.png"
+
+    def test_empty_file_url_returns_empty_string(self, aidp_tool):
+        assert aidp_tool._build_image_url("") == ""
+
+    def test_base_url_missing_trailing_slash_still_produces_valid_url(self, aidp_module, mock_observer):
+        mock_client = MagicMock()
+        aidp_module.http_client_manager.get_sync_client.return_value = mock_client
+        tool = aidp_module.AidpSearchTool(
+            server_url="https://aidp-no-slash.example.com",  # no trailing slash
+            api_key="jwt-token",
+            kds_list='["kb1"]',
+            observer=mock_observer,
+        )
+        url = tool._build_image_url("kb-1/x.png")
+        assert (
+            url
+            == "https://aidp-no-slash.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/x.png"
+        )
+
+    def test_forward_with_relative_file_url_emits_full_url_in_picture_channel(
+        self, aidp_tool, mock_observer, aidp_module
+    ):
+        """End-to-end: a chunk whose file_url is a relative path must end up
+        in the PICTURE_WEB message as the fully-qualified URL the image
+        proxy can fetch."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response(
+            records=[
+                {
+                    "id": "img-1",
+                    "chunk_type": "image",
+                    "title": "Relative image",
+                    "text": "",
+                    "file_url": "kb-1/data/picture.png",
+                    "score": 0.88,
+                    "pages": [1],
+                    "metadata": {},
+                }
+            ]
+        )
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        aidp_tool.forward("image query")
+
+        picture_call = mock_observer.add_message.call_args_list[3]
+        assert picture_call.args[1] == aidp_module.ProcessType.PICTURE_WEB
+        assert (
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/data/picture.png"
+            in picture_call.args[2]
+        )

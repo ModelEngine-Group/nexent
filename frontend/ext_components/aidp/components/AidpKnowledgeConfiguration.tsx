@@ -18,7 +18,6 @@ import aidpKnowledgeService, {
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import log from "@/lib/logger";
 
-import AidpConnectionConfig from "./AidpConnectionConfig";
 import AidpKnowledgeList from "./AidpKnowledgeList";
 import AidpDocumentList from "./AidpDocumentList";
 import AidpCreateKbModal from "./AidpCreateKbModal";
@@ -27,11 +26,6 @@ import AidpUpdateKbModal from "./AidpUpdateKbModal";
 const AidpKnowledgeConfiguration: React.FC = () => {
   const { t } = useTranslation();
   const { message: appMessage } = App.useApp();
-
-  // ---- Connection state (localStorage-backed) ----
-  const [serverUrl, setServerUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
 
   // ---- KB list state ----
   const [kbs, setKbs] = useState<AidpKnowledgeBaseItem[]>([]);
@@ -65,25 +59,11 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [editingKb, setEditingKb] = useState<AidpKnowledgeBaseItem | null>(null);
 
-  // ---- Load credentials from localStorage on mount ----
-  useEffect(() => {
-    const savedUrl = localStorage.getItem("aidp_kb_server_url") || "";
-    const savedKey = localStorage.getItem("aidp_kb_api_key") || "";
-    if (savedUrl && savedKey) {
-      setServerUrl(savedUrl);
-      setApiKey(savedKey);
-      setIsConnected(true);
-    }
-  }, []);
-
   // ---- Fetch KB list (server-side pagination: each page fetches page_size items + Count total) ----
   const fetchKbs = useCallback(async (page: number = 1) => {
-    if (!serverUrl || !apiKey) return;
     setLoadingKbs(true);
     try {
       const result = await aidpKnowledgeService.listKbs(
-        serverUrl,
-        apiKey,
         page,
         KB_PAGE_SIZE,
       );
@@ -102,24 +82,19 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     } finally {
       setLoadingKbs(false);
     }
-  }, [serverUrl, apiKey, appMessage, t]);
+  }, [appMessage, t]);
 
-  // Auto-fetch when credentials become available
+  // Auto-fetch on mount
   useEffect(() => {
-    if (isConnected && serverUrl && apiKey) {
-      fetchKbs();
-    }
-  }, [isConnected, serverUrl, apiKey, fetchKbs]);
+    fetchKbs();
+  }, [fetchKbs]);
 
   // ---- Fetch documents for active KB (server-side pagination) ----
   const fetchDocs = useCallback(
     async (kbId: string, page: number = 1) => {
-      if (!serverUrl || !apiKey) return;
       setLoadingDocs(true);
       try {
         const result = await aidpKnowledgeService.listDocs(
-          serverUrl,
-          apiKey,
           kbId,
           page,
           DOC_PAGE_SIZE,
@@ -141,7 +116,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         setLoadingDocs(false);
       }
     },
-    [serverUrl, apiKey, appMessage, t]
+    [appMessage, t]
   );
 
   // ---- Handle KB selection ----
@@ -157,46 +132,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     [fetchDocs]
   );
 
-  // ---- Handle connection change ----
-  const handleConnectionChange = useCallback(
-    (newUrl: string, newKey: string) => {
-      setServerUrl(newUrl);
-      setApiKey(newKey);
-      setIsConnected(true);
-      setActiveKbId(null);
-      setSelectedKb(null);
-      setActiveKbDetail(null);
-      setDocuments([]);
-      setTotalDocs(0);
-      setDocHasMore(false);
-      setDocTotalReliable(true);
-      setKbTotal(0);
-      setKbTotalReliable(true);
-      setKbPage(1);
-      setDocPage(1);
-    },
-    []
-  );
-
-  // ---- Handle connection clear ----
-  const handleConnectionClear = useCallback(() => {
-    setServerUrl("");
-    setApiKey("");
-    setIsConnected(false);
-    setKbs([]);
-    setActiveKbId(null);
-    setSelectedKb(null);
-    setActiveKbDetail(null);
-    setDocuments([]);
-    setTotalDocs(0);
-    setDocHasMore(false);
-    setDocTotalReliable(true);
-    setKbTotal(0);
-    setKbTotalReliable(true);
-    setKbPage(1);
-    setDocPage(1);
-  }, []);
-
   // ---- Handle KB deletion ----
   const handleDeleteKb = useCallback(
     (kb: AidpKnowledgeBaseItem) => {
@@ -211,11 +146,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         centered: true,
         onOk: async () => {
           try {
-            await aidpKnowledgeService.deleteKb(
-              serverUrl,
-              apiKey,
-              kb.kds_id
-            );
+            await aidpKnowledgeService.deleteKb(kb.kds_id);
             appMessage.success(t("aidpKnowledge.deleteKbSuccess"));
 
             // If the deleted KB was active, clear selection
@@ -238,7 +169,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         },
       });
     },
-    [serverUrl, apiKey, activeKbId, appMessage, t, fetchKbs, kbPage]
+    [activeKbId, appMessage, t, fetchKbs, kbPage]
   );
 
   // ---- Edit KB ----
@@ -258,14 +189,14 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     // by re-fetching it via KB detail (name/description may have changed).
     if (selectedKb && activeKbId === selectedKb.kds_id) {
       aidpKnowledgeService
-        .listKbs(serverUrl, apiKey, kbPage, KB_PAGE_SIZE)
+        .listKbs(kbPage, KB_PAGE_SIZE)
         .then((r) => {
           const refreshed = r.value.find((kb) => kb.kds_id === selectedKb.kds_id);
           if (refreshed) setSelectedKb(refreshed);
         })
         .catch(() => { /* non-fatal; stale item remains visible */ });
     }
-  }, [fetchKbs, kbPage, selectedKb, activeKbId, serverUrl, apiKey]);
+  }, [fetchKbs, kbPage, selectedKb, activeKbId]);
 
   // ---- After create success ----
   // Scan the paginated KB list to find which page the new KB landed on,
@@ -283,8 +214,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       for (let p = 1; p <= MAX_PAGES; p++) {
         try {
           const result = await aidpKnowledgeService.listKbs(
-            serverUrl,
-            apiKey,
             p,
             KB_PAGE_SIZE,
           );
@@ -317,7 +246,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       // Fallback: refresh current KB page if we couldn't locate the new one
       fetchKbs(kbPage);
     },
-    [kbPage, serverUrl, apiKey, fetchDocs]
+    [kbPage, fetchDocs]
   );
 
   // ---- After documents uploaded ----
@@ -345,17 +274,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
-      {/* Connection config card (full width, fixed height) */}
-      <div className="shrink-0">
-        <AidpConnectionConfig
-          serverUrl={serverUrl}
-          apiKey={apiKey}
-          isConnected={isConnected}
-          onConnectionChange={handleConnectionChange}
-          onConnectionClear={handleConnectionClear}
-        />
-      </div>
-
       {/* Two-column layout — content-sized cards with a single
           scroll container; no card stretches to viewport height. */}
       <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto">
@@ -402,8 +320,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
                 totalReliable={docTotalReliable}
                 hasMore={docHasMore}
                 isLoading={loadingDocs}
-                serverUrl={serverUrl}
-                apiKey={apiKey}
                 currentPage={docPage}
                 pageSize={DOC_PAGE_SIZE}
                 onPageChange={(page) => fetchDocs(activeKbId!, page)}
@@ -423,14 +339,10 @@ const AidpKnowledgeConfiguration: React.FC = () => {
                       />
                     </div>
                     <h3 className="text-base font-medium text-gray-700 mb-1">
-                      {!isConnected
-                        ? t("aidpKnowledge.notConnectedTitle")
-                        : t("aidpKnowledge.selectKbTitle")}
+                      {t("aidpKnowledge.selectKbTitle")}
                     </h3>
                     <p className="text-gray-500 max-w-md text-xs">
-                      {!isConnected
-                        ? t("aidpKnowledge.notConnectedHint")
-                        : t("aidpKnowledge.selectKbHint")}
+                      {t("aidpKnowledge.selectKbHint")}
                     </p>
                   </div>
                 </div>
@@ -443,8 +355,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       {/* Create KB Modal */}
       <AidpCreateKbModal
         open={createModalOpen}
-        serverUrl={serverUrl}
-        apiKey={apiKey}
         existingKbs={kbs}
         onCancel={() => setCreateModalOpen(false)}
         onSuccess={handleCreateKbSuccess}
@@ -454,8 +364,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       <AidpUpdateKbModal
         open={updateModalOpen}
         knowledgeBase={editingKb}
-        serverUrl={serverUrl}
-        apiKey={apiKey}
         onCancel={() => {
           setUpdateModalOpen(false);
           setEditingKb(null);
