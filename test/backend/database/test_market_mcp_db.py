@@ -74,6 +74,7 @@ for _col in [
     'mcp_server', 'registry_json', 'config_json', 'source',
     'created_by', 'updated_by',
     'review_status', 'submitted_by', 'source_mcp_id',
+    'group_ids', 'ingroup_permission',
 ]:
     setattr(_MockMcpMarketRecord, _col, _MockColumn())
 

@@ -603,12 +603,16 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_no_group_ids(
-        self, mock_check_name, mock_health, mock_create
+        self, mock_check_name, mock_get_records, mock_health, mock_create
     ):
         """Name conflict should block when existing MCP has no group restriction."""
         mock_check_name.return_value = True  # name exists
+        mock_get_records.return_value = [
+            {"mcp_name": "test-svc", "group_ids": "", "created_by": "other"}
+        ]
 
         with self.assertRaises(MCPNameIllegal):
             await add_mcp_service(
@@ -628,8 +632,8 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service with API-type (OpenAPI JSON) config."""
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('services.tool_configuration_service._refresh_openapi_services_in_mcp')
-    @patch('services.tool_configuration_service.import_openapi_service')
+    @patch('backend.services.tool_configuration_service._refresh_openapi_services_in_mcp')
+    @patch('backend.services.tool_configuration_service.import_openapi_service')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     async def test_api_type_skips_mcp_protocol_and_extracts_tools(
         self, mock_check_name, mock_import, mock_refresh, mock_create
