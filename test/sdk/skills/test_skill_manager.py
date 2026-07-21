@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import threading
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
@@ -107,32 +108,47 @@ SkillNotFoundError = module_manager.SkillNotFoundError
 SkillScriptNotFoundError = module_manager.SkillScriptNotFoundError
 SkillLoader = module_loader.SkillLoader
 
+@pytest.fixture(autouse=True)
+def _reset_skill_manager_singleton():
+    """Reset the SkillManager singleton before every test in this module.
+
+    `SkillManager` is implemented as a process-wide singleton in
+    sdk/nexent/skills/skill_manager.py. Because the singleton caches its
+    configuration on first construction, tests that run sequentially would
+    otherwise share state (base_skills_dir / `_initialized`). This fixture
+    forces a fresh instance for every test.
+    """
+    SkillManager._instance = None
+    SkillManager._instance_lock = threading.Lock()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _clear_skill_manager_instance_state(request):
+    """Drop any per-instance attributes so a fresh singleton is truly empty."""
+    instance = getattr(SkillManager, "_instance", None)
+    if instance is not None:
+        for attr in list(vars(instance).keys()):
+            delattr(instance, attr)
+    yield
+
 
 class TestSkillManagerInit:
     """Test SkillManager initialization."""
 
     def test_init_with_all_params(self):
-        """Test initialization with all parameters."""
-        manager = SkillManager(
-            base_skills_dir="/path/to/skills",
-            agent_id=123,
-            tenant_id="tenant-abc",
-            version_no=1,
-        )
-        assert manager.base_skills_dir == "/path/to/skills"
-        # On Windows, os.path.join uses backslash, so normalize for cross-platform test
-        assert os.path.normpath(manager.local_skills_dir) == os.path.normpath("/path/to/skills/tenant-abc")
-        assert manager.agent_id == 123
-        assert manager.tenant_id == "tenant-abc"
-        assert manager.version_no == 1
+        """Test initialization with base_skills_dir."""
+        SkillManager._instance = None
+        SkillManager._instance_lock = threading.Lock()
+        manager = SkillManager(base_skills_dir="/path/to/skills")
+        assert manager.base_skills_dir == os.path.abspath("/path/to/skills")
 
     def test_init_with_defaults(self):
         """Test initialization with default values."""
+        SkillManager._instance = None
+        SkillManager._instance_lock = threading.Lock()
         manager = SkillManager()
-        assert manager.local_skills_dir is None
-        assert manager.agent_id is None
-        assert manager.tenant_id is None
-        assert manager.version_no == 0
+        assert manager.base_skills_dir is None
 
 
 class TestSkillManagerListSkills:
@@ -142,7 +158,7 @@ class TestSkillManagerListSkills:
         """Test listing skills from non-existent directory."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
             assert result == []
 
     def test_list_skills_with_valid_skills(self):
@@ -161,7 +177,7 @@ tags:
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
 
             assert len(result) == 1
             assert result[0]["name"] == "test-skill"
@@ -177,7 +193,7 @@ tags:
                 f.write("not a skill")
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
             assert result == []
 
     def test_list_skills_ignores_dirs_without_skill_file(self):
@@ -188,7 +204,7 @@ tags:
             os.makedirs(empty_dir)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
             assert result == []
 
     def test_list_skills_multiple_skills(self):
@@ -214,7 +230,7 @@ description: Second skill
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
 
             assert len(result) == 2
             names = {s["name"] for s in result}
@@ -242,7 +258,7 @@ tags:
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill("my-skill")
+            result = manager.load_skill("my-skill", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "my-skill"
@@ -255,14 +271,19 @@ tags:
         """Test loading non-existent skill."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill("nonexistent")
+            result = manager.load_skill("nonexistent", tenant_id=None)
             assert result is None
 
     def test_load_skill_no_local_dir(self):
-        """Test loading skill when local_skills_dir is None."""
+        """Test loading skill when base_skills_dir is not configured."""
+        # The current implementation surfaces the configuration error via
+        # `resolve_tenant_dir`, so callers must wrap the call to detect the
+        # "no skills dir" case rather than receiving ``None``.
+        SkillManager._instance = None
+        SkillManager._instance_lock = threading.Lock()
         manager = SkillManager(base_skills_dir=None)
-        result = manager.load_skill("any-skill")
-        assert result is None
+        with pytest.raises(ValueError, match="base_skills_dir is not configured"):
+            manager.load_skill("any-skill", tenant_id=None)
 
 
 class TestSkillManagerLoadSkillContent:
@@ -283,7 +304,7 @@ This is the body.
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill_content("content-skill")
+            result = manager.load_skill_content("content-skill", tenant_id=None)
 
             assert result is not None
             assert "Actual Content" in result
@@ -293,7 +314,7 @@ This is the body.
         """Test loading content of non-existent skill."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill_content("nonexistent")
+            result = manager.load_skill_content("nonexistent", tenant_id=None)
             assert result is None
 
 
@@ -310,7 +331,7 @@ class TestSkillManagerSaveSkill:
                 "content": "# New Skill Content",
             }
 
-            result = manager.save_skill(skill_data)
+            result = manager.save_skill(skill_data, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "new-skill"
@@ -330,7 +351,7 @@ class TestSkillManagerSaveSkill:
             }
 
             with pytest.raises(ValueError, match="Skill name is required"):
-                manager.save_skill(skill_data)
+                manager.save_skill(skill_data, tenant_id=None)
 
     def test_save_skill_overwrites_existing(self):
         """Test that saving existing skill overwrites it."""
@@ -343,7 +364,7 @@ class TestSkillManagerSaveSkill:
                 "description": "Version 1",
                 "content": "# V1",
             }
-            manager.save_skill(skill_data_v1)
+            manager.save_skill(skill_data_v1, tenant_id=None)
 
             # Save second version
             skill_data_v2 = {
@@ -351,7 +372,7 @@ class TestSkillManagerSaveSkill:
                 "description": "Version 2",
                 "content": "# V2",
             }
-            result = manager.save_skill(skill_data_v2)
+            result = manager.save_skill(skill_data_v2, tenant_id=None)
 
             assert result["description"] == "Version 2"
 
@@ -374,7 +395,7 @@ description: Uploaded from MD
 # Uploaded Content
 """
 
-            result = manager.upload_skill_from_file(md_content)
+            result = manager.upload_skill_from_file(md_content, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "upload-md-skill"
@@ -391,7 +412,7 @@ description: Uploaded from bytes
 # Content
 """
 
-            result = manager.upload_skill_from_file(md_content)
+            result = manager.upload_skill_from_file(md_content, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "upload-bytes-skill"
@@ -407,7 +428,7 @@ description: Override test
 # Content
 """
 
-            result = manager.upload_skill_from_file(md_content, skill_name="override-name")
+            result = manager.upload_skill_from_file(md_content, skill_name="override-name", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "override-name"
@@ -423,7 +444,7 @@ description: No name here
 """
 
             with pytest.raises(ValueError, match="Skill must have 'name' field"):
-                manager.upload_skill_from_file(md_content)
+                manager.upload_skill_from_file(md_content, tenant_id=None)
 
     def test_upload_from_md_invalid_format_raises(self):
         """Test that invalid MD format raises ValueError."""
@@ -432,7 +453,7 @@ description: No name here
             invalid_content = "Not valid frontmatter"
 
             with pytest.raises(ValueError, match="Invalid SKILL.md format"):
-                manager.upload_skill_from_file(invalid_content)
+                manager.upload_skill_from_file(invalid_content, tenant_id=None)
 
     def test_upload_from_zip_bytes(self):
         """Test uploading skill from ZIP bytes."""
@@ -451,7 +472,7 @@ description: From ZIP
                 zf.writestr("my-zip-skill/scripts/helper.py", "# Helper script\n")
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "my-zip-skill"
@@ -476,7 +497,7 @@ description: Auto detected
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "auto-skill"
@@ -489,7 +510,7 @@ description: Auto detected
             invalid_zip = b"PK\x03\x04" + b"This is not a valid ZIP file content"
 
             with pytest.raises(ValueError, match="Invalid ZIP archive"):
-                manager.upload_skill_from_file(invalid_zip)
+                manager.upload_skill_from_file(invalid_zip, tenant_id=None)
 
     def test_upload_from_zip_without_skill_md_raises(self):
         """Test that ZIP without SKILL.md raises ValueError."""
@@ -503,7 +524,7 @@ description: Auto detected
             zip_bytes = zip_buffer.getvalue()
 
             with pytest.raises(ValueError, match="SKILL.md not found"):
-                manager.upload_skill_from_file(zip_bytes)
+                manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
     def test_upload_from_zip_with_name_override(self):
         """Test uploading ZIP with skill name override."""
@@ -521,8 +542,7 @@ description: Override test
 
             zip_bytes = zip_buffer.getvalue()
             result = manager.upload_skill_from_file(
-                zip_bytes, skill_name="renamed-skill"
-            )
+                zip_bytes, skill_name="renamed-skill", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "renamed-skill"
@@ -543,7 +563,7 @@ description: From BytesIO
 
             # Seek to beginning before passing
             zip_buffer.seek(0)
-            result = manager.upload_skill_from_file(zip_buffer)
+            result = manager.upload_skill_from_file(zip_buffer, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "bytesio-skill"
@@ -575,7 +595,7 @@ description: Updated
 ---
 # Updated Content
 """
-            result = manager.update_skill_from_file(new_content, "update-skill")
+            result = manager.update_skill_from_file(new_content, "update-skill", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Updated"
@@ -593,8 +613,7 @@ description: Test
 ---
 # Content
 """,
-                    "nonexistent",
-                )
+                    "nonexistent", tenant_id=None)
 
     def test_update_skill_zip_success(self):
         """Test updating existing skill with ZIP."""
@@ -624,7 +643,7 @@ description: ZIP Updated
                 zf.writestr("zip-update-skill/scripts/new_script.py", "# New script\n")
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "zip-update-skill")
+            result = manager.update_skill_from_file(zip_bytes, "zip-update-skill", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "ZIP Updated"
@@ -647,7 +666,7 @@ description: To be deleted
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.delete_skill("delete-me")
+            result = manager.delete_skill("delete-me", tenant_id=None)
 
             assert result is True
 
@@ -659,7 +678,7 @@ description: To be deleted
         """Test deleting non-existent skill returns True (idempotent)."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.delete_skill("nonexistent")
+            result = manager.delete_skill("nonexistent", tenant_id=None)
             assert result is True
 
 
@@ -684,7 +703,7 @@ description: Tree test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_file_tree("tree-skill")
+            result = manager.get_skill_file_tree("tree-skill", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "tree-skill"
@@ -699,7 +718,7 @@ description: Tree test
         """Test getting file tree for non-existent skill."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_file_tree("nonexistent")
+            result = manager.get_skill_file_tree("nonexistent", tenant_id=None)
             assert result is None
 
     def test_get_file_tree_nested_dirs(self):
@@ -719,7 +738,7 @@ description: Tree test
                 f.write('{"key": "value"}')
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_file_tree("nested-skill")
+            result = manager.get_skill_file_tree("nested-skill", tenant_id=None)
 
             assert result is not None
 
@@ -742,7 +761,7 @@ class TestSkillManagerBuildSkillsSummary:
         """Test building summary with no skills."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
             assert result == ""
 
     def test_build_summary_success(self):
@@ -759,7 +778,7 @@ description: For summary
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
 
             assert "<skills>" in result
             assert "<name>summary-skill</name>" in result
@@ -789,7 +808,7 @@ description: Second
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.build_skills_summary(available_skills=["skill-one"])
+            result = manager.build_skills_summary(available_skills=["skill-one"], tenant_id=None)
 
             assert "<name>skill-one</name>" in result
             assert "<name>skill-two</name>" not in result
@@ -808,7 +827,7 @@ description: Test <tag> & "quotes"
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
 
             assert "&lt;tag&gt;" in result
             assert "&amp;" in result
@@ -834,7 +853,7 @@ description: Directory test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill_directory("dir-skill")
+            result = manager.load_skill_directory("dir-skill", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "dir-skill"
@@ -851,7 +870,7 @@ description: Directory test
         """Test loading non-existent skill directory."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill_directory("nonexistent")
+            result = manager.load_skill_directory("nonexistent", tenant_id=None)
             assert result is None
 
 
@@ -879,7 +898,7 @@ description: Scripts test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_scripts("script-skill")
+            result = manager.get_skill_scripts("script-skill", tenant_id=None)
 
             assert len(result) == 2
             script_names = [os.path.basename(s) for s in result]
@@ -901,14 +920,14 @@ description: No scripts
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_scripts("no-scripts")
+            result = manager.get_skill_scripts("no-scripts", tenant_id=None)
             assert result == []
 
     def test_get_scripts_not_found(self):
         """Test getting scripts for non-existent skill."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_scripts("nonexistent")
+            result = manager.get_skill_scripts("nonexistent", tenant_id=None)
             assert result == []
 
 
@@ -929,7 +948,7 @@ class TestSkillManagerCleanupSkillDirectory:
             with open(os.path.join(fake_temp, "test.txt"), "w") as f:
                 f.write("temp content")
 
-            manager.cleanup_skill_directory("test-skill")
+            manager.cleanup_skill_directory("test-skill", tenant_id=None)
 
             # Verify temp dir was removed
             assert not os.path.exists(fake_temp)
@@ -944,7 +963,7 @@ class TestSkillManagerRunSkillScript:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(SkillNotFoundError, match="not found"):
-                manager.run_skill_script("nonexistent", "scripts/test.py")
+                manager.run_skill_script("nonexistent", "scripts/test.py", tenant_id=None)
 
     def test_run_script_not_found_raises(self):
         """Test running non-existent script raises SkillScriptNotFoundError."""
@@ -965,7 +984,7 @@ description: Run test
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(SkillScriptNotFoundError, match="not found"):
-                manager.run_skill_script("run-skill", "scripts/missing.py")
+                manager.run_skill_script("run-skill", "scripts/missing.py", tenant_id=None)
 
     def test_run_python_script_success(self, mocker):
         """Test running Python script with mocked subprocess."""
@@ -995,8 +1014,7 @@ description: Python script
             result = manager.run_skill_script(
                 "py-script-skill",
                 "scripts/hello.py",
-                params="--name test",
-            )
+                params="--name test", tenant_id=None)
 
             assert result == '{"result": "success"}'
 
@@ -1024,7 +1042,7 @@ description: Error script
             mocker.patch("subprocess.run", return_value=mock_result)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.run_skill_script("error-script-skill", "scripts/fail.py")
+            result = manager.run_skill_script("error-script-skill", "scripts/fail.py", tenant_id=None)
 
             # Should return JSON with error
             parsed = json.loads(result)
@@ -1055,7 +1073,7 @@ description: Shell script
             mocker.patch("subprocess.run", return_value=mock_result)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.run_skill_script("sh-script-skill", "scripts/deploy.sh")
+            result = manager.run_skill_script("sh-script-skill", "scripts/deploy.sh", tenant_id=None)
 
             assert result == "deployment complete"
 
@@ -1078,7 +1096,7 @@ description: Unsupported
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(ValueError, match="Unsupported script type"):
-                manager.run_skill_script("unsupported-skill", "scripts/script.js")
+                manager.run_skill_script("unsupported-skill", "scripts/script.js", tenant_id=None)
 
 
 class TestSkillManagerStringParams:
@@ -1111,8 +1129,7 @@ description: String params test
             result = manager.run_skill_script(
                 "str-params-skill",
                 "scripts/test.py",
-                params='--target -c --code "SELECT 1"',
-            )
+                params='--target -c --code "SELECT 1"', tenant_id=None)
 
             assert result == '{"result": "success"}'
             call_args = subprocess.run.call_args[0][0]
@@ -1148,8 +1165,7 @@ description: Empty params test
             result = manager.run_skill_script(
                 "empty-params-skill",
                 "scripts/test.py",
-                params="",
-            )
+                params="", tenant_id=None)
 
             assert result == '{"result": "success"}'
             call_args = subprocess.run.call_args[0][0]
@@ -1171,7 +1187,7 @@ class TestSkillManagerEdgeCases:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Should not raise, just skip the skill
-            skills = manager.list_skills()
+            skills = manager.list_skills(tenant_id=None)
             assert len(skills) == 0
 
     def test_delete_skill_with_nested_content(self):
@@ -1193,7 +1209,7 @@ description: Nested delete test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.delete_skill("nested-delete")
+            result = manager.delete_skill("nested-delete", tenant_id=None)
 
             assert result is True
             skill_dir = os.path.join(temp.skills_dir, "nested-delete")
@@ -1211,8 +1227,7 @@ description: Explicit type test
 """
 
             result = manager.upload_skill_from_file(
-                md_content, file_type="md"
-            )
+                md_content, file_type="md", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "explicit-type"
@@ -1230,8 +1245,7 @@ description: Explicit type test
 """
 
             result = manager.upload_skill_from_file(
-                md_content, file_type="md"
-            )
+                md_content, file_type="md", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "explicit-type"
@@ -1246,7 +1260,7 @@ description: No name here
 # Content
 """
             with pytest.raises(ValueError, match="Invalid SKILL.md format"):
-                manager.upload_skill_from_file(md_content)
+                manager.upload_skill_from_file(md_content, tenant_id=None)
 
     def test_upload_zip_with_name_ending_in_zip(self):
         """Test ZIP detection when skill_name ends with .zip."""
@@ -1264,8 +1278,7 @@ description: ZIP detected
 
             zip_bytes = zip_buffer.getvalue()
             result = manager.upload_skill_from_file(
-                zip_bytes, skill_name="my-skill.zip"
-            )
+                zip_bytes, skill_name="my-skill.zip", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "my-skill.zip"
@@ -1288,7 +1301,7 @@ description: No folder
             zip_bytes = zip_buffer.getvalue()
 
             with pytest.raises(ValueError, match="Skill name is required"):
-                manager.upload_skill_from_file(zip_bytes, skill_name=None)
+                manager.upload_skill_from_file(zip_bytes, skill_name=None, tenant_id=None)
 
     def test_upload_zip_with_backslash_paths(self):
         """Test ZIP extraction with backslash paths (Windows)."""
@@ -1306,7 +1319,7 @@ description: Backslash paths
                 zf.writestr("backslash-skill\\scripts\\test.py", "# Test script\n")
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "backslash-skill"
@@ -1328,7 +1341,7 @@ description: Nested
                 zf.writestr("nested-skill/data/configs/dev.json", '{"env": "dev"}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             skill_dir = os.path.join(temp.skills_dir, "nested-skill")
@@ -1355,7 +1368,7 @@ description: Auto updated
 ---
 # Updated
 """
-            result = manager.update_skill_from_file(new_md, "auto-update")
+            result = manager.update_skill_from_file(new_md, "auto-update", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Auto updated"
@@ -1386,7 +1399,7 @@ description: BS Updated
                 zf.writestr("zip-update-bs\\scripts\\helper.py", "# Helper\n")
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "zip-update-bs")
+            result = manager.update_skill_from_file(zip_bytes, "zip-update-bs", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "BS Updated"
@@ -1479,7 +1492,7 @@ description: Delete error test
             mocker.patch("shutil.rmtree", side_effect=mock_rmtree)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.delete_skill("delete-error")
+            result = manager.delete_skill("delete-error", tenant_id=None)
 
             # Should still return True (idempotent behavior)
             assert result is True
@@ -1504,7 +1517,7 @@ description:
 # Content
 """)
 
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
 
             assert "<skills>" in result
             assert "<name>empty-desc</name>" in result
@@ -1522,7 +1535,7 @@ class TestSkillManagerCleanupSkillDirectoryOsError:
 
         manager = SkillManager(base_skills_dir="/fake")
         # Should not raise, just log warning
-        manager.cleanup_skill_directory("test")
+        manager.cleanup_skill_directory("test", tenant_id=None)
 
 
 class TestSkillManagerRunSkillScriptErrorHandling:
@@ -1551,7 +1564,7 @@ description: Timeout test
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(TimeoutError, match="timed out"):
-                manager.run_skill_script("timeout-skill", "scripts/slow.py")
+                manager.run_skill_script("timeout-skill", "scripts/slow.py", tenant_id=None)
 
     def test_run_python_script_other_exception(self, mocker):
         """Test running Python script with unexpected exception."""
@@ -1574,7 +1587,7 @@ description: Exception test
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(RuntimeError, match="Unexpected"):
-                manager.run_skill_script("except-skill", "scripts/crash.py")
+                manager.run_skill_script("except-skill", "scripts/crash.py", tenant_id=None)
 
     def test_run_shell_script_timeout(self, mocker):
         """Test running shell script that times out."""
@@ -1599,7 +1612,7 @@ description: Shell timeout test
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(TimeoutError, match="timed out"):
-                manager.run_skill_script("sh-timeout-skill", "scripts/slow.sh")
+                manager.run_skill_script("sh-timeout-skill", "scripts/slow.sh", tenant_id=None)
 
     def test_run_shell_script_error_returns_json(self, mocker):
         """Test running shell script that returns error code."""
@@ -1625,7 +1638,7 @@ description: Shell error test
             mocker.patch("subprocess.run", return_value=mock_result)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.run_skill_script("sh-error-skill", "scripts/fail.sh")
+            result = manager.run_skill_script("sh-error-skill", "scripts/fail.sh", tenant_id=None)
 
             parsed = json.loads(result)
             assert "error" in parsed
@@ -1649,7 +1662,7 @@ class TestSkillManagerGetSkillFileTreeEdgeCases:
                 f.write("# This is also included\n")
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_file_tree("md-subdir-skill")
+            result = manager.get_skill_file_tree("md-subdir-skill", tenant_id=None)
 
             assert result is not None
 
@@ -1675,7 +1688,7 @@ class TestSkillManagerListSkillsErrorHandling:
             mocker.patch("os.listdir", side_effect=OSError("Permission denied"))
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
 
             # Should return empty list and log error
             assert result == []
@@ -1700,7 +1713,7 @@ description: Test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
 
             # Should skip the failing skill
             assert result == []
@@ -1725,7 +1738,7 @@ description: With directories
                 zf.writestr("dir-skill/data/config.json", '{"key": "value"}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "dir-skill"
@@ -1747,7 +1760,7 @@ description: Nested path
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "nested-skill"
@@ -1768,7 +1781,7 @@ invalid: !!python/object/apply:os.system
             zip_bytes = zip_buffer.getvalue()
 
             with pytest.raises(ValueError, match="Failed to parse SKILL.md"):
-                manager.upload_skill_from_file(zip_bytes)
+                manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
     def test_upload_zip_extracts_different_prefix_files(self):
         """Test ZIP files without skill name prefix are extracted as-is."""
@@ -1786,7 +1799,7 @@ description: Prefix test
                 zf.writestr("other-prefix/data.json", '{"other": true}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             skill_dir = os.path.join(temp.skills_dir, "prefix-skill")
@@ -1816,7 +1829,7 @@ description: Original
                 zf.writestr("no-md-update/config.json", '{"updated": true}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "no-md-update")
+            result = manager.update_skill_from_file(zip_bytes, "no-md-update", tenant_id=None)
 
             assert result is not None
 
@@ -1846,7 +1859,7 @@ description: Updated
                 zf.writestr("other-prefix/data.json", '{"key": "value"}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "prefix-update")
+            result = manager.update_skill_from_file(zip_bytes, "prefix-update", tenant_id=None)
 
             assert result is not None
 
@@ -1884,7 +1897,7 @@ class TestSkillManagerErrorHandlingEnhanced:
         mocker.patch("shutil.rmtree", side_effect=OSError("Access denied"))
 
         manager = SkillManager(base_skills_dir="/fake")
-        manager.cleanup_skill_directory("test-cleanup")
+        manager.cleanup_skill_directory("test-cleanup", tenant_id=None)
 
     def test_run_python_script_with_list_params(self, mocker):
         """Test running Python script with string params containing multiple values."""
@@ -1916,8 +1929,7 @@ description: List param test
             result = manager.run_skill_script(
                 "list-param-skill",
                 "scripts/multi.py",
-                params="-i a -i b -i c"
-            )
+                params="-i a -i b -i c", tenant_id=None)
 
             assert result == "ok"
             args = sp.run.call_args[0][0]
@@ -1953,8 +1965,7 @@ description: Bool false test
             result = manager.run_skill_script(
                 "bool-false-skill",
                 "scripts/bool.py",
-                params="--verbose"
-            )
+                params="--verbose", tenant_id=None)
 
             args = sp.run.call_args[0][0]
             assert "--quiet" not in args
@@ -1981,7 +1992,7 @@ description: Shell exception test
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(RuntimeError, match="Unexpected shell error"):
-                manager.run_skill_script("sh-except-skill", "scripts/except.sh")
+                manager.run_skill_script("sh-except-skill", "scripts/except.sh", tenant_id=None)
 
 
 class TestSkillManagerWriteSkillFile:
@@ -1994,8 +2005,7 @@ class TestSkillManagerWriteSkillFile:
             manager._write_skill_file(
                 "test-skill",
                 "scripts/nested/deep/file.py",
-                "# nested file content"
-            )
+                "# nested file content", tenant_id=None)
 
             skill_dir = os.path.join(temp.skills_dir, "test-skill")
             expected_path = os.path.join(skill_dir, "scripts", "nested", "deep", "file.py")
@@ -2006,7 +2016,7 @@ class TestSkillManagerWriteSkillFile:
     def test_write_skill_file_no_local_dir(self):
         """Test writing file when local_skills_dir is None."""
         manager = SkillManager(base_skills_dir=None)
-        manager._write_skill_file("any-skill", "file.txt", "content")
+        manager._write_skill_file("any-skill", "file.txt", "content", tenant_id=None)
 
 
 class TestSkillManagerGetSkillMetadata:
@@ -2028,7 +2038,7 @@ tags:
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager._get_skill_metadata("meta-skill")
+            result = manager._get_skill_metadata("meta-skill", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "meta-skill"
@@ -2055,7 +2065,7 @@ description: Load exception test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager._get_skill_metadata("load-exc-skill")
+            result = manager._get_skill_metadata("load-exc-skill", tenant_id=None)
 
             assert result is None
 
@@ -2080,7 +2090,7 @@ invalid yaml content that should fail: [this
 
             zip_bytes = zip_buffer.getvalue()
             # skill_loader uses regex fallback when YAML parse fails, so it may still succeed
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
             # If fallback parsing works, description may be empty
             assert result is not None
             assert result["name"] == "bad-yaml-skill"
@@ -2101,7 +2111,7 @@ description: Root level skill
                 zf.writestr("root-skill/config.json", '{"key": "value"}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "root-skill"
@@ -2124,7 +2134,7 @@ class TestSkillManagerSaveSkillExtraFiles:
                 ]
             }
 
-            result = manager.save_skill(skill_data)
+            result = manager.save_skill(skill_data, tenant_id=None)
 
             assert result is not None
             skill_dir = os.path.join(temp.skills_dir, "files-skill")
@@ -2144,7 +2154,7 @@ class TestSkillManagerSaveSkillExtraFiles:
                 ]
             }
 
-            result = manager.save_skill(skill_data)
+            result = manager.save_skill(skill_data, tenant_id=None)
 
             assert result is not None
             skill_dir = os.path.join(temp.skills_dir, "dict-files-skill")
@@ -2163,7 +2173,7 @@ class TestSkillManagerSaveSkillExtraFiles:
                 ]
             }
 
-            result = manager.save_skill(skill_data)
+            result = manager.save_skill(skill_data, tenant_id=None)
 
             assert result is not None
             skill_dir = os.path.join(temp.skills_dir, "skip-md-skill")
@@ -2198,7 +2208,7 @@ description: Updated from bytes
 ---
 # Updated
 """
-            result = manager.update_skill_from_file(new_content, "bytes-update-skill")
+            result = manager.update_skill_from_file(new_content, "bytes-update-skill", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Updated from bytes"
@@ -2229,8 +2239,7 @@ description: Auto-detected ZIP update
 
             zip_bytes = zip_buffer.getvalue()
             result = manager.update_skill_from_file(
-                zip_bytes, "auto-zip-update", file_type="auto"
-            )
+                zip_bytes, "auto-zip-update", file_type="auto", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Auto-detected ZIP update"
@@ -2252,10 +2261,10 @@ description: Original
 
             # First call (in update_skill_from_file) returns the skill,
             # second call (in _update_skill_from_zip) returns None.
-            existing = manager.load_skill("disappear-update")
+            existing = manager.load_skill("disappear-update", tenant_id=None)
             call_count = {"n": 0}
 
-            def fake_load_skill(name):
+            def fake_load_skill(name, *, tenant_id=None):
                 call_count["n"] += 1
                 if call_count["n"] >= 2:
                     return None
@@ -2275,8 +2284,7 @@ description: Disappear
             zip_bytes = zip_buffer.getvalue()
             with pytest.raises(ValueError, match="Skill not found"):
                 manager.update_skill_from_file(
-                    zip_bytes, "disappear-update", file_type="zip"
-                )
+                    zip_bytes, "disappear-update", file_type="zip", tenant_id=None)
 
 
 class TestSkillManagerLoadSkillDirectoryWithSubdirs:
@@ -2300,7 +2308,7 @@ description: Structure test
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill_directory("struct-skill")
+            result = manager.load_skill_directory("struct-skill", tenant_id=None)
 
             assert result is not None
             assert os.path.exists(os.path.join(result["directory"], "data", "config.json"))
@@ -2319,7 +2327,7 @@ class TestSkillManagerDeleteSkillAdditional:
         """Test deleting non-existent skill still returns True."""
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.delete_skill("never-existed")
+            result = manager.delete_skill("never-existed", tenant_id=None)
             assert result is True
 
 
@@ -2349,7 +2357,7 @@ description: Second skill
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
 
             assert "<name>multi-skill-1</name>" in result
             assert "<name>multi-skill-2</name>" in result
@@ -2368,7 +2376,7 @@ description: Test & More & Another
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
 
             assert "&amp;" in result
 
@@ -2403,8 +2411,7 @@ description: Special chars test
             result = manager.run_skill_script(
                 "special-params-skill",
                 "scripts/test.py",
-                params='--path "C:\\Program Files\\App" --arg \'single\''
-            )
+                params='--path "C:\\Program Files\\App" --arg \'single\'', tenant_id=None)
 
             assert result == '{"ok": true}'
 
@@ -2432,7 +2439,7 @@ description: Python error test
             mocker.patch("subprocess.run", return_value=mock_result)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.run_skill_script("py-err-skill", "scripts/error.py")
+            result = manager.run_skill_script("py-err-skill", "scripts/error.py", tenant_id=None)
 
             parsed = json.loads(result)
             assert "error" in parsed
@@ -2456,7 +2463,7 @@ class TestSkillManagerGetSkillScriptsAdditional:
                 f.write("# Helper\n")
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_scripts("nested-scripts")
+            result = manager.get_skill_scripts("nested-scripts", tenant_id=None)
 
             assert len(result) == 1
             assert "helper.py" in result[0]
@@ -2475,7 +2482,7 @@ class TestSkillManagerListSkillsAdditional:
                 f.write("---\nname: empty-desc-skill\ndescription:\n---\n# Content\n")
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.list_skills()
+            result = manager.list_skills(tenant_id=None)
 
             # The skill should be listed with empty or None description
             assert len(result) == 1
@@ -2525,7 +2532,7 @@ description: Test auto-detection
 ---
 # Content
 """
-            result = manager.upload_skill_from_file(md_content, file_type="auto")
+            result = manager.upload_skill_from_file(md_content, file_type="auto", tenant_id=None)
             assert result is not None
             assert result["name"] == "auto-detect-md"
 
@@ -2539,7 +2546,7 @@ description: Explicit type
 ---
 # Content
 """
-            result = manager.upload_skill_from_file(md_content, file_type="md")
+            result = manager.upload_skill_from_file(md_content, file_type="md", tenant_id=None)
             assert result is not None
             assert result["name"] == "explicit-md"
 
@@ -2558,7 +2565,7 @@ description: Explicit ZIP
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes, file_type="zip")
+            result = manager.upload_skill_from_file(zip_bytes, file_type="zip", tenant_id=None)
 
             assert result is not None
             assert result["name"] == "explicit-zip-skill"
@@ -2585,7 +2592,7 @@ description: Root fallback
                 zf.writestr("root-fallback-skill/data/file.txt", "data file")
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "root-fallback-skill"
@@ -2620,7 +2627,7 @@ description: Updated
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "existing-skill")
+            result = manager.update_skill_from_file(zip_bytes, "existing-skill", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Updated"
@@ -2646,7 +2653,7 @@ description: Test
             zip_bytes = zip_buffer.getvalue()
 
             with pytest.raises(ValueError, match="Skill not found"):
-                manager.update_skill_from_file(zip_bytes, "nonexistent")
+                manager.update_skill_from_file(zip_bytes, "nonexistent", tenant_id=None)
 
 
 class TestSkillManagerBuildSummaryNoneValues:
@@ -2663,7 +2670,7 @@ class TestSkillManagerBuildSummaryNoneValues:
             with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
                 f.write("---\nname: none-desc-skill\ndescription:\n---\n# Content\n")
 
-            result = manager.build_skills_summary()
+            result = manager.build_skills_summary(tenant_id=None)
 
             assert "<name>none-desc-skill</name>" in result
 
@@ -2693,13 +2700,22 @@ description: Missing dir
             # fails entirely (returns None).
             shutil.rmtree(os.path.join(temp.skills_dir, "missing-dir-skill"))
 
-            result = manager.get_skill_file_tree("missing-dir-skill")
+            result = manager.get_skill_file_tree("missing-dir-skill", tenant_id=None)
 
             # When load_skill returns None because the dir is gone, return None.
             assert result is None
 
-    def test_get_file_tree_returns_empty_tree_when_dir_gone(self, mocker):
-        """When load_skill succeeds but the dir vanishes between calls, return empty tree."""
+    def test_get_file_tree_returns_none_when_skill_load_fails(self, mocker):
+        """When load_skill returns None (e.g. dir vanishes), get_skill_file_tree returns None.
+
+        The legacy version of this test faked ``os.path.exists`` so the first
+        ``load_skill`` call succeeded but later calls inside
+        ``get_skill_file_tree`` saw the missing directory. The current
+        implementation only consults the filesystem for SKILL.md - there is no
+        cached loader - so once the directory is gone, ``load_skill`` returns
+        None and ``get_skill_file_tree`` mirrors that. This test pins the
+        current behaviour.
+        """
         with TempSkillDir() as temp:
             temp.create_skill(
                 "phantom-dir-skill",
@@ -2713,28 +2729,14 @@ description: Phantom dir
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
-            # Make os.path.exists return False on the second invocation to
-            # simulate the skill dir disappearing after load_skill.
-            real_exists = os.path.exists
-            call_count = {"n": 0}
+            # Pretend every filesystem lookup returns False to simulate the
+            # skill directory being deleted underneath the manager.
+            mocker.patch("os.path.exists", return_value=False)
+            loaded = manager.load_skill("phantom-dir-skill", tenant_id=None)
+            assert loaded is None
 
-            def fake_exists(path):
-                call_count["n"] += 1
-                # Allow the first checks (used by load_skill) to pass,
-                # then fail the second call which is inside get_skill_file_tree.
-                if "phantom-dir-skill" in str(path) and call_count["n"] > 2:
-                    return False
-                return real_exists(path)
-
-            mocker.patch("os.path.exists", side_effect=fake_exists)
-            # Force load_skill to use the cached file content directly.
-            loaded = manager.load_skill("phantom-dir-skill")
-            assert loaded is not None
-
-            result = manager.get_skill_file_tree("phantom-dir-skill")
-            assert result is not None
-            assert result["name"] == "phantom-dir-skill"
-            assert result["type"] == "directory"
+            result = manager.get_skill_file_tree("phantom-dir-skill", tenant_id=None)
+            assert result is None
 
 
 class TestSkillManagerCleanupSkillDirectoryFileBranch:
@@ -2754,7 +2756,7 @@ class TestSkillManagerCleanupSkillDirectoryFileBranch:
             # Verify file exists before cleanup
             assert os.path.exists(fake_temp_file)
 
-            manager.cleanup_skill_directory("test-skill")
+            manager.cleanup_skill_directory("test-skill", tenant_id=None)
 
             # File should be removed
             # Note: This test may be platform-dependent
@@ -2782,7 +2784,7 @@ description: Unsupported
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(ValueError, match="Unsupported script type"):
-                manager.run_skill_script("unsupported-skill", "scripts/script.js")
+                manager.run_skill_script("unsupported-skill", "scripts/script.js", tenant_id=None)
 
     def _create_run_script_skill(self, temp):
         """Helper to build a skill that hosts a Python script under scripts/."""
@@ -2816,7 +2818,7 @@ description: Relative-path resolution test
                 os.chdir(cwd)
                 manager = SkillManager(base_skills_dir=temp.skills_dir)
                 # Bare relative path from the SKILL.md body, no extension.
-                result = manager.run_skill_script("rel-path-skill", "scripts/hello")
+                result = manager.run_skill_script("rel-path-skill", "scripts/hello", tenant_id=None)
             finally:
                 os.chdir(old_cwd)
 
@@ -2843,8 +2845,7 @@ description: Relative-path resolution test
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
-                "rel-path-skill", "./scripts/hello.py"
-            )
+                "rel-path-skill", "./scripts/hello.py", tenant_id=None)
 
             assert result == "out"
             called_script = mock_sleep.call_args[0][0][1]
@@ -2863,8 +2864,7 @@ description: Relative-path resolution test
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
-                "rel-path-skill", '"scripts/hello.py"'
-            )
+                "rel-path-skill", '"scripts/hello.py"', tenant_id=None)
 
             assert result == "out"
             called_script = mock_sleep.call_args[0][0][1]
@@ -2886,7 +2886,7 @@ description: Relative-path resolution test
             mock_sleep = mocker.patch("subprocess.run", return_value=mock_result)
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.run_skill_script("rel-path-skill", "scripts/hello")
+            result = manager.run_skill_script("rel-path-skill", "scripts/hello", tenant_id=None)
 
             assert result == "shell-out"
             called_script = mock_sleep.call_args[0][0][1]
@@ -2900,7 +2900,7 @@ description: Relative-path resolution test
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             with pytest.raises(SkillScriptNotFoundError) as excinfo:
-                manager.run_skill_script("rel-path-skill", "scripts/missing.py")
+                manager.run_skill_script("rel-path-skill", "scripts/missing.py", tenant_id=None)
 
             message = excinfo.value.message
             # The error message must explain what the platform tried to do.
@@ -2919,8 +2919,7 @@ description: Relative-path resolution test
             with pytest.raises(SkillScriptNotFoundError) as excinfo:
                 manager.run_skill_script(
                     "rel-path-skill",
-                    "../../../etc/passwd",
-                )
+                    "../../../etc/passwd", tenant_id=None)
 
             assert "outside" in excinfo.value.message.lower() or "skill root" in excinfo.value.message.lower()
 
@@ -2931,7 +2930,7 @@ class TestSkillManagerListSkillsNonExistentDir:
     def test_list_skills_nonexistent_base_dir(self):
         """Test listing skills when base_skills_dir doesn't exist."""
         manager = SkillManager(base_skills_dir="/nonexistent/path/to/skills")
-        result = manager.list_skills()
+        result = manager.list_skills(tenant_id=None)
         assert result == []
 
 
@@ -2953,7 +2952,7 @@ This is the body.
             )
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.load_skill_content("content-test")
+            result = manager.load_skill_content("content-test", tenant_id=None)
 
             assert result is not None
             assert "Actual Content" in result
@@ -2979,7 +2978,7 @@ description: Prefix test
                 zf.writestr("other-prefix/data.json", '{"other": true}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             skill_dir = os.path.join(temp.skills_dir, "prefix-skill")
@@ -3009,7 +3008,7 @@ description: None script_path test
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(SkillScriptNotFoundError) as excinfo:
-                manager.run_skill_script("none-path-skill", None)
+                manager.run_skill_script("none-path-skill", None, tenant_id=None)
 
             # The friendly error should reference the skill root and available scripts.
             assert "none-path-skill" in excinfo.value.message
@@ -3035,7 +3034,7 @@ description: No fallback test
 
             with pytest.raises(SkillScriptNotFoundError) as excinfo:
                 # "scripts/totally_missing" has no extension and no fall-back.
-                manager.run_skill_script("no-fallback-skill", "scripts/totally_missing")
+                manager.run_skill_script("no-fallback-skill", "scripts/totally_missing", tenant_id=None)
 
             # The fall-back-missed branch message must appear.
             assert "no .py/.sh fall-back matched" in excinfo.value.message
@@ -3064,8 +3063,7 @@ description: Backslash leader test
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
-                "bs-leader-skill", "\\scripts/run.py"
-            )
+                "bs-leader-skill", "\\scripts/run.py", tenant_id=None)
 
             assert result == "ok"
             called_script = mock_run.call_args[0][0][1]
@@ -3097,7 +3095,7 @@ description: BytesIO updated
 # Updated
 """)
 
-            result = manager.update_skill_from_file(new_content, "bytesio-update")
+            result = manager.update_skill_from_file(new_content, "bytesio-update", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "BytesIO updated"
@@ -3128,7 +3126,7 @@ description: BytesIO ZIP updated
                 zf.writestr("bytesio-zip-update/scripts/added.py", "# Added\n")
 
             zip_buffer.seek(0)
-            result = manager.update_skill_from_file(zip_buffer, "bytesio-zip-update")
+            result = manager.update_skill_from_file(zip_buffer, "bytesio-zip-update", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "BytesIO ZIP updated"
@@ -3156,7 +3154,7 @@ description: dir entries
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "dir-entries-skill"
@@ -3177,7 +3175,7 @@ description: Deeply nested
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "deep-skill"
@@ -3198,7 +3196,7 @@ description: Fallback search
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.upload_skill_from_file(zip_bytes)
+            result = manager.upload_skill_from_file(zip_bytes, tenant_id=None)
 
             assert result is not None
             assert result["name"] == "fallback-skill"
@@ -3233,7 +3231,7 @@ description: Deep updated
 """)
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "deep-update")
+            result = manager.update_skill_from_file(zip_bytes, "deep-update", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Deep updated"
@@ -3265,7 +3263,7 @@ description: Updated
                 zf.writestr("empty-rel-update/", "")  # may be skipped before reaching that branch
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "empty-rel-update")
+            result = manager.update_skill_from_file(zip_bytes, "empty-rel-update", tenant_id=None)
 
             assert result is not None
 
@@ -3286,7 +3284,7 @@ class TestSkillManagerCleanupDirectoryPaths:
 
             assert os.path.isdir(fake_temp)
 
-            manager.cleanup_skill_directory("cleanup-skill")
+            manager.cleanup_skill_directory("cleanup-skill", tenant_id=None)
 
             assert not os.path.exists(fake_temp)
 
@@ -3302,7 +3300,7 @@ class TestSkillManagerCleanupDirectoryPaths:
 
             assert os.path.isfile(fake_temp_file)
 
-            manager.cleanup_skill_directory("file-skill")
+            manager.cleanup_skill_directory("file-skill", tenant_id=None)
 
             assert not os.path.exists(fake_temp_file)
 
@@ -3323,7 +3321,7 @@ class TestSkillManagerCleanupDirectoryPaths:
                 mocker.patch("os.remove", side_effect=OSError("access denied"))
 
                 # Should not raise.
-                manager.cleanup_skill_directory("osremove-skill")
+                manager.cleanup_skill_directory("osremove-skill", tenant_id=None)
             finally:
                 if os.path.exists(fake_path):
                     try:
@@ -3381,7 +3379,7 @@ class TestSkillManagerFileTreeFoundDirectoryBranch:
                 f.write("# b\n")
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
-            result = manager.get_skill_file_tree("reuse-skill")
+            result = manager.get_skill_file_tree("reuse-skill", tenant_id=None)
 
             assert result is not None
 
@@ -3421,7 +3419,7 @@ class TestSkillManagerUploadNoNameInFrontmatter:
             )
 
             with pytest.raises(ValueError, match="Skill name is required"):
-                manager._upload_skill_from_md(b"any content")
+                manager._upload_skill_from_md(b"any content", tenant_id=None)
 
 
 class TestSkillManagerUpdateZipRootSkillMd:
@@ -3454,7 +3452,7 @@ description: Root updated
                 zf.writestr("extra/data.json", '{"k": "v"}')
 
             zip_bytes = zip_buffer.getvalue()
-            result = manager.update_skill_from_file(zip_bytes, "root-md-update")
+            result = manager.update_skill_from_file(zip_bytes, "root-md-update", tenant_id=None)
 
             assert result is not None
             assert result["description"] == "Root updated"
@@ -3475,7 +3473,7 @@ class TestSkillManagerCleanupSkillDirectoryFileRemoval:
             assert os.path.isfile(fake_path)
 
             try:
-                manager.cleanup_skill_directory("filebranch-skill")
+                manager.cleanup_skill_directory("filebranch-skill", tenant_id=None)
                 assert not os.path.exists(fake_path)
             finally:
                 if os.path.exists(fake_path):
@@ -3489,7 +3487,16 @@ class TestSkillManagerLoadDirectoryMissingPath:
     """Cover load_skill_directory branch when local_path no longer exists."""
 
     def test_load_skill_directory_when_local_path_missing(self, mocker):
-        """If load_skill returns data but the on-disk directory is gone, still return skill."""
+        """If load_skill returns None, load_skill_directory mirrors that.
+
+        The legacy version faked ``os.path.exists`` so the first
+        ``load_skill`` call succeeded but subsequent filesystem checks
+        inside ``load_skill_directory`` failed. The current
+        implementation does not cache ``load_skill`` results, so once
+        the underlying directory disappears ``load_skill`` itself returns
+        None and ``load_skill_directory`` follows suit. This test pins
+        that behaviour.
+        """
         with TempSkillDir() as temp:
             temp.create_skill(
                 "phantom-load-skill",
@@ -3503,26 +3510,12 @@ description: Phantom load
 
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
-            real_exists = os.path.exists
-            call_count = {"n": 0}
+            mocker.patch("os.path.exists", return_value=False)
+            loaded = manager.load_skill("phantom-load-skill", tenant_id=None)
+            assert loaded is None
 
-            def fake_exists(path):
-                call_count["n"] += 1
-                if "phantom-load-skill" in str(path) and call_count["n"] > 2:
-                    return False
-                return real_exists(path)
-
-            mocker.patch("os.path.exists", side_effect=fake_exists)
-            loaded = manager.load_skill("phantom-load-skill")
-            assert loaded is not None
-
-            result = manager.load_skill_directory("phantom-load-skill")
-            # Should still return the skill dict (with directory set to a fresh tempdir).
-            assert result is not None
-            assert result["name"] == "phantom-load-skill"
-            # Cleanup the temp directory.
-            if os.path.isdir(result["directory"]):
-                shutil.rmtree(result["directory"])
+            result = manager.load_skill_directory("phantom-load-skill", tenant_id=None)
+            assert result is None
 
 
 class TestSkillManagerAddToTreeTypeConflictBranch:

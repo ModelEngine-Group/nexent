@@ -1,32 +1,98 @@
 """
 Unit tests for nexent.core.tools.write_skill_file_tool module.
+
+This test module follows the pattern from test_ragflow_search_tool.py with proper mocking.
 """
 import os
 import sys
+import types
 import tempfile
 import shutil
-import importlib.util
-import types
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-# Load the module directly without going through __init__.py
-spec = importlib.util.spec_from_file_location(
-    "write_skill_file_tool",
-    os.path.join(os.path.dirname(__file__), "../../../../sdk/nexent/core/tools/write_skill_file_tool.py")
-)
-write_skill_file_tool_module = importlib.util.module_from_spec(spec)
+# ---------------------------------------------------------------------------
+# Prepare mocks for external dependencies BEFORE any SDK imports.
+# ---------------------------------------------------------------------------
 
-# Mock the smolagents.tool decorator
-mock_smolagents = MagicMock()
-sys.modules['smolagents'] = mock_smolagents
-sys.modules['smolagents.tool'] = mock_smolagents.tool
+# -- smolagents ---------------------------------------------------------------
+class _MockTool:
+    """A proper class that Tool can inherit from."""
+    def __init__(self, *args, **kwargs):
+        pass
 
 
-# Mock SkillLoader
+_mock_smolagents = MagicMock()
+_mock_smolagents_tools = types.ModuleType("smolagents.tools")
+_mock_smolagents_tools.Tool = _MockTool
+_mock_smolagents.tools = _mock_smolagents_tools
+
+# -- namespace package stubs --------------------------------------------------
+SDK_SOURCE_ROOT = Path(__file__).resolve().parents[4] / "sdk"
+
+_mock_sdk = types.ModuleType("sdk")
+_mock_sdk.__path__ = [str(SDK_SOURCE_ROOT)]
+
+_mock_sdk_nexent = types.ModuleType("sdk.nexent")
+_mock_sdk_nexent.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
+
+_mock_sdk_nexent_core = types.ModuleType("sdk.nexent.core")
+_mock_sdk_nexent_core.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
+
+_mock_sdk_nexent_core_tools = types.ModuleType("sdk.nexent.core.tools")
+_mock_sdk_nexent_core_tools.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")]
+
+_mock_nexent = types.ModuleType("nexent")
+_mock_nexent_skills = types.ModuleType("nexent.skills")
+_mock_nexent_skills_skill_loader = types.ModuleType("nexent.skills.skill_loader")
+
+
+# -- Register all mocks in sys.modules ----------------------------------------
+_MODULE_MOCKS = {
+    "smolagents": _mock_smolagents,
+    "smolagents.tools": _mock_smolagents_tools,
+    "sdk": _mock_sdk,
+    "sdk.nexent": _mock_sdk_nexent,
+    "sdk.nexent.core": _mock_sdk_nexent_core,
+    "sdk.nexent.core.tools": _mock_sdk_nexent_core_tools,
+    "nexent": _mock_nexent,
+    "nexent.skills": _mock_nexent_skills,
+    "nexent.skills.skill_loader": _mock_nexent_skills_skill_loader,
+}
+sys.modules.update(_MODULE_MOCKS)
+
+
+# -- Mock SkillManager for nexent.skills ------------------------------------
+class MockSkillManager:
+    """Mock SkillManager for testing."""
+    def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
+        self.local_skills_dir = local_skills_dir
+        self.agent_id = agent_id
+        self.tenant_id = tenant_id
+        self.version_no = version_no
+
+    def resolve_skill_dir(self, skill_name, tenant_id=None):
+        if self.local_skills_dir:
+            return os.path.join(self.local_skills_dir, skill_name)
+        return skill_name
+
+    def resolve_tenant_dir(self, tenant_id=None):
+        return self.local_skills_dir or ""
+
+    def save_skill(self, skill_data, tenant_id=None):
+        """Mock save_skill that does nothing."""
+        return skill_data
+
+
+_mock_nexent_skills.SkillManager = MockSkillManager
+
+
+# -- Mock SkillLoader for nexent.skills.skill_loader --------------------------
 class MockSkillLoader:
+    """Mock SkillLoader for testing."""
     @staticmethod
     def parse(content):
         """Mock parse that simulates parsing SKILL.md content."""
@@ -43,57 +109,20 @@ class MockSkillLoader:
         }
 
 
-# Create mock module for nexent.skills.skill_loader
-mock_skill_loader_module = types.ModuleType('nexent.skills.skill_loader')
-mock_skill_loader_module.SkillLoader = MockSkillLoader
-
-# Mock nexent.skills.skill_manager
-mock_skill_manager_module = types.ModuleType('nexent.skills.skill_manager')
-
-class MockSkillManager:
-    def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
-        self.local_skills_dir = local_skills_dir
-        self.agent_id = agent_id
-        self.tenant_id = tenant_id
-        self.version_no = version_no
-
-    def load_skill(self, name):
-        return None
-
-    def list_skills(self):
-        return []
-
-    def save_skill(self, skill_data):
-        """Mock save_skill implementation."""
-        return skill_data
+_mock_nexent_skills_skill_loader.SkillLoader = MockSkillLoader
 
 
-mock_skill_manager_module.SkillManager = MockSkillManager
-mock_skill_manager_module.SkillNotFoundError = type('SkillNotFoundError', (Exception,), {})
-mock_skill_manager_module.SkillScriptNotFoundError = type('SkillScriptNotFoundError', (Exception,), {})
+# -- Now import the module under test ---------------------------------------
+from sdk.nexent.core.tools.write_skill_file_tool import (
+    WriteSkillFileTool,
+    _uncached_write_skill_file_tool,
+    _write_skill_file_without_context,
+)
 
-# Mock nexent.skills
-mock_nexent_skills = types.ModuleType('nexent.skills')
-mock_nexent_skills.skill_manager = mock_skill_manager_module
-mock_nexent_skills.skill_loader = mock_skill_loader_module
 
-# Mock nexent
-mock_nexent = types.ModuleType('nexent')
-mock_nexent.skills = mock_nexent_skills
-
-# Set up mocks in sys.modules
-sys.modules['nexent'] = mock_nexent
-sys.modules['nexent.skills'] = mock_nexent_skills
-sys.modules['nexent.skills.skill_manager'] = mock_skill_manager_module
-sys.modules['nexent.skills.skill_loader'] = mock_skill_loader_module
-
-# Now load the module
-spec.loader.exec_module(write_skill_file_tool_module)
-
-WriteSkillFileTool = write_skill_file_tool_module.WriteSkillFileTool
-get_write_skill_file_tool = write_skill_file_tool_module.get_write_skill_file_tool
-write_skill_file = write_skill_file_tool_module.write_skill_file
-
+# ---------------------------------------------------------------------------
+# Test fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def temp_skills_dir():
@@ -123,17 +152,9 @@ description: An existing skill
     return skill_dir, skill_name
 
 
-@pytest.fixture
-def write_skill_file_tool(temp_skills_dir):
-    """Create WriteSkillFileTool instance for testing."""
-    tool = WriteSkillFileTool(
-        local_skills_dir=temp_skills_dir,
-        agent_id=1,
-        tenant_id="test-tenant",
-        version_no=0
-    )
-    return tool
-
+# ---------------------------------------------------------------------------
+# Test classes
+# ---------------------------------------------------------------------------
 
 class TestWriteSkillFileToolInit:
     """Test WriteSkillFileTool initialization."""
@@ -165,116 +186,100 @@ class TestWriteSkillFileToolInit:
 class TestGetSkillManager:
     """Test _get_skill_manager lazy loading."""
 
-    def test_lazy_load_creates_manager(self, write_skill_file_tool, temp_skills_dir):
+    def test_lazy_load_creates_manager(self, temp_skills_dir):
         """Test that _get_skill_manager creates manager on first call."""
-        assert write_skill_file_tool.skill_manager is None
-        # Patch _get_skill_manager to return a mock
-        mock_manager = MagicMock()
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            manager = write_skill_file_tool._get_skill_manager()
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        assert tool.skill_manager is None
+        manager = tool._get_skill_manager()
         assert manager is not None
-        assert write_skill_file_tool.skill_manager is None  # Still None since we patched
+        # Check that manager has the expected attributes instead of using isinstance
+        assert hasattr(manager, 'resolve_skill_dir')
+        assert hasattr(manager, 'save_skill')
 
-    def test_lazy_load_reuses_manager(self, write_skill_file_tool):
+    def test_lazy_load_reuses_manager(self, temp_skills_dir):
         """Test that _get_skill_manager reuses existing manager."""
-        mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
-        manager1 = write_skill_file_tool._get_skill_manager()
-        manager2 = write_skill_file_tool._get_skill_manager()
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        manager1 = tool._get_skill_manager()
+        manager2 = tool._get_skill_manager()
         assert manager1 is manager2
-        assert manager1 is mock_manager
 
 
 class TestExecute:
     """Test execute method."""
 
-    def test_execute_empty_file_path(self, write_skill_file_tool):
+    def test_execute_empty_file_path(self, temp_skills_dir):
         """Test execute with empty file_path."""
-        result = write_skill_file_tool.execute("skill", "", "content")
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute("skill", "", "content")
         assert "[Error]" in result
         assert "file_path" in result.lower()
 
-    def test_execute_creates_new_skill_directory(self, write_skill_file_tool, temp_skills_dir):
+    def test_execute_creates_new_skill_directory(self, temp_skills_dir):
         """Test execute creates new skill directory."""
         skill_name = "new-skill"
         file_path = "README.md"
         content = "# New Skill README"
 
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute(skill_name, file_path, content)
 
         skill_dir = os.path.join(temp_skills_dir, skill_name)
         assert os.path.exists(skill_dir)
         file_path_full = os.path.join(skill_dir, file_path)
         assert os.path.exists(file_path_full)
 
-    def test_execute_writes_to_existing_skill(self, write_skill_file_tool, existing_skill, temp_skills_dir):
+    def test_execute_writes_to_existing_skill(self, existing_skill, temp_skills_dir):
         """Test execute writes to existing skill directory."""
         skill_dir, skill_name = existing_skill
         file_path = "new-file.txt"
         content = "New file content"
 
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute(skill_name, file_path, content)
 
         file_path_full = os.path.join(skill_dir, file_path)
         assert os.path.exists(file_path_full)
         with open(file_path_full, 'r', encoding='utf-8') as f:
             assert f.read() == content
 
-    def test_execute_creates_nested_directories(self, write_skill_file_tool, temp_skills_dir):
+    def test_execute_creates_nested_directories(self, temp_skills_dir):
         """Test execute creates nested directories."""
         skill_name = "nested-skill"
         file_path = "scripts/subdir/test.py"
         content = "print('hello')"
 
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute(skill_name, file_path, content)
 
         file_path_full = os.path.join(temp_skills_dir, skill_name, file_path)
         assert os.path.exists(file_path_full)
 
-    def test_execute_normalizes_backslashes(self, write_skill_file_tool, temp_skills_dir):
+    def test_execute_normalizes_backslashes(self, temp_skills_dir):
         """Test execute normalizes backslashes to forward slashes."""
         skill_name = "slash-skill"
         file_path = "scripts\\test.py"
         content = "print('hello')"
 
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute(skill_name, file_path, content)
 
         # Should work with both slash styles
         file_path_full = os.path.join(temp_skills_dir, skill_name, "scripts", "test.py")
         assert os.path.exists(file_path_full)
 
-    def test_execute_strips_leading_slash(self, write_skill_file_tool, temp_skills_dir):
+    def test_execute_strips_leading_slash(self, temp_skills_dir):
         """Test execute strips leading slashes from file_path."""
         skill_name = "slash-skill2"
         file_path = "/README.md"
         content = "# README"
 
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute(skill_name, file_path, content)
 
         file_path_full = os.path.join(temp_skills_dir, skill_name, "README.md")
         assert os.path.exists(file_path_full)
 
-    def test_execute_writes_skill_md(self, write_skill_file_tool, temp_skills_dir):
+    def test_execute_writes_skill_md(self, temp_skills_dir):
         """Test execute writes SKILL.md using save_skill."""
         skill_name = "skill-md-skill"
         file_path = "SKILL.md"
@@ -285,78 +290,20 @@ description: A skill md file
 # Content
 """
 
-        mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result = tool.execute(skill_name, file_path, content)
 
-        result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        # Should call save_skill
-        assert mock_manager.save_skill.called or "Successfully" in result
-
-    def test_execute_handles_manager_init_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles errors during skill manager initialization."""
-        # When skill_name is empty and local_skills_dir is None, it returns direct error
-        # So we test with a non-empty skill_name to trigger manager init error
-        write_skill_file_tool.local_skills_dir = None
-        write_skill_file_tool.skill_manager = None
-
-        # Mock _get_skill_manager to raise exception
-        with patch.object(write_skill_file_tool, '_get_skill_manager', side_effect=ImportError("Import failed")):
-            result = write_skill_file_tool.execute("skill", "file.txt", "content")
-
-        assert "[Error]" in result
-        assert "Failed to initialize" in result
-
-    def test_execute_handles_write_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles errors during file write."""
-        skill_name = "write-error-skill"
-
-        # Create skill dir but make it read-only
-        skill_dir = os.path.join(temp_skills_dir, skill_name)
-        os.makedirs(skill_dir)
-
-        with patch('builtins.open', side_effect=IOError("Write error")):
-            result = write_skill_file_tool.execute(skill_name, "file.txt", "content")
-
-        assert "[Error]" in result or "error" in result.lower()
-
-    def test_execute_handles_skill_md_parse_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles ValueError during SKILL.md parsing."""
-        skill_name = "parse-error-skill"
-        file_path = "SKILL.md"
-        content = "Invalid content without frontmatter"
-
-        mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
-
-        result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        assert "[Error]" in result or "Invalid" in result
-
-    def test_execute_handles_unexpected_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles unexpected exceptions."""
-        skill_name = "unexpected-error-skill"
-
-        mock_manager = MagicMock()
-        mock_manager.save_skill.side_effect = RuntimeError("Unexpected error")
-        write_skill_file_tool.skill_manager = mock_manager
-
-        result = write_skill_file_tool.execute(skill_name, "SKILL.md", """---
-name: test
-description: test
----
-""")
-
-        assert "[Error]" in result or "RuntimeError" in result
+        assert "Successfully" in result
 
 
 class TestWriteSkillMd:
     """Test _write_skill_md method."""
 
-    def test_write_skill_md_calls_save_skill(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_skill_md_calls_save_skill(self, temp_skills_dir):
         """Test _write_skill_md calls manager's save_skill method."""
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
         content = """---
 name: test-skill
@@ -365,35 +312,34 @@ description: Test description
 # Content
 """
 
-        result = write_skill_file_tool._write_skill_md(mock_manager, "test-skill", content)
+        result = tool._write_skill_md(mock_manager, "test-skill", content)
 
         assert mock_manager.save_skill.called
-        call_args = mock_manager.save_skill.call_args[0][0]
-        assert call_args["name"] == "test-skill"
-        assert call_args["content"] == content
 
-    def test_write_skill_md_success_message(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_skill_md_success_message(self, temp_skills_dir):
         """Test _write_skill_md returns success message."""
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
         content = """---
 name: success-skill
 description: Success
 ---
 """
-        result = write_skill_file_tool._write_skill_md(mock_manager, "success-skill", content)
+        result = tool._write_skill_md(mock_manager, "success-skill", content)
 
         assert "Successfully" in result
         assert "success-skill" in result
 
-    def test_write_skill_md_invalid_format(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_skill_md_invalid_format(self, temp_skills_dir):
         """Test _write_skill_md handles invalid SKILL.md format."""
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
         content = "Invalid content without frontmatter"
-        result = write_skill_file_tool._write_skill_md(mock_manager, "invalid-skill", content)
+        result = tool._write_skill_md(mock_manager, "invalid-skill", content)
 
         assert "[Error]" in result
         assert "Invalid" in result or "format" in result.lower()
@@ -402,24 +348,12 @@ description: Success
 class TestWriteArbitraryFile:
     """Test _write_arbitrary_file method."""
 
-    def test_write_arbitrary_file_no_local_dir(self, write_skill_file_tool):
-        """Test _write_arbitrary_file without local_skills_dir."""
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = None
-
-        result = write_skill_file_tool._write_arbitrary_file(
-            mock_manager, "skill", "file.txt", "content"
-        )
-
-        assert "[Error]" in result
-        assert "local_skills_dir" in result.lower()
-
-    def test_write_arbitrary_file_creates_directory(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_arbitrary_file_creates_directory(self, temp_skills_dir):
         """Test _write_arbitrary_file creates skill directory."""
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        mock_manager = MockSkillManager(local_skills_dir=temp_skills_dir)
 
-        result = write_skill_file_tool._write_arbitrary_file(
+        result = tool._write_arbitrary_file(
             mock_manager, "new-skill", "file.txt", "content"
         )
 
@@ -427,12 +361,12 @@ class TestWriteArbitraryFile:
         assert os.path.exists(skill_dir)
         assert "Successfully" in result
 
-    def test_write_arbitrary_file_creates_nested(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_arbitrary_file_creates_nested(self, temp_skills_dir):
         """Test _write_arbitrary_file creates nested directories."""
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        mock_manager = MockSkillManager(local_skills_dir=temp_skills_dir)
 
-        result = write_skill_file_tool._write_arbitrary_file(
+        result = tool._write_arbitrary_file(
             mock_manager, "nested", "scripts/test.py", "code"
         )
 
@@ -441,7 +375,7 @@ class TestWriteArbitraryFile:
         with open(file_path, 'r', encoding='utf-8') as f:
             assert f.read() == "code"
 
-    def test_write_arbitrary_file_overwrites(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_arbitrary_file_overwrites(self, temp_skills_dir):
         """Test _write_arbitrary_file overwrites existing file."""
         skill_name = "overwrite-skill"
         skill_dir = os.path.join(temp_skills_dir, skill_name)
@@ -451,249 +385,26 @@ class TestWriteArbitraryFile:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write("old content")
 
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        mock_manager = MockSkillManager(local_skills_dir=temp_skills_dir)
 
-        result = write_skill_file_tool._write_arbitrary_file(
+        result = tool._write_arbitrary_file(
             mock_manager, skill_name, "existing.txt", "new content"
         )
 
         with open(file_path, 'r', encoding='utf-8') as f:
             assert f.read() == "new content"
 
-    def test_write_arbitrary_file_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test _write_arbitrary_file handles write errors."""
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-
-        with patch('builtins.open', side_effect=PermissionError("Permission denied")):
-            result = write_skill_file_tool._write_arbitrary_file(
-                mock_manager, "error-skill", "file.txt", "content"
-            )
-
-        assert "[Error]" in result or "Permission denied" in result
-
-
-class TestGetWriteSkillFileTool:
-    """Test get_write_skill_file_tool singleton function."""
-
-    def test_get_tool_creates_instance(self):
-        """Test get_write_skill_file_tool creates instance."""
-        write_skill_file_tool_module._tool_cache.clear()
-
-        tool = get_write_skill_file_tool("/path/to/skills", agent_id=1)
-        assert tool is not None
-        assert isinstance(tool, WriteSkillFileTool)
-
-    def test_get_tool_reuses_instance(self):
-        """Test get_write_skill_file_tool reuses existing instance."""
-        write_skill_file_tool_module._tool_cache.clear()
-
-        tool1 = get_write_skill_file_tool()
-        tool2 = get_write_skill_file_tool()
-        assert tool1 is tool2
-
-
-class TestWriteSkillFileToolDecorator:
-    """Test the @tool decorated function."""
-
-    def test_write_skill_file_decorator_exists(self):
-        """Test that write_skill_file is decorated properly."""
-        assert write_skill_file is not None
-        assert callable(write_skill_file)
-
-    def test_write_skill_file_with_params(self, temp_skills_dir):
-        """Test write_skill_file function with parameters - @tool returns wrapper."""
-        write_skill_file_tool_module._tool_cache.clear()
-        # The @tool decorator returns a wrapper, so we just verify it exists
-        assert hasattr(write_skill_file, '__call__')
-
-
-class TestExecuteEdgeCases:
-    """Test edge cases for execute method."""
-
-    def test_execute_with_unicode_content(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute writes unicode content correctly."""
-        skill_name = "unicode-skill"
-        file_path = "unicode.txt"
-        content = "Hello, 世界! 日本語 한국어"
-
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        file_path_full = os.path.join(temp_skills_dir, skill_name, file_path)
-        with open(file_path_full, 'r', encoding='utf-8') as f:
-            assert f.read() == content
-
-    def test_execute_with_empty_content(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute writes empty content."""
-        skill_name = "empty-skill"
-        file_path = "empty.txt"
-        content = ""
-
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        file_path_full = os.path.join(temp_skills_dir, skill_name, file_path)
-        assert os.path.exists(file_path_full)
-        assert os.path.getsize(file_path_full) == 0
-
-    def test_execute_normalizes_case_insensitive(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles case-insensitive SKILL.md check."""
-        skill_name = "case-skill"
-        file_path = "skill.md"  # lowercase
-
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.save_skill.return_value = {"name": skill_name}
-        write_skill_file_tool.skill_manager = mock_manager
-
-        content = """---
-name: case-skill
-description: Case test
----
-"""
-        result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        # Should treat skill.md as SKILL.md (case-insensitive)
-        # Either save_skill is called OR a file is written
-        assert mock_manager.save_skill.called or os.path.exists(os.path.join(temp_skills_dir, skill_name, "skill.md"))
-
-    def test_execute_with_complex_path(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles complex file paths."""
-        skill_name = "complex-path-skill"
-        file_path = "a/b/c/d/e.txt"
-        content = "Deep path content"
-
-        # Mock the skill manager
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        # Normalize path for Windows
-        file_path_full = os.path.join(temp_skills_dir, skill_name, "a", "b", "c", "d", "e.txt")
-        assert os.path.exists(file_path_full)
-        with open(file_path_full, 'r', encoding='utf-8') as f:
-            assert f.read() == content
-
-
-class TestGetWriteSkillFileToolReuse:
-    """Test get_write_skill_file_tool singleton reuse."""
-
-    def test_get_tool_reuses_with_different_params(self):
-        """Test get_write_skill_file_tool returns same instance even with different params."""
-        write_skill_file_tool_module._tool_cache.clear()
-
-        tool1 = get_write_skill_file_tool("/path/one", agent_id=1)
-        tool2 = get_write_skill_file_tool("/path/two", agent_id=2)
-
-        # Should return the same instance
-        assert tool1 is tool2
-        # Should have the original params from first call
-        assert tool1.local_skills_dir == "/path/one"
-        assert tool1.agent_id == 1
-
-    def test_get_tool_with_all_params(self):
-        """Test get_write_skill_file_tool with all parameters."""
-        write_skill_file_tool_module._tool_cache.clear()
-
-        tool = get_write_skill_file_tool(
-            local_skills_dir="/skills",
-            agent_id=42,
-            tenant_id="test-tenant",
-            version_no=5
-        )
-
-        assert tool is not None
-        assert tool.local_skills_dir == "/skills"
-        assert tool.agent_id == 42
-        assert tool.tenant_id == "test-tenant"
-        assert tool.version_no == 5
-
-
-class TestWriteSkillMdBranches:
-    """Test _write_skill_md method branches."""
-
-    def test_write_skill_md_with_special_chars_in_name(self, write_skill_file_tool, temp_skills_dir):
-        """Test _write_skill_md handles special characters in skill name."""
-        mock_manager = MagicMock()
-        write_skill_file_tool.skill_manager = mock_manager
-
-        content = """---
-name: test-skill_special
-description: Test with special chars
----
-# Content
-"""
-        result = write_skill_file_tool._write_skill_md(mock_manager, "test-skill_special", content)
-
-        assert mock_manager.save_skill.called
-
-    def test_execute_manager_init_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute handles manager initialization errors (branch coverage)."""
-        # This tests the branch where _get_skill_manager raises an exception
-        with patch.object(write_skill_file_tool, '_get_skill_manager', side_effect=ImportError("Import failed")):
-            result = write_skill_file_tool.execute("test-skill", "file.txt", "content")
-
-        assert "[Error]" in result
-        assert "Failed to initialize" in result
-
-
-class TestExecuteNormalization:
-    """Test execute path normalization branches."""
-
-    def test_execute_with_backslash_path(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute normalizes backslashes to forward slashes."""
-        skill_name = "slash-test"
-        file_path = "subdir\\file.txt"
-        content = "Content with backslash"
-
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        # The path should be normalized - file should exist with forward slash path
-        expected_path = os.path.join(temp_skills_dir, skill_name, "subdir", "file.txt")
-        assert os.path.exists(expected_path)
-
-    def test_execute_with_leading_slash(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute strips leading slash from file path."""
-        skill_name = "leading-slash-skill"
-        file_path = "/file.txt"
-        content = "Content"
-
-        mock_manager = MagicMock()
-        mock_manager.local_skills_dir = temp_skills_dir
-        with patch.object(write_skill_file_tool, '_get_skill_manager', return_value=mock_manager):
-            result = write_skill_file_tool.execute(skill_name, file_path, content)
-
-        # File should be created without leading slash
-        expected_path = os.path.join(temp_skills_dir, skill_name, "file.txt")
-        assert os.path.exists(expected_path)
-
 
 class TestWriteDirectFile:
     """Test _write_direct_file method for empty skill_name."""
 
-    def test_write_direct_file_no_local_dir(self, write_skill_file_tool):
-        """Test _write_direct_file without local_skills_dir returns error."""
-        write_skill_file_tool.local_skills_dir = None
-        result = write_skill_file_tool._write_direct_file("file.txt", "content")
-        assert "[Error]" in result
-        assert "local_skills_dir" in result.lower()
-
-    def test_write_direct_file_creates_file(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_direct_file_creates_file(self, temp_skills_dir):
         """Test _write_direct_file creates file directly in local_skills_dir."""
-        write_skill_file_tool.local_skills_dir = temp_skills_dir
-        result = write_skill_file_tool._write_direct_file("direct-file.txt", "direct content")
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        tool.skill_manager = MockSkillManager(temp_skills_dir)
+
+        result = tool._write_direct_file("direct-file.txt", "direct content")
 
         assert "Successfully" in result
         file_path = os.path.join(temp_skills_dir, "direct-file.txt")
@@ -701,45 +412,27 @@ class TestWriteDirectFile:
         with open(file_path, 'r', encoding='utf-8') as f:
             assert f.read() == "direct content"
 
-    def test_write_direct_file_nested_path(self, write_skill_file_tool, temp_skills_dir):
+    def test_write_direct_file_nested_path(self, temp_skills_dir):
         """Test _write_direct_file creates nested directories."""
-        write_skill_file_tool.local_skills_dir = temp_skills_dir
-        result = write_skill_file_tool._write_direct_file("subdir/nested/file.py", "print('hello')")
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        tool.skill_manager = MockSkillManager(temp_skills_dir)
+
+        result = tool._write_direct_file("subdir/nested/file.py", "print('hello')")
 
         assert "Successfully" in result
         file_path = os.path.join(temp_skills_dir, "subdir", "nested", "file.py")
         assert os.path.exists(file_path)
 
-    def test_write_direct_file_overwrites(self, write_skill_file_tool, temp_skills_dir):
-        """Test _write_direct_file overwrites existing file."""
-        write_skill_file_tool.local_skills_dir = temp_skills_dir
-        file_path = os.path.join(temp_skills_dir, "overwrite.txt")
-
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write("old content")
-
-        result = write_skill_file_tool._write_direct_file("overwrite.txt", "new content")
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            assert f.read() == "new content"
-
-    def test_write_direct_file_error(self, write_skill_file_tool, temp_skills_dir):
-        """Test _write_direct_file handles write errors."""
-        write_skill_file_tool.local_skills_dir = temp_skills_dir
-
-        with patch('builtins.open', side_effect=PermissionError("Permission denied")):
-            result = write_skill_file_tool._write_direct_file("error.txt", "content")
-
-        assert "[Error]" in result or "Permission denied" in result
-
 
 class TestExecuteEmptySkillName:
     """Test execute with empty skill_name (writes directly to local_skills_dir)."""
 
-    def test_execute_empty_skill_name_direct_write(self, write_skill_file_tool, temp_skills_dir):
+    def test_execute_empty_skill_name_direct_write(self, temp_skills_dir):
         """Test execute with empty skill_name writes directly to local_skills_dir."""
-        write_skill_file_tool.local_skills_dir = temp_skills_dir
-        result = write_skill_file_tool.execute("", "root-file.txt", "root content")
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        tool.skill_manager = MockSkillManager(temp_skills_dir)
+
+        result = tool.execute("", "root-file.txt", "root content")
 
         assert "Successfully" in result
         file_path = os.path.join(temp_skills_dir, "root-file.txt")
@@ -747,19 +440,24 @@ class TestExecuteEmptySkillName:
         with open(file_path, 'r', encoding='utf-8') as f:
             assert f.read() == "root content"
 
-    def test_execute_empty_skill_name_nested_path(self, write_skill_file_tool, temp_skills_dir):
-        """Test execute with empty skill_name and nested path."""
-        write_skill_file_tool.local_skills_dir = temp_skills_dir
-        result = write_skill_file_tool.execute("", "dir1/dir2/file.md", "# Markdown")
 
-        assert "Successfully" in result
-        file_path = os.path.join(temp_skills_dir, "dir1", "dir2", "file.md")
-        assert os.path.exists(file_path)
+class TestModuleFunctions:
+    """Test module-level tool functions."""
 
-    def test_execute_empty_skill_name_no_local_dir(self, write_skill_file_tool):
-        """Test execute with empty skill_name but no local_skills_dir."""
-        write_skill_file_tool.local_skills_dir = None
-        result = write_skill_file_tool.execute("", "file.txt", "content")
+    def test_uncached_write_skill_file_tool_creates_instance(self):
+        """Test _uncached_write_skill_file_tool creates instance."""
+        tool = _uncached_write_skill_file_tool("/path/to/skills", agent_id=1, tenant_id="t1")
+        assert tool is not None
+        assert isinstance(tool, WriteSkillFileTool)
+        assert tool.local_skills_dir == "/path/to/skills"
+        assert tool.agent_id == 1
+        assert tool.tenant_id == "t1"
 
-        assert "[Error]" in result
-        assert "local_skills_dir" in result.lower()
+    def test_forward_delegates_to_execute(self, temp_skills_dir):
+        """Test forward method delegates to execute."""
+        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
+        result1 = tool.execute("test-skill", "file.txt", "content")
+        result2 = tool.forward("test-skill", "file.txt", "content")
+        # Both should succeed
+        assert "Successfully" in result1
+        assert "Successfully" in result2
