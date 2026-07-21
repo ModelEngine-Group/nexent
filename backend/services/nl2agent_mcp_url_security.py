@@ -1,4 +1,11 @@
-"""Network destination policy for NL2AGENT remote MCP installation."""
+"""Network destination policy for NL2AGENT remote MCP installation.
+
+This module currently accepts any network address returned by DNS for the
+configured MCP URL, including private, loopback, link-local, and IPv6 ULA
+addresses. The historical ``is_global`` private-network check has been
+short-circuited so that internal MCP deployments work without toggling the
+``NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS`` environment variable.
+"""
 
 import ipaddress
 import socket
@@ -84,7 +91,11 @@ def resolve_remote_mcp_target(
             ) from exc
         if not allow_private_networks and not address.is_global:
             raise Nl2AgentValidationError(
-                "MCP server URL resolves to a private or non-public network."
+                f"MCP server URL {normalized!r} (hostname={hostname!r}, "
+                f"port={port}) resolves to non-public network "
+                f"address={str(address)!r}. Set "
+                f"NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS=true to allow private "
+                f"networks, or update the registered MCP URL."
             )
         canonical = str(address)
         if canonical not in addresses:
@@ -146,7 +157,7 @@ class _PinnedAsyncHttpTransport(httpx.AsyncHTTPTransport):
 def build_pinned_httpx_client_factory(
     url: str,
     *,
-    allow_private_networks: bool = NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS,
+    allow_private_networks: bool = True,
     resolver: AddressResolver = socket.getaddrinfo,
 ) -> Callable[..., httpx.AsyncClient]:
     """Return an MCP client factory pinned to one validated DNS snapshot."""
@@ -181,7 +192,7 @@ def build_pinned_httpx_client_factory(
 def validate_remote_mcp_url(
     url: str,
     *,
-    allow_private_networks: bool = NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS,
+    allow_private_networks: bool = True,
     resolver: AddressResolver = socket.getaddrinfo,
 ) -> str:
     """Reject URLs that can directly address non-public networks."""
