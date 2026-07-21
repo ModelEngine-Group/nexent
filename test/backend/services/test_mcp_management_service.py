@@ -426,6 +426,21 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.query_group_ids_by_user')
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    async def test_list_handles_group_query_failure(self, mock_get, mock_tenant):
+        """list_community_mcp_services should handle query_group_ids_by_user failure gracefully."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
+
+        result = await list_community_mcp_services(
+            tenant_id="tid", user_id="uid", limit=30,
+        )
+        self.assertEqual(result["count"], 0)
+        mock_get.assert_called_once_with(
+            tenant_id="tid", search=None, tag=None,
+            transport_type=None, cursor=None, limit=30,
+            user_id="uid", user_group_ids=[],
+        )
+
     async def test_list_skips_group_filter_for_admin(self, mock_get, mock_tenant, mock_groups):
         """Admin users should skip group filtering (user_id None, user_group_ids None)."""
         mock_tenant.return_value = {"user_role": "ADMIN"}
@@ -675,6 +690,28 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.update_mcp_market_record')
     @patch('backend.services.mcp_management_service._resolve_user_email')
     @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('backend.services.mcp_management_service.update_mcp_record_manage_fields_by_id')
+    async def test_update_with_shared_fields(self, mock_upd_mcp, mock_get, mock_email, mock_update_record, mock_update_status):
+        """update_community_mcp_service should update shared_fields on source MCP record."""
+        mock_get.return_value = {
+            "market_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
+            "config_json": None, "registry_json": None,
+            "source_mcp_id": 10, "tags": [],
+        }
+        mock_email.return_value = "user@test.com"
+
+        shared = {"serverUrl": True}
+        await update_community_mcp_service(
+            tenant_id="tid", user_id="uid", market_id=1,
+            name="svc", description="d", tags=[],
+            registry_json=None,
+            shared_fields=shared,
+        )
+        mock_upd_mcp.assert_called_once()
+        kwargs = mock_upd_mcp.call_args[1]
+        self.assertEqual(kwargs["mcp_id"], 10)
+        self.assertEqual(kwargs["shared_fields"], shared)
+
     async def test_update_infers_transport_type(self, mock_get, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
             "market_id": 1, "mcp_name": "svc",

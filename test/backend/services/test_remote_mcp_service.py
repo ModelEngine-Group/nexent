@@ -709,6 +709,25 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
     @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_no_group_ids_mcp_visible(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """MCPs with no group_ids should be visible to all users."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "public", "group_ids": "", "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+        names = [r['remote_mcp_server_name'] for r in result]
+        self.assertIn("public", names)
+
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
     async def test_private_mcp_hidden_from_non_creator(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -728,6 +747,75 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
 
         names = [r['remote_mcp_server_name'] for r in result]
         self.assertNotIn("private-svc", names)
+
+
+# ============================================================================
+# _is_container_record - API type tests
+# ============================================================================
+
+class TestIsContainerRecordApiType(unittest.TestCase):
+    """Test _is_container_record with API-type config."""
+
+    def test_api_type_config_returns_false(self):
+        """_is_container_record should return False for API-type MCPs (config_json has openapi)."""
+        record = {"config_json": {"openapi": "3.0.0", "info": {"title": "Test"}}}
+        self.assertFalse(_is_container_record(record))
+
+    def test_none_record_returns_false(self):
+        """_is_container_record should return False for None record."""
+        self.assertFalse(_is_container_record(None))
+
+    def test_empty_record_returns_false(self):
+        """_is_container_record should return False for empty record."""
+        self.assertFalse(_is_container_record({}))
+
+    def test_container_config_returns_true(self):
+        """_is_container_record should return True for container MCPs."""
+        record = {"config_json": {"mcpServers": {"s": {"command": "echo"}}}}
+        self.assertTrue(_is_container_record(record))
+
+    def test_container_id_returns_true(self):
+        """_is_container_record should return True when container_id is set."""
+        record = {"container_id": "abc123", "config_json": None}
+        self.assertTrue(_is_container_record(record))
+
+
+# ============================================================================
+# update_mcp_service_enabled - API type tests
+# ============================================================================
+
+class TestUpdateMcpServiceEnabledApiType(unittest.IsolatedAsyncioTestCase):
+    """Test update_mcp_service_enabled with API-type MCP."""
+
+    def _make_api_record(self, **overrides):
+        base = {
+            "mcp_id": 1, "mcp_name": "test-api", "mcp_server": "http://localhost:8765",
+            "container_id": None, "container_port": None,
+            "config_json": {"openapi": "3.0.0", "info": {"title": "Test"}},
+            "authorization_token": None, "custom_headers": None,
+            "enabled": False, "source": "local",
+        }
+        base.update(overrides)
+        return base
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_api_enable_skips_health_check(
+        self, mock_records, mock_get, mock_status, mock_enabled
+    ):
+        """Enabling API-type MCP should skip MCP health check and set status=True."""
+        mock_get.return_value = self._make_api_record()
+        mock_records.return_value = []
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        # Should update status to True directly without health check
+        mock_status.assert_called_once_with(
+            mcp_id=1, tenant_id='tid', user_id='uid', status=True,
+        )
+        mock_enabled.assert_called_once()
 
 
 # ============================================================================

@@ -345,6 +345,19 @@ class TestUpdateMcpMarketRecord:
             shared_fields={"serverUrl": True, "authorizationToken": False},
         )
 
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_with_group_permissions(self, mock_session):
+        """Test update_mcp_market_record with group_ids and ingroup_permission."""
+        session = MockSession()
+        session.update = MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_record(
+            market_id=1, user_id="uid",
+            group_ids="2,4",
+            ingroup_permission="EDIT",
+        )
+
 
 class TestApplyGroupPermissionFilter:
     """Test _apply_group_permission_filter directly with mocked or_."""
@@ -373,6 +386,18 @@ class TestApplyGroupPermissionFilter:
             session = MockSession()
             mock_session.return_value = session
             result = get_mcp_market_records(tenant_id="tid")
+            assert result is not None
+
+    @patch('backend.database.market_mcp_db.or_')
+    def test_with_user_id_and_groups(self, mock_or):
+        """get_mcp_market_records should apply filter when user_id and user_group_ids provided."""
+        from backend.database.market_mcp_db import get_mcp_market_records
+        with patch('backend.database.market_mcp_db.get_db_session') as mock_session:
+            session = MockSession()
+            mock_session.return_value = session
+            result = get_mcp_market_records(
+                tenant_id="tid", user_id="uid", user_group_ids=[2, 4],
+            )
             assert result is not None
 
 
