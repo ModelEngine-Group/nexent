@@ -322,35 +322,38 @@ class NexentAgent:
         """
         class_name = tool_config.class_name
         params = tool_config.params or {}
-        metadata = tool_config.metadata or {}
 
         if class_name == "RunSkillScriptTool":
-            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
-            return get_run_skill_script_tool(
+            from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
+            metadata = tool_config.metadata or {}
+            return RunSkillScriptTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
         elif class_name == "ReadSkillMdTool":
-            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
-            return get_read_skill_md_tool(
+            from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
+            metadata = tool_config.metadata or {}
+            return ReadSkillMdTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
         elif class_name == "WriteSkillFileTool":
-            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
-            return get_write_skill_file_tool(
+            from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
+            metadata = tool_config.metadata or {}
+            return WriteSkillFileTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
         elif class_name == "ReadSkillConfigTool":
-            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
-            return get_read_skill_config_tool(
+            from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
+            metadata = tool_config.metadata or {}
+            return ReadSkillConfigTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),

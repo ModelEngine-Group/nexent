@@ -1,13 +1,27 @@
 """Skill script execution tool."""
 import logging
-from typing import Dict, Optional
-from smolagents import tool
+from typing import Optional
+
+from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
 
-class RunSkillScriptTool:
+class RunSkillScriptTool(Tool):
     """Tool for executing skill scripts."""
+
+    name = "run_skill_script"
+    description = "Execute a Python or shell script that belongs to an enabled skill."
+    inputs = {
+        "skill_name": {"type": "string", "description": "Name of the skill containing the script."},
+        "script_path": {"type": "string", "description": "Path to the script relative to the skill root."},
+        "params": {
+            "type": "string",
+            "description": "Optional raw command-line arguments for the script.",
+            "nullable": True,
+        },
+    }
+    output_type = "string"
 
     def __init__(
         self,
@@ -24,6 +38,7 @@ class RunSkillScriptTool:
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
         """
+        super().__init__()
         self.skill_manager = None
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
@@ -34,12 +49,7 @@ class RunSkillScriptTool:
         """Lazy load skill manager."""
         if self.skill_manager is None:
             from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(
-                self.local_skills_dir,
-                agent_id=self.agent_id,
-                tenant_id=self.tenant_id,
-                version_no=self.version_no,
-            )
+            self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     def execute(
@@ -78,17 +88,17 @@ class RunSkillScriptTool:
                 skill_name,
                 script_path,
                 params,
-                agent_id=self.agent_id,
                 tenant_id=self.tenant_id,
-                version_no=self.version_no,
             )
             return str(result)
         except SkillNotFoundError as e:
-            logger.error(f"Skill not found: {skill_name} - {e.message}")
-            return f"[SkillNotFoundError] {e.message}"
+            message = getattr(e, "message", str(e))
+            logger.error(f"Skill not found: {skill_name} - {message}")
+            return f"[SkillNotFoundError] {message}"
         except SkillScriptNotFoundError as e:
-            logger.error(f"Script not found in skill '{skill_name}': {script_path} - {e.message}")
-            return f"[ScriptNotFoundError] {e.message}"
+            message = getattr(e, "message", str(e))
+            logger.error(f"Script not found in skill '{skill_name}': {script_path} - {message}")
+            return f"[ScriptNotFoundError] {message}"
         except FileNotFoundError as e:
             logger.error(f"Script file not found: {e}")
             return f"[FileNotFoundError] Script file not found: {e}"
@@ -99,61 +109,28 @@ class RunSkillScriptTool:
             logger.error(f"Failed to execute skill script: {e}")
             return f"[UnexpectedError] Failed to execute skill script: {type(e).__name__}: {str(e)}"
 
+    def forward(
+        self,
+        skill_name: str,
+        script_path: str,
+        params: Optional[str] = None,
+    ) -> str:
+        """Execute a tenant-scoped skill script."""
+        return self.execute(skill_name, script_path, params)
 
-# Cache by tenant_id to ensure correct skill directory isolation
-_tool_cache: Dict[str, "RunSkillScriptTool"] = {}
 
-
-def get_run_skill_script_tool(
+def _uncached_run_skill_script_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> "RunSkillScriptTool":
-    """Get or create the skill script tool instance, cached by tenant_id.
-
-    Args:
-        local_skills_dir: Path to local skills storage.
-        agent_id: Agent ID for filtering available skills in error messages.
-        tenant_id: Tenant ID for filtering available skills in error messages.
-        version_no: Version number for filtering available skills.
-
-    Returns:
-        Tool instance cached by tenant_id.
-    """
-    cache_key = tenant_id or ""
-    if cache_key not in _tool_cache:
-        _tool_cache[cache_key] = RunSkillScriptTool(
-            local_skills_dir=local_skills_dir,
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no,
-        )
-    return _tool_cache[cache_key]
+) -> RunSkillScriptTool:
+    """Construct an uncached tool for internal use and isolated tests."""
+    return RunSkillScriptTool(local_skills_dir, agent_id, tenant_id, version_no)
 
 
-@tool
-def run_skill_script(skill_name: str, script_path: str, params: Optional[str] = None) -> str:
-    """Execute a skill script with given parameters.
-
-    This tool runs Python or shell scripts that are part of a skill. Scripts
-    are declared in the skill via XML tags such as
-    ``<use_script path="..." />``. The ``script_path`` is always resolved
-    **relative to the skill's root directory**, not the agent's current
-    working directory. Common forms like ``scripts/foo`` (no extension) are
-    also accepted via .py/.sh fall-back resolution.
-
-    Args:
-        skill_name: Name of the skill containing the script (e.g., "code-reviewer")
-        script_path: Path to the script relative to the skill root directory
-            (e.g. ``"scripts/analyze.py"``, ``"./scripts/analyze.py"``,
-            ``"scripts/sub/run.sh"``). May be supplied bare or wrapped in
-            quotes if it was extracted from markdown formatting.
-        params: Raw command-line argument string to pass to the script.
-            Example: ``--target /path/to/file -c --code "SELECT 1"``
-
-    Returns:
-        Script execution result as string
-    """
-    tool_instance = get_run_skill_script_tool()
-    return tool_instance.execute(skill_name, script_path, params)
+def _run_skill_script_without_context(
+    skill_name: str, script_path: str, params: Optional[str] = None
+) -> str:
+    """Legacy internal wrapper; tenant-aware agents instantiate the class directly."""
+    return _uncached_run_skill_script_tool().execute(skill_name, script_path, params)
