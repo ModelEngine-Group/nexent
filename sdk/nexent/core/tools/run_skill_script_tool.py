@@ -189,11 +189,11 @@ class RunSkillScriptTool:
             self._publish_artifacts(skill_name, script_path, artifacts)
             return str(result)
         except SkillNotFoundError as e:
-            logger.error(f"Skill not found: {skill_name} - {e.message}")
-            return f"[SkillNotFoundError] {e.message}"
+            logger.error(f"Skill not found: {skill_name} - {e}")
+            return f"[SkillNotFoundError] {e}"
         except SkillScriptNotFoundError as e:
-            logger.error(f"Script not found in skill '{skill_name}': {script_path} - {e.message}")
-            return f"[ScriptNotFoundError] {e.message}"
+            logger.error(f"Script not found in skill '{skill_name}': {script_path} - {e}")
+            return f"[ScriptNotFoundError] {e}"
         except FileNotFoundError as e:
             logger.error(f"Script file not found: {e}")
             return f"[FileNotFoundError] Script file not found: {e}"

@@ -19,6 +19,10 @@ spec = importlib.util.spec_from_file_location(
     os.path.join(os.path.dirname(__file__), "../../../../sdk/nexent/core/tools/run_skill_script_tool.py")
 )
 run_skill_script_tool_module = importlib.util.module_from_spec(spec)
+_original_modules = {
+    name: sys.modules.get(name)
+    for name in ("smolagents", "smolagents.tool", "nexent", "nexent.skills", "nexent.skills.skill_manager")
+}
 
 # Mock the smolagents.tool decorator and nexent.skills dependencies before loading
 mock_smolagents = MagicMock()
@@ -76,9 +80,28 @@ sys.modules['nexent.skills.skill_manager'] = mock_skill_manager_module
 # Now load the module
 spec.loader.exec_module(run_skill_script_tool_module)
 
+for name, original_module in _original_modules.items():
+    if original_module is None:
+        sys.modules.pop(name, None)
+    else:
+        sys.modules[name] = original_module
+
 RunSkillScriptTool = run_skill_script_tool_module.RunSkillScriptTool
 get_run_skill_script_tool = run_skill_script_tool_module.get_run_skill_script_tool
 run_skill_script = run_skill_script_tool_module.run_skill_script
+
+
+@pytest.fixture(autouse=True)
+def mock_skill_dependencies():
+    with patch.dict(
+        sys.modules,
+        {
+            "nexent": mock_nexent,
+            "nexent.skills": mock_nexent_skills,
+            "nexent.skills.skill_manager": mock_skill_manager_module,
+        },
+    ):
+        yield
 
 
 @pytest.fixture
