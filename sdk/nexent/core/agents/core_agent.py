@@ -360,6 +360,25 @@ Additional Args:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
+    @staticmethod
+    def _ensure_context_within_hard_budget(final_context: Any) -> None:
+        """Stop before the provider call when safe compaction cannot fit input."""
+        evidence = final_context.evidence
+        if evidence.over_hard_budget is True:
+            raise ValueError(
+                "Context input remains over the model hard budget after compaction: "
+                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
+            )
+
+    def _emit_history_summary_event(self) -> None:
+        payload = self.context_runtime.consume_history_summary_event()
+        if isinstance(payload, dict):
+            self.observer.add_message(
+                self.agent_name,
+                ProcessType.HISTORY_SUMMARY,
+                json.dumps(payload, ensure_ascii=False),
+            )
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -374,6 +393,8 @@ Additional Args:
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
@@ -944,6 +965,8 @@ You have been provided with these additional arguments, that you can access usin
             task=task,
             final_answer_templates=self.prompt_templates,
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
 
         # Create the final memory step with error

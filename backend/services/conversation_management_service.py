@@ -568,6 +568,27 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     unit_type = unit.get('unit_type')
                     unit_content = unit.get('unit_content')
 
+                    if unit_type == 'history_summary':
+                        try:
+                            summary_payload = json.loads(unit_content)
+                            covered_message_id = int(
+                                summary_payload['covered_through_message_id'])
+                        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                            logger.warning(
+                                "Skipping invalid history summary unit_id=%s",
+                                unit_id,
+                            )
+                            continue
+                        if covered_message_id != int(message_id):
+                            logger.warning(
+                                "Skipping misplaced history summary unit_id=%s "
+                                "message_id=%s coverage=%s",
+                                unit_id,
+                                message_id,
+                                covered_message_id,
+                            )
+                            continue
+
                     if unit_type == 'search_content_placeholder' and unit_id:
                         placeholder_content = {
                             "placeholder": True,

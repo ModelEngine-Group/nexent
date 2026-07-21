@@ -9,6 +9,7 @@ from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfi
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
+    resolve_policy,
 )
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
@@ -953,6 +954,23 @@ async def create_agent_config(
         "agent": agent_info.get("context_policy"),
         "request": request_context_policy,
     })
+    effective_context_policy = resolve_policy(policy_layers)
+    effective_processing_mode = getattr(
+        effective_context_policy.processing_mode,
+        "value",
+        effective_context_policy.processing_mode,
+    )
+    policy_layers_payload = (
+        policy_layers.model_dump(mode="json")
+        if hasattr(policy_layers, "model_dump")
+        else policy_layers
+    )
+    logger.info(
+        "Agent %s effective context policy: processing_mode=%s layers=%s",
+        agent_id,
+        effective_processing_mode,
+        policy_layers_payload,
+    )
     cm_config = ContextManagerConfig(
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,

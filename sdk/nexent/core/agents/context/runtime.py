@@ -105,6 +105,9 @@ class ManagedContextRuntime:
     def compression_stats(self) -> dict[str, object]:
         return self.context_manager.get_step_compression_stats()
 
+    def consume_history_summary_event(self) -> dict[str, object] | None:
+        return self.context_manager.consume_history_summary_event()
+
     def finalize_evidence(self, *, status: str) -> ContextEvidence:
         return self._evidence.finalize(status=status)
 

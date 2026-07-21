@@ -12,6 +12,9 @@ export interface TokenMetrics {
   total_output_tokens: number;
   estimated_context_tokens: number | null;
   token_threshold: number | null;
+  hard_input_budget_tokens: number | null;
+  context_processing_mode: "adaptive_compact" | "passthrough" | null;
+  output_finish_reason: string | null;
 }
 
 // Step related types

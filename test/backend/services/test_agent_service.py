@@ -4969,6 +4969,66 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test__stream_agent_chunks_does_not_persist_history_summary_event(monkeypatch):
+    """The live summary event is streamed but its checkpoint is already persisted."""
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="hello",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    summary_content = json.dumps({
+        "summary": {"task_overview": "done"},
+        "covered_through_message_id": 24,
+        "trigger": "soft_budget_exceeded",
+    })
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "history_summary",
+            "content": summary_content,
+        })
+
+    save_unit = MagicMock(return_value=42)
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=4242), raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        save_unit, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(), raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        MagicMock(), raising=False)
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *args, **kwargs: _FakeFuture(), raising=False)
+    memory_context = MagicMock()
+    memory_context.user_config.memory_switch = False
+
+    chunks = []
+    async for chunk in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_context
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert '"type": "history_summary"' in chunks[0]
+    save_unit.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch, caplog):
     """When agent_run raises, an error SSE chunk should be emitted and run unregistered."""
     agent_request = AgentRequest(

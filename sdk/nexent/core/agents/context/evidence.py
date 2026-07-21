@@ -76,8 +76,14 @@ class ContextEvidenceCollector:
                 )
             payload = asdict(self._finalized)
         logger.info(
-            "Agent loop context evidence: %s",
-            json.dumps(payload, ensure_ascii=False, default=str, sort_keys=True),
+            "Agent loop context evidence:\n%s",
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                default=str,
+                indent=2,
+                sort_keys=True,
+            ),
         )
         return self._finalized
 

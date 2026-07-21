@@ -1,9 +1,12 @@
 import json
+import logging
 
-from smolagents.memory import ActionStep, TaskStep
+from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.monitoring import Timing
 
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
+from nexent.core.agents.context.evidence import ContextEvidenceCollector
+from nexent.core.context_runtime.contracts import ContextEvidence
 
 
 class _SystemPrompt:
@@ -192,6 +195,27 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
     )
 
 
+def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    tool_call = ToolCall(name="python_interpreter", arguments="print('ok')", id="call_1")
+    action = ActionStep(
+        step_number=1, timing=Timing(start_time=0), tool_calls=[tool_call],
+        observations="ok", action_output="done", model_output="reasoning",
+    )
+    memory = _Memory([TaskStep(task="current"), action])
+    manager = ContextManager(ContextManagerConfig(
+        soft_input_budget_tokens=10000,
+        policy_layers={"request": {"processing_mode": "passthrough"}},
+    ))
+
+    projected = manager._project_current_run(memory, 0)
+    action_item = next(item for item in projected if item.type.value == "current_action")
+    assert action_item.content["tool_calls"] == [{
+        "name": "python_interpreter", "arguments": "print('ok')", "id": "call_1",
+    }]
+    json.dumps(action_item.content)
+
+
 def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     class PlainModel:
@@ -236,10 +260,8 @@ def test_current_action_compaction_does_not_mutate_agent_memory(monkeypatch):
     )
     assert [(action.observations, action.model_output) for action in actions] == before
     states = dict(result.evidence.item_representations)
-    assert states["current_action:0"] == "compact"
-    assert states["current_action:1"] == "compact"
-    assert all(states[f"current_action:{index}"] == "raw" for index in range(2, 6))
-    assert result.evidence.current_action_compact_count == 2
+    assert all(states[f"current_action:{index}"] == "compact" for index in range(6))
+    assert result.evidence.current_action_compact_count == 6
 
 
 def test_compact_stages_old_actions_before_other_items(monkeypatch):
@@ -284,6 +306,31 @@ def test_compact_stages_old_actions_before_other_items(monkeypatch):
     assert "knowledge knowledge" in rendered
 
 
+def test_recent_actions_are_compacted_as_last_resort(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    action = ActionStep(
+        step_number=1, timing=Timing(start_time=0), tool_calls=[],
+        observations="database row " * 1000, action_output="database result " * 1000,
+        model_output="reasoning " * 1000,
+    )
+    memory = _Memory([TaskStep(task="task"), action])
+    manager = ContextManager(ContextManagerConfig(
+        soft_input_budget_tokens=50, hard_input_budget_tokens=10000,
+        keep_recent_steps=4,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+    ))
+    run = manager.prepare_run_context(memory, "", [])
+
+    result = manager.assemble_final_context(
+        model=_SummaryModel(), memory=memory, current_run_start_idx=0,
+        run_context=run,
+    )
+
+    states = dict(result.evidence.item_representations)
+    assert states["current_action:0"] == "compact"
+    assert result.evidence.current_action_compact_count == 1
+
+
 def test_persistence_failure_does_not_block_current_context(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     def fail(_candidate):
@@ -318,3 +365,39 @@ def test_no_drop_over_hard_budget_is_explicit_in_evidence(monkeypatch):
     assert result.evidence.over_hard_budget is True
     assert result.evidence.compact_exhausted is True
     assert result.evidence.final_token_estimate > result.evidence.hard_budget
+
+
+def test_new_history_summary_event_is_consumed_once(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    manager = ContextManager(ContextManagerConfig(
+        soft_input_budget_tokens=20, hard_input_budget_tokens=100,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+    ))
+    memory = _Memory([TaskStep(task="current")])
+    run = manager.prepare_run_context(memory, "", _summary_and_turns())
+
+    manager.assemble_final_context(
+        model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
+    )
+
+    event = manager.consume_history_summary_event()
+    assert event is not None
+    assert event["covered_through_message_id"] == 22
+    assert event["summary"]
+    assert manager.consume_history_summary_event() is None
+
+
+def test_context_evidence_log_is_pretty_printed(caplog):
+    collector = ContextEvidenceCollector()
+    collector.record_call(ContextEvidence(
+        processing_mode="adaptive_compact",
+        raw_token_estimate=120,
+        final_token_estimate=80,
+    ))
+
+    with caplog.at_level(logging.INFO, logger="context_evidence"):
+        collector.finalize(status="completed")
+
+    assert "Agent loop context evidence:\n{" in caplog.text
+    assert '\n  "final_token_estimate": 80,' in caplog.text
+    assert '\n  "processing_mode": "adaptive_compact",' in caplog.text

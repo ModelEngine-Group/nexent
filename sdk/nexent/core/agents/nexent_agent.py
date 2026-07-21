@@ -556,11 +556,15 @@ class NexentAgent:
                             ).get("estimated_input_tokens")
 
                         token_threshold = None
+                        hard_input_budget_tokens = None
+                        context_processing_mode = None
                         if (
                             hasattr(self.agent, "context_manager")
                             and self.agent.context_manager is not None
                         ):
                             token_threshold = self.agent.context_manager.config.token_threshold
+                            hard_input_budget_tokens = self.agent.context_manager.hard_input_budget_tokens
+                            context_processing_mode = self.agent.context_manager.processing_mode
 
                         token_data = {
                             "step_number": step_log.step_number,
@@ -570,6 +574,13 @@ class NexentAgent:
                             "total_output_tokens": total_output_tokens,
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
+                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "context_processing_mode": context_processing_mode,
+                            "output_finish_reason": getattr(
+                                getattr(self.agent, "model", None),
+                                "last_finish_reason",
+                                None,
+                            ),
                         }
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 

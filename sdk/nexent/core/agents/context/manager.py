@@ -7,6 +7,8 @@ import json
 import logging
 import threading
 from copy import deepcopy
+from dataclasses import asdict, is_dataclass
+from enum import Enum
 from typing import Any, Dict, Optional, Sequence
 
 from smolagents.memory import ActionStep, AgentMemory, TaskStep
@@ -51,12 +53,22 @@ class ContextManager:
         self._last_compressed_token_count: int | None = None
         self._previous_stable_fingerprint: str | None = None
         self._previous_stable_items: dict[str, str] = {}
+        self._pending_history_summary_event: dict[str, Any] | None = None
 
     def _soft_input_budget_tokens(self) -> int:
         return self.config.soft_input_budget_tokens or self.config.token_threshold
 
     def _hard_input_budget_tokens(self) -> int:
         return self.config.hard_input_budget_tokens or int(self.config.token_threshold * 1.1)
+
+    @property
+    def hard_input_budget_tokens(self) -> int:
+        """Effective hard budget, including the legacy fallback calculation."""
+        return self._hard_input_budget_tokens()
+
+    @property
+    def processing_mode(self) -> str:
+        return resolve_policy(self.config.policy_layers).processing_mode.value
 
     def prepare_run_context(
         self, memory: AgentMemory, fallback_system_prompt: str,
@@ -128,6 +140,10 @@ class ContextManager:
                     }]
                     final_items.append(result.candidate.as_item())
                     persist_status = self._persist_candidate(result.candidate)
+                    self._pending_history_summary_event = {
+                        **deepcopy(result.candidate.as_item().content),
+                        "persist_status": persist_status,
+                    }
                 elif result.fallback_turns:
                     fallback_by_id = {item.id: item for item in result.fallback_turns}
                     final_items = [fallback_by_id.get(item.id, item) for item in final_items]
@@ -191,6 +207,12 @@ class ContextManager:
             ),
         )
 
+    def consume_history_summary_event(self) -> dict[str, Any] | None:
+        """Return a newly-created summary checkpoint once for stream display."""
+        event = self._pending_history_summary_event
+        self._pending_history_summary_event = None
+        return deepcopy(event) if event is not None else None
+
     def _compact_to_soft_budget(self, items, purpose_stable, purpose_dynamic, tools):
         result = list(items)
         if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
@@ -198,6 +220,7 @@ class ContextManager:
         keep_recent = max(0, self.config.keep_recent_steps)
         actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
         old_actions = actions[:-keep_recent] if keep_recent else actions
+        recent_actions = actions[-keep_recent:] if keep_recent else []
         other_items = [
             item for item in result
             if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact
@@ -205,7 +228,9 @@ class ContextManager:
         # The stages are intentional: reclaim old current-run execution detail
         # before degrading stable resources or planning/evidence Items. Within a
         # stage, prefer the largest deterministic saving.
-        for candidates in (old_actions, other_items):
+        # Recent actions are the last-resort stage. Keeping them raw is a
+        # preference, not permission to exceed the model input budget.
+        for candidates in (old_actions, other_items, recent_actions):
             savings = []
             for item in candidates:
                 compact = item.compact()
@@ -240,10 +265,10 @@ class ContextManager:
             elif isinstance(step, ActionStep):
                 content = {
                     "step_number": getattr(step, "step_number", action_index + 1),
-                    "tool_calls": deepcopy(getattr(step, "tool_calls", None)),
-                    "observations": deepcopy(getattr(step, "observations", None)),
+                    "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
+                    "observations": self._to_json_value(getattr(step, "observations", None)),
                     "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
-                    "result": deepcopy(getattr(step, "action_output", None)),
+                    "result": self._to_json_value(getattr(step, "action_output", None)),
                     "messages": [self._message_to_dict(message) for message in step.to_messages()],
                 }
                 item = ContextItem.from_input(ContextItemInput(
@@ -382,9 +407,26 @@ class ContextManager:
     @staticmethod
     def _message_to_dict(message):
         if isinstance(message, dict):
-            return deepcopy(message)
+            return ContextManager._to_json_value(message)
         role = getattr(message.role, "value", message.role)
-        return {"role": str(role), "content": deepcopy(message.content)}
+        return {"role": str(role), "content": ContextManager._to_json_value(message.content)}
+
+    @staticmethod
+    def _to_json_value(value):
+        """Convert runtime memory values into detached JSON-compatible payloads."""
+        if isinstance(value, dict):
+            return {str(key): ContextManager._to_json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [ContextManager._to_json_value(item) for item in value]
+        if isinstance(value, Enum):
+            return ContextManager._to_json_value(value.value)
+        if is_dataclass(value) and not isinstance(value, type):
+            return ContextManager._to_json_value(asdict(value))
+        if hasattr(value, "model_dump"):
+            return ContextManager._to_json_value(value.model_dump(mode="json"))
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
 
     def _fingerprint(self, value):
         encoded = json.dumps(self._normalize(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))

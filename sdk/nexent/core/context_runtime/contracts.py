@@ -110,6 +110,9 @@ class ContextRuntime(Protocol):
     def compression_stats(self) -> dict[str, object]:
         """Return this step's compression metrics in the common shape."""
 
+    def consume_history_summary_event(self) -> dict[str, object] | None:
+        """Return a newly-created history checkpoint once, if present."""
+
     @property
     def chars_per_token(self) -> float:
         """Token-estimation factor for the active context path."""
@@ -160,6 +163,9 @@ class UnconfiguredContextRuntime:
 
     def compression_stats(self) -> dict[str, object]:
         return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}
+
+    def consume_history_summary_event(self) -> dict[str, object] | None:
+        return None
 
     @property
     def chars_per_token(self) -> float:

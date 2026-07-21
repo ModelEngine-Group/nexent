@@ -1182,7 +1182,13 @@ async def _stream_agent_chunks(
                         continue
 
                     # Default path: insert a new unit row with unit_status='streaming'.
-                    if streaming_message_id is not None and chunk_type not in (
+                    # history_summary is already persisted once by the canonical
+                    # checkpoint sink on its covered assistant message. The stream
+                    # event is display-only and must not create a duplicate unit on
+                    # the currently-running assistant message.
+                    if chunk_type == "history_summary":
+                        current_unit = None
+                    elif streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
                         new_unit_id = submit(
