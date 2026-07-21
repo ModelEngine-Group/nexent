@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum
 from types import SimpleNamespace
 
@@ -17,6 +18,16 @@ from nexent.core.agents.context.models import (
     SystemContextItem,
     normalize_context_inputs,
 )
+from nexent.core.agents.context.manager import ContextManager
+from nexent.core.agents.context.formatting import (
+    _format_agent_fallback,
+    _format_external_agents_description,
+    _format_managed_agents_description,
+    _format_memory_context,
+    _format_skills_description,
+    _format_tools_description,
+)
+from nexent.core.agents.context.rendering import ContextItemRenderer, ContextItemRenderingError
 from nexent.core.agents.context.step_renderer import StepRenderer
 from nexent.core.context_runtime.contracts import (
     ContextEvidence,
@@ -147,3 +158,222 @@ def test_context_item_representation_guards_and_compact_cache():
     assert first is second
     assert compactable.representation_cache_stats == (1, 1)
     assert "deterministically compacted" in first.content["text"]
+
+
+def test_formatting_empty_and_tool_variants():
+    assert _format_memory_context([]) == ""
+    assert _format_skills_description([]) == ""
+    assert _format_managed_agents_description({}) == ""
+    assert _format_external_agents_description({}) == ""
+    assert _format_agent_fallback({"worker": {}}, {}) == ""
+    assert "No tools are currently available" in _format_tools_description({}, language="en")
+
+    tool = SimpleNamespace(
+        description="remote search",
+        inputs={"query": "string"},
+        output_type="string",
+        source="mcp",
+    )
+    zh_description = _format_tools_description({"search": tool}, language="zh", is_manager=False)
+    en_description = _format_tools_description({"search": tool}, language="en", is_manager=False)
+    assert "[MCP] search" in zh_description
+    assert "presigned_url" in zh_description
+    assert "Accepts input" in en_description
+    assert "presigned_url" in en_description
+
+
+def _direct_item(item_id, item_type, content, metadata=None):
+    return ContextItem(
+        id=item_id,
+        type=item_type,
+        content=content,
+        metadata=metadata or {},
+    )
+
+
+def test_renderer_text_templates_and_payload_guards():
+    renderer = ContextItemRenderer()
+    skills_usage = _direct_item(
+        "skills",
+        ContextItemType.SYSTEM,
+        {"template": "skills_usage", "skills": [], "language": "en", "is_manager": False},
+    )
+    fallback = _direct_item(
+        "fallback",
+        ContextItemType.SYSTEM,
+        {"template": "agent_fallback", "language": "en"},
+    )
+    assert "No skills" in renderer.render([skills_usage])[0]["content"][0]["text"]
+    assert "No agents" in renderer.render([fallback])[0]["content"][0]["text"]
+
+    invalid_items = [
+        _direct_item("unknown", ContextItemType.SYSTEM, {"template": "unknown"}),
+        _direct_item("payload", ContextItemType.SYSTEM, {"text": "x", "extra": True}),
+        _direct_item("missing", ContextItemType.SYSTEM, {"text": None}),
+        _direct_item("role", ContextItemType.SYSTEM, {"text": "x", "role": "invalid"}),
+    ]
+    for item in invalid_items:
+        with pytest.raises(ContextItemRenderingError):
+            renderer.render([item])
+
+    empty = _direct_item("empty", ContextItemType.SYSTEM, {"text": ""})
+    assert renderer.render([empty]) == []
+
+
+def test_renderer_handler_and_group_error_boundaries():
+    renderer = ContextItemRenderer()
+    ungrouped_tool = _direct_item("tool", ContextItemType.TOOL, {"name": "tool"})
+    with pytest.raises(ContextItemRenderingError, match="no handler"):
+        renderer.render([ungrouped_tool])
+
+    renderer.register(ContextItemType.TOOL, lambda _item: 1 / 0)
+    with pytest.raises(ContextItemRenderingError, match="handler failed"):
+        renderer.render([ungrouped_tool])
+
+    bad_group = _direct_item(
+        "bad-group",
+        ContextItemType.TOOL,
+        {"name": "tool"},
+        {"render_group": 3},
+    )
+    with pytest.raises(ContextItemRenderingError, match="invalid render group"):
+        ContextItemRenderer().render([bad_group])
+
+    tool = _direct_item(
+        "group-tool",
+        ContextItemType.TOOL,
+        {"name": "tool"},
+        {"render_group": "resources"},
+    )
+    skill = _direct_item(
+        "group-skill",
+        ContextItemType.SKILL,
+        {"name": "skill"},
+        {"render_group": "resources"},
+    )
+    with pytest.raises(ContextItemRenderingError, match="mixes context item types"):
+        ContextItemRenderer().render([tool, skill])
+
+    second_tool = _direct_item(
+        "group-tool-2",
+        ContextItemType.TOOL,
+        {"name": "tool-2"},
+        {"render_group": "resources", "language": "en"},
+    )
+    with pytest.raises(ContextItemRenderingError, match="inconsistent rendering metadata"):
+        ContextItemRenderer().render([tool, second_tool])
+
+    unsupported = _direct_item(
+        "group-system",
+        ContextItemType.SYSTEM,
+        {"text": "system"},
+        {"render_group": "system"},
+    )
+    with pytest.raises(ContextItemRenderingError, match="unsupported render group"):
+        ContextItemRenderer().render([unsupported])
+
+    broken_tool = _direct_item(
+        "broken-tool",
+        ContextItemType.TOOL,
+        {},
+        {"render_group": "tools"},
+    )
+    with pytest.raises(ContextItemRenderingError, match="handler failed for item group"):
+        ContextItemRenderer().render([broken_tool])
+
+
+def test_renderer_current_action_without_raw_messages():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {"step_number": 1, "result": "done"},
+    )
+    message = ContextItemRenderer().render([action])[0]
+    assert message["role"] == "assistant"
+    assert '"result": "done"' in message["content"][0]["text"]
+
+
+def test_context_manager_management_and_diagnostic_helpers():
+    manager = ContextManager(ContextManagerConfig(token_threshold=100, chars_per_token=2.0))
+    item_input = ContextItemInput(id="system", type="system", content={"text": "policy"})
+    normalized = ContextItem.from_input(item_input)
+
+    assert manager.hard_input_budget_tokens == 110
+    assert manager.processing_mode == "passthrough"
+    assert manager.get_step_compression_stats() == {"calls": 0, "records": []}
+    assert manager.get_all_compression_stats() == {"calls": 0, "records": []}
+    assert manager.get_token_counts() == {"uncompressed": None, "compressed": None}
+    assert manager.export_summary() == {"history_candidate": None}
+
+    manager.register_item(item_input)
+    assert manager.get_registered_items()[0].id == "system"
+    with pytest.raises(ValueError, match="duplicate context item id"):
+        manager.register_item(item_input)
+    assert manager.build_system_prompt()[0]["role"] == "system"
+
+    manager.replace_items([])
+    assert manager.get_registered_items() == []
+    manager.replace_items([item_input])
+    assert manager.get_registered_items()[0].id == "system"
+    manager.clear_items()
+    assert manager.get_registered_items() == []
+
+    with pytest.raises(TypeError, match="cannot mix"):
+        manager._item_source([normalized, item_input])
+    with pytest.raises(ValueError, match="requires final_answer_templates"):
+        manager._purpose_messages(purpose="final_answer", task="task", final_answer_templates=None)
+
+
+@dataclass
+class _Payload:
+    value: int
+
+
+class _Dumpable:
+    def model_dump(self, mode=None):
+        return {"mode": mode, "value": 2}
+
+
+def test_context_manager_runtime_value_normalization_helpers():
+    manager = ContextManager(ContextManagerConfig(token_threshold=100))
+    assert manager._normalize({2: (_Dumpable(),)}) == {
+        "2": [{"mode": None, "value": 2}]
+    }
+    assert manager._normalize(SimpleNamespace(name="worker")) == {"name": "worker"}
+    assert manager._canonical_tools([{"z": 1}, {"a": 1}]) == [{"a": 1}, {"z": 1}]
+
+    message = SimpleNamespace(role=_Role.USER, content={"payload": _Payload(1)})
+    assert manager._message_to_dict(message) == {
+        "role": "user",
+        "content": {"payload": {"value": 1}},
+    }
+    assert manager._message_to_dict({"role": "user", "content": {_Role.USER}}) == {
+        "role": "user",
+        "content": ["user"],
+    }
+    assert manager._to_json_value(_Dumpable()) == {"mode": "json", "value": 2}
+    assert manager._to_json_value(SimpleNamespace(name="value")) == "namespace(name='value')"
+
+
+def test_context_manager_memory_rendering_and_change_reasons():
+    manager = ContextManager(ContextManagerConfig(token_threshold=100))
+    system_prompt = SimpleNamespace(to_messages=lambda: [{"role": "system", "content": "policy"}])
+    step = SimpleNamespace(to_messages=lambda: [{"role": "user", "content": "task"}])
+    assert manager.render_memory_messages(SimpleNamespace(system_prompt=system_prompt, steps=[step])) == [
+        {"role": "system", "content": "policy"},
+        {"role": "user", "content": "task"},
+    ]
+
+    assert manager._change_reasons("first", {"tools": "a", "purpose": "step", "system": "one"}) == [
+        "initial_request"
+    ]
+    manager._previous_stable_fingerprint = "first"
+    assert manager._change_reasons("first", manager._previous_stable_items) == []
+    assert manager._change_reasons(
+        "second",
+        {"tools": "b", "purpose": "final", "system": "two"},
+    ) == ["tool_schema_version", "context_purpose", "system_prompt_version"]
+    manager._previous_stable_fingerprint = "second"
+    assert manager._change_reasons("third", manager._previous_stable_items) == [
+        "unexpected_nondeterminism"
+    ]
