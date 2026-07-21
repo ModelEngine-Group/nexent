@@ -4370,7 +4370,6 @@ async def test_run_agent_stream(
     "backend.services.agent_service._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("backend.services.agent_service.generate_conversation_title_service", new=AsyncMock())
 @patch("backend.services.agent_service.create_new_conversation")
 @patch("backend.services.agent_service.generate_stream_with_memory")
 @patch('backend.services.agent_service.save_messages')
@@ -4403,6 +4402,7 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
 
     # Assert agent_request got the new conversation_id
     assert mock_agent_request.conversation_id == 999
+    assert response.headers["conversation_id"] == "999"
 
     # Assert save_messages received the updated conversation_id
     mock_save_messages.assert_called_once()
@@ -11629,6 +11629,35 @@ async def test_process_skill_file_uploads_success(
     assert len(result) == 1
     assert result[0]["status"] == "success"
     assert result[0]["file_name"] == "test.txt"
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.upload_fileobj")
+@patch("backend.services.agent_service.is_allowed_skill_upload_path")
+@patch("backend.services.agent_service.os.path.exists")
+@patch("backend.services.agent_service.os.path.getsize")
+@patch("builtins.open", new_callable=MagicMock)
+async def test_process_skill_file_uploads_uses_structured_payloads(
+    mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
+):
+    """Structured artifacts should bypass legacy text extraction."""
+    from backend.services.agent_service import _process_skill_file_uploads
+
+    mock_exists.return_value = True
+    mock_allowed.return_value = True
+    mock_getsize.return_value = 128
+    mock_upload.return_value = {"success": True, "object_name": "obj1", "url": "http://example.com/file"}
+    payloads = [{
+        "absolute_path": "/mnt/nexent/report.docx",
+        "file_name": "report.docx",
+        "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }]
+
+    result = await _process_skill_file_uploads(payloads, "user1", "tenant1")
+
+    assert len(result) == 1
+    assert result[0]["file_name"] == "report.docx"
+    mock_upload.assert_called_once()
 
 
 @pytest.mark.asyncio

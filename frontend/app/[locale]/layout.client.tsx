@@ -63,7 +63,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     left: 0,
     backgroundColor: "#fff",
     overflow: "visible",
-    zIndex: 998,
+    zIndex: 30,
   };
 
   const siderInnerStyle: React.CSSProperties = {
@@ -151,7 +151,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
               transform: "translateY(-50%)",
               right: "-12px",
               transition: "right 0.2s ease, left 0.2s ease",
-              zIndex: 999,
+              zIndex: 40,
             }}
             icon={
               collapsed ? (

@@ -1,6 +1,7 @@
 """
 Unit tests for nexent.core.tools.run_skill_script_tool module.
 """
+import json
 import os
 import sys
 import tempfile
@@ -300,6 +301,96 @@ class TestExecute:
         # Should pass None for params (not converted to {})
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] is None
+
+    def test_execute_publishes_structured_file_artifact(self, tmp_path):
+        """Test that declared file results publish an observer event."""
+        output_path = tmp_path / "report.docx"
+        output_path.write_bytes(b"docx")
+        observer = MagicMock()
+        tool = RunSkillScriptTool(observer=observer)
+        manager = MagicMock()
+        manager.run_skill_script.return_value = json.dumps({
+            "status": "success",
+            "artifacts": [{
+                "kind": "file",
+                "absolute_path": str(output_path),
+                "file_name": "report.docx",
+                "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "file_size_bytes": 4,
+            }],
+        })
+        manager.load_skill.return_value = {
+            "script_outputs": {
+                "scripts/generate_docx.py": {
+                    "kind": "file",
+                    "mime_types": [
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                }
+            },
+        }
+        tool.skill_manager = manager
+
+        tool.execute("create-docx", "scripts/generate_docx.py")
+
+        observer.add_message.assert_called_once()
+        args = observer.add_message.call_args.args
+        assert args[1].value == "skill_artifact"
+        assert args[2]["artifacts"][0]["file_name"] == "report.docx"
+
+    def test_execute_does_not_publish_legacy_file_result(self, tmp_path):
+        """Test that top-level file fields do not implicitly create artifacts."""
+        output_path = tmp_path / "report.docx"
+        output_path.write_bytes(b"docx")
+        observer = MagicMock()
+        tool = RunSkillScriptTool(observer=observer)
+        manager = MagicMock()
+        manager.run_skill_script.return_value = json.dumps({
+            "status": "success",
+            "absolute_path": str(output_path),
+            "file_name": "report.docx",
+            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        })
+        manager.load_skill.return_value = {
+            "script_outputs": {
+                "scripts/generate_docx.py": {
+                    "kind": "file",
+                    "mime_types": [
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                }
+            },
+        }
+        tool.skill_manager = manager
+
+        tool.execute("create-docx", "scripts/generate_docx.py")
+
+        observer.add_message.assert_not_called()
+
+    def test_execute_does_not_publish_artifact_from_undeclared_script(self, tmp_path):
+        """Test that only script_outputs entries can publish artifacts."""
+        output_path = tmp_path / "report.docx"
+        output_path.write_bytes(b"docx")
+        observer = MagicMock()
+        tool = RunSkillScriptTool(observer=observer)
+        manager = MagicMock()
+        manager.run_skill_script.return_value = json.dumps({
+            "status": "success",
+            "artifacts": [{
+                "kind": "file",
+                "absolute_path": str(output_path),
+                "file_name": "report.docx",
+                "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }],
+        })
+        manager.load_skill.return_value = {
+            "script_outputs": {},
+        }
+        tool.skill_manager = manager
+
+        tool.execute("create-docx", "scripts/get_document_info.py")
+
+        observer.add_message.assert_not_called()
 
 
 class TestGetRunSkillScriptTool:

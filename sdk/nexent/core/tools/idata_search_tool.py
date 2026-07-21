@@ -135,17 +135,15 @@ class IdataSearchTool(Tool):
         )
 
         self.record_ops = 1  # To record serial number
-        self.running_prompt_zh = "iData知识库检索中..."
-        self.running_prompt_en = "Searching iData knowledge base..."
 
     def forward(
         self,
         question: str
     ) -> str:
-        # Send tool run message
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. We only emit the search card from inside the tool.
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": question}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(
                 card_content, ensure_ascii=False))

@@ -1,56 +1,30 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { Tooltip as AntdTooltip, ConfigProvider } from "antd";
-import type { TooltipProps as AntdTooltipProps } from "antd";
+import * as React from "react"
+import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
-export const TooltipProvider: React.FC<{
-  children: React.ReactNode;
-}> = ({ children }) => {
-  return (
-    <ConfigProvider
-      theme={{
-        components: {
-          Tooltip: {
-            zIndexPopup: 1050,
-          },
-        },
-      }}
-    >
-      {children}
-    </ConfigProvider>
-  );
-};
+const TooltipProvider = TooltipPrimitive.Provider
 
-// Tooltip component - wrapper around antd Tooltip with default smooth transition and no arrow
-export const Tooltip: React.FC<AntdTooltipProps> = ({
-  children,
-  arrow = false,
-  mouseEnterDelay = 0.1,
-  mouseLeaveDelay = 0.1,
-  className,
-  ...props
-}) => {
-  // Merge provided classNames with our default root class to replace deprecated overlayClassName
-  const mergedClassNames = {
-    ...(props.classNames || {}),
-    root: cn("ant-tooltip-no-arrow", (props.classNames as any)?.root),
-  };
-  return (
-    <AntdTooltip
-      arrow={arrow}
-      mouseEnterDelay={mouseEnterDelay}
-      mouseLeaveDelay={mouseLeaveDelay}
-      classNames={mergedClassNames}
-      className={className}
-      {...props}
-    >
-      {children}
-    </AntdTooltip>
-  );
-};
+const Tooltip = TooltipPrimitive.Root
 
-// Re-export for convenience
-export { Tooltip as default };
+const TooltipTrigger = TooltipPrimitive.Trigger
+
+const TooltipContent = React.forwardRef<
+  React.ElementRef<typeof TooltipPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
+>(({ className, sideOffset = 4, ...props }, ref) => (
+  <TooltipPrimitive.Content
+    ref={ref}
+    sideOffset={sideOffset}
+    className={cn(
+      "z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-tooltip-content-transform-origin]",
+      className
+    )}
+    {...props}
+  />
+))
+TooltipContent.displayName = TooltipPrimitive.Content.displayName
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
