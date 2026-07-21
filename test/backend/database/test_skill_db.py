@@ -1063,7 +1063,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = [skill1, skill2]
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -1082,6 +1082,10 @@ class TestListSkills:
         assert result[0]['name'] == 'skill1'
         assert result[0]['tool_ids'] == [1, 2]
         assert result[1]['tool_ids'] == []
+        mock_filter.order_by.assert_called_once_with(
+            db_models_mock.SkillInfo.create_time.desc(),
+            db_models_mock.SkillInfo.skill_id.desc(),
+        )
 
     def test_list_skills_empty(self, monkeypatch, mock_session):
         """Test listing when no skills exist."""
@@ -1090,7 +1094,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = []
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()

@@ -6,7 +6,7 @@ import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
 import { Badge, Button, message, Tabs, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { Info, Trash2, Settings } from "lucide-react";
+import { Eye, Pencil, Trash2, Settings } from "lucide-react";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { deleteSkill, fetchSkillInstances } from "@/services/agentConfigService";
 import log from "@/lib/logger";
@@ -18,6 +18,7 @@ interface SkillManagementProps {
   isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
   isReadOnly?: boolean;
+  onEditSkill?: (skill: Skill) => void;
 }
 
 export default function SkillManagement({
@@ -25,6 +26,7 @@ export default function SkillManagement({
   isCreatingMode,
   currentAgentId,
   isReadOnly: isReadOnlyProp,
+  onEditSkill,
 }: SkillManagementProps) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
@@ -136,6 +138,10 @@ export default function SkillManagement({
 
   const handleInfoClick = (skill: Skill, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isReadOnly && skill.permission === "EDIT" && onEditSkill) {
+      onEditSkill(skill);
+      return;
+    }
     setSelectedSkill(skill);
     setIsDetailModalOpen(true);
   };
@@ -244,6 +250,9 @@ export default function SkillManagement({
         >
           {group.skills.map((skill) => {
             const isSelected = originalSelectedSkillIdsSet.has(skill.skill_id);
+            const canEditSkill =
+              !isReadOnly && skill.permission === "EDIT" && onEditSkill != null;
+            const SkillActionIcon = canEditSkill ? Pencil : Eye;
             const hasConfigurableParams =
               Array.isArray(skill.config_schemas) && skill.config_schemas.length > 0;
 
@@ -270,12 +279,10 @@ export default function SkillManagement({
                       onClick={isReadOnly ? undefined : (e) => handleConfigClick(skill, e)}
                     />
                   )}
-                  <Info
+                  <SkillActionIcon
                     size={16}
-                    className={`cursor-pointer text-gray-400 hover:text-gray-600 transition-colors ${
-                      isReadOnly ? "pointer-events-none opacity-50" : ""
-                    }`}
-                    onClick={isReadOnly ? undefined : (e) => handleInfoClick(skill, e)}
+                    className="cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
+                    onClick={(e) => handleInfoClick(skill, e)}
                   />
                   <Tooltip
                     title={

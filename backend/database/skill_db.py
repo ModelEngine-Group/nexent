@@ -268,6 +268,9 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
         skills = session.query(SkillInfo).filter(
             SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
+        ).order_by(
+            SkillInfo.create_time.desc(),
+            SkillInfo.skill_id.desc(),
         ).all()
         results = []
         for s in skills:

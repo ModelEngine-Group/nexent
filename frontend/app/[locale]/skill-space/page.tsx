@@ -330,53 +330,6 @@ export default function SkillRepositoryPage() {
     );
   };
 
-  const getPendingRepositoryInfo = (skill?: MyEditableSkillItem | null) =>
-    (skill?.repository_info ?? []).filter(
-      (info) => info.status === "pending_review"
-    );
-
-  const confirmEditListedSkill = async (
-    skill: MyEditableSkillItem
-  ): Promise<boolean> => {
-    const pendingInfo = getPendingRepositoryInfo(skill);
-    if (pendingInfo.length === 0) {
-      return true;
-    }
-
-    const confirmed = await new Promise<boolean>((resolve) => {
-      modal.confirm({
-        title: t("skillRepository.edit.confirmWithdrawTitle"),
-        content: t("skillRepository.edit.confirmWithdrawContent"),
-        okText: t("skillRepository.edit.continueSave"),
-        cancelText: t("common.cancel"),
-        onOk: () => resolve(true),
-        onCancel: () => resolve(false),
-      });
-    });
-    if (!confirmed) {
-      return false;
-    }
-
-    try {
-      await Promise.all(
-        pendingInfo.map((info) =>
-          updateStatusMutation.mutateAsync({
-            skillRepositoryId: info.skill_repository_id,
-            status: "not_shared",
-          })
-        )
-      );
-      return true;
-    } catch (error) {
-      message.error(
-        error instanceof Error
-          ? error.message
-          : t("skillRepository.common.statusUpdateFailed")
-      );
-      return false;
-    }
-  };
-
   const handleSkillBuildSuccess = async () => {
     await refetchMine().catch(() => {});
     setEditingSkill(null);
@@ -658,7 +611,6 @@ export default function SkillRepositoryPage() {
           setEditingSkill(null);
         }}
         onSuccess={handleSkillBuildSuccess}
-        onBeforeEditSave={confirmEditListedSkill}
       />
       <SkillDetailModal
         open={viewingSkill != null}
