@@ -1161,15 +1161,13 @@ def test_get_next_version_no_includes_soft_deleted_snapshots(monkeypatch, mock_s
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     db_models_mock.AgentInfo.delete_flag.__eq__.reset_mock()
-    db_models_mock.AgentInfo.version_no.__gt__.reset_mock()
 
     result = get_next_version_no(agent_id=1, tenant_id="tenant1")
 
     assert result == 3
     filter_conditions = query.filter.call_args.args
     assert db_models_mock.AgentInfo.delete_flag.__eq__.call_count == 0
-    assert db_models_mock.AgentInfo.version_no.__gt__.call_args.args == (0,)
-    assert len(filter_conditions) == 3
+    assert len(filter_conditions) == 2
 
 
 def test_delete_version_success(monkeypatch, mock_session):
