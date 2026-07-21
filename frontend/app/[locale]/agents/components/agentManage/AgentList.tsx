@@ -268,6 +268,7 @@ export default function AgentList({
         prompt_template_name: detail.prompt_template_name ?? "system_default",
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
+        runtime_framework: detail.runtime_framework || "smolagents",
       });
 
       if (!createResult.success || !createResult.data?.agent_id) {

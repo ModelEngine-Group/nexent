@@ -29,6 +29,12 @@ consts_mock.const.PERMISSION_READ = "READ_ONLY"
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 
+agent_runtime_mod = types.ModuleType("consts.agent_runtime")
+agent_runtime_mod.normalize_agent_runtime_framework = (
+    lambda value, default="smolagents": default if value is None else value
+)
+sys.modules['consts.agent_runtime'] = agent_runtime_mod
+
 consts_exceptions_mod = types.ModuleType("consts.exceptions")
 
 
@@ -36,8 +42,28 @@ class ValidationError(Exception):
     pass
 
 
+class AppException(Exception):
+    def __init__(self, error_code, message, details=None):
+        super().__init__(message)
+        self.error_code = error_code
+        self.details = details
+
+
 consts_exceptions_mod.ValidationError = ValidationError
+consts_exceptions_mod.AppException = AppException
 sys.modules['consts.exceptions'] = consts_exceptions_mod
+
+error_code_mod = types.ModuleType("consts.error_code")
+error_code_mod.ErrorCode = type(
+    "ErrorCode",
+    (),
+    {
+        "AGENT_RUNTIME_FRAMEWORK_REQUIRED": "AGENT_RUNTIME_FRAMEWORK_REQUIRED",
+        "AGENT_RUNTIME_FRAMEWORK_MISMATCH": "AGENT_RUNTIME_FRAMEWORK_MISMATCH",
+        "AGENT_RUNTIME_FRAMEWORK_IMMUTABLE": "AGENT_RUNTIME_FRAMEWORK_IMMUTABLE",
+    },
+)
+sys.modules['consts.error_code'] = error_code_mod
 
 # Mock consts.agent_unavailable_reasons
 agent_unavailable_reasons_mock = MagicMock()
@@ -129,6 +155,9 @@ sys.modules['backend.database.model_management_db'] = model_management_db_mock
 
 # Mock database.agent_db (for list_published_agents_impl)
 agent_db_mock = MagicMock()
+agent_db_mock.search_agent_info_by_agent_id.return_value = {
+    "runtime_framework": "smolagents"
+}
 sys.modules['database.agent_db'] = agent_db_mock
 sys.modules['backend.database.agent_db'] = agent_db_mock
 
@@ -200,6 +229,7 @@ def mock_agent_draft():
         "created_by": "user1",
         "updated_by": "user1",
         "delete_flag": "N",
+        "runtime_framework": "smolagents",
     }
 
 
@@ -258,6 +288,64 @@ def mock_skills_draft():
             "enabled": True,
         }
     ]
+
+
+def test_publish_version_rejects_mixed_framework_child_before_snapshot_write(monkeypatch):
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_draft",
+        MagicMock(
+            return_value=(
+                {"agent_id": 1, "runtime_framework": "openjiuwen"},
+                [],
+                [{"selected_agent_id": 2}],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=3),
+    )
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "search_agent_info_by_agent_id",
+        MagicMock(return_value={"runtime_framework": "smolagents"}),
+    )
+    insert_snapshot = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", insert_snapshot)
+
+    with pytest.raises(AppException) as exc_info:
+        publish_version_impl(1, "tenant1", "user1")
+
+    assert exc_info.value.error_code == "AGENT_RUNTIME_FRAMEWORK_MISMATCH"
+    insert_snapshot.assert_not_called()
+
+
+def test_rollback_rejects_snapshot_that_would_change_framework(monkeypatch):
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "search_version_by_version_no",
+        MagicMock(return_value={"version_name": "V1"}),
+    )
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_snapshot",
+        MagicMock(return_value=({"runtime_framework": "openjiuwen"}, [], [])),
+    )
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_draft",
+        MagicMock(return_value=({"runtime_framework": "smolagents"}, [], [])),
+    )
+    restore = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", restore)
+
+    with pytest.raises(AppException) as exc_info:
+        rollback_version_impl(1, "tenant1", 1)
+
+    assert exc_info.value.error_code == "AGENT_RUNTIME_FRAMEWORK_IMMUTABLE"
+    restore.assert_not_called()
 
 
 def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2076,6 +2164,7 @@ def test_publish_version_impl_with_a2a_no_name_uses_default(monkeypatch, mock_to
         "max_steps": 10,
         "duty_prompt": "Test prompt",
         "group_ids": "1,2",
+        "runtime_framework": "smolagents",
     }
 
     mock_query_draft = MagicMock(return_value=(agent_draft_no_name, mock_tools_draft, mock_relations_draft))
@@ -2235,6 +2324,7 @@ def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_
         "max_steps": 10,
         "duty_prompt": "Test prompt",
         "group_ids": "1,2",
+        "runtime_framework": "smolagents",
     }
 
     mock_query_draft = MagicMock(return_value=(agent_draft_no_name, mock_tools_draft, mock_relations_draft))
@@ -2321,6 +2411,7 @@ def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools
         "max_steps": 10,
         "duty_prompt": "Test prompt",
         "group_ids": "1,2",
+        "runtime_framework": "smolagents",
     }
 
     mock_query_draft = MagicMock(return_value=(agent_draft_empty_name, mock_tools_draft, mock_relations_draft))

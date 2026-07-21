@@ -46,6 +46,7 @@ export interface Agent {
   is_available?: boolean;
   unavailable_reasons?: string[];
   tools: ToolInstance[];
+  runtime_framework?: "smolagents" | "openjiuwen";
 }
 
 export interface AgentVersion { 

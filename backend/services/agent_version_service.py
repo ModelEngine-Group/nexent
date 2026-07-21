@@ -32,8 +32,12 @@ from database.agent_version_db import (
     STATUS_ARCHIVED,
 )
 from database.model_management_db import get_model_by_model_id, get_valid_model_ids
+from database.agent_db import search_agent_info_by_agent_id
 from utils.str_utils import convert_string_to_list
+from consts.agent_runtime import normalize_agent_runtime_framework
 from consts.agent_unavailable_reasons import AgentUnavailableReason
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 logger = logging.getLogger("agent_version_service")
 
@@ -80,6 +84,47 @@ def publish_version_impl(
     if not agent_draft:
         raise ValueError("Agent draft not found")
 
+    runtime_framework = normalize_agent_runtime_framework(
+        agent_draft.get("runtime_framework"),
+        default=None,
+    )
+    if runtime_framework is None:
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED,
+            "Agent must select a runtime framework before publishing.",
+            details={"agent_id": agent_id},
+        )
+
+    child_versions: dict[int, int] = {}
+    for rel in relations_draft:
+        child_id = rel['selected_agent_id']
+        child_version = query_current_version_no(child_id, tenant_id)
+        if child_version is None:
+            raise ValueError(
+                f"Sub-agent {child_id} has no published version; publish the sub-agent first."
+            )
+        child_snapshot = search_agent_info_by_agent_id(
+            child_id,
+            tenant_id,
+            child_version,
+        )
+        child_framework = normalize_agent_runtime_framework(
+            child_snapshot.get("runtime_framework"),
+            default=None,
+        )
+        if child_framework != runtime_framework:
+            raise AppException(
+                ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH,
+                "Internal parent and child Agents must use the same runtime framework.",
+                details={
+                    "parent_agent_id": agent_id,
+                    "parent_runtime_framework": runtime_framework,
+                    "child_agent_id": child_id,
+                    "child_runtime_framework": child_framework,
+                },
+            )
+        child_versions[child_id] = child_version
+
     # Calculate new version number
     new_version_no = get_next_version_no(agent_id, tenant_id)
 
@@ -106,11 +151,7 @@ def publish_version_impl(
     # Insert relation snapshots with pinned child agent versions
     for rel in relations_draft:
         child_id = rel['selected_agent_id']
-        child_version = query_current_version_no(child_id, tenant_id)
-        if child_version is None:
-            raise ValueError(
-                f"Sub-agent {child_id} has no published version; publish the sub-agent first."
-            )
+        child_version = child_versions[child_id]
         rel_snapshot = rel.copy()
         rel_snapshot.pop('version_no', None)
         rel_snapshot['version_no'] = new_version_no
@@ -415,6 +456,24 @@ def rollback_version_impl(
     draft_agent, _, _ = query_agent_draft(agent_id, tenant_id)
     if not draft_agent:
         raise ValueError("Agent draft not found")
+    draft_framework = normalize_agent_runtime_framework(
+        draft_agent.get("runtime_framework"),
+        default=None,
+    )
+    target_framework = normalize_agent_runtime_framework(
+        target_agent.get("runtime_framework"),
+        default=None,
+    )
+    if draft_framework != target_framework:
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_IMMUTABLE,
+            "AGENT_RUNTIME_FRAMEWORK_IMMUTABLE",
+            details={
+                "agent_id": agent_id,
+                "current": draft_framework,
+                "requested": target_framework,
+            },
+        )
 
     # Get skill snapshots for target version
     from database import skill_db as skill_db_module
@@ -967,6 +1026,9 @@ async def list_published_agents_impl(
                 "current_version_no": agent.get("current_version_no"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
+                "runtime_framework": normalize_agent_runtime_framework(
+                    agent.get("runtime_framework")
+                ),
             })
 
         return simple_agent_list

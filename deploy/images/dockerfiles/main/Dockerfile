@@ -38,6 +38,7 @@ WORKDIR /opt/backend
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv sync --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR")
+RUN /opt/backend/.venv/bin/python -c "from openjiuwen.core.foundation.tool import LocalFunction, McpServerConfig; from openjiuwen.core.runner import Runner; from openjiuwen.core.single_agent import ReActAgent"
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
     /opt/backend/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 # Layer 1: install sdk in link mode
@@ -58,6 +59,7 @@ COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 
 # Layer 2: copy backend code
 COPY backend /opt/backend
+RUN /opt/backend/.venv/bin/python -c "from services.agent_runtime.providers.openjiuwen_in_process import OpenJiuwenInProcessRuntime, _load_openjiuwen_bindings; _load_openjiuwen_bindings()"
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh

@@ -568,6 +568,7 @@ class AgentInfoRequest(BaseModel):
     verification_config: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+    runtime_framework: Optional[Literal["smolagents", "openjiuwen"]] = None
     version_no: int = 0
 
     @field_validator("verification_config", mode="before")
@@ -665,6 +666,7 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    runtime_framework: Literal["smolagents", "openjiuwen"] = "smolagents"
 
     class Config:
         arbitrary_types_allowed = True

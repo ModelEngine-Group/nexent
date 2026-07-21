@@ -52,6 +52,7 @@ export type EditableAgent = Pick<
   | "enable_context_manager"
   | "greeting_message"
   | "example_questions"
+  | "runtime_framework"
 > & {
   skills: Skill[];
   external_sub_agent_id_list?: number[];
@@ -65,6 +66,7 @@ interface AgentConfigStoreState {
   editedAgent: EditableAgent;
   hasUnsavedChanges: boolean;
   isCreatingMode: boolean; // true when user is in create mode, even if currentAgentId is null
+  isRuntimeFrameworkLocked: boolean;
   isGenerating: boolean; // true when agent generation is in progress
   defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
 
@@ -186,6 +188,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     ingroup_permission: "READ_ONLY",
     greeting_message: "",
     example_questions: [],
+    runtime_framework: "smolagents",
   };
 }
 
@@ -221,6 +224,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         prompts_hidden: agent.prompts_hidden,
         greeting_message: agent.greeting_message || "",
         example_questions: agent.example_questions || [],
+        runtime_framework: agent.runtime_framework || "smolagents",
       }
     : { ...emptyEditableAgent };
 
@@ -341,7 +345,8 @@ const isDirty = (
       editedAgent.skills.length > 0 ||
       editedAgent.ingroup_permission !== "READ_ONLY" ||
       editedAgent.greeting_message !== "" ||
-      (editedAgent.example_questions || []).length > 0
+      (editedAgent.example_questions || []).length > 0 ||
+      editedAgent.runtime_framework !== "smolagents"
     );
   }
 
@@ -377,7 +382,8 @@ const isDirty = (
     isSkillsDirty(baselineAgent.skills, editedAgent.skills) ||
     baselineAgent.ingroup_permission !== editedAgent.ingroup_permission ||
     baselineAgent.greeting_message !== editedAgent.greeting_message ||
-    JSON.stringify(baselineAgent.example_questions ?? []) !== JSON.stringify(editedAgent.example_questions ?? [])
+    JSON.stringify(baselineAgent.example_questions ?? []) !== JSON.stringify(editedAgent.example_questions ?? []) ||
+    baselineAgent.runtime_framework !== editedAgent.runtime_framework
   );
 };
 
@@ -388,6 +394,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   editedAgent: createEmptyEditableAgent(),
   hasUnsavedChanges: false,
   isCreatingMode: false,
+  isRuntimeFrameworkLocked: false,
   isGenerating: false,
   defaultLlmConfig: null,
   forceRefreshKey: 0,
@@ -437,6 +444,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       editedAgent,
       hasUnsavedChanges: isDirty(baselineAgent, editedAgent),
       isCreatingMode: false,
+      isRuntimeFrameworkLocked: Boolean(agent?.runtime_framework),
       forceRefreshKey: 0,
     });
   },
@@ -450,6 +458,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
       hasUnsavedChanges: false,
       isCreatingMode: true,
+      isRuntimeFrameworkLocked: false,
       forceRefreshKey: 0,
     });
   },
@@ -504,6 +513,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     set({
       baselineAgent: { ...editedAgent },
       hasUnsavedChanges: false,
+      isRuntimeFrameworkLocked: true,
     });
   },
 
@@ -532,6 +542,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
       hasUnsavedChanges: false,
       isCreatingMode: false,
+      isRuntimeFrameworkLocked: false,
       isGenerating: false,
       forceRefreshKey: 0,
     });

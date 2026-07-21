@@ -17,6 +17,7 @@ _EXPORTS = {
     "CoreAgent": (".core_agent", "CoreAgent"),
     "ModelConfig": (_AGENT_MODEL_MODULE, "ModelConfig"),
     "ToolConfig": (_AGENT_MODEL_MODULE, "ToolConfig"),
+    "MCPBinding": (_AGENT_MODEL_MODULE, "MCPBinding"),
     "AgentConfig": (_AGENT_MODEL_MODULE, "AgentConfig"),
     "AgentRunInfo": (_AGENT_MODEL_MODULE, "AgentRunInfo"),
     "AgentHistory": (_AGENT_MODEL_MODULE, "AgentHistory"),

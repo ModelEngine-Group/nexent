@@ -77,6 +77,9 @@ class ErrorCode(Enum):
     AGENTSPACE_AGENT_RUN_FAILED = "030103"  # Agent run failed
     AGENTSPACE_AGENT_NAME_DUPLICATE = "030104"  # Duplicate agent name
     AGENTSPACE_VERSION_NOT_FOUND = "030105"  # Agent version not found
+    AGENT_RUNTIME_FRAMEWORK_IMMUTABLE = "030106"  # Runtime framework cannot be changed after creation
+    AGENT_RUNTIME_FRAMEWORK_MISMATCH = "030107"  # Internal parent and child frameworks differ
+    AGENT_RUNTIME_FRAMEWORK_REQUIRED = "030108"  # Blank agent has no selected runtime framework
 
     # ==================== 04 AgentMarket / 智能体市场 ====================
     # 01 - Agent
@@ -245,6 +248,9 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.COMMON_RESOURCE_NOT_FOUND: 404,
     ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: 409,
     ErrorCode.COMMON_RESOURCE_DISABLED: 403,
+    ErrorCode.AGENT_RUNTIME_FRAMEWORK_IMMUTABLE: 409,
+    ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH: 409,
+    ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED: 409,
     # Common - File
     ErrorCode.FILE_NOT_FOUND: 404,
     ErrorCode.FILE_UPLOAD_FAILED: 500,

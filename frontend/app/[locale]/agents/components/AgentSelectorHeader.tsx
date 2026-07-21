@@ -298,6 +298,7 @@ export default function AgentSelectorHeader({
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
+        runtime_framework: detail.runtime_framework || "smolagents",
       });
 
       if (!createResult.success || !createResult.data?.agent_id) {

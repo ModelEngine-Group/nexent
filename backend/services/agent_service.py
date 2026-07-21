@@ -12,7 +12,6 @@ from typing import Any, Callable, Optional, Dict, List
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from nexent.core.agents.run_agent import agent_run
 from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
@@ -24,6 +23,10 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from consts.agent_runtime import (
+    DEFAULT_AGENT_RUNTIME_FRAMEWORK,
+    normalize_agent_runtime_framework,
+)
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -37,7 +40,6 @@ from consts.model import (
     ExportAndImportDataFormat,
     MCPInfo,
     MessageRequest,
-    MessageUnit,
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
@@ -70,7 +72,6 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -108,6 +109,12 @@ from services.conversation_management_service import (
 from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
+from .agent_runtime.execution import AgentRuntimeExecution
+from .agent_runtime.registry import get_agent_runtime
+from .agent_runtime.run_control import (
+    RuntimeRunHandle,
+    runtime_run_control_registry,
+)
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.memory_utils import build_memory_config
@@ -287,7 +294,7 @@ async def _process_skill_file_uploads(
                     absolute_path,
                     error_message,
                 )
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "[skill-file] failed to upload file file_name=%s absolute_path=%s",
                 file_name,
@@ -963,23 +970,53 @@ async def _stream_agent_chunks(
             user_id=user_id
         )
 
-    cancel_poll_task = asyncio.create_task(
-        _poll_runtime_cancel_signal(
+    cancel_poll_task: Optional[asyncio.Task] = None
+    runtime = None
+    runtime_run_id: Optional[str] = None
+    try:
+        runtime_framework = vars(agent_run_info).get(
+            "runtime_framework",
+            DEFAULT_AGENT_RUNTIME_FRAMEWORK,
+        )
+        if runtime_framework is None:
+            raise AppException(
+                ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED,
+                "Agent must select a runtime framework before it can run.",
+            )
+        runtime = get_agent_runtime(runtime_framework)
+        runtime_run_id = uuid.uuid4().hex
+        runtime_execution = AgentRuntimeExecution(
+            run_id=runtime_run_id,
+            agent_run_info=agent_run_info,
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
-            stop_event=agent_run_info.stop_event,
+            tenant_id=tenant_id,
+            version_no=agent_request.version_no or 0,
         )
-    )
+        runtime_run_control_registry.register(
+            RuntimeRunHandle(
+                run_id=runtime_run_id,
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+                runtime=runtime,
+            )
+        )
+        cancel_poll_task = asyncio.create_task(
+            _poll_runtime_cancel_signal(
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+                stop_event=agent_run_info.stop_event,
+            )
+        )
 
-    # In resume mode, emit a status event first
-    if is_resume_mode:
-        await channel.publish(STREAM_STATUS_EVENT)
-        await channel.publish(f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n')
-        yield STREAM_STATUS_EVENT
-        yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
+        # In resume mode, emit a status event first
+        if is_resume_mode:
+            await channel.publish(STREAM_STATUS_EVENT)
+            await channel.publish(f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n')
+            yield STREAM_STATUS_EVENT
+            yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
-    try:
-        async for chunk in agent_run(agent_run_info):
+        async for chunk in runtime.run(runtime_execution):
             chunk_type: Optional[str] = None
             chunk_content: str = ""
             try:
@@ -1067,9 +1104,7 @@ async def _stream_agent_chunks(
                     # loop is async but the DB operations are I/O-bound with network
                     # latency, synchronous writes here are acceptably fast and guarantee
                     # that each chunk is fully persisted before the next chunk arrives.
-                    old_len = len(current_unit["content"])
                     current_unit["content"] += chunk_content
-                    new_len = len(current_unit["content"])
                     update_unit_content(
                         current_unit["unit_id"],
                         current_unit["content"],
@@ -1244,7 +1279,7 @@ async def _stream_agent_chunks(
             except Exception:
                 logger.exception("Failed to mark assistant message as %s", terminal_status)
 
-        if not cancel_poll_task.done():
+        if cancel_poll_task is not None and not cancel_poll_task.done():
             cancel_poll_task.cancel()
 
         was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
@@ -1252,6 +1287,20 @@ async def _stream_agent_chunks(
 
         agent_run_manager.unregister_agent_run(
             agent_request.conversation_id, user_id, status=terminal_status)
+
+        if (
+            runtime is not None
+            and runtime_run_id is not None
+            and not stream_completed_normally
+            and not agent_run_info.stop_event.is_set()
+        ):
+            runtime.request_stop(runtime_run_id)
+        if runtime_run_id is not None:
+            runtime_run_control_registry.unregister(
+                run_id=runtime_run_id,
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+            )
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
@@ -1261,7 +1310,7 @@ async def _stream_agent_chunks(
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
-            cleanup_task = asyncio.create_task(
+            asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
                     user_id=user_id
@@ -1570,7 +1619,117 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
             "duty_prompt": agent_info.get("duty_prompt"),
             "constraint_prompt": agent_info.get("constraint_prompt"),
             "few_shots_prompt": agent_info.get("few_shots_prompt"),
+            "runtime_framework": agent_info.get("runtime_framework"),
             "sub_agent_id_list": query_sub_agents_id_list(main_agent_id=sub_agent_id, tenant_id=tenant_id)}
+
+
+def _resolve_runtime_framework_for_save(
+    request: AgentInfoRequest,
+    tenant_id: str,
+) -> str:
+    """Resolve the one-time framework assignment and enforce immutability."""
+    raw_requested_framework = vars(request).get("runtime_framework")
+    requested_framework = normalize_agent_runtime_framework(
+        raw_requested_framework,
+        default=DEFAULT_AGENT_RUNTIME_FRAMEWORK,
+    )
+    if request.agent_id is None:
+        return requested_framework
+
+    existing = search_agent_info_by_agent_id(
+        agent_id=request.agent_id,
+        tenant_id=tenant_id,
+        version_no=vars(request).get("version_no", 0),
+    )
+    existing_framework = _runtime_framework_from_record(existing)
+    if existing_framework is None:
+        return requested_framework
+    if raw_requested_framework is not None and requested_framework != existing_framework:
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_IMMUTABLE,
+            "AGENT_RUNTIME_FRAMEWORK_IMMUTABLE",
+            details={
+                "agent_id": request.agent_id,
+                "current": existing_framework,
+                "requested": requested_framework,
+            },
+        )
+    return existing_framework
+
+
+def _runtime_framework_from_record(record: Any) -> str | None:
+    """Read persisted framework while treating pre-migration records as Smolagents."""
+    if record is None:
+        return None
+    if not isinstance(record, dict) or "runtime_framework" not in record:
+        return DEFAULT_AGENT_RUNTIME_FRAMEWORK
+    return normalize_agent_runtime_framework(
+        record.get("runtime_framework"),
+        default=None,
+    )
+
+
+def _require_agent_runtime_framework_for_run(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    version_no: int = 0,
+) -> str:
+    """Fail before opening SSE when a blank Agent has no selected framework."""
+    agent = search_agent_info_by_agent_id(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
+    framework = _runtime_framework_from_record(agent)
+    if framework is None:
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED,
+            "Agent must select a runtime framework before it can run.",
+            details={"agent_id": agent_id},
+        )
+    return framework
+
+
+def _validate_related_agent_frameworks(
+    *,
+    parent_agent_id: int,
+    child_agent_ids: List[int],
+    tenant_id: str,
+    version_no: int = 0,
+) -> None:
+    """Reject internal parent-child links that cross runtime frameworks."""
+    parent = search_agent_info_by_agent_id(parent_agent_id, tenant_id, version_no)
+    parent_framework = _runtime_framework_from_record(parent)
+    if parent_framework is None:
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED,
+            "Parent Agent must select a runtime framework before adding sub-agents.",
+            details={"agent_id": parent_agent_id},
+        )
+
+    mismatches = []
+    for child_agent_id in child_agent_ids:
+        child = search_agent_info_by_agent_id(child_agent_id, tenant_id, version_no)
+        child_framework = _runtime_framework_from_record(child)
+        if child_framework != parent_framework:
+            mismatches.append(
+                {
+                    "agent_id": child_agent_id,
+                    "runtime_framework": child_framework,
+                }
+            )
+
+    if mismatches:
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH,
+            "Internal parent and child Agents must use the same runtime framework.",
+            details={
+                "parent_agent_id": parent_agent_id,
+                "parent_runtime_framework": parent_framework,
+                "children": mismatches,
+            },
+        )
 
 
 def _validate_requested_output_tokens_for_agent(
@@ -1618,6 +1777,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "example_questions cannot exceed 6 items")
 
     _validate_requested_output_tokens_for_agent(request, tenant_id)
+    request.runtime_framework = _resolve_runtime_framework_for_save(request, tenant_id)
 
     prompt_template_id, prompt_template_name = get_prompt_template_summary(
         template_id=request.prompt_template_id,
@@ -1651,6 +1811,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "few_shots_prompt": request.few_shots_prompt,
                 "greeting_message": request.greeting_message,
                 "example_questions": request.example_questions,
+                "runtime_framework": request.runtime_framework,
                 "enabled": request.enabled if request.enabled is not None else True,
                 "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids,
                 "ingroup_permission": request.ingroup_permission
@@ -1661,6 +1822,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
             update_agent(agent_id, request, user_id)
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
@@ -1771,6 +1934,12 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     try:
         if request.related_agent_ids is not None and agent_id is not None:
             related_agent_ids = request.related_agent_ids
+            _validate_related_agent_frameworks(
+                parent_agent_id=agent_id,
+                child_agent_ids=related_agent_ids,
+                tenant_id=tenant_id,
+                version_no=vars(request).get("version_no", 0),
+            )
             # Check for circular dependencies using BFS
             search_list = deque(related_agent_ids)
             agent_id_set = set()
@@ -1795,7 +1964,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 tenant_id=tenant_id,
                 user_id=user_id
             )
-    except ValueError as e:
+    except (AppException, ValueError):
         # Re-raise ValueError (circular dependency) as-is
         raise
     except Exception as e:
@@ -2193,8 +2362,68 @@ async def export_agent_by_agent_id(
                                           skill_names=skill_names,
                                           prompt_template_id=agent_info.get(
                                               "prompt_template_id"),
-                                          prompt_template_name=agent_info.get("prompt_template_name"))
+                                          prompt_template_name=agent_info.get("prompt_template_name"),
+                                          runtime_framework=normalize_agent_runtime_framework(
+                                              agent_info.get("runtime_framework")
+                                          ))
     return agent_info
+
+
+def _validate_import_agent_graph(agent_bundle: ExportAndImportDataFormat) -> None:
+    """Validate framework compatibility and acyclicity before import writes begin."""
+    records = {int(agent_id): info for agent_id, info in agent_bundle.agent_info.items()}
+    if agent_bundle.agent_id not in records:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "The imported root Agent is missing from agent_info.",
+        )
+
+    frameworks = {
+        agent_id: normalize_agent_runtime_framework(
+            vars(info).get("runtime_framework")
+        )
+        for agent_id, info in records.items()
+    }
+    for parent_id, info in records.items():
+        for child_id in info.managed_agents:
+            if child_id not in records:
+                raise AppException(
+                    ErrorCode.COMMON_PARAMETER_INVALID,
+                    f"Imported child Agent {child_id} is missing from agent_info.",
+                    details={"parent_agent_id": parent_id, "child_agent_id": child_id},
+                )
+            if frameworks[child_id] != frameworks[parent_id]:
+                raise AppException(
+                    ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH,
+                    "Imported internal parent and child Agents must use the same runtime framework.",
+                    details={
+                        "parent_agent_id": parent_id,
+                        "parent_runtime_framework": frameworks[parent_id],
+                        "child_agent_id": child_id,
+                        "child_runtime_framework": frameworks[child_id],
+                    },
+                )
+
+    visiting: set[int] = set()
+    visited: set[int] = set()
+
+    def visit(agent_id: int) -> None:
+        if agent_id in visiting:
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Circular dependency detected in imported Agent relationships.",
+                details={"agent_id": agent_id},
+            )
+        if agent_id in visited:
+            return
+        visiting.add(agent_id)
+        for child_id in records[agent_id].managed_agents:
+            visit(child_id)
+        visiting.remove(agent_id)
+        visited.add(agent_id)
+
+    for record_id in records:
+        visit(record_id)
 
 
 async def import_agent_impl(
@@ -2213,6 +2442,7 @@ async def import_agent_impl(
         exist for the current tenant.
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+    _validate_import_agent_graph(agent_info)
     agent_id = agent_info.agent_id
 
     agent_stack = deque([agent_id])
@@ -2342,6 +2572,9 @@ async def import_agent_by_agent_id(
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
+                                         "runtime_framework": normalize_agent_runtime_framework(
+                                             vars(import_agent_info).get("runtime_framework")
+                                         ),
                                          "enabled": import_agent_info.enabled,
                                          "group_ids": user_group_ids},
                              tenant_id=tenant_id,
@@ -2516,6 +2749,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+                "runtime_framework": normalize_agent_runtime_framework(
+                    agent.get("runtime_framework")
+                ),
             })
 
         return simple_agent_list
@@ -2680,6 +2916,15 @@ def check_agent_availability(
 
 
 def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
+    try:
+        _validate_related_agent_frameworks(
+            parent_agent_id=parent_agent_id,
+            child_agent_ids=[child_agent_id],
+            tenant_id=tenant_id,
+        )
+    except AppException as exc:
+        return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
     # search the agent by bfs, check if there is a circular call
     search_list = deque([child_agent_id])
     agent_id_set = set()
@@ -3029,6 +3274,12 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if not resume and agent_request.agent_id is not None:
+        _require_agent_runtime_framework_for_run(
+            agent_id=agent_request.agent_id,
+            tenant_id=resolved_tenant_id,
+            version_no=agent_request.version_no or 0,
+        )
 
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist
@@ -3341,6 +3592,11 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
     Stop agent run and preprocess tasks for the specified conversation_id.
     Matches the behavior of agent_app.agent_stop_api.
     """
+    runtime_stopped = runtime_run_control_registry.request_stop(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+
     # Stop agent run
     agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
 
@@ -3348,8 +3604,10 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
     preprocess_stopped = preprocess_manager.stop_preprocess_tasks(
         conversation_id)
 
-    if agent_stopped or preprocess_stopped:
+    if runtime_stopped or agent_stopped or preprocess_stopped:
         message_parts = []
+        if runtime_stopped:
+            message_parts.append("agent runtime")
         if agent_stopped:
             message_parts.append("agent run")
         if preprocess_stopped:
