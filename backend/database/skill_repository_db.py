@@ -136,6 +136,7 @@ def list_skill_repository_summaries(
         query = session.query(
             SkillRepository.skill_repository_id,
             SkillRepository.skill_id,
+            SkillRepository.publisher_user_id,
             SkillRepository.submitted_by,
             SkillRepository.name,
             SkillRepository.description,
@@ -174,6 +175,7 @@ def list_skill_repository_summaries(
         {
             "skill_repository_id": row.skill_repository_id,
             "skill_id": row.skill_id,
+            "publisher_user_id": row.publisher_user_id,
             "submitted_by": row.submitted_by,
             "name": row.name,
             "description": row.description,

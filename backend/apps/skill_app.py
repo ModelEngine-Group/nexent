@@ -68,11 +68,14 @@ async def list_skills(
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
-        _, current_tenant_id = get_current_user_id(authorization)
+        user_id, current_tenant_id = get_current_user_id(authorization)
         # Super admin can query a specific tenant's skills; otherwise use current user's tenant
         effective_tenant_id = tenant_id if tenant_id else current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
-        skills = service.list_skills(tenant_id=effective_tenant_id)
+        skills = service.list_visible_skills(
+            tenant_id=effective_tenant_id,
+            user_id=user_id,
+        )
         return JSONResponse(content={"skills": skills})
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))

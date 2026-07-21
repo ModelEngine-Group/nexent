@@ -27,6 +27,7 @@ from consts.const import (
     OFFICIAL_SKILLS_ZIP_PATH,
     PERMISSION_EDIT,
     PERMISSION_PRIVATE,
+    PERMISSION_READ,
     ROOT_DIR,
 )
 from consts.exceptions import ForbiddenError, SkillException
@@ -41,6 +42,62 @@ from utils.str_utils import convert_list_to_string
 logger = logging.getLogger(__name__)
 
 _skill_manager: Optional[SkillManager] = None
+
+
+def _to_group_id_set(group_ids: Any) -> set[int]:
+    if isinstance(group_ids, str):
+        return {
+            int(group_id.strip())
+            for group_id in group_ids.split(",")
+            if group_id.strip().isdigit()
+        }
+    if isinstance(group_ids, list):
+        return {
+            int(group_id)
+            for group_id in group_ids
+            if str(group_id).strip().isdigit()
+        }
+    return set()
+
+
+def can_view_skill(
+    *,
+    skill: Dict[str, Any],
+    user_id: str,
+    user_role: str,
+    user_group_ids: set[int],
+) -> bool:
+    """Return whether a skill is available to the current user."""
+    if user_role in CAN_EDIT_ALL_USER_ROLES:
+        return True
+    if str(skill.get("created_by")) == str(user_id):
+        return True
+    if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
+        return False
+    return bool(
+        user_group_ids.intersection(_to_group_id_set(skill.get("group_ids")))
+    )
+
+
+def resolve_skill_permission(
+    *,
+    skill: Dict[str, Any],
+    user_id: str,
+    user_role: str,
+    user_group_ids: set[int],
+) -> str:
+    """Resolve whether the current user can edit or only use a visible skill."""
+    if user_role in CAN_EDIT_ALL_USER_ROLES:
+        return PERMISSION_EDIT
+    if str(skill.get("created_by")) == str(user_id):
+        return PERMISSION_EDIT
+    if skill.get("ingroup_permission") != PERMISSION_EDIT:
+        return PERMISSION_READ
+    return (
+        PERMISSION_EDIT
+        if user_group_ids.intersection(_to_group_id_set(skill.get("group_ids")))
+        else PERMISSION_READ
+    )
 
 
 def _apply_default_skill_permission_fields(
@@ -68,17 +125,14 @@ def _get_user_role(user_id: Optional[str]) -> str:
 def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
     if not user_id:
         return False
-    if _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES:
-        return True
-    if str(skill.get("created_by")) == str(user_id):
-        return True
-    if skill.get("ingroup_permission") in (None, PERMISSION_PRIVATE):
-        return False
-    if skill.get("ingroup_permission") != PERMISSION_EDIT:
-        return False
-    skill_group_ids = {int(group_id) for group_id in skill.get("group_ids") or []}
+    user_role = _get_user_role(user_id)
     user_group_ids = set(query_group_ids_by_user(user_id) or [])
-    return bool(skill_group_ids.intersection(user_group_ids))
+    return resolve_skill_permission(
+        skill=skill,
+        user_id=user_id,
+        user_role=user_role,
+        user_group_ids=user_group_ids,
+    ) == PERMISSION_EDIT
 
 
 def _normalize_zip_entry_path(name: str) -> str:
@@ -993,6 +1047,34 @@ class SkillService:
         except Exception as e:
             logger.error(f"Error listing skills: {e}")
             raise SkillException(f"Failed to list skills: {str(e)}") from e
+
+    def list_visible_skills(
+        self,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: str,
+    ) -> List[Dict[str, Any]]:
+        """List skills visible to a user and attach the resolved permission."""
+        user_role = _get_user_role(user_id)
+        user_group_ids = set(query_group_ids_by_user(user_id) or [])
+        visible_skills = [
+            skill
+            for skill in self.list_skills(tenant_id=tenant_id)
+            if can_view_skill(
+                skill=skill,
+                user_id=user_id,
+                user_role=user_role,
+                user_group_ids=user_group_ids,
+            )
+        ]
+        for skill in visible_skills:
+            skill["permission"] = resolve_skill_permission(
+                skill=skill,
+                user_id=user_id,
+                user_role=user_role,
+                user_group_ids=user_group_ids,
+            )
+        return visible_skills
 
     def get_skill(self, skill_name: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Get a specific skill within a tenant.
@@ -2177,7 +2259,8 @@ class SkillService:
         source: str = "导入",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        skip_duplicate_check: bool = False
+        skip_duplicate_check: bool = False,
+        ingroup_permission: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a skill from ZIP bytes, optionally skipping the duplicate name check.
 
@@ -2192,6 +2275,7 @@ class SkillService:
             user_id: Creator user ID
             tenant_id: Tenant ID
             skip_duplicate_check: If True, skip the "skill already exists" check
+            ingroup_permission: Optional group permission override for the new skill
 
         Returns:
             Created skill dict
@@ -2295,6 +2379,8 @@ class SkillService:
         if user_id:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
+        if ingroup_permission is not None:
+            skill_dict["ingroup_permission"] = ingroup_permission
         _apply_default_skill_permission_fields(skill_dict, user_id)
 
         result = skill_db.create_skill(skill_dict, tenant_id)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Form, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -11,12 +11,15 @@ import type {
   SkillFormData,
 } from "@/types/skill";
 import {
+  fetchSkillById,
   fetchSkillFileContent,
   fetchSkillFiles,
   SkillFilesAccessDeniedError,
 } from "@/services/agentConfigService";
 import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
 
 interface SkillDetailModalProps {
@@ -33,7 +36,25 @@ export default function SkillDetailModal({
   onClose,
 }: SkillDetailModalProps) {
   const { t } = useTranslation("common");
+  const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
+  const { data: groupData } = useGroupList(user?.tenantId ?? null);
+  const accessibleGroupIds = useMemo(
+    () => getAccessibleGroupIds(),
+    [getAccessibleGroupIds]
+  );
+  const { groups: filteredGroups } = useGroupDetails(
+    groupData?.groups ?? [],
+    accessibleGroupIds
+  );
+  const groupSelectOptions = useMemo(
+    () =>
+      filteredGroups.map((group) => ({
+        label: group.group_name,
+        value: group.group_id,
+      })),
+    [filteredGroups]
+  );
   const [skillTabs, setSkillTabs] = useState<SkillFileContent[]>([
     { path: "SKILL.md", content: "" },
   ]);
@@ -51,6 +72,8 @@ export default function SkillDetailModal({
       source: formatSource(skill.source, t),
       tags: Array.isArray(skill.tags) ? skill.tags : [],
       content: skill.content || "",
+      group_ids: skill.group_ids || [],
+      ingroup_permission: skill.ingroup_permission || undefined,
     });
     setSkillTabs([{ path: "SKILL.md", content: skill.content || "" }]);
     setActiveSkillTab("SKILL.md");
@@ -59,10 +82,29 @@ export default function SkillDetailModal({
     const loadFiles = async () => {
       setLoading(true);
       try {
-        const files = await fetchSkillFiles(skill.name);
+        const detailResult = await fetchSkillById(
+          skill.skill_id,
+          skill.tenant_id
+        );
+        const detail =
+          detailResult.success && detailResult.data ? detailResult.data : skill;
+        const skillName = detail.name?.trim() || skill.name;
+        if (!cancelled) {
+          form.setFieldsValue({
+            name: skillName,
+            description: detail.description || "",
+            source: formatSource(detail.source, t),
+            tags: Array.isArray(detail.tags) ? detail.tags : [],
+            content: detail.content || "",
+            group_ids: Array.isArray(detail.group_ids) ? detail.group_ids : [],
+            ingroup_permission: detail.ingroup_permission || undefined,
+          });
+        }
+
+        const files = await fetchSkillFiles(skillName);
         const flatFiles = flattenSkillFiles(
           normalizeSkillFiles(files),
-          skill.name
+          skillName
         );
         if (flatFiles.length === 0) {
           return;
@@ -71,7 +113,7 @@ export default function SkillDetailModal({
         const tabs = await Promise.all(
           flatFiles.map(async (path) => {
             try {
-              const content = await fetchSkillFileContent(skill.name, path);
+              const content = await fetchSkillFileContent(skillName, path);
               return { path, content: content || "" };
             } catch (error) {
               log.error("Failed to load skill file content:", error);
@@ -104,7 +146,7 @@ export default function SkillDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [open, skill?.skill_id, form, t]);
+  }, [open, skill, form, t]);
 
   const handleClose = () => {
     setSkillTabs([{ path: "SKILL.md", content: "" }]);
@@ -145,6 +187,7 @@ export default function SkillDetailModal({
             setSkillTabs={setSkillTabs}
             activeSkillTab={activeSkillTab}
             setActiveSkillTab={setActiveSkillTab}
+            groupSelectOptions={groupSelectOptions}
             readOnly
           />
         </div>

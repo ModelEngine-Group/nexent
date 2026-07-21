@@ -15,12 +15,7 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.const import (
-    CAN_EDIT_ALL_USER_ROLES,
-    PERMISSION_EDIT,
-    PERMISSION_PRIVATE,
-    PERMISSION_READ,
-)
+from consts.const import PERMISSION_PRIVATE, PERMISSION_READ
 from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
 from database.skill_repository_db import (
     get_skill_repository_by_id_and_publisher,
@@ -34,10 +29,8 @@ from database.skill_repository_db import (
     update_skill_repository_status_by_id,
 )
 from database.skill_db import get_skill_by_name
-from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.skill_service import SkillService
-from utils.str_utils import convert_string_to_list
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
@@ -91,18 +84,6 @@ _UPDATE_SNAPSHOT_FIELDS = (
 )
 
 
-def _to_group_id_set(group_ids: Any) -> set[int]:
-    if isinstance(group_ids, str):
-        return set(convert_string_to_list(group_ids))
-    if isinstance(group_ids, list):
-        return {
-            int(group_id)
-            for group_id in group_ids
-            if str(group_id).strip().isdigit()
-        }
-    return set()
-
-
 def _serialize_created_at(create_time: Any) -> Optional[str]:
     """Serialize DB create_time to an ISO string for API consumers."""
     if create_time is None:
@@ -112,9 +93,13 @@ def _serialize_created_at(create_time: Any) -> Optional[str]:
     return str(create_time)
 
 
-def _to_summary_item(record: Dict[str, Any]) -> Dict[str, Any]:
+def _to_summary_item(
+    record: Dict[str, Any],
+    *,
+    can_take_down: Optional[bool] = None,
+) -> Dict[str, Any]:
     """Map a DB record to a lightweight skill marketplace summary item."""
-    return {
+    item = {
         "id": record.get("skill_repository_id"),
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
@@ -130,6 +115,9 @@ def _to_summary_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": record.get("created_at") or _serialize_created_at(record.get("create_time")),
         "updated_at": record.get("updated_at") or _serialize_created_at(record.get("update_time")),
     }
+    if can_take_down is not None:
+        item["can_take_down"] = can_take_down
+    return item
 
 
 def _to_detail_item(
@@ -260,21 +248,6 @@ def _get_user_role(user_id: str) -> str:
     return str(user_tenant.get("user_role") or "USER")
 
 
-def _resolve_mine_skill_permission(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-) -> str:
-    """Resolve list-item permission for skill repository mine view."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return PERMISSION_EDIT
-    if str(skill.get("created_by")) == str(user_id):
-        return PERMISSION_EDIT
-    ingroup_permission = skill.get("ingroup_permission")
-    return ingroup_permission if ingroup_permission is not None else PERMISSION_READ
-
-
 def _can_publish_skill(
     *,
     skill: Dict[str, Any],
@@ -288,24 +261,6 @@ def _can_publish_skill(
         user_role == "DEV"
         and str(skill.get("created_by")) == str(user_id)
     )
-
-
-def _can_view_mine_skill(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-    user_group_ids: set[int],
-) -> bool:
-    """Return whether a skill should appear in the current user's mine list."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return True
-    if str(skill.get("created_by")) == str(user_id):
-        return True
-    if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
-        return False
-    skill_group_ids = _to_group_id_set(skill.get("group_ids"))
-    return bool(user_group_ids.intersection(skill_group_ids))
 
 
 def _resolve_submitter_email(user_id: str) -> Optional[str]:
@@ -804,6 +759,7 @@ def install_skill_from_repository_impl(
             source="repository",
             user_id=user_id,
             tenant_id=tenant_id,
+            ingroup_permission=PERMISSION_READ,
         )
     except SkillException as exc:
         message = str(exc)
@@ -887,11 +843,7 @@ def _to_mine_skill_item(
         "created_by": skill.get("created_by"),
         "created_at": skill.get("create_time"),
         "updated_at": skill.get("update_time"),
-        "permission": _resolve_mine_skill_permission(
-            skill=skill,
-            user_id=user_id,
-            user_role=user_role,
-        ),
+        "permission": skill.get("permission"),
         "can_publish": _can_publish_skill(
             skill=skill,
             user_id=user_id,
@@ -923,17 +875,10 @@ def list_my_editable_skills_impl(
     safe_page_size = max(int(page_size or 10), 1)
 
     user_role = _get_user_role(user_id)
-    user_group_ids = set(query_group_ids_by_user(user_id) or [])
-    skills = [
-        skill
-        for skill in SkillService(tenant_id=tenant_id).list_skills(tenant_id=tenant_id)
-        if _can_view_mine_skill(
-            skill=skill,
-            user_id=user_id,
-            user_role=user_role,
-            user_group_ids=user_group_ids,
-        )
-    ]
+    skills = SkillService(tenant_id=tenant_id).list_visible_skills(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
     counts = _count_skills_by_ownership(skills, user_id)
 
     filtered_skills = [
@@ -982,6 +927,7 @@ def list_my_editable_skills_impl(
 def list_skill_repository_listings_impl(
     tenant_id: str,
     *,
+    user_id: str,
     status: Optional[str] = None,
     skill_id: Optional[int] = None,
     category_id: Optional[int] = None,
@@ -1007,8 +953,24 @@ def list_skill_repository_listings_impl(
         search=search,
         sort_by_update_time=sort_by_update_time,
     )
+    user_role = _get_user_role(user_id)
     return {
-        "items": [_to_summary_item(record) for record in result.get("items", [])],
+        "items": [
+            _to_summary_item(
+                record,
+                can_take_down=(
+                    record.get("status") == STATUS_SHARED
+                    and (
+                        user_role in ("ADMIN", "SU")
+                        or (
+                            user_role == "DEV"
+                            and str(record.get("publisher_user_id")) == str(user_id)
+                        )
+                    )
+                ),
+            )
+            for record in result.get("items", [])
+        ],
         "pagination": result.get("pagination"),
     }
 

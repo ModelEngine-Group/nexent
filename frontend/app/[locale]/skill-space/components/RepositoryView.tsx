@@ -78,7 +78,7 @@ export function RepositoryView({
                 key={listing.skill_repository_id}
                 listing={listing}
                 onDetailClick={() => onDetailClick(listing)}
-                showAdminMenu={showAdminMenu}
+                showAdminMenu={showAdminMenu || listing.can_take_down === true}
                 isTakingDown={
                   takingDownRepositoryId === listing.skill_repository_id
                 }

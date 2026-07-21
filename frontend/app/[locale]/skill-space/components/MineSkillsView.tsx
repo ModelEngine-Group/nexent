@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { App, Button, Dropdown, Input } from "antd";
+import { App, Button, Dropdown, Input, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -435,17 +435,23 @@ function MineSkillCard({
               {t("skillRepository.common.view")}
             </Button>
           )}
-          {canPublish ? (
-            <Button
-              type={hasSharedRepository ? "default" : "primary"}
-              className="min-w-0 flex-1"
-              icon={<Power className="size-3.5" aria-hidden />}
-              disabled={isPendingReview}
-              onClick={canApplyListing ? onApplyListing : onViewReview}
-            >
-              {applyButtonLabel}
-            </Button>
-          ) : null}
+          <Tooltip
+            title={
+              canPublish ? undefined : t("skillRepository.mine.applyForbidden")
+            }
+          >
+            <span className="min-w-0 flex-1">
+              <Button
+                type={hasSharedRepository ? "default" : "primary"}
+                className="w-full"
+                icon={<Power className="size-3.5" aria-hidden />}
+                disabled={!canPublish || isPendingReview}
+                onClick={canApplyListing ? onApplyListing : onViewReview}
+              >
+                {applyButtonLabel}
+              </Button>
+            </span>
+          </Tooltip>
         </div>
       </div>
     </article>

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
-import { Tabs, message, Tooltip, Badge } from "antd";
+import { Badge, Button, message, Tabs, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Info, Trash2, Settings } from "lucide-react";
@@ -277,13 +277,22 @@ export default function SkillManagement({
                     }`}
                     onClick={isReadOnly ? undefined : (e) => handleInfoClick(skill, e)}
                   />
-                  <Trash2
-                    size={16}
-                    className={`cursor-pointer text-gray-400 hover:text-red-500 transition-colors ${
-                      isReadOnly ? "pointer-events-none opacity-50" : ""
-                    }`}
-                    onClick={isReadOnly ? undefined : (e) => handleDeleteClick(skill, e)}
-                  />
+                  <Tooltip
+                    title={
+                      skill.permission === "READ_ONLY"
+                        ? t("skillManagement.noEditPermission")
+                        : t("common.delete")
+                    }
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Trash2 className="size-4" />}
+                      disabled={isReadOnly || skill.permission === "READ_ONLY"}
+                      className="text-gray-400 hover:text-red-500"
+                      onClick={(e) => handleDeleteClick(skill, e)}
+                    />
+                  </Tooltip>
                 </div>
               </div>
             );

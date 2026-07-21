@@ -20,6 +20,7 @@ export interface SkillRepositoryListingItem {
   category_id?: number | null;
   author?: string | null;
   submitted_by?: string | null;
+  can_take_down?: boolean;
 }
 
 export interface SkillRepositoryListingPagination {

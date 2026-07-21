@@ -132,6 +132,29 @@ class _SkillServiceMock:
     def list_skills(self, tenant_id=None):
         return []
 
+    def list_visible_skills(self, *, tenant_id=None, user_id):
+        user_tenant = _user_tenant_db_mock.get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant.get("user_role") or "USER")
+        user_group_ids = set(_group_db_mock.query_group_ids_by_user(user_id) or [])
+        skills = [
+            skill
+            for skill in self.list_skills(tenant_id=tenant_id)
+            if user_role in {"ADMIN", "SUPER_ADMIN"}
+            or str(skill.get("created_by")) == str(user_id)
+            or (
+                skill.get("ingroup_permission") != "PRIVATE"
+                and bool(user_group_ids.intersection(skill.get("group_ids") or []))
+            )
+        ]
+        for skill in skills:
+            skill["permission"] = (
+                "EDIT"
+                if user_role in {"ADMIN", "SUPER_ADMIN"}
+                or str(skill.get("created_by")) == str(user_id)
+                else skill.get("ingroup_permission") or "READ_ONLY"
+            )
+        return skills
+
 
 _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
@@ -352,21 +375,30 @@ def test_update_status_dev_cannot_update_other_users_listing():
 
 
 def test_install_skill_from_repository_success_increments_downloads():
+    create_kwargs = {}
+
+    class CapturingSkillService(_SkillServiceMock):
+        def create_skill_from_zip_bytes(self, **kwargs):
+            create_kwargs.update(kwargs)
+            return super().create_skill_from_zip_bytes(**kwargs)
+
     encoded_zip = base64.b64encode(b"zip").decode("ascii")
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = {
         **_repository_record(status="shared"),
         "skill_zip_base64": encoded_zip,
     }
 
-    result = srs.install_skill_from_repository_impl(
-        skill_repository_id=1,
-        tenant_id="tenant-1",
-        user_id="user-1",
-        target_name="Skill A Copy",
-    )
+    with patch.object(srs, "SkillService", CapturingSkillService):
+        result = srs.install_skill_from_repository_impl(
+            skill_repository_id=1,
+            tenant_id="tenant-1",
+            user_id="user-1",
+            target_name="Skill A Copy",
+        )
 
     assert result["name"] == "Skill A Copy"
     assert result["source"] == "repository"
+    assert create_kwargs["ingroup_permission"] == "READ_ONLY"
     _skill_repo_db_mock.increment_skill_repository_downloads.assert_called_once_with(
         repository_id=1,
         user_id="user-1",
@@ -456,7 +488,7 @@ def test_mine_ownership_uses_creator_not_edit_permission():
             "get_user_tenant_by_user_id",
             return_value={"user_role": "DEV"},
         ),
-        patch.object(srs, "query_group_ids_by_user", return_value=[1]),
+        patch.object(_group_db_mock, "query_group_ids_by_user", return_value=[1]),
     ):
         created_result = srs.list_my_editable_skills_impl(
             tenant_id="tenant-1",
@@ -481,6 +513,7 @@ def test_list_repository_listings_validates_status():
     with pytest.raises(ValueError):
         srs.list_skill_repository_listings_impl(
             "tenant-1",
+            user_id="user-1",
             status="bad_status",
         )
 
@@ -640,9 +673,18 @@ def test_repository_list_and_detail_success():
     }
     result = srs.list_skill_repository_listings_impl(
         "tenant-1",
+        user_id="user-1",
         status="shared",
     )
     assert result["items"][0]["status"] == "shared"
+    assert result["items"][0]["can_take_down"] is True
+
+    result = srs.list_skill_repository_listings_impl(
+        "tenant-1",
+        user_id="user-2",
+        status="shared",
+    )
+    assert result["items"][0]["can_take_down"] is False
 
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
         _repository_record(status="shared")
@@ -676,11 +718,6 @@ def test_mapping_and_filter_helpers_cover_edge_branches():
     assert srs._paginate_mine_skills_with_optional_padding([], 1, 10, False) == ([], 0)
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = None
     assert srs._get_user_role("missing-user") == "USER"
-    assert srs._resolve_mine_skill_permission(
-        skill={"created_by": "someone-else"},
-        user_id="admin-1",
-        user_role="ADMIN",
-    ) == srs.PERMISSION_EDIT
     assert srs._normalize_listing_tags(None) == []
     with pytest.raises(ValueError, match="icon is required"):
         srs._validate_card_fields({"icon": 123})

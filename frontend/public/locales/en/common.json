@@ -1365,6 +1365,7 @@
   "skillManagement.delete.confirmTitle": "Confirm Delete Skill",
   "skillManagement.delete.confirmContent": "Are you sure you want to delete skill 「{{skillName}}」? This action cannot be undone.",
   "skillManagement.delete.success": "Skill deleted successfully",
+  "skillManagement.noEditPermission": "No permission to edit this skill",
   "skillManagement.delete.failed": "Failed to delete skill",
   "mcpConfig.modal.title": "MCP Server Configuration",
   "mcpConfig.modal.close": "Close",

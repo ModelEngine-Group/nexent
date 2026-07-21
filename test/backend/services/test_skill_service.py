@@ -170,6 +170,7 @@ consts_const_mock.ROOT_DIR = "/tmp"
 consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
+consts_const_mock.PERMISSION_READ = "READ_ONLY"
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 
 class SkillException(Exception):
@@ -549,6 +550,96 @@ class TestSkillServiceListSkills:
 
         with pytest.raises(Exception):
             service.list_skills()
+
+    def test_list_skills_filters_by_creator_group_and_private_permission(self, mocker):
+        mocker.patch(
+            'backend.services.skill_service.skill_db.list_skills',
+            return_value=[
+                {
+                    "skill_id": 1,
+                    "name": "own-private",
+                    "created_by": "user-1",
+                    "group_ids": [],
+                    "ingroup_permission": "PRIVATE",
+                },
+                {
+                    "skill_id": 2,
+                    "name": "group-read-only",
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "READ_ONLY",
+                },
+                {
+                    "skill_id": 3,
+                    "name": "group-edit",
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "EDIT",
+                },
+                {
+                    "skill_id": 4,
+                    "name": "group-private",
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "PRIVATE",
+                },
+                {
+                    "skill_id": 5,
+                    "name": "different-group",
+                    "created_by": "user-2",
+                    "group_ids": [20],
+                    "ingroup_permission": "EDIT",
+                },
+            ],
+        )
+        mocker.patch(
+            'backend.services.skill_service.query_group_ids_by_user',
+            return_value=[10],
+        )
+        mocker.patch(
+            'backend.services.skill_service.get_user_tenant_by_user_id',
+            return_value={"user_role": "DEV"},
+        )
+
+        result = create_test_service().list_visible_skills(user_id="user-1")
+
+        assert [skill["name"] for skill in result] == [
+            "own-private",
+            "group-read-only",
+            "group-edit",
+        ]
+        assert [skill["permission"] for skill in result] == [
+            "EDIT",
+            "READ_ONLY",
+            "EDIT",
+        ]
+
+    def test_list_skills_admin_can_view_all_tenant_skills(self, mocker):
+        mocker.patch(
+            'backend.services.skill_service.skill_db.list_skills',
+            return_value=[
+                {
+                    "skill_id": 1,
+                    "name": "private-skill",
+                    "created_by": "user-2",
+                    "group_ids": [],
+                    "ingroup_permission": "PRIVATE",
+                }
+            ],
+        )
+        mocker.patch(
+            'backend.services.skill_service.query_group_ids_by_user',
+            return_value=[],
+        )
+        mocker.patch(
+            'backend.services.skill_service.get_user_tenant_by_user_id',
+            return_value={"user_role": "ADMIN"},
+        )
+
+        result = create_test_service().list_visible_skills(user_id="admin-1")
+
+        assert len(result) == 1
+        assert result[0]["permission"] == "EDIT"
 
 
 class TestSkillServiceGetSkill:

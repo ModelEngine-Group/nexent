@@ -271,7 +271,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.return_value = [
+                mock_service.list_visible_skills.return_value = [
                     {"skill_id": 1, "name": "skill1", "description": "Desc1"},
                     {"skill_id": 2, "name": "skill2", "description": "Desc2"}
                 ]
@@ -294,7 +294,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.return_value = []
+                mock_service.list_visible_skills.return_value = []
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -314,7 +314,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.side_effect = SkillException("Database error")
+                mock_service.list_visible_skills.side_effect = SkillException("Database error")
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -331,7 +331,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.return_value = [
+                mock_service.list_visible_skills.return_value = [
                     {"skill_id": 10, "name": "admin_skill", "description": "Admin desc"}
                 ]
 
@@ -349,7 +349,10 @@ class TestListSkillsEndpoint:
                 assert "skills" in data
                 assert len(data["skills"]) == 1
                 # Verify the service was called with the target tenant_id, not super_tenant
-                mock_service.list_skills.assert_called_once_with(tenant_id="target_tenant")
+                mock_service.list_visible_skills.assert_called_once_with(
+                    tenant_id="target_tenant",
+                    user_id="super_user",
+                )
 
 
 # ===== Create Skill Endpoint Tests =====
@@ -1099,7 +1102,7 @@ class TestErrorHandling:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.side_effect = Exception("Unexpected error")
+                mock_service.list_visible_skills.side_effect = Exception("Unexpected error")
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
