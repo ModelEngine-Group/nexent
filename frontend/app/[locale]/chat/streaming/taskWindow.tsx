@@ -353,7 +353,6 @@ const HistorySummaryEvent = ({
   content: string;
   t: TranslationFunction;
 }) => {
-  const [expanded, setExpanded] = useState(false);
   let payload: HistorySummaryPayload = {};
   try {
     payload = JSON.parse(content) as HistorySummaryPayload;
@@ -369,23 +368,11 @@ const HistorySummaryEvent = ({
     : t("taskWindow.historySummary.triggerUnknown");
 
   return (
-    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 text-left"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span className="flex items-center gap-2 font-medium text-gray-700">
-          <FileText size={15} aria-hidden="true" />
-          {t("taskWindow.historySummary.title")}
-        </span>
-        <ChevronRight
-          size={16}
-          aria-hidden="true"
-          className={`shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
-        />
-      </button>
+    <div className="w-full text-gray-700">
+      <div className="flex items-center gap-2 font-medium">
+        <FileText size={15} aria-hidden="true" />
+        {t("taskWindow.historySummary.title")}
+      </div>
       <div className="mt-1 text-xs text-gray-500">
         {typeof payload.covered_through_message_id === "number" && (
           <span className="mr-3">
@@ -396,20 +383,18 @@ const HistorySummaryEvent = ({
         )}
         <span>{t("taskWindow.historySummary.trigger", { trigger })}</span>
       </div>
-      {expanded && (
-        <div className="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-700">
-          {summary ? (
-            <MarkdownRenderer
-              content={summary}
-              className="task-message-content"
-              showDiagramToggle={false}
-              enableMultimodal={false}
-            />
-          ) : (
-            t("taskWindow.historySummary.empty")
-          )}
-        </div>
-      )}
+      <div className="mt-3 border-t border-gray-200 pt-3 text-sm">
+        {summary ? (
+          <MarkdownRenderer
+            content={summary}
+            className="task-message-content"
+            showDiagramToggle={false}
+            enableMultimodal={false}
+          />
+        ) : (
+          t("taskWindow.historySummary.empty")
+        )}
+      </div>
     </div>
   );
 };
