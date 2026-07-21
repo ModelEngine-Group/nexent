@@ -52,7 +52,7 @@ patch('database.user_tenant_db.update_user_tenant_role').start()
 patch('database.user_tenant_db.get_user_tenant_by_user_id').start()
 patch('database.user_tenant_db.soft_delete_user_tenant_by_user_id').start()
 patch('database.group_db.remove_user_from_all_groups').start()
-patch('database.group_db.query_groups_by_user', return_value=[]).start()
+patch('database.group_db.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
 from backend.services.user_service import get_users, update_user, delete_user_and_cleanup
@@ -74,9 +74,9 @@ def reset_mocks():
     user_service.soft_delete_user_tenant_by_user_id.side_effect = None
     user_service.remove_user_from_all_groups.reset_mock()
     user_service.remove_user_from_all_groups.side_effect = None
-    user_service.query_groups_by_user.reset_mock()
-    user_service.query_groups_by_user.side_effect = None
-    user_service.query_groups_by_user.return_value = []
+    user_service.query_groups_by_users.reset_mock()
+    user_service.query_groups_by_users.side_effect = None
+    user_service.query_groups_by_users.return_value = {}
 
 
 class TestGetUsers:

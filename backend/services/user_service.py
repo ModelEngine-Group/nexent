@@ -8,7 +8,7 @@ from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
     soft_delete_user_tenant_by_user_id
 )
-from database.group_db import remove_user_from_all_groups, query_groups_by_user
+from database.group_db import remove_user_from_all_groups, query_groups_by_users
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
@@ -38,19 +38,20 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
     # Get user-tenant relationships from database with pagination and sorting
     result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
 
-    # Return basic user information from the relationships, including group names
-    users = []
-    for relationship in result["users"]:
-        user_group_list = query_groups_by_user(relationship["user_id"])
-        group_names = [g["group_name"] for g in user_group_list]
-        user_info = {
-            "id": relationship["user_id"],
-            "username": relationship.get("user_email"),
-            "role": relationship["user_role"],
-            "tenant_id": relationship["tenant_id"],
-            "group_names": group_names,
+    # Batch fetch group names for all users in a single query
+    tenant_user_ids = [r["user_id"] for r in result["users"]]
+    user_group_map = query_groups_by_users(tenant_user_ids)
+
+    users = [
+        {
+            "id": r["user_id"],
+            "username": r.get("user_email"),
+            "role": r["user_role"],
+            "tenant_id": r["tenant_id"],
+            "group_names": user_group_map.get(r["user_id"], []),
         }
-        users.append(user_info)
+        for r in result["users"]
+    ]
 
     # Calculate pagination info only if pagination is used
     if page is not None and page_size is not None:
