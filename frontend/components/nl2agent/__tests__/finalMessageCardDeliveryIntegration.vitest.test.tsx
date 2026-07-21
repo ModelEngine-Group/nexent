@@ -9,6 +9,7 @@ const testState = vi.hoisted(() => ({
     | {
         nl2AgentCardRenderMode?: string;
         nl2AgentCardRegistrationEnabled?: boolean;
+        nl2AgentInteractiveCardIdentities?: ReadonlySet<string>;
         onNl2AgentCardRegistered?: (receipt: {
           cardType: "local_resources";
           cardKey?: string;
@@ -22,6 +23,22 @@ const testState = vi.hoisted(() => ({
     failCardDelivery: vi.fn(),
     notifyStateChanged: vi.fn(),
     continueWithText: vi.fn(),
+    sessionState: undefined as unknown,
+  },
+  validation: { cards: [], failure: undefined } as {
+    cards: Array<{
+      agentId: number;
+      cardType: "web_mcp";
+      cardKey: string;
+      language: "nl2agent-web-mcps";
+      payload: {
+        agent_id: number;
+        recommendation_batch_id: string;
+        items: [];
+      };
+      requiresRegistration: true;
+    }>;
+    failure: undefined;
   },
 }));
 
@@ -38,7 +55,7 @@ vi.mock("@/components/common/markdownRenderer", () => ({
 }));
 
 vi.mock("@/components/nl2agent/cardValidation", () => ({
-  validateNl2AgentCards: () => ({ cards: [], failure: undefined }),
+  validateNl2AgentCards: () => testState.validation,
 }));
 
 vi.mock("@/components/nl2agent/Nl2AgentWorkflowContext", () => ({
@@ -79,6 +96,8 @@ describe("ChatStreamFinalMessage NL2AGENT delivery gate", () => {
   afterEach(() => {
     testState.markdownProps = undefined;
     testState.workflow.active = false;
+    testState.workflow.sessionState = undefined;
+    testState.validation.cards = [];
     vi.clearAllMocks();
   });
 
@@ -153,5 +172,61 @@ describe("ChatStreamFinalMessage NL2AGENT delivery gate", () => {
       });
     });
     expect(serviceMocks.reportCardDelivery).not.toHaveBeenCalled();
+  });
+
+  it("passes only a latest unresolved historical online card through the read-only gate", () => {
+    testState.workflow.active = true;
+    testState.workflow.sessionState = {
+      agent_id: 202,
+      resource_review: {
+        online_configuration_confirmed: false,
+        online_recommendation_batches: {
+          mcp_2: {
+            resource_type: "mcp",
+            status: "recommendations_ready",
+          },
+        },
+      },
+    };
+    testState.validation.cards = [
+      {
+        agentId: 202,
+        cardType: "web_mcp",
+        cardKey: "mcp_2",
+        language: "nl2agent-web-mcps",
+        payload: {
+          agent_id: 202,
+          recommendation_batch_id: "mcp_2",
+          items: [],
+        },
+        requiresRegistration: true,
+      },
+    ];
+    const message: ChatMessageType = {
+      id: "assistant-73",
+      message_id: 73,
+      role: "assistant",
+      content: "restored MCP card",
+      isComplete: true,
+      timestamp: new Date(0),
+    };
+
+    render(
+      <ChatStreamFinalMessage
+        message={message}
+        nl2AgentDraftAgentId={202}
+        isLatestMessage={false}
+        isStreaming={false}
+        latestNl2AgentOnlineCardKeys={{ web_mcp: "mcp_2" }}
+      />
+    );
+
+    expect(testState.markdownProps?.nl2AgentCardRenderMode).toBe("readonly");
+    expect(testState.markdownProps?.nl2AgentInteractiveCardIdentities).toEqual(
+      new Set(["web_mcp:mcp_2"])
+    );
+    expect(testState.markdownProps?.nl2AgentCardRegistrationEnabled).toBe(
+      false
+    );
   });
 });

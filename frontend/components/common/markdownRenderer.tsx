@@ -25,6 +25,7 @@ import type {
   Nl2AgentCardRegistrationHandler,
   ValidatedNl2AgentCard,
 } from "@/components/nl2agent/cardValidation";
+import { isNl2AgentCardExplicitlyInteractive } from "@/components/nl2agent/finalMessageCardDelivery";
 import {
   extractParsedMarkdownHeadings,
   flattenTextContent,
@@ -62,6 +63,8 @@ interface MarkdownRendererProps {
   nl2AgentCardRegistrationEnabled?: boolean;
   /** Parsed once by the final-message boundary and reused during rendering. */
   nl2AgentCards?: readonly ValidatedNl2AgentCard[];
+  /** Historical online cards that remain actionable in the current workflow. */
+  nl2AgentInteractiveCardIdentities?: ReadonlySet<string>;
 }
 
 class MarkdownErrorBoundary extends React.Component<
@@ -969,6 +972,7 @@ const MarkdownRendererComponent: React.FC<MarkdownRendererProps> = ({
   onNl2AgentCardRegistered,
   nl2AgentCardRegistrationEnabled = false,
   nl2AgentCards,
+  nl2AgentInteractiveCardIdentities,
 }) => {
   const { t } = useTranslation("common");
 
@@ -1309,7 +1313,13 @@ const MarkdownRendererComponent: React.FC<MarkdownRendererProps> = ({
                             nl2AgentCardRegistrationEnabled
                           );
                       if (node) {
-                        return nl2AgentCardRenderMode === "readonly" ? (
+                        const explicitlyInteractive =
+                          isNl2AgentCardExplicitlyInteractive(
+                            validatedCard,
+                            nl2AgentInteractiveCardIdentities
+                          );
+                        return nl2AgentCardRenderMode === "readonly" &&
+                          !explicitlyInteractive ? (
                           <div
                             aria-disabled="true"
                             className="pointer-events-none opacity-75"

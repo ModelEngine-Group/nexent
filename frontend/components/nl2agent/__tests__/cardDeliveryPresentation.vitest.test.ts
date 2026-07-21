@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveNl2AgentCardPresentation } from "../finalMessageCardDelivery";
+import type { ChatMessageType } from "@/types/chat";
+import type { Nl2AgentSessionState } from "@/services/nl2agentService";
+import { validateNl2AgentCards } from "../cardValidation";
+import {
+  isNl2AgentCardExplicitlyInteractive,
+  resolveActionableNl2AgentOnlineCardIdentities,
+  resolveLatestNl2AgentOnlineCardKeys,
+  resolveNl2AgentCardPresentation,
+} from "../finalMessageCardDelivery";
+
+const onlineCardMessage = (
+  cardType: "mcp" | "skill",
+  batchId: string,
+  options: { complete?: boolean; valid?: boolean } = {}
+): ChatMessageType => ({
+  id: `${cardType}-${batchId}`,
+  role: "assistant",
+  content:
+    options.valid === false
+      ? `\`\`\`nl2agent-web-${cardType}s\n{invalid}\n\`\`\``
+      : `\`\`\`nl2agent-web-${cardType}s\n${JSON.stringify({
+          agent_id: 202,
+          recommendation_batch_id: batchId,
+          items: [],
+        })}\n\`\`\``,
+  isComplete: options.complete ?? true,
+  timestamp: new Date(0),
+});
+
+const textMessage = (id: string): ChatMessageType => ({
+  id,
+  role: "assistant",
+  content: "Continue configuring resources.",
+  isComplete: true,
+  timestamp: new Date(0),
+});
 
 describe("NL2AGENT final-message card delivery presentation", () => {
   it("preserves card rendering while delaying registration until delivery is safe", () => {
@@ -42,7 +77,7 @@ describe("NL2AGENT final-message card delivery presentation", () => {
     });
     expect(
       resolveNl2AgentCardPresentation({ ...readyMessage, readOnly: true })
-    ).toEqual({ renderMode: "interactive", registrationEnabled: false });
+    ).toEqual({ renderMode: "readonly", registrationEnabled: false });
     expect(
       resolveNl2AgentCardPresentation({
         isComplete: true,
@@ -66,5 +101,112 @@ describe("NL2AGENT final-message card delivery presentation", () => {
         readOnly: false,
       })
     ).toEqual({ renderMode: "placeholder", registrationEnabled: false });
+  });
+
+  it("tracks the latest valid completed card independently by online resource type", () => {
+    const latest = resolveLatestNl2AgentOnlineCardKeys(
+      [
+        onlineCardMessage("mcp", "mcp_1"),
+        textMessage("newer-text"),
+        onlineCardMessage("skill", "skill_1"),
+        onlineCardMessage("mcp", "mcp_incomplete", { complete: false }),
+        onlineCardMessage("mcp", "mcp_invalid", { valid: false }),
+        onlineCardMessage("mcp", "mcp_2"),
+      ],
+      202
+    );
+
+    expect(latest).toEqual({ web_mcp: "mcp_2", web_skill: "skill_1" });
+  });
+
+  it("makes only the latest matching ready batch explicitly interactive", () => {
+    const oldCard = validateNl2AgentCards(
+      onlineCardMessage("mcp", "mcp_1").content,
+      202
+    ).cards[0];
+    const latestCard = validateNl2AgentCards(
+      onlineCardMessage("mcp", "mcp_2").content,
+      202
+    ).cards[0];
+    const skillCard = validateNl2AgentCards(
+      onlineCardMessage("skill", "skill_1").content,
+      202
+    ).cards[0];
+    const sessionState = {
+      agent_id: 202,
+      resource_review: {
+        online_configuration_confirmed: false,
+        online_recommendation_batches: {
+          mcp_1: {
+            resource_type: "mcp",
+            status: "recommendations_ready",
+          },
+          mcp_2: {
+            resource_type: "mcp",
+            status: "recommendations_ready",
+          },
+          skill_1: {
+            resource_type: "skill",
+            status: "recommendations_ready",
+          },
+        },
+      },
+    } as unknown as Nl2AgentSessionState;
+
+    const interactive = resolveActionableNl2AgentOnlineCardIdentities(
+      [oldCard, latestCard, skillCard],
+      { web_mcp: "mcp_2", web_skill: "skill_1" },
+      sessionState,
+      true
+    );
+
+    expect(isNl2AgentCardExplicitlyInteractive(oldCard, interactive)).toBe(
+      false
+    );
+    expect(isNl2AgentCardExplicitlyInteractive(latestCard, interactive)).toBe(
+      true
+    );
+    expect(isNl2AgentCardExplicitlyInteractive(skillCard, interactive)).toBe(
+      true
+    );
+  });
+
+  it("keeps completed and read-only online cards locked", () => {
+    const card = validateNl2AgentCards(
+      onlineCardMessage("skill", "skill_1").content,
+      202
+    ).cards[0];
+    const sessionState = {
+      agent_id: 202,
+      resource_review: {
+        online_configuration_confirmed: true,
+        online_recommendation_batches: {
+          skill_1: { resource_type: "skill", status: "completed" },
+        },
+      },
+    } as unknown as Nl2AgentSessionState;
+
+    expect(
+      resolveActionableNl2AgentOnlineCardIdentities(
+        [card],
+        { web_skill: "skill_1" },
+        sessionState,
+        true
+      ).size
+    ).toBe(0);
+    expect(
+      resolveActionableNl2AgentOnlineCardIdentities(
+        [card],
+        { web_skill: "skill_1" },
+        {
+          ...sessionState,
+          resource_review: {
+            ...sessionState.resource_review,
+            online_configuration_confirmed: false,
+          },
+        },
+        false
+      ).size
+    ).toBe(0);
   });
 });

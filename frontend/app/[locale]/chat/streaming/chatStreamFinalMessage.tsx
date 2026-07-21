@@ -56,7 +56,11 @@ import {
   reportNl2AgentCardDelivery,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
-import { resolveNl2AgentCardPresentation } from "@/components/nl2agent/finalMessageCardDelivery";
+import {
+  resolveActionableNl2AgentOnlineCardIdentities,
+  resolveNl2AgentCardPresentation,
+  type LatestNl2AgentOnlineCardKeys,
+} from "@/components/nl2agent/finalMessageCardDelivery";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -75,6 +79,7 @@ interface FinalMessageProps {
   isLatestMessage?: boolean;
   isStreaming?: boolean;
   enableNl2AgentCardRecovery?: boolean;
+  latestNl2AgentOnlineCardKeys?: LatestNl2AgentOnlineCardKeys;
 }
 
 // TTS playback status
@@ -98,6 +103,7 @@ function ChatStreamFinalMessageInner({
   isLatestMessage = false,
   isStreaming = false,
   enableNl2AgentCardRecovery = false,
+  latestNl2AgentOnlineCardKeys = {},
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
 
@@ -117,6 +123,7 @@ function ChatStreamFinalMessageInner({
     failCardDelivery,
     notifyStateChanged,
     continueWithText,
+    sessionState: workflowSessionState,
   } = useNl2AgentWorkflow();
   const sawActiveStreamRef = useRef(false);
   const finalCardValidation = useMemo(
@@ -135,6 +142,22 @@ function ChatStreamFinalMessageInner({
     isLatestMessage,
     readOnly,
   });
+  const actionableNl2AgentOnlineCardIdentities = useMemo(
+    () =>
+      resolveActionableNl2AgentOnlineCardIdentities(
+        finalCardValidation.cards,
+        latestNl2AgentOnlineCardKeys,
+        workflowSessionState,
+        workflowActive && !readOnly
+      ),
+    [
+      finalCardValidation.cards,
+      latestNl2AgentOnlineCardKeys,
+      readOnly,
+      workflowActive,
+      workflowSessionState,
+    ]
+  );
 
   const handleCardRegistered = useCallback(
     async ({ cardType, cardKey }: Nl2AgentCardRegistrationReceipt) => {
@@ -555,6 +578,9 @@ function ChatStreamFinalMessageInner({
                 nl2AgentCardRegistrationEnabled={
                   nl2AgentCardPresentation.registrationEnabled
                 }
+                nl2AgentInteractiveCardIdentities={
+                  actionableNl2AgentOnlineCardIdentities
+                }
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
@@ -763,7 +789,8 @@ function areEqualFinalMessage(
     prev.nl2AgentDraftAgentId === next.nl2AgentDraftAgentId &&
     prev.isLatestMessage === next.isLatestMessage &&
     prev.isStreaming === next.isStreaming &&
-    prev.enableNl2AgentCardRecovery === next.enableNl2AgentCardRecovery
+    prev.enableNl2AgentCardRecovery === next.enableNl2AgentCardRecovery &&
+    prev.latestNl2AgentOnlineCardKeys === next.latestNl2AgentOnlineCardKeys
     // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally
     // excluded: they do not affect rendered output and will be stabilized with useCallback (Phase 1.2).
   );

@@ -24,6 +24,7 @@ import {
   Nl2AgentContinuationError,
   OnlineConfigurationBar,
 } from "@/components/nl2agent/OnlineConfigurationBar";
+import { resolveLatestNl2AgentOnlineCardKeys } from "@/components/nl2agent/finalMessageCardDelivery";
 
 export const isHiddenNl2AgentContinuation = (message: ChatMessageType) =>
   message.role === MESSAGE_ROLES.USER &&
@@ -141,6 +142,15 @@ export function ChatStreamMain({
       conversationGroups: conversationGroups,
     };
   }, [messages]);
+
+  const latestNl2AgentOnlineCardKeys = useMemo(
+    () =>
+      resolveLatestNl2AgentOnlineCardKeys(
+        processedMessages.finalMessages,
+        nl2AgentDraftAgentId
+      ),
+    [nl2AgentDraftAgentId, processedMessages.finalMessages]
+  );
 
   // Extract latest token metrics from the most recent assistant step
   const latestMetrics = useMemo<TokenMetrics | null>(() => {
@@ -462,6 +472,9 @@ export function ChatStreamMain({
                         !readOnly &&
                         !shareMode &&
                         cardRecoveryConversationId === currentConversationId
+                      }
+                      latestNl2AgentOnlineCardKeys={
+                        latestNl2AgentOnlineCardKeys
                       }
                     />
                   )}
