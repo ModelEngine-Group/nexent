@@ -39,7 +39,13 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   #### 要求：
   1.示例必须是一个具体的内容，是用户的假设提问。
   2.如果该应用有可以使用的助手和工具，则两种调用方式都要体现。
-  3.若未指定语言，请使用中文输出，语言表达要自然流畅。
+  3.如果工具列表中有 parallel_executor，且示例中需要同时调用多个互不依赖的助手或工具，可以在代码中使用 parallel_executor 来展示并行调用（参考下方任务6、7、8）。
+  4.parallel_executor 的具体写法：
+    - 二元组（返回列表）：results = parallel_executor((tool_a, {参数}), (tool_b, {参数}))，用 results[0]、results[1] 按顺序取结果
+    - 三元组（返回字典）：results = parallel_executor((tool_a, {参数}, "名称a"), (tool_b, {参数}, "名称b"))，用 results["名称a"]、results["名称b"] 按名称取结果
+    - 所有返回值均为纯字符串，用 print() 打印即可
+    - 可选参数：timeout=120（单任务超时秒数）、max_workers=4（最大并发线程数）
+  5.若未指定语言，请使用中文输出，语言表达要自然流畅。
 
   ### Agent的执行流程：
   要解决任务，Agent必须通过一系列步骤向前规划，以'思考：'和'代码：'序列循环进行。**注意：禁止在代码执行前输出'观察结果：'，观察结果只能由代码执行后产生。**
@@ -166,6 +172,65 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
   </DISPLAY>
+
+  ---
+
+  任务6："同时搜索Python设计模式和Java设计模式"
+
+  思考：两个搜索任务互不依赖，使用parallel_executor并行调用。
+  代码：
+  <code>
+  results = parallel_executor(
+      (web_search, {"query": "Python设计模式"}),
+      (web_search, {"query": "Java设计模式"}),
+  )
+  print(results[0])  # Python设计模式搜索结果
+  print(results[1])  # Java设计模式搜索结果
+  </code>
+  # 系统返回 Observation: [搜索结果1..., 搜索结果2...]
+
+  思考：已获得两个搜索结果，现在整合回答。
+  Python设计模式方面...，Java设计模式方面...
+
+  ---
+
+  任务7："检查代码安全性和风格"
+
+  思考：需要调用security_scanner和style_checker两个助手，它们互不依赖，用parallel_executor带名称并行。
+  代码：
+  <code>
+  results = parallel_executor(
+      (security_scanner, {"task": "检查SQL注入和XSS漏洞"}, "security"),
+      (style_checker, {"task": "检查PEP8规范和函数命名"}, "style"),
+  )
+  print(results["security"])
+  print(results["style"])
+  </code>
+  # 系统返回 Observation: {"security": "发现1个SQL注入漏洞...", "style": "函数名应使用snake_case..."}
+
+  思考：已获得安全分析和风格检查结果，现在整合两份报告。
+  安全方面发现SQL注入漏洞...，风格方面建议函数名改为snake_case...
+
+  ---
+
+  任务8："同时搜索资料和分析数据"
+
+  思考：网络搜索和数据分析互不依赖，用parallel_executor并行，设置超时避免长时间等待。
+  代码：
+  <code>
+  results = parallel_executor(
+      (web_search, {"query": "2024年AI发展趋势"}),
+      (data_analyst, {"task": "分析销售数据CSV文件中的季度趋势"}),
+      timeout=60,
+      max_workers=2,
+  )
+  print(results[0])
+  print(results[1])
+  </code>
+  # 系统返回 Observation: [搜索结果..., 数据分析报告...]
+
+  思考：已获得搜索结果和分析报告，整合回答。
+  2024年AI发展趋势...，销售数据季度趋势分析...
 
   ---
 

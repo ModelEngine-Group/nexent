@@ -87,6 +87,20 @@ sys.modules['nexent.vector_database'] = nexent_vector_database_mock
 sys.modules['nexent.memory'] = nexent_memory_mock
 sys.modules['nexent.monitor'] = nexent_monitor_mock
 
+# Stub parallel_executor so that prompt_service can import ParallelExecutorTool
+_parallel_executor_stub = types.ModuleType("nexent.core.tools.parallel_executor")
+class _MockParallelExecutorTool:
+    __name__ = "ParallelExecutorTool"
+    name = "parallel_executor"
+    description = "Execute multiple independent calls in parallel."
+    description_zh = "并行执行多个互不依赖的调用。"
+    inputs = {"tasks": {"type": "array"}}
+    output_type = "any"
+
+_mock_parallel_tool = _MockParallelExecutorTool
+_parallel_executor_stub.ParallelExecutorTool = _mock_parallel_tool
+sys.modules["nexent.core.tools.parallel_executor"] = _parallel_executor_stub
+
 # Mock external dependencies
 sys.modules['boto3'] = MagicMock()
 sys.modules['elasticsearch'] = MagicMock()
@@ -154,6 +168,7 @@ from backend.services.prompt_service import (
     join_info_for_generate_system_prompt,
     join_info_for_optimize_prompt_section,
     optimize_prompt_section_impl,
+    get_enabled_tool_description_for_generate_prompt,
     PromptOptimizationService,
     OptimizeRequest,
     OptimizeResult,
@@ -1021,9 +1036,7 @@ class TestPromptService(unittest.TestCase):
         mock_get_enable_tool_ids,
         mock_query_tools,
     ):
-        """Wrapper should fetch enabled tool IDs then query tool details."""
-        from backend.services.prompt_service import get_enabled_tool_description_for_generate_prompt
-
+        """DB results should be returned with parallel_executor appended."""
         mock_get_enable_tool_ids.return_value = [1, 2]
         tools = [{"tool_id": 1}, {"tool_id": 2}]
         mock_query_tools.return_value = tools
@@ -1036,7 +1049,30 @@ class TestPromptService(unittest.TestCase):
             agent_id=123, tenant_id="tenant-x"
         )
         mock_query_tools.assert_called_once_with([1, 2])
-        self.assertEqual(result, tools)
+        # parallel_executor is always injected
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0], {"tool_id": 1})
+        self.assertEqual(result[1], {"tool_id": 2})
+        self.assertEqual(result[2]["name"], "parallel_executor")
+
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
+    def test_get_enabled_tool_description_parallel_executor_not_duplicated(
+        self,
+        mock_get_enable_tool_ids,
+        mock_query_tools,
+    ):
+        """When parallel_executor is already in DB results, it is not duplicated."""
+        mock_get_enable_tool_ids.return_value = [1]
+        tools = [{"name": "parallel_executor", "tool_id": 99}]
+        mock_query_tools.return_value = tools
+
+        result = get_enabled_tool_description_for_generate_prompt(
+            agent_id=1, tenant_id="t"
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["tool_id"], 99)
 
     @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
     @patch('backend.services.prompt_service.query_sub_agents_id_list')

@@ -142,7 +142,7 @@ class RAGFlowSearchTool(Tool):
         if not dataset_ids:
             raise ValueError("dataset_ids is required and must be a non-empty JSON string array or list")
         logger.info(f"Validating RAGFlowSearchTool with dataset_ids: {dataset_ids}")
-        
+
         try:
             if isinstance(dataset_ids, str):
                 parsed_ids = json.loads(dataset_ids)

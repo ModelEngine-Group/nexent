@@ -61,6 +61,10 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "preserve_source_file": query.get("preserve_source_file", True),
             }
 
+            # Per-KB soft quota (optional, null = unlimited)
+            if "quota_limit_bytes" in query:
+                data["quota_limit_bytes"] = query["quota_limit_bytes"]
+
             # For backward compatibility: if caller explicitly provides index_name,
             # respect it and do not regenerate; otherwise generate after flush.
             explicit_index_name = query.get("index_name")
@@ -132,6 +136,10 @@ def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 existing_record.updated_by = query.get('user_id')
                 existing_record.update_time = func.current_timestamp()
 
+                # Update per-KB soft quota if provided
+                if "quota_limit_bytes" in query:
+                    existing_record.quota_limit_bytes = query["quota_limit_bytes"]
+
                 session.flush()
                 session.commit()
                 return {
@@ -190,6 +198,10 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             # Update group IDs
             if query.get("group_ids") is not None:
                 record.group_ids = query["group_ids"]
+
+            # Update per-KB soft quota
+            if "quota_limit_bytes" in query:
+                record.quota_limit_bytes = query["quota_limit_bytes"]
 
             # Update timestamp and user
             if query.get("user_id"):

@@ -183,7 +183,12 @@ def reset_test_isolation():
     """Reset test isolation state before each test."""
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
-    token_db_mod.log_token_usage.reset_mock()
+    token_db_mod.log_token_usage.reset_mock(side_effect=True)
+    token_db_mod.log_token_usage.return_value = 1
+    agent_version_mod.list_published_agents_impl.reset_mock(side_effect=True)
+    agent_version_mod.list_published_agents_impl.return_value = [
+        {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
+    ]
     yield
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
@@ -841,6 +846,43 @@ class TestGetAgentInfoList:
 
         assert len(result["data"]) == 2
         agent_version_mod.list_published_agents_impl.assert_called()
+
+    async def test_get_agent_info_by_name_success(self):
+        """Test exact-name lookup returns one published agent without its internal ID."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {"agent_id": 42, "name": "target_agent", "description": "Target"},
+            {"agent_id": 43, "name": "other_agent", "description": "Other"},
+        ]
+
+        result = await ns.get_agent_info_by_name_for_northbound(ctx, "target_agent")
+
+        assert result["message"] == "success"
+        assert result["data"]["name"] == "target_agent"
+        assert "agent_id" not in result["data"]
+
+    async def test_get_agent_info_by_name_not_found(self):
+        """Test lookup rejects unpublished or unavailable agent names."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.return_value = []
+
+        with pytest.raises(LookupError, match="Published agent not found"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "missing_agent")
+
+    async def test_get_agent_info_by_name_empty(self):
+        """Test that empty/whitespace agent_name raises ValueError."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+
+        with pytest.raises(ValueError, match="agent_name is required"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "   ")
+
+    async def test_get_agent_info_by_name_internal_error(self):
+        """Test that internal errors from _get_visible_published_agents are wrapped."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.side_effect = RuntimeError("DB connection lost")
+
+        with pytest.raises(Exception, match="Failed to get agent info for agent_name"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "any_agent")
 
 
 @pytest.mark.asyncio

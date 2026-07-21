@@ -198,6 +198,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     """
     info_with_metadata = dict(agent_info)
     info_with_metadata.setdefault("max_steps", 15)
+    info_with_metadata.setdefault("is_main_agent", True)
     info_with_metadata.setdefault("verification_config", None)
     info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.update({
@@ -227,6 +228,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "few_shots_prompt": new_agent.few_shots_prompt,
             "parent_agent_id": new_agent.parent_agent_id,
             "enabled": new_agent.enabled,
+            "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,

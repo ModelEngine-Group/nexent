@@ -288,6 +288,7 @@ export default function AgentSelectorHeader({
         model_ids: modelIdsForCopy,
         max_steps: detail.max_step,
         requested_output_tokens: detail.requested_output_tokens ?? null,
+        is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,
