@@ -2592,7 +2592,7 @@
   "paths": {
     "/nl2agent/session/by-conversation/{conversation_id}": {
       "get": {
-        "description": "Resolve an owned active or completed session after browser state is lost.",
+        "description": "Resolve an optional owned session after browser state is lost.",
         "operationId": "resolve_session_api_nl2agent_session_by_conversation__conversation_id__get",
         "parameters": [
           {
@@ -2626,7 +2626,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Resolve Session Api Nl2Agent Session By Conversation  Conversation Id  Get"
                 }
               }
             },

@@ -63,8 +63,8 @@ def _public_session(record: Dict[str, Any]) -> Dict[str, Any]:
 
 def resolve_session(
     *, conversation_id: int, tenant_id: str, user_id: str
-) -> Dict[str, Any]:
-    """Resolve one readable session by conversation with owner isolation."""
+) -> Dict[str, Any] | None:
+    """Resolve an optional readable session by conversation with owner isolation."""
     conversation_id = _positive_identifier(conversation_id, "conversation_id")
     record = get_nl2agent_session_by_conversation(
         tenant_id,
@@ -76,7 +76,7 @@ def resolve_session(
         NL2AGENT_SESSION_ACTIVE,
         NL2AGENT_SESSION_COMPLETED,
     }:
-        raise Nl2AgentDraftNotFoundError()
+        return None
     return _public_session(record)
 
 

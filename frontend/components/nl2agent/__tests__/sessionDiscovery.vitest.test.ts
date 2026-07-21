@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchWithAuth } from "@/lib/auth";
+import { ApiError } from "@/services/api";
 import {
   Nl2AgentRequestError,
   resolveNl2AgentSessionByConversation,
@@ -60,7 +61,15 @@ describe("NL2AGENT durable session discovery", () => {
 
   it("returns null for a normal or inaccessible conversation", async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue(
-      new Response("", { status: 404 })
+      new Response("null", { status: 200 })
+    );
+
+    await expect(resolveNl2AgentSessionByConversation(902)).resolves.toBeNull();
+  });
+
+  it("supports draft-not-found responses from older backends", async () => {
+    vi.mocked(fetchWithAuth).mockRejectedValue(
+      new ApiError("030201", "NL2AGENT draft agent not found.")
     );
 
     await expect(resolveNl2AgentSessionByConversation(902)).resolves.toBeNull();

@@ -8,7 +8,7 @@ export interface paths {
     };
     /**
      * Resolve Session Api
-     * @description Resolve an owned active or completed session after browser state is lost.
+     * @description Resolve an optional owned session after browser state is lost.
      */
     get: operations["resolve_session_api_nl2agent_session_by_conversation__conversation_id__get"];
     put?: never;
@@ -1447,7 +1447,8 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Nl2AgentSessionSummaryResponse"];
+          "application/json":
+            components["schemas"]["Nl2AgentSessionSummaryResponse"] | null;
         };
       };
       /** @description Validation Error */

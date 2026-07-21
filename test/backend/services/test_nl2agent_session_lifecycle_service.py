@@ -95,24 +95,22 @@ def test_resolve_session_does_not_disclose_missing_foreign_or_abandoned_session(
         MagicMock(return_value=None),
     )
 
-    with pytest.raises(Nl2AgentDraftNotFoundError):
-        lifecycle.resolve_session(
-            conversation_id=902,
-            tenant_id="tenant-a",
-            user_id="user-a",
-        )
+    assert lifecycle.resolve_session(
+        conversation_id=902,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    ) is None
 
     monkeypatch.setattr(
         lifecycle,
         "get_nl2agent_session_by_conversation",
         MagicMock(return_value=_record(status="abandoned")),
     )
-    with pytest.raises(Nl2AgentDraftNotFoundError):
-        lifecycle.resolve_session(
-            conversation_id=902,
-            tenant_id="tenant-a",
-            user_id="user-a",
-        )
+    assert lifecycle.resolve_session(
+        conversation_id=902,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    ) is None
 
 
 def test_require_active_session_authorizes_owner_and_conversation(monkeypatch):

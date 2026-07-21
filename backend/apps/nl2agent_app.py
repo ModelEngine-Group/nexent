@@ -161,7 +161,7 @@ async def list_sessions_api(
 
 @router.get(
     "/session/by-conversation/{conversation_id}",
-    response_model=Nl2AgentSessionSummaryResponse,
+    response_model=Optional[Nl2AgentSessionSummaryResponse],
     response_model_exclude_none=True,
 )
 async def resolve_session_api(
@@ -169,7 +169,7 @@ async def resolve_session_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    """Resolve an owned active or completed session after browser state is lost."""
+    """Resolve an optional owned session after browser state is lost."""
     user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return resolve_session(

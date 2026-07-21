@@ -258,6 +258,29 @@ async def test_resolve_session_http_contract_restores_complete_execution_context
 
 
 @pytest.mark.asyncio
+async def test_resolve_session_http_contract_returns_null_for_ordinary_conversation(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    monkeypatch.setattr(nl2agent_app, "resolve_session", MagicMock(return_value=None))
+    app = FastAPI()
+    app.include_router(nl2agent_app.router)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/nl2agent/session/by-conversation/87")
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+@pytest.mark.asyncio
 async def test_list_sessions_api_passes_authenticated_owner(monkeypatch) -> None:
     monkeypatch.setattr(
         nl2agent_app,

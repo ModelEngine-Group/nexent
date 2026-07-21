@@ -8,7 +8,7 @@
  */
 
 import { fetchWithAuth } from "@/lib/auth";
-import { API_ENDPOINTS } from "@/services/api";
+import { API_ENDPOINTS, ApiError } from "@/services/api";
 import log from "@/lib/logger";
 import type { components as Nl2AgentApiComponents } from "@/contracts/generated/nl2agent-api";
 
@@ -105,12 +105,21 @@ export type Nl2AgentSessionSummary =
 export const resolveNl2AgentSessionByConversation = async (
   conversationId: number
 ): Promise<Nl2AgentSessionSummary | null> => {
-  const response = await fetchWithAuth(
-    API_ENDPOINTS.nl2agent.sessionByConversation(conversationId)
-  );
-  if (response.status === 404) return null;
-  if (!response.ok) await throwNl2AgentRequestError(response);
-  return response.json();
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.nl2agent.sessionByConversation(conversationId)
+    );
+    if (!response.ok) await throwNl2AgentRequestError(response);
+    const session: Nl2AgentSessionSummary | null = await response.json();
+    return session;
+  } catch (error) {
+    // Older backends reported an absent association as the draft-not-found
+    // business error. Treat only that exact response as an ordinary chat.
+    if (error instanceof ApiError && String(error.code) === "030201") {
+      return null;
+    }
+    throw error;
+  }
 };
 
 export const resumeNl2AgentSession = async (
