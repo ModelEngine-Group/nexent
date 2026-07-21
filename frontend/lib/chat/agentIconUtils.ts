@@ -9,7 +9,7 @@ import {
   SearchIcon,
   FileTextIcon,
 } from "lucide-react";
-import type { PublishedAgent } from "@/types/agentConfig";
+import type { Agent, PublishedAgent } from "@/types/agentConfig";
 
 type AgentIconType = "sparkles" | "code" | "search" | "file";
 

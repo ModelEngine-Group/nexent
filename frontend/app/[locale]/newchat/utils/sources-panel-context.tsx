@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, type FC, type ReactNode } from "react";
-import type { PanelSourceItem } from "./sources-panel";
+import type { PanelSourceItem } from "../ui/sources-panel";
 
 /**
  * State describing which source group is currently driving the panel.

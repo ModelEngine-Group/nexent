@@ -33,7 +33,12 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { Document } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
 import { formatScoreAsPercentage, getScoreColor } from "@/lib/utils";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Chunk {
   id: string;
@@ -564,21 +569,24 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     const displayName = getDisplayName(doc.name || "");
 
     return (
-      <Tooltip title={displayName} placement="top">
-        <div className="flex w-full items-center justify-between gap-2 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span>{getFileIcon(doc.type)}</span>
-            <span className="truncate text-sm font-medium text-gray-800 max-w-[150px]">
-              {displayName}
-            </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex w-full items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span>{getFileIcon(doc.type)}</span>
+              <span className="truncate text-sm font-medium text-gray-800 max-w-[150px]">
+                {displayName}
+              </span>
+            </div>
+            <Badge
+              color="#1677ff"
+              showZero
+              count={chunkCount}
+              className="flex-shrink-0 chunk-count-badge"
+            />
           </div>
-          <Badge
-            color="#1677ff"
-            showZero
-            count={chunkCount}
-            className="flex-shrink-0 chunk-count-badge"
-          />
-        </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{displayName}</TooltipContent>
       </Tooltip>
     );
   };
@@ -684,35 +692,44 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                         </div>
                         <div className="flex items-center gap-1">
                           {!isReadOnlyMode && (
-                            <Tooltip title={t("document.chunk.tooltip.edit")}>
-                              <Button
-                                type="text"
-                                icon={<SquarePen size={16} />}
-                                onClick={() => openEditChunkModal(chunk)}
-                                size="small"
-                                className="self-center"
-                              />
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="text"
+                                  icon={<SquarePen size={16} />}
+                                  onClick={() => openEditChunkModal(chunk)}
+                                  size="small"
+                                  className="self-center"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent>{t("document.chunk.tooltip.edit")}</TooltipContent>
                             </Tooltip>
                           )}
-                          <Tooltip title={t("document.chunk.tooltip.download")}>
-                            <Button
-                              type="text"
-                              icon={<Download size={16} />}
-                              onClick={() => handleDownloadChunk(chunk)}
-                              size="small"
-                              className="self-center"
-                            />
-                          </Tooltip>
-                          {!isReadOnlyMode && (
-                            <Tooltip title={t("document.chunk.tooltip.delete")}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
                               <Button
                                 type="text"
-                                danger
-                                icon={<Trash2 size={16} />}
-                                onClick={() => handleDeleteChunk(chunk)}
+                                icon={<Download size={16} />}
+                                onClick={() => handleDownloadChunk(chunk)}
                                 size="small"
                                 className="self-center"
                               />
+                            </TooltipTrigger>
+                            <TooltipContent>{t("document.chunk.tooltip.download")}</TooltipContent>
+                          </Tooltip>
+                          {!isReadOnlyMode && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="text"
+                                  danger
+                                  icon={<Trash2 size={16} />}
+                                  onClick={() => handleDeleteChunk(chunk)}
+                                  size="small"
+                                  className="self-center"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent>{t("document.chunk.tooltip.delete")}</TooltipContent>
                             </Tooltip>
                           )}
                         </div>
@@ -822,12 +839,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           </div>
           {/* Create Chunk button - hide when user has READ_ONLY permission */}
           {!isReadOnlyMode && (
-            <Tooltip title={t("document.chunk.tooltip.create")}>
-              <Button
-                type="text"
-                icon={<FilePlus2 size={16} />}
-                onClick={openCreateChunkModal}
-              ></Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="text"
+                  icon={<FilePlus2 size={16} />}
+                  onClick={openCreateChunkModal}
+                />
+              </TooltipTrigger>
+              <TooltipContent>{t("document.chunk.tooltip.create")}</TooltipContent>
             </Tooltip>
           )}
         </div>
