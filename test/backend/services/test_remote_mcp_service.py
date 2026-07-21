@@ -1119,7 +1119,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
     @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health', side_effect=MCPConnectionError('health failed'))
+    @patch('backend.services.remote_mcp_service.mcp_server_health', return_value=False)
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     async def test_non_container_enable_health_fail_raises_error(
