@@ -104,6 +104,7 @@ class ContextManagerConfig:
     # === NEW: Per-Component Token Budgets ===
     component_budgets: Dict[str, int] = field(default_factory=lambda: {
         "system_prompt": 4000,
+        "turn_resources": 12000,
         "tools": 3000,
         "skills": 4000,
         "memory": 2000,

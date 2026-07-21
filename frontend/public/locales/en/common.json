@@ -2873,6 +2873,13 @@
   "common.email": "Email",
 
   "turnResourceInvocation.menuTitle": "Turn-scoped resource invocation",
+  "turnResourceInvocation.menuHint": "Type to filter",
+  "turnResourceInvocation.loadingSkills": "Loading available skills…",
+  "turnResourceInvocation.skills": "Skills",
+  "turnResourceInvocation.commands": "Commands",
+  "turnResourceInvocation.noResults": "No matching skills or commands",
+  "turnResourceInvocation.remove": "Remove {{name}}",
+  "turnResourceInvocation.queryPlaceholder": "Describe what to do this turn",
   "turnResourceInvocation.automation.title": "Automation task",
   "turnResourceInvocation.automation.description": "Explicitly interpret this turn and prepare an automation task for confirmation",
   "turnResourceInvocation.validation.argumentRequired": "Describe the task and schedule after {{command}}",

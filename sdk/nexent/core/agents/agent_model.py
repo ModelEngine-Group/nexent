@@ -212,6 +212,10 @@ class AgentConfig(BaseModel):
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
+    turn_resources: Optional[Any] = Field(
+        description="Run-local resources explicitly required by the user",
+        default=None,
+    )
     managed_agents: List["AgentConfig"] = Field(
         description="Internal managed sub-agents created locally",
         default=[]
@@ -381,7 +385,16 @@ class ExternalA2AAgentConfig(BaseModel):
 # Context Component System - Building blocks for system prompt assembly
 # =============================================================================
 
-ComponentType = Literal["system_prompt", "tools", "skills", "memory", "knowledge_base", "managed_agents", "external_a2a_agents"]
+ComponentType = Literal[
+    "system_prompt",
+    "turn_resources",
+    "tools",
+    "skills",
+    "memory",
+    "knowledge_base",
+    "managed_agents",
+    "external_a2a_agents",
+]
 
 
 class ContextComponent(BaseModel, ABC):
@@ -440,6 +453,20 @@ class SystemPromptComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, Any]]:
         return [self._text_message("system", self.content)]
+
+
+class TurnResourcesComponent(ContextComponent):
+    """Required resources explicitly selected for the current turn."""
+
+    component_type: ComponentType = Field(default="turn_resources")
+    priority: int = Field(default=1000)
+    metadata: Dict[str, Any] = Field(default_factory=lambda: {"required": True})
+    invocation: Any
+    language: str = "zh"
+
+    def to_messages(self) -> List[Dict[str, Any]]:
+        instructions = self.invocation.render_required_instructions(self.language)
+        return [self._text_message("system", instructions)] if instructions else []
 
 
 class ToolsComponent(ContextComponent):
@@ -631,10 +658,17 @@ class TokenBudgetStrategy(ContextStrategy):
             fits_total = total_tokens + comp_tokens <= token_budget
             fits_type = current_type_total + comp_tokens <= comp_budget
 
-            if fits_total and fits_type:
+            is_required = bool(comp.metadata.get("required"))
+            if is_required or (fits_total and fits_type):
                 selected.append(comp)
                 total_tokens += comp_tokens
                 type_totals[comp.component_type] = current_type_total + comp_tokens
+                if is_required and not (fits_total and fits_type):
+                    logger.warning(
+                        "TokenBudgetStrategy retained required component type=%s "
+                        "tokens=%d despite budget pressure",
+                        comp.component_type, comp_tokens,
+                    )
             else:
                 # Surface the drop so operators can see when the prompt is
                 # being silently truncated by budget pressure. Identifying
@@ -677,7 +711,11 @@ class BufferedStrategy(ContextStrategy):
 
         selected: List[ContextComponent] = []
         for comp_type, bucket in type_buckets.items():
-            recent = bucket[-self.buffer_size:]
+            required = [comp for comp in bucket if comp.metadata.get("required")]
+            optional = [comp for comp in bucket if not comp.metadata.get("required")]
+            optional_slots = max(self.buffer_size - len(required), 0)
+            recent_optional = optional[-optional_slots:] if optional_slots else []
+            recent = required + recent_optional
             dropped = len(bucket) - len(recent)
             if dropped > 0:
                 logger.warning(
@@ -710,7 +748,7 @@ class PriorityWeightedStrategy(ContextStrategy):
         for comp in components:
             relevance = comp.metadata.get("relevance_score", 1.0)
             score = comp.priority * 0.7 + relevance * 0.3 * 100
-            if relevance >= self.relevance_threshold:
+            if comp.metadata.get("required") or relevance >= self.relevance_threshold:
                 scored_components.append((comp, score))
             else:
                 logger.warning(
@@ -726,7 +764,7 @@ class PriorityWeightedStrategy(ContextStrategy):
 
         for comp, score in sorted_components:
             comp_tokens = comp.token_estimate or comp.estimate_tokens()
-            if total_tokens + comp_tokens <= token_budget:
+            if comp.metadata.get("required") or total_tokens + comp_tokens <= token_budget:
                 selected.append(comp)
                 total_tokens += comp_tokens
             else:

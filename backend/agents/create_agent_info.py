@@ -667,6 +667,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    turn_resources: Optional[Any] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -860,6 +861,12 @@ async def create_agent_config(
     # Assemble legacy system_prompt only for the isolated fallback path.
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
+    if turn_resources:
+        existing_skill_names = {skill.get("name") for skill in skills}
+        for resource in turn_resources.resources:
+            if resource.resource_type == "skill" and resource.name not in existing_skill_names:
+                skills.append({"name": resource.name, "description": resource.description})
+                existing_skill_names.add(resource.name)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
     builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
@@ -949,6 +956,15 @@ async def create_agent_config(
             knowledge_base_summary=knowledge_base_summary,
             kb_ids=kb_ids,
         )
+        if turn_resources:
+            from nexent.core.agents.agent_model import TurnResourcesComponent
+
+            context_components.append(
+                TurnResourcesComponent(
+                    invocation=turn_resources,
+                    language=language,
+                )
+            )
 
         logger.info(
             f"Agent {agent_id} context assembly: "
@@ -962,7 +978,7 @@ async def create_agent_config(
         hard_input_budget_tokens=hard_input_budget_tokens,
         strategy="full",
     )
-    agent_config = AgentConfig(
+    agent_config_kwargs = dict(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
         prompt_templates=await prepare_prompt_templates(
@@ -984,6 +1000,11 @@ async def create_agent_config(
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
     )
+    if turn_resources:
+        agent_config_kwargs["turn_resources"] = turn_resources
+        if not enable_context_manager:
+            agent_config_kwargs["instructions"] = turn_resources.render_required_instructions(language)
+    agent_config = AgentConfig(**agent_config_kwargs)
     return agent_config
 
 
@@ -1396,6 +1417,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    turn_resources: Optional[Any] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1429,6 +1451,8 @@ async def create_agent_run_info(
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
+    if turn_resources is not None:
+        create_config_kwargs["turn_resources"] = turn_resources
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 

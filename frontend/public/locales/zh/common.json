@@ -2752,6 +2752,13 @@
   "common.email": "邮箱",
 
   "turnResourceInvocation.menuTitle": "本轮资源调用",
+  "turnResourceInvocation.menuHint": "输入名称筛选",
+  "turnResourceInvocation.loadingSkills": "正在加载可用技能…",
+  "turnResourceInvocation.skills": "技能",
+  "turnResourceInvocation.commands": "指令",
+  "turnResourceInvocation.noResults": "没有匹配的技能或指令",
+  "turnResourceInvocation.remove": "移除 {{name}}",
+  "turnResourceInvocation.queryPlaceholder": "描述本轮要完成的任务",
   "turnResourceInvocation.automation.title": "自动化任务",
   "turnResourceInvocation.automation.description": "明确解析本轮指令，并生成可确认的自动化任务方案",
   "turnResourceInvocation.validation.argumentRequired": "请在 {{command}} 后填写任务内容和执行时间",

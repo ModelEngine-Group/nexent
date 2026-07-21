@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, PrivateAttr, field_validator
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -304,6 +304,21 @@ class ToolParamsRequest(BaseModel):
     )
 
 
+class TurnResourceReferenceRequest(BaseModel):
+    """Untrusted reference to a resource selected for the current turn."""
+
+    resource_type: Literal["skill", "knowledge", "mcp", "subagent"]
+    resource_id: str = Field(min_length=1, max_length=128)
+    name: Optional[str] = Field(default=None, max_length=255)
+
+
+class TurnResourceInvocationRequest(BaseModel):
+    """Resources the authenticated user explicitly requires for one turn."""
+
+    mode: Literal["required"] = "required"
+    resources: List[TurnResourceReferenceRequest] = Field(min_length=1, max_length=5)
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -316,6 +331,9 @@ class AgentRequest(BaseModel):
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
+    turn_resources: Optional[TurnResourceInvocationRequest] = None
+
+    _resolved_turn_resources: Any = PrivateAttr(default=None)
 
 
 class MessageUnit(BaseModel):

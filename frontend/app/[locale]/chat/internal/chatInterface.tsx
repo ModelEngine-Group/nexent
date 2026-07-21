@@ -25,6 +25,11 @@ import {
 } from "@/features/agentAutomation/chatAdapter";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
 import { parseTurnResourceInvocation } from "@/features/turnResourceInvocation/parser";
+import {
+  buildTurnResourceRequest,
+  getInterceptSelection,
+} from "@/features/turnResourceInvocation/selection";
+import type { TurnResourceSelection } from "@/features/turnResourceInvocation/types";
 import { validateTurnResourceInvocation } from "@/features/turnResourceInvocation/validation";
 import {
   storageService,
@@ -141,6 +146,9 @@ const getI18nKeyByType = (type: string): string => {
 
 export function ChatInterface() {
   const [input, setInput] = useState("");
+  const [turnResourceSelections, setTurnResourceSelections] = useState<
+    TurnResourceSelection[]
+  >([]);
   // Replace the original messages state
   const [sessionMessages, setSessionMessages] = useState<{
     [conversationId: number]: ChatMessageType[];
@@ -469,7 +477,14 @@ export function ChatInterface() {
 
     // Handle user message content
     const userMessageId = uuidv4();
-    const userMessageContent = input.trim();
+    const inputDraft = input.trim();
+    const currentTurnResourceSelections = turnResourceSelections;
+    const interceptSelection = getInterceptSelection(
+      currentTurnResourceSelections
+    );
+    const userMessageContent = interceptSelection?.command
+      ? `${interceptSelection.command.command} ${inputDraft}`.trim()
+      : inputDraft;
     const turnResourceInvocation =
       parseTurnResourceInvocation(userMessageContent);
     if (turnResourceInvocation) {
@@ -555,6 +570,7 @@ export function ChatInterface() {
 
     // Clear input box and attachments
     setInput("");
+    setTurnResourceSelections([]);
     setAttachments([]);
 
     // Create initial AI reply message
@@ -689,7 +705,8 @@ export function ChatInterface() {
             }
             return nextState;
           });
-          setInput(userMessageContent);
+          setInput(inputDraft);
+          setTurnResourceSelections(currentTurnResourceSelections);
           return;
         }
       }
@@ -796,6 +813,9 @@ export function ChatInterface() {
                   };
                 })
               : undefined, // Use complete attachment object structure
+          turn_resources: buildTurnResourceRequest(
+            currentTurnResourceSelections
+          ),
         };
 
       // Only include conversation_id for existing conversations; omit for new ones
@@ -1103,6 +1123,7 @@ export function ChatInterface() {
 
     // Reset all states
     setInput("");
+    setTurnResourceSelections([]);
     setIsLoading(false);
     setIsSwitchedConversation(false);
 
@@ -1320,6 +1341,7 @@ export function ChatInterface() {
     // Do not cancel any conversation requests, let them continue running in the background
 
     // Use conversation management hook
+    setTurnResourceSelections([]);
     conversationManagement.handleConversationSelect(dialog);
     const conversationUrl = new URL(window.location.href);
     conversationUrl.searchParams.set(
@@ -2187,6 +2209,8 @@ export function ChatInterface() {
                 ]
               }
               onInputChange={(value: string) => setInput(value)}
+              turnResourceSelections={turnResourceSelections}
+              onTurnResourceSelectionsChange={setTurnResourceSelections}
               onSend={handleSend}
               onStop={handleStop}
               onKeyDown={handleKeyDown}

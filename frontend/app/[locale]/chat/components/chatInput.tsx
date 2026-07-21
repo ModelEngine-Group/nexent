@@ -1,6 +1,14 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
+import {
+  Paperclip,
+  Mic,
+  MicOff,
+  Square,
+  X,
+  AlertCircle,
+  Upload,
+} from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Button, Tooltip } from "antd";
@@ -24,8 +32,13 @@ import { ChatAgentSelector } from "./chatAgentSelector";
 import { ChatModelSelector } from "./chatModelSelector";
 import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
 import { TokenMetrics } from "@/types/chat";
-import { TurnResourceCommandMenu } from "@/features/turnResourceInvocation/TurnResourceCommandMenu";
-import { getTurnResourceCommandSuggestions } from "@/features/turnResourceInvocation/parser";
+import {
+  TurnResourcePicker,
+  getTurnResourceSearchQuery,
+} from "@/features/turnResourceInvocation/TurnResourcePicker";
+import { TurnResourceSelectionTokens } from "@/features/turnResourceInvocation/TurnResourceSelectionTokens";
+import { addTurnResourceSelection } from "@/features/turnResourceInvocation/selection";
+import type { TurnResourceSelection } from "@/features/turnResourceInvocation/types";
 
 // Format file size
 const formatFileSize = (sizeInBytes: number): string => {
@@ -61,15 +74,29 @@ interface ChatInputProps {
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[], modelIds?: number[], modelNames?: string[]) => void;
+  onAgentSelect?: (
+    agentId: string | null,
+    greetingMessage?: string,
+    exampleQuestions?: string[],
+    modelIds?: number[],
+    modelNames?: string[]
+  ) => void;
   latestMetrics?: TokenMetrics | null;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
   agentModelIds?: number[];
   agentModelNames?: string[];
-  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  availableModels?: {
+    id: number;
+    displayName: string;
+    connect_status?: string;
+  }[];
   selectedModelId?: number | null;
   onModelSelect?: (modelId: number | null) => void;
+  turnResourceSelections?: TurnResourceSelection[];
+  onTurnResourceSelectionsChange?: (
+    selections: TurnResourceSelection[]
+  ) => void;
 }
 
 export function ChatInput({
@@ -96,6 +123,8 @@ export function ChatInput({
   availableModels = [],
   selectedModelId = null,
   onModelSelect,
+  turnResourceSelections = [],
+  onTurnResourceSelectionsChange,
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -104,7 +133,9 @@ export function ChatInput({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [selectedPreviewFile, setSelectedPreviewFile] = useState<File | null>(null);
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<File | null>(
+    null
+  );
   const [isDragging, setIsDragging] = useState(false);
   const dropAreaRef = useRef<HTMLDivElement>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -239,24 +270,36 @@ export function ChatInput({
     };
   }, [onImageUpload, onFileUpload]);
 
-  const applyCommand = (command: string) => {
-    onInputChange(`${command} `);
+  const applyTurnResource = (selection: TurnResourceSelection) => {
+    onTurnResourceSelectionsChange?.(
+      addTurnResourceSelection(turnResourceSelections, selection)
+    );
+    onInputChange("");
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  const applyFirstCommandSuggestion = () => {
-    const commandSuggestion = getTurnResourceCommandSuggestions(input)[0];
-    if (!commandSuggestion) return false;
-    applyCommand(commandSuggestion.command);
-    return true;
+  const removeTurnResource = (key: string) => {
+    onTurnResourceSelectionsChange?.(
+      turnResourceSelections.filter((selection) => selection.key !== key)
+    );
   };
 
   // Modify keyboard event handling
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (
+      e.key === "Backspace" &&
+      input.length === 0 &&
+      turnResourceSelections.length > 0
+    ) {
+      e.preventDefault();
+      onTurnResourceSelectionsChange?.(turnResourceSelections.slice(0, -1));
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
 
-      if (applyFirstCommandSuggestion()) return;
+      if (getTurnResourceSearchQuery(input) !== null) return;
 
       // Check if there is input content, if there is no content, do not send
       if (!input.trim()) {
@@ -389,11 +432,15 @@ export function ChatInput({
             sttConfig.model_factory = "volcengine";
             sttConfig.model_appid = modelConfig?.stt?.modelAppid || "";
             sttConfig.access_token = modelConfig?.stt?.accessToken || "";
-            sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+            sttConfig.base_url =
+              modelConfig?.stt?.apiConfig?.modelUrl ||
+              "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
           } else {
             // Ali/DashScope STT uses api_key and model name
-            sttConfig.api_key = modelConfig?.stt?.apiConfig?.apiKey || "sk-no-api-key";
-            sttConfig.model = modelConfig?.stt?.modelName || "qwen3-asr-flash-realtime";
+            sttConfig.api_key =
+              modelConfig?.stt?.apiConfig?.apiKey || "sk-no-api-key";
+            sttConfig.model =
+              modelConfig?.stt?.modelName || "qwen3-asr-flash-realtime";
             sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "";
           }
 
@@ -594,7 +641,9 @@ export function ChatInput({
         newAttachments.push({
           id: fileId,
           file,
-          type: isImage ? chatConfig.filePreviewTypes.image : chatConfig.filePreviewTypes.file,
+          type: isImage
+            ? chatConfig.filePreviewTypes.image
+            : chatConfig.filePreviewTypes.file,
           fileType: file.type,
           extension,
           previewUrl,
@@ -716,7 +765,11 @@ export function ChatInput({
                         className="flex-shrink-0 transform group-hover:scale-110 transition-transform w-8 flex justify-center cursor-pointer"
                         onClick={() => handlePreviewFile(attachment.file)}
                       >
-                        {getFileIcon(attachment.file.name, attachment.file.type, 32)}
+                        {getFileIcon(
+                          attachment.file.name,
+                          attachment.file.type,
+                          32
+                        )}
                       </div>
                       <div
                         className="flex-1 overflow-hidden cursor-pointer"
@@ -789,9 +842,10 @@ export function ChatInput({
     <>
       {renderDragOverlay()}
       {renderAttachments()}
-      <TurnResourceCommandMenu
+      <TurnResourcePicker
         input={input}
-        onSelect={applyCommand}
+        selections={turnResourceSelections}
+        onSelect={applyTurnResource}
       />
       <div
         className="max-h-[300px] overflow-y-auto pt-3"
@@ -800,22 +854,34 @@ export function ChatInput({
           scrollbarColor: "#d1d5db transparent",
         }}
       >
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={t("chatInput.sendMessageTo", {
-            appName: appConfig.appName,
-          })}
-          className="px-5 pb-3 pt-0 text-xl resize-none bg-slate-100 border-0 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 w-full"
-          rows={1}
-          style={{
-            minHeight: "60px",
-            overflow: "auto",
-            fontSize: "18px",
-          }}
-        />
+        <div className="flex flex-wrap items-start gap-2 px-4">
+          <TurnResourceSelectionTokens
+            selections={turnResourceSelections}
+            onRemove={removeTurnResource}
+          />
+          <div className="min-w-[220px] flex-1">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                turnResourceSelections.length > 0
+                  ? t("turnResourceInvocation.queryPlaceholder")
+                  : t("chatInput.sendMessageTo", {
+                      appName: appConfig.appName,
+                    })
+              }
+              className="w-full resize-none border-0 bg-slate-100 px-1 pb-3 pt-0 text-xl focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+              rows={1}
+              style={{
+                minHeight: "60px",
+                overflow: "auto",
+                fontSize: "18px",
+              }}
+            />
+          </div>
+        </div>
       </div>
       <div className="h-12 bg-slate-100 relative">
         {/* Agent and model selectors on the left */}
@@ -850,12 +916,12 @@ export function ChatInput({
             }
           >
             <Button
-                  type="default"
-                  shape="circle"
-                  size="middle"
-                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                  onClick={toggleRecording}
-                  disabled={recordingStatus === "connecting" || isStreaming}
+              type="default"
+              shape="circle"
+              size="middle"
+              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+              onClick={toggleRecording}
+              disabled={recordingStatus === "connecting" || isStreaming}
             >
               {isRecording ? (
                 <MicOff className="h-5 w-5" />
@@ -882,7 +948,12 @@ export function ChatInput({
                 id="file-upload-regular"
                 className="hidden"
                 onChange={handleFileUpload}
-                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => '.' + ext).join(',')}`}
+                accept={`image/*,audio/*,video/*,${Object.values(
+                  chatConfig.fileIcons
+                )
+                  .flat()
+                  .map((ext) => "." + ext)
+                  .join(",")}`}
                 multiple
               />
             </Button>
@@ -907,7 +978,12 @@ export function ChatInput({
           ) : (
             <Button
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || !selectedAgentId}
+              disabled={
+                !input.trim() ||
+                isLoading ||
+                !selectedAgentId ||
+                getTurnResourceSearchQuery(input) !== null
+              }
               type="primary"
               shape="circle"
               size="middle"
@@ -920,8 +996,8 @@ export function ChatInput({
                 hasUnsupportedFiles
                   ? t("chatInput.unsupportedFileTypeSimple")
                   : !selectedAgentId
-                  ? t("agentSelector.pleaseSelectAgent")
-                  : t("chatInput.send")
+                    ? t("agentSelector.pleaseSelectAgent")
+                    : t("chatInput.send")
               }
             >
               <svg
@@ -972,7 +1048,7 @@ export function ChatInput({
 
   // Stop recording before sending a message
   const handleSend = () => {
-    if (applyFirstCommandSuggestion()) return;
+    if (getTurnResourceSearchQuery(input) !== null) return;
 
     // Check if agent is selected
     if (!selectedAgentId) {
@@ -1080,7 +1156,9 @@ export function ChatInput({
                   onClick={() => onInputChange(question)}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-sm text-gray-700 shadow-sm transition-all text-left flex items-center gap-2"
                 >
-                  <span className="text-muted-foreground font-medium">{idx + 1}.</span>
+                  <span className="text-muted-foreground font-medium">
+                    {idx + 1}.
+                  </span>
                   <span>{question}</span>
                 </button>
               ))}
@@ -1088,7 +1166,7 @@ export function ChatInput({
           )}
           <div
             ref={dropAreaRef}
-            className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"
+            className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-visible"
           >
             {renderInputArea()}
           </div>
@@ -1098,7 +1176,7 @@ export function ChatInput({
           <div className="max-w-3xl mx-auto">
             <div
               ref={dropAreaRef}
-              className="relative rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"
+              className="relative rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-visible"
             >
               {renderInputArea()}
             </div>

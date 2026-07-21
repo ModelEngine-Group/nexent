@@ -41,7 +41,8 @@ from consts.model import (
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
-    ToolSourceEnum, ModelConnectStatusEnum
+    ToolSourceEnum, ModelConnectStatusEnum,
+    TurnResourceInvocationRequest,
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
 from database.agent_db import (
@@ -117,12 +118,26 @@ from utils.llm_utils import call_llm_for_system_prompt
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
-
-# Import monitoring utilities
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+
+
+def _resolve_agent_request_turn_resources(
+    agent_request: AgentRequest,
+    tenant_id: str,
+) -> None:
+    """Resolve optional resources lazily to keep the normal run path isolated."""
+    if not isinstance(agent_request.turn_resources, TurnResourceInvocationRequest):
+        agent_request._resolved_turn_resources = None
+        return
+    from services.turn_resource_service import resolve_turn_resources
+
+    agent_request._resolved_turn_resources = resolve_turn_resources(
+        agent_request.turn_resources,
+        tenant_id,
+    )
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -2727,7 +2742,7 @@ async def prepare_agent_run(
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
-    agent_run_info = await create_agent_run_info(
+    create_run_kwargs = dict(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
         query=agent_request.query,
@@ -2742,6 +2757,9 @@ async def prepare_agent_run(
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
     )
+    if agent_request._resolved_turn_resources is not None:
+        create_run_kwargs["turn_resources"] = agent_request._resolved_turn_resources
+    agent_run_info = await create_agent_run_info(**create_run_kwargs)
 
     # Mount conversation-level reusable ContextManager if enabled
     cm_config = getattr(agent_run_info.agent_config,
@@ -3029,6 +3047,7 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    _resolve_agent_request_turn_resources(agent_request, resolved_tenant_id)
 
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist
@@ -3352,6 +3371,8 @@ async def run_agent_background(
     """
     if not agent_request.conversation_id:
         raise ValueError("conversation_id is required for background agent runs")
+
+    _resolve_agent_request_turn_resources(agent_request, tenant_id)
 
     if not agent_request.is_debug and not skip_user_save:
         save_messages(

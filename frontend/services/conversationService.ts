@@ -904,6 +904,14 @@ export const conversationService = {
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
+      turn_resources?: {
+        mode: "required";
+        resources: Array<{
+          resource_type: "skill" | "knowledge" | "mcp" | "subagent";
+          resource_id: string;
+          name: string;
+        }>;
+      };
     },
     signal?: AbortSignal
   ) {
@@ -915,10 +923,14 @@ export const conversationService = {
         history: params.history,
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
+        turn_resources: params.turn_resources,
       };
 
       // Only include conversation_id if it has a value
-      if (params.conversation_id !== undefined && params.conversation_id !== null) {
+      if (
+        params.conversation_id !== undefined &&
+        params.conversation_id !== null
+      ) {
         requestParams.conversation_id = params.conversation_id;
       }
 

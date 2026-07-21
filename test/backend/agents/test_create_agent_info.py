@@ -1769,6 +1769,7 @@ class TestCreateAgentConfig:
         template: str,
         prepared_prompt: str,
         components: Optional[List[Mock]] = None,
+        turn_resources: Optional[Mock] = None,
     ):
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
@@ -1781,6 +1782,11 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch.object(
+                    sys.modules['nexent.core.agents.agent_model'],
+                    'TurnResourcesComponent',
+                    create=True,
+                ) as mock_turn_resources_component, \
                 patch(
                     'backend.agents.create_agent_info.ContextManagerConfig',
                     side_effect=lambda **kwargs: Mock(**kwargs),
@@ -1809,12 +1815,20 @@ class TestCreateAgentConfig:
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                turn_resources=turn_resources,
+            )
 
             return {
                 "build_components": mock_build_components,
                 "prepare_templates": mock_prepare_templates,
                 "agent_config": mock_agent_config,
+                "turn_resources_component": mock_turn_resources_component,
             }
 
     @pytest.mark.asyncio
@@ -1875,6 +1889,48 @@ class TestCreateAgentConfig:
         assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
         assert mocks["agent_config"].call_args.kwargs["context_components"] == []
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_managed_path_injects_required_turn_resources(self):
+        invocation = Mock(
+            resources=[
+                Mock(
+                    resource_type="skill",
+                    name="report-writer",
+                    description="Write reports",
+                )
+            ]
+        )
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=True,
+            template="legacy {{duty}}",
+            prepared_prompt="",
+            components=[Mock(component_type="system_prompt")],
+            turn_resources=invocation,
+        )
+
+        mocks["turn_resources_component"].assert_called_once_with(
+            invocation=invocation,
+            language="zh",
+        )
+        config_kwargs = mocks["agent_config"].call_args.kwargs
+        assert config_kwargs["turn_resources"] is invocation
+        assert "instructions" not in config_kwargs
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_legacy_path_injects_required_instructions(self):
+        invocation = Mock(resources=[])
+        invocation.render_required_instructions.return_value = "required guide"
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=False,
+            template="{{duty}}",
+            prepared_prompt="rendered",
+            turn_resources=invocation,
+        )
+
+        config_kwargs = mocks["agent_config"].call_args.kwargs
+        assert config_kwargs["turn_resources"] is invocation
+        assert config_kwargs["instructions"] == "required guide"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):

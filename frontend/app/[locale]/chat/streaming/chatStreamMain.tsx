@@ -27,6 +27,8 @@ export function ChatStreamMain({
   isLoadingHistoricalConversation = false,
   conversationLoadError,
   onInputChange,
+  turnResourceSelections,
+  onTurnResourceSelectionsChange,
   onSend,
   onStop,
   onKeyDown,
@@ -367,6 +369,10 @@ export function ChatStreamMain({
                         isStreaming={isStreaming}
                         isInitialMode={true}
                         onInputChange={onInputChange}
+                        turnResourceSelections={turnResourceSelections}
+                        onTurnResourceSelectionsChange={
+                          onTurnResourceSelectionsChange
+                        }
                         onSend={onSend}
                         onStop={onStop}
                         onKeyDown={onKeyDown}
@@ -491,6 +497,8 @@ export function ChatStreamMain({
               isLoading={isLoading}
               isStreaming={isStreaming}
               onInputChange={onInputChange}
+              turnResourceSelections={turnResourceSelections}
+              onTurnResourceSelectionsChange={onTurnResourceSelectionsChange}
               onSend={onSend}
               onStop={onStop}
               onKeyDown={onKeyDown}

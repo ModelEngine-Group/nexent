@@ -1,6 +1,7 @@
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
+import type { TurnResourceSelection } from "@/features/turnResourceInvocation/types";
 
 export type MessageRole = (typeof MESSAGE_ROLES)[keyof typeof MESSAGE_ROLES];
 
@@ -225,6 +226,10 @@ export interface ChatStreamMainProps {
   isLoadingHistoricalConversation?: boolean;
   conversationLoadError?: string;
   onInputChange: (value: string) => void;
+  turnResourceSelections?: TurnResourceSelection[];
+  onTurnResourceSelectionsChange?: (
+    selections: TurnResourceSelection[]
+  ) => void;
   onSend: () => void;
   onStop: () => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
