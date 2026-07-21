@@ -10,7 +10,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from consts.error_code import ErrorCode
 from consts.exceptions import (
@@ -56,6 +56,7 @@ from consts.nl2agent_response import (
     Nl2AgentSessionSummaryResponse,
     Nl2AgentSessionStateResponse,
     Nl2AgentWebSkillInstallResponse,
+    Nl2AgentWebSkillConfigurationResponse,
 )
 from services.nl2agent_service import (
     apply_local_resources_batch,
@@ -66,6 +67,7 @@ from services.nl2agent_service import (
     bind_mcp_tools,
     install_recommended_mcp,
     get_session_state,
+    get_web_skill_configuration,
     register_local_resource_recommendations,
     register_online_resource_recommendations,
     register_requirements_review,
@@ -556,6 +558,33 @@ async def install_web_skill_api(
             tenant_id=tenant_id,
             user_id=user_id,
             locale=language,
+            config_values=payload.config_values,
+        )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.get(
+    "/session/{agent_id}/web-skill/configuration",
+    response_model=Nl2AgentWebSkillConfigurationResponse,
+    response_model_exclude_none=True,
+)
+async def get_web_skill_configuration_api(
+    agent_id: int,
+    http_request: Request,
+    skill_id: Optional[int] = Query(default=None, ge=1),
+    skill_name: Optional[str] = Query(default=None, min_length=1, max_length=300),
+    authorization: Optional[str] = Header(None),
+):
+    """Return authoritative configuration metadata for one trusted Skill."""
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return get_web_skill_configuration(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            skill_id=skill_id,
+            skill_name=skill_name,
         )
     except Exception as exc:
         raise _session_http_error(exc) from exc

@@ -672,6 +672,12 @@
         "additionalProperties": false,
         "description": "Request body for installing a single official/web skill into the tenant.",
         "properties": {
+          "config_values": {
+            "additionalProperties": true,
+            "maxProperties": 100,
+            "title": "Config Values",
+            "type": "object"
+          },
           "skill_id": {
             "anyOf": [
               {
@@ -1849,6 +1855,132 @@
         "title": "Nl2AgentSessionSummaryResponse",
         "type": "object"
       },
+      "Nl2AgentSkillParameterSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "default": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "depends_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
+          },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
+          "description_zh": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Zh"
+          },
+          "isSecret": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issecret"
+          },
+          "is_secret": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Secret"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "optional": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Optional"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "Nl2AgentSkillParameterSchema",
+        "type": "object"
+      },
       "Nl2AgentSkillSummary": {
         "additionalProperties": false,
         "properties": {
@@ -2054,6 +2186,43 @@
           "origin"
         ],
         "title": "Nl2AgentToolSummary",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "config_schemas": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentSkillParameterSchema"
+            },
+            "title": "Config Schemas",
+            "type": "array"
+          },
+          "config_values": {
+            "additionalProperties": true,
+            "title": "Config Values",
+            "type": "object"
+          },
+          "skill_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Id"
+          },
+          "skill_name": {
+            "title": "Skill Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_name"
+        ],
+        "title": "Nl2AgentWebSkillConfigurationResponse",
         "type": "object"
       },
       "Nl2AgentWebSkillInstallResponse": {
@@ -3594,6 +3763,97 @@
           }
         },
         "summary": "Get Session State Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/web-skill/configuration": {
+      "get": {
+        "description": "Return authoritative configuration metadata for one trusted Skill.",
+        "operationId": "get_web_skill_configuration_api_nl2agent_session__agent_id__web_skill_configuration_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill Name"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentWebSkillConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Web Skill Configuration Api"
       }
     },
     "/nl2agent/sessions": {

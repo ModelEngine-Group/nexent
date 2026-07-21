@@ -56,6 +56,8 @@ class SkillInstallationDependencies:
     install_by_name: Callable[..., List[str]]
     install_by_id: Callable[..., List[int]]
     get_installed_by_name: Callable[[str, str], Optional[CatalogItem]]
+    get_installed_by_id: Callable[[int, str], Optional[CatalogItem]]
+    get_official_configuration: Callable[[str, Optional[str]], CatalogItem]
     bind_skill: Callable[..., Any]
     acquire_installation_lock: Callable[..., Optional[str]]
     renew_installation_lock: Callable[..., bool]
@@ -358,6 +360,7 @@ def _bind_installed_skill(
     tenant_id: str,
     user_id: str,
     skill_label: Any,
+    config_values: Dict[str, Any],
 ) -> None:
     """Enable one tenant Skill on the draft agent."""
     try:
@@ -367,6 +370,7 @@ def _bind_installed_skill(
                 agent_id=agent_id,
                 enabled=True,
                 version_no=0,
+                config_values=config_values,
             ),
             tenant_id=tenant_id,
             user_id=user_id,
@@ -378,6 +382,137 @@ def _bind_installed_skill(
         ) from exc
 
 
+def _skill_parameter_is_secret(field: Dict[str, Any]) -> bool:
+    name = str(field.get("name") or "")
+    return bool(
+        field.get("isSecret")
+        or field.get("is_secret")
+        or re.search(r"password|authorization|api[_-]?key|secret|token", name, re.I)
+    )
+
+
+def _normalize_skill_config_schemas(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, list):
+        return [deepcopy(item) for item in value if isinstance(item, dict) and item.get("name")]
+    if isinstance(value, dict):
+        return [
+            {"name": str(name), **deepcopy(metadata)}
+            for name, metadata in value.items()
+            if isinstance(metadata, dict)
+        ]
+    return []
+
+
+def _public_skill_configuration(configuration: CatalogItem) -> Dict[str, Any]:
+    schemas = _normalize_skill_config_schemas(configuration.get("config_schemas"))
+    defaults = configuration.get("config_values")
+    default_values = defaults if isinstance(defaults, dict) else {}
+    public_defaults = {
+        str(field["name"]): deepcopy(default_values[str(field["name"])])
+        for field in schemas
+        if not _skill_parameter_is_secret(field)
+        and str(field["name"]) in default_values
+    }
+    return {
+        "skill_id": configuration.get("skill_id"),
+        "skill_name": configuration.get("skill_name"),
+        "config_schemas": [
+            {
+                **field,
+                **(
+                    {"value": None, "default": None}
+                    if _skill_parameter_is_secret(field)
+                    else {}
+                ),
+            }
+            for field in schemas
+        ],
+        "config_values": public_defaults,
+    }
+
+
+def get_web_skill_configuration(
+    dependencies: SkillInstallationDependencies,
+    *,
+    agent_id: int,
+    tenant_id: str,
+    skill_id: Optional[int] = None,
+    skill_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return redacted configuration metadata for a trusted recommendation."""
+    dependencies.get_owned_draft(agent_id, tenant_id)
+    canonical = _require_installable_skill(
+        dependencies,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        skill_id=skill_id,
+        skill_name=skill_name,
+    )
+    canonical_name = str(
+        canonical.get("skill_name") or canonical.get("name") or ""
+    ).strip()
+    configuration = dependencies.get_official_configuration(canonical_name, tenant_id)
+    configuration["skill_id"] = canonical.get("skill_id") or configuration.get("skill_id")
+    configuration["skill_name"] = canonical_name
+    return _public_skill_configuration(configuration)
+
+
+_SKILL_VALUE_TYPES: Dict[str, Callable[[Any], bool]] = {
+    "string": lambda value: isinstance(value, str),
+    "optional": lambda value: True,
+    "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+    "boolean": lambda value: isinstance(value, bool),
+    "array": lambda value: isinstance(value, list),
+    "object": lambda value: isinstance(value, dict),
+}
+
+
+def _resolve_skill_config_values(
+    skill_id: int,
+    schemas: Any,
+    defaults: Any,
+    submitted: Dict[str, Any],
+) -> Dict[str, Any]:
+    fields = {
+        str(field["name"]): field
+        for field in _normalize_skill_config_schemas(schemas)
+    }
+    unknown = sorted(set(submitted) - set(fields))
+    if unknown:
+        raise Nl2AgentValidationError(
+            f"Skill {skill_id} received unknown configuration fields: {', '.join(unknown)}."
+        )
+    if not fields and submitted:
+        raise Nl2AgentValidationError(
+            f"Skill {skill_id} does not accept configuration values."
+        )
+
+    resolved = deepcopy(defaults) if isinstance(defaults, dict) else {}
+    resolved.update(deepcopy(submitted))
+    for name, field in fields.items():
+        dependency = str(field.get("depends_on") or "").strip()
+        if dependency and not resolved.get(dependency):
+            resolved.pop(name, None)
+            continue
+        value = resolved.get(name, field.get("value", field.get("default")))
+        if value in (None, ""):
+            if field.get("required") is True or field.get("optional") is False:
+                raise Nl2AgentValidationError(
+                    f"Skill {skill_id} requires configuration field: {name}."
+                )
+            resolved.pop(name, None)
+            continue
+        expected_type = str(field.get("type") or "string").lower()
+        type_check = _SKILL_VALUE_TYPES.get(expected_type)
+        if type_check and not type_check(value):
+            raise Nl2AgentValidationError(
+                f"Skill {skill_id} configuration field {name} must be {expected_type}."
+            )
+        resolved[name] = value
+    return resolved
+
+
 async def install_web_skill(
     dependencies: SkillInstallationDependencies,
     *,
@@ -387,6 +522,7 @@ async def install_web_skill(
     user_id: str,
     skill_name: Optional[str] = None,
     locale: Optional[str] = None,
+    config_values: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Install one recommendation resolved from the trusted session catalog."""
     dependencies.get_owned_draft(agent_id, tenant_id)
@@ -451,6 +587,35 @@ async def install_web_skill(
             installer=installer,
             tenant_id=tenant_id,
         )
+        installed_skill_id = int(result["skill_id"])
+        if skill_name:
+            installed_skill = dependencies.get_installed_by_name(
+                canonical_name, tenant_id
+            ) or dependencies.get_installed_by_id(installed_skill_id, tenant_id)
+        else:
+            installed_skill = dependencies.get_installed_by_id(
+                installed_skill_id, tenant_id
+            ) or dependencies.get_installed_by_name(canonical_name, tenant_id)
+        if not installed_skill:
+            raise Nl2AgentOperationError(
+                f"Installed skill {canonical_name} could not be resolved for binding."
+            )
+        resolved_config = _resolve_skill_config_values(
+            installed_skill_id,
+            installed_skill.get("config_schemas"),
+            installed_skill.get("config_values"),
+            config_values or {},
+        )
+        _bind_installed_skill(
+            dependencies,
+            agent_id=agent_id,
+            skill_id=installed_skill_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            skill_label=canonical_name,
+            config_values=resolved_config,
+        )
+        result["bound"] = True
         operation_committed = True
         try:
             workflow_result = {
@@ -574,19 +739,11 @@ def _install_skill_by_name(
             f"Installed skill {canonical_name} could not be resolved for binding."
         )
     bound_skill_id = int(installed_skill["skill_id"])
-    _bind_installed_skill(
-        dependencies,
-        agent_id=agent_id,
-        skill_id=bound_skill_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        skill_label=canonical_name,
-    )
     return {
         "skill_id": bound_skill_id,
         "skill_name": canonical_name,
         "installed": True,
-        "bound": True,
+        "bound": False,
         "installed_ids": [],
         "installed_names": installed_names,
     }
@@ -616,17 +773,9 @@ def _install_skill_by_id(
     if not installed_ids:
         raise Nl2AgentExternalServiceError(f"Failed to install skill {canonical_id}.")
     installed_skill_id = int(installed_ids[0])
-    _bind_installed_skill(
-        dependencies,
-        agent_id=agent_id,
-        skill_id=installed_skill_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        skill_label=canonical_id,
-    )
     return {
         "skill_id": installed_skill_id,
         "installed": True,
-        "bound": True,
+        "bound": False,
         "installed_ids": installed_ids,
     }

@@ -305,6 +305,30 @@ class Nl2AgentWebSkillInstallResponse(Nl2AgentResponse):
     installed_names: Optional[List[str]] = None
 
 
+class Nl2AgentSkillParameterSchema(Nl2AgentResponse):
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    type: Optional[str] = None
+    required: bool = False
+    optional: Optional[bool] = None
+    value: Optional[Any] = None
+    default: Optional[Any] = None
+    choices: Optional[List[Any]] = None
+    description_en: Optional[str] = None
+    description_zh: Optional[str] = None
+    depends_on: Optional[str] = None
+    isSecret: Optional[bool] = None
+    is_secret: Optional[bool] = None
+
+
+class Nl2AgentWebSkillConfigurationResponse(Nl2AgentResponse):
+    skill_id: Optional[int] = None
+    skill_name: str
+    config_schemas: List[Nl2AgentSkillParameterSchema] = Field(default_factory=list)
+    config_values: Dict[str, Any] = Field(default_factory=dict)
+
+
 class Nl2AgentFinalizeResponse(Nl2AgentResponse):
     agent_id: int
     status: Literal["draft_ready"]

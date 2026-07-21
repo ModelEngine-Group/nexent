@@ -23,6 +23,83 @@ def test_tool_catalog_redacts_sensitive_parameter_defaults():
     assert params[0]["default"] == "secret-value"
 
 
+def test_web_skill_configuration_is_authoritative_and_redacts_secrets():
+    dependencies = MagicMock()
+    dependencies.get_owned_draft.return_value = {"agent_id": 202}
+    dependencies.get_session_catalogs.return_value = {
+        "official_skills": [
+            {"skill_id": 12, "skill_name": "writer", "status": "installable"}
+        ]
+    }
+    dependencies.get_official_configuration.return_value = {
+        "skill_name": "writer",
+        "config_schemas": [
+            {
+                "name": "api_key",
+                "type": "string",
+                "required": True,
+                "default": "schema-secret",
+            },
+            {"name": "tone", "type": "string", "required": False},
+        ],
+        "config_values": {"api_key": "never-return", "tone": "formal"},
+    }
+
+    result = nl2agent_catalog_service.get_web_skill_configuration(
+        dependencies,
+        agent_id=202,
+        tenant_id="tenant_1",
+        skill_id=12,
+        skill_name="writer",
+    )
+
+    assert result["config_values"] == {"tone": "formal"}
+    assert result["config_schemas"][0]["value"] is None
+    assert result["config_schemas"][0]["default"] is None
+    assert "never-return" not in str(result)
+    assert "schema-secret" not in str(result)
+
+
+def test_resolve_skill_config_values_validates_and_preserves_internal_defaults():
+    schemas = [
+        {"name": "enabled", "type": "boolean", "required": True},
+        {
+            "name": "endpoint",
+            "type": "string",
+            "required": True,
+            "depends_on": "enabled",
+        },
+        {"name": "region", "type": "string", "optional": False},
+    ]
+
+    assert nl2agent_catalog_service._resolve_skill_config_values(
+        12,
+        schemas,
+        {
+            "internal": "kept",
+            "enabled": False,
+            "endpoint": "ignored",
+            "region": "us-east-1",
+        },
+        {},
+    ) == {"internal": "kept", "enabled": False, "region": "us-east-1"}
+    with pytest.raises(Nl2AgentValidationError, match="requires configuration field"):
+        nl2agent_catalog_service._resolve_skill_config_values(
+            12, schemas, {"enabled": True, "region": "us-east-1"}, {}
+        )
+    with pytest.raises(Nl2AgentValidationError, match="requires configuration field"):
+        nl2agent_catalog_service._resolve_skill_config_values(
+            12, schemas, {"enabled": False}, {}
+        )
+    with pytest.raises(Nl2AgentValidationError, match="unknown configuration"):
+        nl2agent_catalog_service._resolve_skill_config_values(
+            12,
+            schemas,
+            {"enabled": False, "region": "us-east-1"},
+            {"unknown": "value"},
+        )
+
+
 @pytest.mark.parametrize(
     ("items_key", "nested_cursor_key", "first_page", "second_page"),
     [

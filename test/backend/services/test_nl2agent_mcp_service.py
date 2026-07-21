@@ -904,7 +904,16 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
         "get_tenant_skill_by_name",
-        MagicMock(return_value={"skill_id": 112, "skill_name": "search-web-tavily"}),
+        MagicMock(
+            return_value={
+                "skill_id": 112,
+                "skill_name": "search-web-tavily",
+                "config_schemas": [
+                    {"name": "region", "type": "string", "required": True}
+                ],
+                "config_values": {"internal_default": "preserved"},
+            }
+        ),
     )
     monkeypatch.setattr(
         nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
@@ -936,6 +945,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         tenant_id="tenant_1",
         user_id="user_1",
         locale="en",
+        config_values={"region": "eu"},
     )
     Nl2AgentWebSkillInstallResponse.model_validate(result)
 
@@ -957,6 +967,10 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     assert skill_request.skill_id == 112
     assert skill_request.agent_id == 202
     assert skill_request.enabled is True
+    assert skill_request.config_values == {
+        "internal_default": "preserved",
+        "region": "eu",
+    }
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
         {
             "skill_id": 12,
@@ -983,6 +997,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         tenant_id="tenant_1",
         user_id="user_1",
         locale="en",
+        config_values={"region": "eu"},
     )
     assert retried == result
     install_from_zip.assert_called_once()
@@ -1110,6 +1125,11 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
         ),
     )
     monkeypatch.setattr(nl2agent_service, "install_skills_for_tenant", install_by_id)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_tenant_skill_by_id",
+        MagicMock(return_value={"skill_id": 107, "name": "legacy-source"}),
+    )
     monkeypatch.setattr(
         nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
     )

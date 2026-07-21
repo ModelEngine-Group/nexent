@@ -1,15 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, message as AntMessage } from "antd";
+import { Alert, Button, message as AntMessage } from "antd";
 import { Download, CheckCircle2, Loader2 } from "lucide-react";
 import {
   installWebSkill,
+  getWebSkillConfiguration,
   type Nl2AgentInstallWebSkillPayload,
+  type Nl2AgentWebSkillConfiguration,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { WebSkillConfigurationModal } from "./WebSkillConfigurationModal";
 import type { WebSkillCardItem } from "./cardPayloadTypes";
 
 export type { WebSkillCardItem } from "./cardPayloadTypes";
@@ -37,6 +40,36 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
   );
   const { t } = useTranslation("common");
   const [installed, setInstalled] = useState(item.status === "installed");
+  const [configuration, setConfiguration] =
+    useState<Nl2AgentWebSkillConfiguration>();
+  const [configurationLoading, setConfigurationLoading] = useState(false);
+  const [configurationError, setConfigurationError] = useState<string>();
+  const [configurationOpen, setConfigurationOpen] = useState(false);
+
+  const loadConfiguration = useCallback(async () => {
+    setConfigurationLoading(true);
+    setConfigurationError(undefined);
+    try {
+      setConfiguration(
+        await getWebSkillConfiguration(agentId, {
+          skill_id: item.skill_id,
+          skill_name: item.skill_name || item.name,
+        })
+      );
+    } catch (error) {
+      setConfigurationError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load Skill configuration."
+      );
+    } finally {
+      setConfigurationLoading(false);
+    }
+  }, [agentId, item.name, item.skill_id, item.skill_name]);
+
+  useEffect(() => {
+    if (!installed) void loadConfiguration();
+  }, [installed, loadConfiguration]);
 
   React.useEffect(() => {
     const normalizedName = (item.skill_name || item.name).trim().toLowerCase();
@@ -49,10 +82,11 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
     if (restored) setInstalled(true);
   }, [item.name, item.skill_id, item.skill_name, workflow.sessionState]);
 
-  const handleInstall = async () => {
+  const performInstall = async (configValues: Record<string, unknown>) => {
     try {
       const payload: Nl2AgentInstallWebSkillPayload = {
         skill_name: item.skill_name || item.name,
+        config_values: configValues,
       };
       if (typeof item.skill_id === "number" && item.skill_id > 0) {
         payload.skill_id = item.skill_id;
@@ -69,11 +103,23 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
         },
         notifyStateChanged: true,
       });
+      return true;
     } catch (error) {
       AntMessage.error(
         error instanceof Error ? error.message : "Failed to install skill."
       );
+      return false;
     }
+  };
+
+  const configSchemas = configuration?.config_schemas ?? [];
+
+  const handleInstall = () => {
+    if (configSchemas.length > 0) {
+      setConfigurationOpen(true);
+      return;
+    }
+    void performInstall({});
   };
 
   return (
@@ -111,8 +157,14 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
         </div>
         <Button
           size="small"
-          disabled={installed || lifecycle.pending}
-          loading={lifecycle.pending}
+          disabled={
+            installed ||
+            lifecycle.pending ||
+            configurationLoading ||
+            Boolean(configurationError) ||
+            !configuration
+          }
+          loading={lifecycle.pending || configurationLoading}
           icon={
             installed ? (
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -126,9 +178,34 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
         >
           {installed
             ? t("nl2agent.webSkill.installedShort", "Installed")
-            : t("nl2agent.webSkill.install", "Install")}
+            : configSchemas.length > 0
+              ? t("nl2agent.webSkill.configureInstall", "Configure & Install")
+              : t("nl2agent.webSkill.install", "Install")}
         </Button>
       </div>
+      {configurationError ? (
+        <Alert
+          className="mt-2"
+          type="error"
+          showIcon
+          message={configurationError}
+          action={
+            <Button size="small" onClick={() => void loadConfiguration()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : null}
+      {configuration && configSchemas.length > 0 ? (
+        <WebSkillConfigurationModal
+          open={configurationOpen}
+          onCancel={() => setConfigurationOpen(false)}
+          onSubmit={performInstall}
+          skillName={configuration.skill_name}
+          schemas={configSchemas}
+          defaults={configuration.config_values ?? {}}
+        />
+      ) : null}
     </div>
   );
 };

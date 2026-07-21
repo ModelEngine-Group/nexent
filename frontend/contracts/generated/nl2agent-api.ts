@@ -344,6 +344,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/nl2agent/session/{agent_id}/web-skill/configuration": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Web Skill Configuration Api
+     * @description Return authoritative configuration metadata for one trusted Skill.
+     */
+    get: operations["get_web_skill_configuration_api_nl2agent_session__agent_id__web_skill_configuration_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/nl2agent/sessions": {
     parameters: {
       query?: never;
@@ -675,6 +695,10 @@ export interface components {
      * @description Request body for installing a single official/web skill into the tenant.
      */
     Nl2AgentInstallWebSkillRequest: {
+      /** Config Values */
+      config_values?: {
+        [key: string]: unknown;
+      };
       /** Skill Id */
       skill_id?: number | null;
       /** Skill Name */
@@ -1117,6 +1141,38 @@ export interface components {
       /** Update Time */
       update_time?: string | null;
     };
+    /** Nl2AgentSkillParameterSchema */
+    Nl2AgentSkillParameterSchema: {
+      /** Choices */
+      choices?: unknown[] | null;
+      /** Default */
+      default?: unknown | null;
+      /** Depends On */
+      depends_on?: string | null;
+      /** Description En */
+      description_en?: string | null;
+      /** Description Zh */
+      description_zh?: string | null;
+      /** Issecret */
+      isSecret?: boolean | null;
+      /** Is Secret */
+      is_secret?: boolean | null;
+      /** Name */
+      name: string;
+      /** Optional */
+      optional?: boolean | null;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+      /** Type */
+      type?: string | null;
+      /** Value */
+      value?: unknown | null;
+    } & {
+      [key: string]: unknown;
+    };
     /** Nl2AgentSkillSummary */
     Nl2AgentSkillSummary: {
       /** Name */
@@ -1188,6 +1244,19 @@ export interface components {
       source: string;
       /** Tool Id */
       tool_id: number;
+    };
+    /** Nl2AgentWebSkillConfigurationResponse */
+    Nl2AgentWebSkillConfigurationResponse: {
+      /** Config Schemas */
+      config_schemas?: components["schemas"]["Nl2AgentSkillParameterSchema"][];
+      /** Config Values */
+      config_values?: {
+        [key: string]: unknown;
+      };
+      /** Skill Id */
+      skill_id?: number | null;
+      /** Skill Name */
+      skill_name: string;
     };
     /** Nl2AgentWebSkillInstallResponse */
     Nl2AgentWebSkillInstallResponse: {
@@ -1994,6 +2063,42 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Nl2AgentSessionStateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_web_skill_configuration_api_nl2agent_session__agent_id__web_skill_configuration_get: {
+    parameters: {
+      query?: {
+        skill_id?: number | null;
+        skill_name?: string | null;
+      };
+      header?: {
+        authorization?: string | null;
+      };
+      path: {
+        agent_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Nl2AgentWebSkillConfigurationResponse"];
         };
       };
       /** @description Validation Error */

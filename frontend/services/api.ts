@@ -559,6 +559,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/nl2agent/session/${agentId}/identity`,
     installWebSkill: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/install-web-skill`,
+    webSkillConfiguration: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/web-skill/configuration`,
     finalize: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/finalize`,
   },

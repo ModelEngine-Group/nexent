@@ -306,6 +306,9 @@ export type Nl2AgentInstallWebSkillResponse =
 export type Nl2AgentInstallWebSkillPayload =
   Nl2AgentApiSchemas["Nl2AgentInstallWebSkillRequest"];
 
+export type Nl2AgentWebSkillConfiguration =
+  Nl2AgentApiSchemas["Nl2AgentWebSkillConfigurationResponse"];
+
 export type Nl2AgentFinalizePayload =
   Nl2AgentApiSchemas["Nl2AgentFinalizeRequest"];
 
@@ -372,6 +375,7 @@ export const installWebSkill = async (
     if (payload.skill_name) {
       body.skill_name = payload.skill_name;
     }
+    body.config_values = payload.config_values ?? {};
 
     const response = await fetchWithAuth(
       API_ENDPOINTS.nl2agent.installWebSkill(agentId),
@@ -390,6 +394,22 @@ export const installWebSkill = async (
     log.error("installWebSkill failed", error);
     throw error;
   }
+};
+
+export const getWebSkillConfiguration = async (
+  agentId: number,
+  payload: Pick<Nl2AgentInstallWebSkillPayload, "skill_id" | "skill_name">
+): Promise<Nl2AgentWebSkillConfiguration> => {
+  const query = new URLSearchParams();
+  if (typeof payload.skill_id === "number" && payload.skill_id > 0) {
+    query.set("skill_id", String(payload.skill_id));
+  }
+  if (payload.skill_name) query.set("skill_name", payload.skill_name);
+  const response = await fetchWithAuth(
+    `${API_ENDPOINTS.nl2agent.webSkillConfiguration(agentId)}?${query.toString()}`
+  );
+  if (!response.ok) await throwNl2AgentRequestError(response);
+  return response.json();
 };
 
 /**

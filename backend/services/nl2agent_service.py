@@ -92,6 +92,7 @@ from database.nl2agent_session_db import (
 )
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
+    get_skill_by_id as get_tenant_skill_by_id,
     get_skill_by_name as get_tenant_skill_by_name,
     list_skills_for_catalog as list_tenant_skills,
     query_enabled_skill_instances,
@@ -117,6 +118,7 @@ from services.nl2agent_catalog_service import (
     CatalogDependencies,
     SkillInstallationDependencies,
     install_web_skill as install_web_skill_service,
+    get_web_skill_configuration as get_web_skill_configuration_service,
     load_session_catalogs,
     recommendation_id as _recommendation_id,
 )
@@ -167,6 +169,7 @@ from services.nl2agent_summary_service import (
     raise_for_invalid_resource_references,
     resolve_model_summaries,
     resolve_resource_summaries,
+    resolve_online_resource_provenance,
     validate_available_llm_ids,
 )
 from services.nl2agent_workflow_service import (
@@ -189,6 +192,7 @@ from services.remote_mcp_service import (
 )
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.skill_service import (
+    get_official_skill_configuration,
     get_official_skills_with_status,
     install_skills_for_tenant,
     install_skills_from_zip_for_tenant,
@@ -483,6 +487,7 @@ def _resolve_resource_summaries(
     tool_instances: List[Dict[str, Any]],
     skill_instances: List[Dict[str, Any]],
     tenant_id: str,
+    **provenance: Any,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Enrich persisted resource instances and report dangling references."""
     tool_ids = [int(row["tool_id"]) for row in tool_instances]
@@ -492,6 +497,7 @@ def _resolve_resource_summaries(
         skill_instances,
         query_tools_by_ids_for_tenant(tool_ids, tenant_id) if tool_ids else [],
         query_skills_by_ids(skill_ids, tenant_id) if skill_ids else [],
+        **provenance,
     )
 
 
@@ -716,6 +722,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         query_enabled_skill_instances=query_enabled_skill_instances,
         resolve_model_summaries=_resolve_model_summaries,
         resolve_resource_summaries=_resolve_resource_summaries,
+        resolve_online_resource_provenance=resolve_online_resource_provenance,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         sanitize_tool_parameter_schema=redact_tool_parameter_defaults,
         normalize_model_ids=normalize_model_ids,
@@ -905,6 +912,8 @@ def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependenc
         install_by_name=install_skills_from_zip_for_tenant,
         install_by_id=install_skills_for_tenant,
         get_installed_by_name=get_tenant_skill_by_name,
+        get_installed_by_id=get_tenant_skill_by_id,
+        get_official_configuration=get_official_skill_configuration,
         bind_skill=create_or_update_skill_by_skill_info,
         acquire_installation_lock=acquire_mcp_installation_lock,
         renew_installation_lock=renew_mcp_installation_lock,
@@ -922,6 +931,7 @@ async def install_web_skill(
     user_id: str,
     skill_name: Optional[str] = None,
     locale: Optional[str] = None,
+    config_values: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Delegate trusted official Skill installation to the catalog service."""
     _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
@@ -933,6 +943,24 @@ async def install_web_skill(
         user_id=user_id,
         skill_name=skill_name,
         locale=locale,
+        config_values=config_values,
+    )
+
+
+def get_web_skill_configuration(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    skill_id: Optional[int] = None,
+    skill_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return trusted, redacted online Skill configuration metadata."""
+    return get_web_skill_configuration_service(
+        _skill_installation_dependencies(user_id),
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        skill_id=skill_id,
+        skill_name=skill_name,
     )
 
 

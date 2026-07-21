@@ -597,6 +597,7 @@ class Nl2AgentInstallWebSkillRequest(_StrictNl2AgentRequest):
 
     skill_id: Optional[Nl2AgentPositiveInt] = None
     skill_name: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    config_values: Dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class Nl2AgentFinalizeRequest(_StrictNl2AgentRequest):

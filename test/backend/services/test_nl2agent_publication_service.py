@@ -829,7 +829,26 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
             ]
         ),
     )
+    _prepare_required_online_review()
     _register_local_batch("restore_batch", [11], [])
+    _complete_local_apply("restore_batch", [11], [])
+    nl2agent_session_catalog.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:web-fetch",
+        status="tools_bound",
+        bound_tool_ids=[12],
+    )
+    reservation = nl2agent_session_catalog.reserve_online_installation(
+        "tenant_1", 202, "skill:official", "install-skill:official"
+    )
+    nl2agent_session_catalog.complete_online_installation(
+        "tenant_1",
+        202,
+        "skill:official",
+        reservation["operation_id"],
+        {"skill_id": 22, "skill_name": "Official Skill"},
+    )
 
     result = await nl2agent_service.get_session_state(202, "tenant_1", "user_1")
 

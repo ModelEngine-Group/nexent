@@ -6,6 +6,7 @@ from consts.exceptions import AgentRunException, Nl2AgentValidationError
 from services.nl2agent_summary_service import (
     raise_for_invalid_resource_references,
     resolve_model_summaries,
+    resolve_online_resource_provenance,
     resolve_resource_summaries,
     validate_available_llm_ids,
 )
@@ -72,6 +73,8 @@ def test_resolve_resource_summaries_preserves_origin_and_reports_dangling_ids():
         [{"skill_id": 3}],
         [{"tool_id": 1, "origin_name": "Remote Search", "source": "mcp"}],
         [{"skill_id": 3, "name": "Writer", "source": "official"}],
+        online_tool_ids={1},
+        online_skill_ids={3},
     )
 
     assert tools == [
@@ -95,6 +98,53 @@ def test_resolve_resource_summaries_preserves_origin_and_reports_dangling_ids():
     assert invalid == [
         {"reference_type": "tool", "reference_id": 2, "reason": "not_found"}
     ]
+
+
+def test_resource_origin_uses_workflow_provenance_instead_of_source_labels():
+    tools, skills, invalid = resolve_resource_summaries(
+        [{"tool_id": 1}, {"tool_id": 2}],
+        [{"skill_id": 3}, {"skill_id": 4}],
+        [
+            {"tool_id": 1, "name": "Installed MCP", "source": "custom"},
+            {"tool_id": 2, "name": "Existing MCP", "source": "mcp"},
+        ],
+        [
+            {"skill_id": 3, "name": "在线技能", "source": "官方"},
+            {"skill_id": 4, "name": "Local Official", "source": "official"},
+        ],
+        online_tool_ids={1},
+        online_skill_names={"在线技能"},
+    )
+
+    assert invalid == []
+    assert [item["origin"] for item in tools] == ["online", "local"]
+    assert [item["origin"] for item in skills] == ["online", "local"]
+
+
+def test_resolve_online_resource_provenance_uses_bound_tenant_resources():
+    tool_ids, skill_ids, skill_names = resolve_online_resource_provenance(
+        {
+            "mcp_workflows": {
+                "mcp": {"status": "tools_bound", "bound_tool_ids": [10, 11]},
+                "skipped": {"status": "binding_skipped", "bound_tool_ids": [12]},
+            },
+            "online_installations": {
+                "skill": {
+                    "status": "completed",
+                    "result": {
+                        "skill_id": 20,
+                        "installed_ids": [21],
+                        "installed_names": ["Writer"],
+                        "_source_skill_id": 999,
+                    },
+                }
+            },
+        }
+    )
+
+    assert tool_ids == {10, 11}
+    assert skill_ids == {20, 21}
+    assert skill_names == {"writer"}
 
 
 def test_resolve_resource_summaries_redacts_persisted_tool_secrets():

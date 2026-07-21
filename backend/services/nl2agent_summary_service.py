@@ -1,6 +1,6 @@
 """Pure model and resource projections for NL2AGENT session summaries."""
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from consts.exceptions import AgentRunException, Nl2AgentValidationError
 from consts.model import ModelConnectStatusEnum
@@ -120,6 +120,10 @@ def resolve_resource_summaries(
     skill_instances: List[Dict[str, Any]],
     tool_records: List[Dict[str, Any]],
     skill_records: List[Dict[str, Any]],
+    *,
+    online_tool_ids: Optional[Set[int]] = None,
+    online_skill_ids: Optional[Set[int]] = None,
+    online_skill_names: Optional[Set[str]] = None,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Enrich persisted resource instances and report dangling references."""
     tools, invalid_tools = _resolve_resource_type(
@@ -128,7 +132,7 @@ def resolve_resource_summaries(
         id_key="tool_id",
         resource_type="tool",
         name_resolver=lambda info: info.get("origin_name") or info.get("name"),
-        online_source="mcp",
+        online_ids=online_tool_ids or set(),
     )
     tool_instances_by_id = {
         int(instance["tool_id"]): instance for instance in tool_instances
@@ -162,7 +166,8 @@ def resolve_resource_summaries(
         id_key="skill_id",
         resource_type="skill",
         name_resolver=lambda info: info.get("name"),
-        online_source="official",
+        online_ids=online_skill_ids or set(),
+        online_names=online_skill_names or set(),
     )
     return tools, skills, invalid_tools + invalid_skills
 
@@ -174,7 +179,8 @@ def _resolve_resource_type(
     id_key: str,
     resource_type: str,
     name_resolver: Callable[[Dict[str, Any]], Any],
-    online_source: str,
+    online_ids: Set[int],
+    online_names: Optional[Set[str]] = None,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     records_by_id = {int(row[id_key]): row for row in records}
     summaries: List[Dict[str, Any]] = []
@@ -193,15 +199,54 @@ def _resolve_resource_type(
             )
             continue
         source = str(info.get("source") or "").lower()
+        normalized_name = name.casefold().strip()
         summaries.append(
             {
                 id_key: resource_id,
                 "name": name,
                 "source": source,
-                "origin": "online" if source == online_source else "local",
+                "origin": (
+                    "online"
+                    if resource_id in online_ids
+                    or normalized_name in (online_names or set())
+                    else "local"
+                ),
             }
         )
     return summaries, invalid_references
+
+
+def resolve_online_resource_provenance(
+    workflow_state: Dict[str, Any],
+) -> tuple[Set[int], Set[int], Set[str]]:
+    """Resolve resources bound through this session's online workflows."""
+    online_tool_ids = {
+        int(tool_id)
+        for workflow in workflow_state.get("mcp_workflows", {}).values()
+        if workflow.get("status") == "tools_bound"
+        for tool_id in workflow.get("bound_tool_ids", [])
+    }
+    online_skill_ids: Set[int] = set()
+    online_skill_names: Set[str] = set()
+    for installation in workflow_state.get("online_installations", {}).values():
+        if installation.get("status") != "completed":
+            continue
+        result = installation.get("result") or {}
+        for value in (result.get("skill_id"), *(result.get("installed_ids") or [])):
+            try:
+                if value is not None:
+                    online_skill_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        for value in (
+            result.get("skill_name"),
+            result.get("_source_skill_name"),
+            *(result.get("installed_names") or []),
+        ):
+            normalized = str(value or "").casefold().strip()
+            if normalized:
+                online_skill_names.add(normalized)
+    return online_tool_ids, online_skill_ids, online_skill_names
 
 
 def raise_for_invalid_resource_references(

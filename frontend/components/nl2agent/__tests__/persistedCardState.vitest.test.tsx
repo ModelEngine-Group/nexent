@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getAvailablePlatformLlms,
   getNl2AgentSessionState,
+  getWebSkillConfiguration,
 } from "@/services/nl2agentService";
 import { OnlineRecommendationGroup } from "..";
 import { ModelSelectionCard } from "../ModelSelectionCard";
@@ -16,6 +17,7 @@ vi.mock("@/services/nl2agentService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/nl2agentService")>()),
   getAvailablePlatformLlms: vi.fn(),
   getNl2AgentSessionState: vi.fn(),
+  getWebSkillConfiguration: vi.fn(),
 }));
 
 describe("persisted NL2AGENT card state", () => {
@@ -28,6 +30,13 @@ describe("persisted NL2AGENT card state", () => {
       { id: 8, displayName: "Fallback LLM" },
     ]);
     vi.mocked(getNl2AgentSessionState).mockReset();
+    vi.mocked(getWebSkillConfiguration).mockReset();
+    vi.mocked(getWebSkillConfiguration).mockResolvedValue({
+      skill_id: 12,
+      skill_name: "search-web-tavily",
+      config_schemas: [],
+      config_values: {},
+    });
     vi.mocked(getNl2AgentSessionState).mockResolvedValue({
       agent_id: 202,
       business_logic_model_id: 7,

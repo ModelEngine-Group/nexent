@@ -87,6 +87,7 @@ class WorkflowDependencies:
         ...,
         tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]],
     ]
+    resolve_online_resource_provenance: Callable[..., Any]
     query_tools_by_ids: Callable[..., List[Dict[str, Any]]]
     sanitize_tool_parameter_schema: Callable[[Any], List[Dict[str, Any]]]
     normalize_model_ids: Callable[[Any], List[int]]
@@ -353,6 +354,10 @@ async def get_session_state(
         )
         or []
     )
+    workflow_state = deepcopy(dependencies.get_session_state(tenant_id, agent_id))
+    online_tool_ids, online_skill_ids, online_skill_names = (
+        dependencies.resolve_online_resource_provenance(workflow_state)
+    )
     models, invalid_model_references = dependencies.resolve_model_summaries(
         draft,
         tenant_id,
@@ -362,9 +367,11 @@ async def get_session_state(
             tool_instances,
             skill_instances,
             tenant_id,
+            online_tool_ids=online_tool_ids,
+            online_skill_ids=online_skill_ids,
+            online_skill_names=online_skill_names,
         )
     )
-    workflow_state = deepcopy(dependencies.get_session_state(tenant_id, agent_id))
     workflow_summary = dependencies.summarize_workflow_state(workflow_state)
     workflow_state.pop("online_installations", None)
     for batch in workflow_state.get("recommendation_batches", {}).values():
