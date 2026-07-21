@@ -1,10 +1,10 @@
 # NL2AGENT 对话式智能体构建设计
 
-> 实现快照：`5375990a0336644b84ddb4307c8d3d4199f1976b`
+> 实现快照：`1f123a48c` (当前最新)
 >
 > 对比基线：`4e7d9fe15c78d85c732beb9fe06ac8d439e99327`
 >
-> 最近复核：2026-07-20
+> 最近复核：2026-07-21
 
 本文描述当前分支已经实现的 NL2AGENT 能力。历史 gap 方案、阶段性代码审查和已删除兼容逻辑不作为当前行为依据；发生行为变更时，应同步更新本文、Canonical Contract 和对应测试。
 
@@ -609,3 +609,156 @@ npm --prefix frontend run contracts:check
 8. 临时 `repair_nl2agent_tables.py` 不是当前完整迁移路径，不应用于常规部署。
 
 这些是当前代码的真实边界；历史审查文档只记录当时快照，不能替代本文和现行测试结果。
+
+---
+
+## 19. 架构约束审计 (2026-07-21)
+
+基于基线 `4e7d9fe15c78d85c` 到当前最新变更的审计结果。
+
+### 19.1 约束一：SDK 不依赖 Backend Service
+
+**审计结果：通过**
+
+SDK (`sdk/nexent/core/tools/nl2agent/`) 完全隔离：
+
+| 文件 | 依赖 |
+|------|------|
+| `_context.py` | `dataclasses`, `typing`, `hashlib`, `json`, `re`, `unicodedata`, `jieba`, `rapidfuzz` |
+| `search_local_resources_tool.py` | `smolagents.Tool`, 本地 `_context` |
+| `search_web_mcps_tool.py` | `smolagents.Tool`, 本地 `_context` |
+| `search_web_skills_tool.py` | `smolagents.Tool`, 本地 `_context` |
+
+- 无 `from backend.*` 导入
+- 无 `from services.*` 导入
+- 无环境变量直接访问
+- Catalog 通过 `Nl2AgentContext` 由 Backend 在 session start 时注入
+- 搜索结果记录通过注入的 `record_search_result` callback 回调 Backend
+
+### 19.2 约束二：Frontend 只做展示，业务逻辑全在后端
+
+**审计结果：通过，有边界清晰度改进空间**
+
+Frontend 职责：
+
+| 文件 | 职责 | 评估 |
+|------|------|------|
+| `index.tsx` | Card 分发渲染 | 纯展示 |
+| `Nl2AgentWorkflowContext.tsx` | 状态管理、并发控制、自动继续协调 | 展示层协调，无业务逻辑 |
+| `useNl2AgentCardLifecycle.ts` | API 调用编排、retry、delivery claim | 展示层编排 |
+| `nl2agentService.ts` | API 调用封装、错误转换 | API 代理 |
+| `nl2agentContinuation.ts` | 自动继续文本识别 | 纯常量/工具函数 |
+| `cardValidation.ts` | JSON Schema 校验 | 展示层数据校验 |
+| `FinalizeCard.tsx` | 展示最终审核信息 | 纯展示 |
+
+Backend 业务逻辑分布：
+
+| Service | 职责 |
+|---------|------|
+| `nl2agent_service.py` | Facade，依赖装配 |
+| `nl2agent_workflow_service.py` | 状态动作、阶段推进 |
+| `nl2agent_catalog_service.py` | Catalog 加载、trusted proof |
+| `nl2agent_resource_service.py` | 本地资源 Apply/Skip |
+| `nl2agent_mcp_service.py` | MCP 安装 saga、工具发现、绑定 |
+| `nl2agent_publication_service.py` | Finalize 发布 |
+| `nl2agent_session_service.py` | Session 创建 |
+| `nl2agent_session_lifecycle_service.py` | Session 生命周期 |
+| `nl2agent_seed_service.py` | Runner seed |
+| `nl2agent_summary_service.py` | 引用验证、资源解析 |
+
+### 19.3 约束三：Backend 高内聚低耦合
+
+**审计结果：部分通过，存在大型 Facade 模块**
+
+当前 Backend Service 分布：
+
+```
+backend/services/
+├── nl2agent_service.py          # 1089 行 - 大型 Facade
+├── nl2agent_session_catalog.py   # 1207 行 - 混合 State/Catalog repository
+├── nl2agent_mcp_service.py      # 920 行 - MCP 专项
+├── nl2agent_workflow_service.py  # 中等
+├── nl2agent_catalog_service.py   # 中等
+├── nl2agent_resource_service.py  # 中等
+├── nl2agent_publication_service.py # 中等
+├── nl2agent_session_service.py  # 中等
+├── nl2agent_session_lifecycle_service.py # 中等
+├── nl2agent_seed_service.py     # 小型
+└── nl2agent_summary_service.py  # 小型
+```
+
+问题识别：
+
+1. **大型 Facade**：`nl2agent_service.py` (1089 行) 导入并重新导出大量函数，虽为过渡设计，但维护负担较高。
+2. **混合模块**：`nl2agent_session_catalog.py` (1207 行) 同时包含 State repository 和 Catalog repository 逻辑。
+3. **API 层直接调用 Facade**：部分 App endpoint 直接调用 `nl2agent_service.*`，而非专用 Service。
+
+建议：
+
+- Facade 应逐步收敛到只做依赖装配，核心逻辑移入专用 Service
+- `nl2agent_session_catalog.py` 可考虑拆分为 `nl2agent_state_repository.py` 和 `nl2agent_catalog_repository.py`
+
+### 19.4 约束四：无冗余 Backend 接口
+
+**审计结果：通过**
+
+NL2AGENT 专用接口统一位于 `/nl2agent` 前缀：
+
+| 方法 | 路径 | 动作 |
+|------|------|------|
+| GET | `/sessions` | 列出 active Sessions |
+| GET | `/session/by-conversation/{id}` | 按 Conversation 恢复 |
+| POST | `/session/start` | 创建 Session |
+| POST | `/session/{id}/resume` | 恢复 final-review |
+| POST | `/session/{id}/abandon` | 终止 Session |
+| POST | `/session/{id}/requirements/register` | 注册需求摘要 |
+| POST | `/session/{id}/requirements/confirm` | 确认需求 |
+| PUT | `/session/{id}/models` | 保存模型 |
+| POST | `/session/{id}/local-resources/register` | 注册本地批次 |
+| POST | `/session/{id}/apply-local-resources` | Apply 本地资源 |
+| POST | `/session/{id}/local-resources/skip` | Skip 本地批次 |
+| POST | `/session/{id}/online-recommendations/register` | 注册在线批次 |
+| POST | `/session/{id}/mcp/install` | 安装 MCP |
+| POST | `/session/{id}/mcp/{mcp_id}/bind-tools` | 绑定 MCP 工具 |
+| POST | `/session/{id}/mcp/{mcp_id}/skip-tools` | 跳过 MCP |
+| POST | `/session/{id}/install-web-skill` | 安装 Skill |
+| POST | `/session/{id}/online-configuration/complete` | 完成在线配置 |
+| GET | `/session/{id}/state` | 获取状态投影 |
+| PUT | `/session/{id}/identity` | 保存身份 |
+| POST | `/session/{id}/card-delivery` | 记录 Card 交付 |
+| POST | `/session/{id}/finalize` | 完成构建 |
+| GET | `/session/{id}/web-skill/configuration` | 获取 Skill 配置 |
+
+无重叠接口，每接口职责单一。
+
+### 19.5 约束五：无重复代码逻辑
+
+**审计结果：基本通过，有一处边界引用**
+
+**SDK 搜索内核复用**（合理）：
+- `_context.py` 的 `_score_candidates()` 被三个搜索工具共享
+- 这是有意的代码复用，不是重复
+
+**Backend MCP 规范化**（合理）：
+- `search_web_mcps_tool.py` 的 `normalize_mcp_candidate()` 同步被 Backend `nl2agent_service.py` 引用
+- 这是 Catalog 加载和 SDK 搜索共享规范化逻辑，确保两边一致
+
+**潜在重复点**：
+- `nl2agent_workflow.py` 的 `evaluate_workflow()` 是唯一阶段评估入口
+- `nl2agent_session_catalog.py` 的 `summarize_workflow_state()` 是序列化包装
+- 两函数配合使用，无重复业务逻辑
+
+### 19.6 总结
+
+| 约束 | 状态 | 备注 |
+|------|------|------|
+| SDK 无 Service 依赖 | 通过 | 完全隔离，Catalog 通过 context 注入 |
+| Frontend 纯展示 | 通过 | 业务逻辑全在后端 Service 层 |
+| 高内聚低耦合 | 部分通过 | 大型 Facade 和混合模块需重构 |
+| 无冗余接口 | 通过 | 20 个接口，职责清晰 |
+| 无重复代码 | 通过 | 共享逻辑有明确边界 |
+
+**待改进项**：
+1. `nl2agent_service.py` Facade 应逐步收敛
+2. `nl2agent_session_catalog.py` 可考虑拆分
+3. 部分旧文档描述仍有参考价值但已过时
