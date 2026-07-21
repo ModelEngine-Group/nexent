@@ -2066,6 +2066,7 @@
   "tenantResources.users.updated": "用户已更新",
   "tenantResources.users.email": "邮箱",
   "tenantResources.users.role": "角色",
+  "tenantResources.users.userGroup": "用户组",
   "tenantResources.contactAdmin": "请联系管理员为您分配租户。",
   "tenantResources.noTenantAssigned": "未分配租户",
   "tenantResources.selectTenantDescription": "从列表中选择一个租户来管理其资源。",

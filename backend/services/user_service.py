@@ -8,7 +8,7 @@ from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
     soft_delete_user_tenant_by_user_id
 )
-from database.group_db import remove_user_from_all_groups
+from database.group_db import remove_user_from_all_groups, query_groups_by_user
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
@@ -38,15 +38,17 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
     # Get user-tenant relationships from database with pagination and sorting
     result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
 
-    # For now, return basic user information from the relationships
-    # In the future, this could be enhanced to fetch full user details from Supabase
+    # Return basic user information from the relationships, including group names
     users = []
     for relationship in result["users"]:
+        user_group_list = query_groups_by_user(relationship["user_id"])
+        group_names = [g["group_name"] for g in user_group_list]
         user_info = {
             "id": relationship["user_id"],
             "username": relationship.get("user_email"),
             "role": relationship["user_role"],
-            "tenant_id": relationship["tenant_id"]
+            "tenant_id": relationship["tenant_id"],
+            "group_names": group_names,
         }
         users.append(user_info)
 
