@@ -63,7 +63,6 @@ export const compositeAttachmentAdapter: AttachmentAdapter = {
     );
 
     try {
-      console.log(file)
       const result = await storageService.uploadFiles([file], UPLOAD_FOLDER);
       const item = result.results?.find((r) => r.success);
 
@@ -106,7 +105,6 @@ export const compositeAttachmentAdapter: AttachmentAdapter = {
         // Carry upload metadata alongside the typed fields.
         ...(meta as object),
       };
-      console.log(completeAttachment)
       return completeAttachment;
     } catch (error) {
       log.error("[AttachmentAdapter] Upload error:", error);

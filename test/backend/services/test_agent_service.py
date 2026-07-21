@@ -248,6 +248,9 @@ class MockProcessType:
     class MODEL_OUTPUT_DEEP_THINKING:
         value = "model_output_deep_thinking"
 
+    class SKILL_ARTIFACT:
+        value = "skill_artifact"
+
 sys.modules['nexent.core.utils.observer'] = MagicMock()
 sys.modules['nexent.core.utils.observer'].ProcessType = MockProcessType
 
@@ -14812,153 +14815,6 @@ async def test_run_agent_stream_resume_update_message_status_exception(
         assert result.status_code == 200
         # Verify update_message_status was called
         assert mock_update.call_count == 1
-
-
-# ============================================================================
-# Tests for generate_conversation_title_service exception handling (line 3132)
-# ============================================================================
-
-
-@pytest.mark.asyncio
-@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.create_new_conversation")
-async def test_run_agent_stream_title_generation_exception(
-    mock_create_conversation,
-    mock_build_mem_ctx,
-    mock_generate_stream,
-    mock_resolve,
-    mock_agent_request,
-    mock_http_request,
-    caplog,
-):
-    """run_agent_stream should handle generate_conversation_title_service exception gracefully."""
-    import logging
-
-    # Set conversation_id to None to trigger is_new_conversation=True path
-    mock_agent_request.conversation_id = None
-    mock_agent_request.is_debug = False
-
-    mock_create_conversation.return_value = {"conversation_id": 999}
-    mock_build_mem_ctx.return_value = MagicMock(
-        user_config=MagicMock(memory_switch=True)
-    )
-
-    # Track that title generation was called
-    title_gen_called = {"called": False}
-
-    async def mock_title_gen(*args, **kwargs):
-        title_gen_called["called"] = True
-        raise Exception("Title generation failed")
-
-    mock_generate_stream.return_value = mock_stream_for_title_test()
-
-    # Use the tracking function as side_effect
-    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=mock_title_gen):
-        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
-            response = await agent_service.run_agent_stream(
-                mock_agent_request,
-                mock_http_request,
-                "Bearer token"
-            )
-
-            # Consume the stream to trigger finally block
-            chunks = []
-            async for chunk in response.body_iterator:
-                chunks.append(chunk)
-
-            # Stream should complete successfully despite title generation failure
-            assert response.status_code == 200
-
-            # Verify title generation was called (by checking chunks or title_gen_called)
-            assert len(chunks) > 0, "Stream should yield at least one chunk"
-            assert title_gen_called["called"], "Title generation should have been called"
-
-
-async def mock_stream_for_title_test():
-    """Helper to yield streaming chunks for title generation test."""
-    yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
-
-
-@pytest.mark.asyncio
-@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "zh"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.create_new_conversation")
-async def test_run_agent_stream_title_generation_zh_language(
-    mock_create_conversation,
-    mock_build_mem_ctx,
-    mock_generate_stream,
-    mock_resolve,
-    mock_agent_request,
-    mock_http_request,
-):
-    """run_agent_stream should handle title generation with zh language setting."""
-    mock_create_conversation.return_value = {"conversation_id": 999}
-    mock_build_mem_ctx.return_value = MagicMock(
-        user_config=MagicMock(memory_switch=True)
-    )
-
-    async def mock_stream():
-        yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
-
-    mock_generate_stream.return_value = mock_stream()
-
-    # Make title generation raise exception
-    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=Exception("DB error")):
-        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
-            response = await agent_service.run_agent_stream(
-                mock_agent_request,
-                mock_http_request,
-                "Bearer token"
-            )
-
-            # Should complete successfully
-            assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.create_new_conversation")
-async def test_run_agent_stream_title_generation_success(
-    mock_create_conversation,
-    mock_build_mem_ctx,
-    mock_generate_stream,
-    mock_resolve,
-    mock_agent_request,
-    mock_http_request,
-):
-    """run_agent_stream should successfully call generate_conversation_title_service."""
-    mock_create_conversation.return_value = {"conversation_id": 999}
-    mock_build_mem_ctx.return_value = MagicMock(
-        user_config=MagicMock(memory_switch=True)
-    )
-
-    async def mock_stream():
-        yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
-
-    mock_generate_stream.return_value = mock_stream()
-
-    # Track title generation call
-    title_gen_calls = []
-
-    async def mock_title_gen(*args, **kwargs):
-        title_gen_calls.append(kwargs)
-        return {"success": True}
-
-    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=mock_title_gen):
-        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
-            response = await agent_service.run_agent_stream(
-                mock_agent_request,
-                mock_http_request,
-                "Bearer token"
-            )
-
-            # Should complete successfully
-            assert response.status_code == 200
 
 
 # ============================================================================

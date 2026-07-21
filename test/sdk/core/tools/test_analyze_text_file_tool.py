@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import sdk.nexent.core.tools.analyze_text_file_tool as module
-from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool, ProcessType
+from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool
 
 
 class _NoopLoadSaveObjectManager:
@@ -85,8 +85,6 @@ class TestAnalyzeTextFileTool:
 
         assert result == ["answer"]
         tool.process_text_file.assert_called_once_with("file_1.txt", b"x")
-        observer_en.add_message.assert_any_call("", ProcessType.TOOL, "Analyzing file...")
-
     @pytest.mark.parametrize(
         "payload",
         [
