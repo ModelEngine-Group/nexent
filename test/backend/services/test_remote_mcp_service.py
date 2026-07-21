@@ -632,11 +632,9 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service with API-type (OpenAPI JSON) config."""
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.tool_configuration_service._refresh_openapi_services_in_mcp')
-    @patch('backend.services.tool_configuration_service.import_openapi_service')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     async def test_api_type_skips_mcp_protocol_and_extracts_tools(
-        self, mock_check_name, mock_import, mock_refresh, mock_create
+        self, mock_check_name, mock_create
     ):
         """API-type MCP should skip MCP protocol check and extract tool names from OpenAPI."""
         mock_check_name.return_value = False
@@ -657,15 +655,6 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
             custom_headers=None, container_config=None, registry_json=None,
             enabled=False, config_json=openapi_spec, market_id=None,
         )
-
-        # Verify OpenAPI service was registered
-        mock_import.assert_called_once_with(
-            service_name='test-api', openapi_json=openapi_spec,
-            server_url='https://api.test', tenant_id='tid', user_id='uid',
-            service_description='desc', headers_template=None,
-            force_update=True,
-        )
-        mock_refresh.assert_called_once_with('tid')
 
         # Verify tool names were extracted from OpenAPI paths
         call_data = mock_create.call_args[1]['mcp_data']

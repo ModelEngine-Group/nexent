@@ -55,6 +55,7 @@ class _MockColumn:
     def __add__(self, other): return MagicMock()
     def __radd__(self, other): return MagicMock()
     def __hash__(self): return 0
+    def is_(self, other): return MagicMock()
     def desc(self): return MagicMock()
     def ilike(self, key): return True
     def any(self, val): return MagicMock()
