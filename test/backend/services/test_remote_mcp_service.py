@@ -727,6 +727,9 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         names = [r['remote_mcp_server_name'] for r in result]
         self.assertIn("public", names)
 
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
     async def test_private_mcp_hidden_from_non_creator(
         self, mock_mgr, mock_tenant, mock_groups, mock_records

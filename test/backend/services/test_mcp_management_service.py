@@ -426,7 +426,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.query_group_ids_by_user')
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.mcp_management_service.get_mcp_market_records')
-    async def test_list_handles_group_query_failure(self, mock_get, mock_tenant):
+    async def test_list_handles_group_query_failure(self, mock_get, mock_tenant, mock_groups):
         """list_community_mcp_services should handle query_group_ids_by_user failure gracefully."""
         mock_tenant.return_value = {"user_role": "DEV"}
         mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
@@ -441,6 +441,9 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=[],
         )
 
+    @patch('backend.services.mcp_management_service.query_group_ids_by_user')
+    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('backend.services.mcp_management_service.get_mcp_market_records')
     async def test_list_skips_group_filter_for_admin(self, mock_get, mock_tenant, mock_groups):
         """Admin users should skip group filtering (user_id None, user_group_ids None)."""
         mock_tenant.return_value = {"user_role": "ADMIN"}
@@ -712,6 +715,10 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["mcp_id"], 10)
         self.assertEqual(kwargs["shared_fields"], shared)
 
+    @patch('backend.services.mcp_management_service.update_mcp_market_status')
+    @patch('backend.services.mcp_management_service.update_mcp_market_record')
+    @patch('backend.services.mcp_management_service._resolve_user_email')
+    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
     async def test_update_infers_transport_type(self, mock_get, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
             "market_id": 1, "mcp_name": "svc",
