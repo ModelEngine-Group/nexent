@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from unittest.mock import MagicMock
@@ -639,6 +640,30 @@ def test_create_message_unit_inserts_single_row(monkeypatch):
     assert _captured_insert_values["updated_by"] == "actor"
 
 
+def test_create_message_unit_serializes_structured_content(monkeypatch):
+    """create_message_unit serializes mappings before inserting into the text column."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one.return_value = 11
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    unit_id = create_message_unit(
+        message_id=1,
+        conversation_id=2,
+        unit_index=0,
+        unit_type="skill_artifact",
+        unit_content={"skill_name": "create-docx", "artifacts": [{"file_name": "output.docx"}]},
+    )
+
+    assert unit_id == 11
+    assert json.loads(_captured_insert_values["unit_content"]) == {
+        "skill_name": "create-docx",
+        "artifacts": [{"file_name": "output.docx"}],
+    }
+
+
 def test_create_message_unit_without_user_id(monkeypatch):
     """create_message_unit works without user_id."""
     session = MagicMock()
@@ -766,6 +791,20 @@ def test_update_conversation_message_content(monkeypatch):
     session.execute.assert_called_once()
     assert _captured_update_values["message_content"] == "new text"
     assert _captured_update_values["updated_by"] == "actor"
+
+
+def test_update_message_unit_content_serializes_structured_content(monkeypatch):
+    """update_message_unit_content serializes mappings before updating the text column."""
+    session = MagicMock()
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    update_message_unit_content(42, {"status": "ready"}, user_id="editor")
+
+    assert json.loads(_captured_update_values["unit_content"]) == {"status": "ready"}
+    assert _captured_update_values["updated_by"] == "editor"
 
 
 def test_update_message_unit_content(monkeypatch):

@@ -26,6 +26,7 @@ class ProcessType(Enum):
 
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
+    SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
     VERIFICATION = "verification"  # layered ReAct self-verification status
@@ -74,16 +75,9 @@ class ParseTransformer(MessageTransformer):
 
 
 class ExecutionLogsTransformer(MessageTransformer):
-    # execution log template
-    TEMPLATES = {"zh": "\n📝 执行结果\n", "en": "\n📝 Execution Logs\n"}
-
     def transform(self, **kwargs: Any) -> str:
         """convert the message of execution log"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return template + f"```bash\n{content}\n```\n"
+        return kwargs.get("content", "")
 
 
 class FinalAnswerTransformer(MessageTransformer):
@@ -98,19 +92,6 @@ class TokenCountTransformer(MessageTransformer):
     def transform(self, **kwargs: Any) -> str:
         """Pass through token stats JSON content unchanged for frontend consumption."""
         return kwargs.get("content", "")
-
-
-class ErrorTransformer(MessageTransformer):
-    # error template
-    TEMPLATES = {"zh": "\n💥 运行出错： \n{0}\n", "en": "\n💥 Error: \n{0}\n"}
-
-    def transform(self, **kwargs: Any) -> str:
-        """convert the message of error"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return template.format(content)
 
 
 class MessageObserver:
@@ -152,7 +133,7 @@ class MessageObserver:
             ProcessType.PARSE: ParseTransformer(),
             ProcessType.EXECUTION_LOGS: ExecutionLogsTransformer(),
             ProcessType.FINAL_ANSWER: FinalAnswerTransformer(),
-            ProcessType.ERROR: ErrorTransformer(),
+            ProcessType.ERROR: default_transformer,
             ProcessType.OTHER: default_transformer,
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
@@ -161,6 +142,7 @@ class MessageObserver:
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
+            ProcessType.SKILL_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
             ProcessType.MAX_STEPS_REACHED: default_transformer,
             ProcessType.VERIFICATION: default_transformer
@@ -306,8 +288,13 @@ class MessageObserver:
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
+
+        tool_name = kwargs.get("tool_name")
+        tool_arguments = kwargs.get("tool_arguments")
+
         self.message_query.append(
-            Message(process_type, formatted_content).to_json())
+            Message(process_type, formatted_content, tool_name=tool_name,
+                    tool_arguments=tool_arguments).to_json())
 
     def add_model_reasoning_content(self, reasoning_content):
         """
@@ -336,10 +323,24 @@ class MessageObserver:
 
 # fixed MessageObserver output format
 class Message:
-    def __init__(self, message_type: ProcessType, content):
+    def __init__(self, message_type: ProcessType, content, tool_name: str = None,
+                 tool_arguments: dict = None):
         self.message_type = message_type
         self.content = content
+        self.tool_name = tool_name
+        self.tool_arguments = tool_arguments
 
     # generate json format and convert to string
     def to_json(self):
-        return json.dumps({"type": self.message_type.value, "content": self.content}, ensure_ascii=False)
+        result = {"type": self.message_type.value}
+        # Always include content (running prompt text)
+        if isinstance(self.content, dict):
+            result["content"] = self.content
+        else:
+            result["content"] = self.content
+        # Add tool metadata if available
+        if self.tool_name is not None:
+            result["tool_name"] = self.tool_name
+        if self.tool_arguments is not None:
+            result["tool_arguments"] = self.tool_arguments
+        return json.dumps(result, ensure_ascii=False)

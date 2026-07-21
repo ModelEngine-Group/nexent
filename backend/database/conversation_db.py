@@ -24,6 +24,13 @@ class MessageRecord(TypedDict):
     opinion_flag: Optional[str]
 
 
+def _serialize_unit_content(content: Any) -> str:
+    """Serialize structured unit content for the text database column."""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
 class SearchRecord(TypedDict):
     message_id: int
     source_type: str
@@ -216,7 +223,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "conversation_id": conversation_id,
                 "unit_index": idx,
                 "unit_type": unit['type'],
-                "unit_content": unit['content'],
+                "unit_content": _serialize_unit_content(unit['content']),
                 "delete_flag": 'N'
             }
 
@@ -235,7 +242,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
 
 
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
-                        unit_type: str, unit_content: str,
+                        unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,
                         unit_status: str = 'completed') -> int:
     """
@@ -263,7 +270,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "conversation_id": conversation_id,
             "unit_index": unit_index,
             "unit_type": unit_type,
-            "unit_content": unit_content,
+            "unit_content": _serialize_unit_content(unit_content),
             "unit_status": unit_status,
             "delete_flag": 'N',
         }
@@ -355,7 +362,7 @@ def update_message_unit_status(unit_id: int, status: str,
         )
 
 
-def update_message_unit_content(unit_id: int, content: str,
+def update_message_unit_content(unit_id: int, content: Any,
                                 user_id: Optional[str] = None) -> None:
     """
     Update the unit_content field of a message unit.
@@ -368,7 +375,7 @@ def update_message_unit_content(unit_id: int, content: str,
     with get_db_session() as session:
         unit_id = int(unit_id)
         update_data = {
-            "unit_content": content,
+            "unit_content": _serialize_unit_content(content),
             "update_time": func.current_timestamp(),
         }
         if user_id:
@@ -817,7 +824,10 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.conversation_id == conversation_id,
 
             ConversationMessage.delete_flag == 'N'
-        ).order_by(ConversationMessage.message_index)
+        ).order_by(
+            asc(ConversationMessage.message_index),
+            asc(ConversationMessage.message_id),
+        )
 
         message_records = session.execute(query).all()
 
