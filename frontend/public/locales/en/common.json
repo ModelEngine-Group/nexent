@@ -2097,6 +2097,7 @@
   "tenantResources.users.updated": "User updated",
   "tenantResources.users.email": "Email",
   "tenantResources.users.role": "Role",
+  "tenantResources.users.userGroup": "User Group",
   "tenantResources.contactAdmin": "Please contact your administrator to assign a tenant.",
   "tenantResources.noTenantAssigned": "No tenant assigned",
   "tenantResources.selectTenantDescription": "Choose a tenant from the list to manage its resources.",

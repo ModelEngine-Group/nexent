@@ -141,7 +141,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
         title: t("common.email"),
         dataIndex: "username",
         key: "username",
-        width: "50%"
+        width: "30%"
       },
       {
         title: t("common.type"),
@@ -164,6 +164,26 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
           return <Tag color={color}>
               {roleLabels[role] || role}
             </Tag>;
+        },
+        width: "20%"
+      },
+      {
+        title: t("tenantResources.users.userGroup"),
+        dataIndex: "group_names",
+        key: "group_names",
+        render: (groupNames: string[] | undefined) => {
+          if (!groupNames || groupNames.length === 0) {
+            return "-";
+          }
+          return (
+            <div className="flex flex-wrap gap-1">
+              {groupNames.map((name) => (
+                <Tag key={name} color="geekblue">
+                  {name}
+                </Tag>
+              ))}
+            </div>
+          );
         },
         width: "20%"
       },
@@ -199,7 +219,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
             </Popconfirm>
           </div>
         ),
-        width: "20%"
+        width: "30%"
       },
     ],
     []
