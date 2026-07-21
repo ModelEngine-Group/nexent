@@ -217,6 +217,7 @@ async def publish_community_mcp_service_api(
             config_json=payload.config_json,
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -262,6 +263,7 @@ async def update_community_mcp_service_legacy_api(
             transport_type=payload.transport_type,
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -393,6 +395,7 @@ async def create_community_mcp_service_api(
             config_json=payload.config_json,
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -439,6 +442,7 @@ async def update_community_mcp_service_api(
             transport_type=payload.transport_type,
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:

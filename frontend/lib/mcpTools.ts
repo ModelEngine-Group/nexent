@@ -60,6 +60,9 @@ export const resolveDeploymentType = (item: {
   serverUrl?: string;
 }): McpDeploymentType => {
   if (item.deploymentType) return item.deploymentType;
+  if (item.configJson && typeof item.configJson === "object" && "openapi" in item.configJson) {
+    return McpDeploymentType.API;
+  }
   if (item.transportType === McpTransportType.CONTAINER || item.configJson) {
     return McpDeploymentType.CONTAINER;
   }

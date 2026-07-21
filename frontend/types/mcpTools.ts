@@ -152,6 +152,9 @@ export interface CommunityMcpCard {
   pendingVersion?: string;
   groupIds?: string;
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
+  authorizationToken?: string;
+  customHeaders?: Record<string, string>;
 }
 
 export interface McpServiceItem {
@@ -183,6 +186,7 @@ export interface McpServiceItem {
   permission?: "EDIT" | "READ_ONLY";
   groupIds?: string;
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 export interface McpTagStat {
@@ -207,6 +211,7 @@ export interface AddMcpServicePayload {
   market_id?: number;
   group_ids?: string;
   ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 }
 
 export interface UpdateMcpServicePayload {
@@ -222,6 +227,7 @@ export interface UpdateMcpServicePayload {
   community_id?: number;
   group_ids?: string;
   ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 }
 
 export interface ToggleMcpServicePayload {
@@ -269,6 +275,7 @@ export interface LocalAddMcpDraft {
   version?: string;
   groupIds?: number[];
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 /**

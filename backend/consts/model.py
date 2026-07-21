@@ -1361,6 +1361,7 @@ class AddMcpServiceRequest(BaseModel):
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
     group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod
@@ -1406,6 +1407,7 @@ class UpdateMcpServiceRequest(BaseModel):
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
     @classmethod
@@ -1524,6 +1526,7 @@ class CommunityPublishRequest(BaseModel):
     config_json: Optional[Dict[str, Any]] = Field(None, description="Container MCP configuration JSON override")
     group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "description", "mcp_server", mode="before")
     @classmethod
@@ -1549,6 +1552,7 @@ class CommunityUpdateRequest(BaseModel):
     )
     group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "description", "mcp_server", "transport_type", mode="before")
     @classmethod

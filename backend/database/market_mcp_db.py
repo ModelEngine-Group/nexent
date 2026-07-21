@@ -178,6 +178,7 @@ def update_mcp_market_record(
     transport_type: str | None = None,
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     """Update editable fields on a market record (does not change status)."""
     update_fields: Dict[str, Any] = {"updated_by": user_id}
@@ -199,6 +200,8 @@ def update_mcp_market_record(
         update_fields["group_ids"] = group_ids
     if ingroup_permission is not None:
         update_fields["ingroup_permission"] = ingroup_permission
+    if shared_fields is not None:
+        update_fields["shared_fields"] = shared_fields
 
     with get_db_session() as session:
         session.query(McpMarketRecord).filter(

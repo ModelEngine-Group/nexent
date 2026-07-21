@@ -52,6 +52,7 @@ type AddContainerMcpToolPayload = {
   mcp_config: McpContainerConfigPayload;
   group_ids?: string;
   ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 };
 
 type PortConflictResult = {
@@ -298,11 +299,13 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       updatedAt: s.update_time,
       tags: s.tags || [],
       transportType:
-        (s.config_json !== undefined && s.config_json !== null) ||
-        (s.container_id !== undefined && s.container_id !== null) ||
-        (s.container_port !== undefined && s.container_port !== null)
-          ? McpTransportType.CONTAINER
-          : McpTransportType.URL,
+        s.config_json && typeof s.config_json === "object" && "openapi" in s.config_json
+          ? McpTransportType.URL
+          : (s.config_json !== undefined && s.config_json !== null) ||
+            (s.container_id !== undefined && s.container_id !== null) ||
+            (s.container_port !== undefined && s.container_port !== null)
+            ? McpTransportType.CONTAINER
+            : McpTransportType.URL,
       serverUrl: s.mcp_url,
       version: s.version ?? undefined,
       registryJson: s.registry_json ?? undefined,
@@ -319,6 +322,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       permission: s.permission ?? undefined,
       groupIds: s.group_ids ?? undefined,
       ingroupPermission: s.ingroup_permission ?? undefined,
+      sharedFields: s.shared_fields ?? undefined,
     } as McpServiceItem;
   });
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
@@ -511,6 +515,7 @@ export type PublishCommunityMcpToolPayload = {
   config_json?: McpContainerConfigPayload;
   group_ids?: number[];
   ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 };
 
 export const publishCommunityMcpTool = async (
@@ -570,6 +575,7 @@ export const updateCommunityMcpTool = async (payload: {
   config_json?: McpContainerConfigPayload;
   group_ids?: number[];
   ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 }) => {
   try {
     const response = await fetchWithAuth(

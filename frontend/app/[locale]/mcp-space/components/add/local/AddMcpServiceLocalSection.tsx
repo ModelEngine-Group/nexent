@@ -243,40 +243,82 @@ export default function AddMcpServiceLocalSection({
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.serverUrl")}
                 </label>
-                <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0">
-                  <Input
-                    {...bindField("serverUrl")}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.serverUrl")}
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0 flex-1">
+                    <Input
+                      {...bindField("serverUrl")}
+                      className="w-full rounded-md"
+                      placeholder={t("mcpTools.addModal.serverUrl")}
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["serverUrl"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), serverUrl: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    共享
+                  </label>
+                </div>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.bearerTokenOptional")}
                 </label>
-                <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0">
-                  <Input
-                    {...bindField("authorizationToken")}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0 flex-1">
+                    <Input
+                      {...bindField("authorizationToken")}
+                      className="w-full rounded-md"
+                      placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["authorizationToken"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), authorizationToken: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    共享
+                  </label>
+                </div>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.customHeaders")}
                 </label>
-                <Form.Item name="customHeaders" className="mb-0">
-                  <Input.TextArea
-                    {...bindField("customHeaders")}
-                    rows={2}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="customHeaders" className="mb-0 flex-1">
+                    <Input.TextArea
+                      {...bindField("customHeaders")}
+                      rows={2}
+                      className="w-full rounded-md"
+                      placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["customHeaders"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), customHeaders: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    共享
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -290,14 +332,28 @@ export default function AddMcpServiceLocalSection({
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.containerConfig")}
                 </label>
-                <Form.Item name="containerConfigJson" rules={rules.containerConfig} className="mb-0">
-                  <Input.TextArea
-                    {...bindField("containerConfigJson")}
-                    rows={5}
-                    placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
-                    className="w-full"
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="containerConfigJson" rules={rules.containerConfig} className="mb-0 flex-1">
+                    <Input.TextArea
+                      {...bindField("containerConfigJson")}
+                      rows={5}
+                      placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+                      className="w-full"
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["containerConfigJson"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), containerConfigJson: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    共享
+                  </label>
+                </div>
               </div>
 
               <Form.Item name="containerPort" rules={rules.containerPort} className="mb-0">

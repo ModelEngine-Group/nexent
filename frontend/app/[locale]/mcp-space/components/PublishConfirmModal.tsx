@@ -23,6 +23,8 @@ export interface PublishOverride {
   groupIds?: number[];
   /** Permission level: EDIT, READ_ONLY, PRIVATE. */
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Field-level sharing flags. */
+  sharedFields?: Record<string, boolean>;
 }
 
 interface PublishConfirmModalProps {
@@ -58,6 +60,7 @@ export default function PublishConfirmModal({
     containerConfigJson: "",
     groupIds: [],
     ingroupPermission: "READ_ONLY",
+    sharedFields: {},
   });
 
   const { data: groupData } = useGroupList(tenantId);
@@ -78,6 +81,7 @@ export default function PublishConfirmModal({
       containerConfigJson,
       groupIds: [],
       ingroupPermission: "READ_ONLY",
+      sharedFields: {},
     };
     setDraft(next);
     form.setFieldsValue(next);
@@ -120,6 +124,7 @@ export default function PublishConfirmModal({
           : undefined,
       groupIds: isPrivate ? [] : draft.groupIds,
       ingroupPermission: draft.ingroupPermission,
+      sharedFields: draft.sharedFields,
     });
   };
 
@@ -195,40 +200,69 @@ export default function PublishConfirmModal({
         </Form.Item>
 
         {source?.transportType !== McpTransportType.CONTAINER ? (
-          <Form.Item
-            label={t("mcpTools.detail.serverUrl")}
-            name="serverUrl"
-            rules={rules.httpUrl}
-          >
-            <Input
-              value={draft.serverUrl}
-              onChange={(event) => {
-                patch({ serverUrl: event.target.value });
-                form.setFieldValue("serverUrl", event.target.value);
-              }}
-              className="rounded-md"
-            />
-          </Form.Item>
+          <div className="flex items-center gap-2">
+            <Form.Item
+              label={t("mcpTools.detail.serverUrl")}
+              name="serverUrl"
+              rules={rules.httpUrl}
+              className="mb-0 flex-1"
+            >
+              <Input
+                value={draft.serverUrl}
+                onChange={(event) => {
+                  patch({ serverUrl: event.target.value });
+                  form.setFieldValue("serverUrl", event.target.value);
+                }}
+                className="w-full rounded-md"
+              />
+            </Form.Item>
+            <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300"
+                checked={draft.sharedFields?.["serverUrl"] ?? false}
+                onChange={(e) => {
+                  const next = { ...(draft.sharedFields || {}), serverUrl: e.target.checked };
+                  patch({ sharedFields: next });
+                }}
+              />
+              共享
+            </label>
+          </div>
         ) : null}
 
         {source?.transportType === McpTransportType.CONTAINER ? (
-          <Form.Item
-            label={t("mcpTools.addModal.containerConfig")}
-            name="containerConfigJson"
-            rules={rules.containerConfig}
-            className="mb-0 text-sm text-slate-500"
-          >
-            <Input.TextArea
-              value={draft.containerConfigJson ?? ""}
-              onChange={(event) => {
-                patch({ containerConfigJson: event.target.value });
-                form.setFieldValue("containerConfigJson", event.target.value);
-              }}
-              rows={6}
-              className="mt-2 rounded-md font-mono text-sm"
-              placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
-            />
-          </Form.Item>
+          <div className="flex items-center gap-2">
+            <Form.Item
+              label={t("mcpTools.addModal.containerConfig")}
+              name="containerConfigJson"
+              rules={rules.containerConfig}
+              className="mb-0 flex-1 text-sm text-slate-500"
+            >
+              <Input.TextArea
+                value={draft.containerConfigJson ?? ""}
+                onChange={(event) => {
+                  patch({ containerConfigJson: event.target.value });
+                  form.setFieldValue("containerConfigJson", event.target.value);
+                }}
+                rows={6}
+                className="mt-2 w-full rounded-md font-mono text-sm"
+                placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+              />
+            </Form.Item>
+            <label className="flex shrink-0 items-center gap-1 self-start pt-3 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300"
+                checked={draft.sharedFields?.["containerConfigJson"] ?? false}
+                onChange={(e) => {
+                  const next = { ...(draft.sharedFields || {}), containerConfigJson: e.target.checked };
+                  patch({ sharedFields: next });
+                }}
+              />
+              共享
+            </label>
+          </div>
         ) : null}
 
         <TagEditor

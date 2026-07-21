@@ -123,6 +123,7 @@ export default function McpServiceDetailModal({
   const isRemoteLink = deploymentType === McpDeploymentType.REMOTE_LINK;
   const isContainer = deploymentType === McpDeploymentType.CONTAINER;
   const isApi = deploymentType === McpDeploymentType.API;
+  const isLocalImage = deploymentType === McpDeploymentType.LOCAL_IMAGE;
   const isUnsupported =
     deploymentType === McpDeploymentType.LOCAL_IMAGE ||
     deploymentType !== originalDeploymentType;
@@ -231,29 +232,23 @@ export default function McpServiceDetailModal({
               <label className="mb-2 block text-sm font-medium text-slate-700">
                 {t("mcpTools.detail.addMethod")}
               </label>
-              <div className="grid grid-cols-4 gap-3">
-                {DEPLOYMENT_OPTIONS.map(({ value, labelKey, Icon }) => {
-                  const selected = deploymentType === value;
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setDeploymentType(value)}
-                      className={`flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm transition ${
-                        selected
-                          ? "border-blue-500 bg-blue-50 text-blue-600 shadow-sm"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/40"
-                      }`}
-                    >
-                      <Icon className="text-xl" />
-                      <span>{t(labelKey)}</span>
-                    </button>
-                  );
-                })}
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center gap-3">
+                  {(() => {
+                    const opt = DEPLOYMENT_OPTIONS.find(o => o.value === originalDeploymentType) || DEPLOYMENT_OPTIONS[0];
+                    const Icon = opt.Icon;
+                    return (
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Icon className="text-lg" />
+                        <span>{t(opt.labelKey)}</span>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             </div>
 
-            {isUnsupported ? (
+            {isLocalImage ? (
               <Alert
                 type="info"
                 showIcon
@@ -302,48 +297,93 @@ export default function McpServiceDetailModal({
                     <label className="mb-1 block text-sm font-normal text-slate-500">
                       {t("mcpTools.addModal.serverUrl")}
                     </label>
-                    <Form.Item
-                      name="serverUrl"
-                      rules={rules.httpUrl}
-                      className="mb-0"
-                    >
-                      <Input
-                        className="w-full rounded-md"
-                        placeholder={t("mcpTools.addModal.serverUrl")}
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
+                    <div className="flex items-center gap-2">
+                      <Form.Item
+                        name="serverUrl"
+                        rules={rules.httpUrl}
+                        className="mb-0 flex-1"
+                      >
+                        <Input
+                          className="w-full rounded-md"
+                          placeholder={t("mcpTools.addModal.serverUrl")}
+                          disabled={isReadOnly}
+                        />
+                      </Form.Item>
+                      <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300"
+                          checked={draft.sharedFields?.["serverUrl"] ?? false}
+                          disabled={isReadOnly}
+                          onChange={(e) => {
+                            const next = { ...(draft.sharedFields || {}), serverUrl: e.target.checked };
+                            setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
+                          }}
+                        />
+                        共享
+                      </label>
+                    </div>
                   </div>
 
                   <div>
                     <label className="mb-1 block text-sm font-normal text-slate-500">
                       {t("mcpTools.addModal.bearerTokenOptional")}
                     </label>
-                    <Form.Item
-                      name="authorizationToken"
-                      rules={rules.authToken}
-                      className="mb-0"
-                    >
-                      <Input
-                        className="w-full rounded-md"
-                        placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
+                    <div className="flex items-center gap-2">
+                      <Form.Item
+                        name="authorizationToken"
+                        rules={rules.authToken}
+                        className="mb-0 flex-1"
+                      >
+                        <Input
+                          className="w-full rounded-md"
+                          placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                          disabled={isReadOnly}
+                        />
+                      </Form.Item>
+                      <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300"
+                          checked={draft.sharedFields?.["authorizationToken"] ?? false}
+                          disabled={isReadOnly}
+                          onChange={(e) => {
+                            const next = { ...(draft.sharedFields || {}), authorizationToken: e.target.checked };
+                            setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
+                          }}
+                        />
+                        共享
+                      </label>
+                    </div>
                   </div>
 
                   <div>
                     <label className="mb-1 block text-sm font-normal text-slate-500">
                       {t("mcpTools.addModal.customHeaders")}
                     </label>
-                    <Form.Item name="customHeaders" className="mb-0">
-                      <Input.TextArea
-                        rows={2}
-                        className="w-full rounded-md"
-                        placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
+                    <div className="flex items-center gap-2">
+                      <Form.Item name="customHeaders" className="mb-0 flex-1">
+                        <Input.TextArea
+                          rows={2}
+                          className="w-full rounded-md"
+                          placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
+                          disabled={isReadOnly}
+                        />
+                      </Form.Item>
+                      <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300"
+                          checked={draft.sharedFields?.["customHeaders"] ?? false}
+                          disabled={isReadOnly}
+                          onChange={(e) => {
+                            const next = { ...(draft.sharedFields || {}), customHeaders: e.target.checked };
+                            setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
+                          }}
+                        />
+                        共享
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -413,14 +453,29 @@ export default function McpServiceDetailModal({
                     <label className="mb-1 block text-sm font-normal text-slate-500">
                       {t("mcpTools.addModal.containerConfig")}
                     </label>
-                    <Form.Item name="containerConfigJson" className="mb-0">
-                      <Input.TextArea
-                        rows={5}
-                        className="w-full rounded-md bg-white text-slate-600"
-                        placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
+                    <div className="flex items-center gap-2">
+                      <Form.Item name="containerConfigJson" className="mb-0 flex-1">
+                        <Input.TextArea
+                          rows={5}
+                          className="w-full rounded-md bg-white text-slate-600"
+                          placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+                          disabled={isReadOnly}
+                        />
+                      </Form.Item>
+                      <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300"
+                          checked={draft.sharedFields?.["containerConfigJson"] ?? false}
+                          disabled={isReadOnly}
+                          onChange={(e) => {
+                            const next = { ...(draft.sharedFields || {}), containerConfigJson: e.target.checked };
+                            setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
+                          }}
+                        />
+                        共享
+                      </label>
+                    </div>
                   </div>
 
                   <Form.Item name="containerPort" className="mb-0">
@@ -448,7 +503,7 @@ export default function McpServiceDetailModal({
                   <Select
                     mode="multiple"
                     placeholder={t("tenantResources.knowledgeBase.groupNames")}
-                    disabled={isReadOnly}
+                    disabled={isReadOnly || isApi}
                     value={draft.groupIds ? draft.groupIds.split(",").map(Number) : []}
                     options={groups.map((g: { group_id: number; group_name: string }) => ({
                       label: g.group_name,
@@ -471,7 +526,7 @@ export default function McpServiceDetailModal({
                   >
                     <Select
                       value={draft.ingroupPermission ?? "READ_ONLY"}
-                      disabled={isReadOnly}
+                      disabled={isReadOnly || isApi}
                       onChange={(value) => {
                         setDraft((prev) => prev ? { ...prev, ingroupPermission: value as "EDIT" | "READ_ONLY" | "PRIVATE" } : prev);
                         form.setFieldValue("ingroup_permission", value);
@@ -486,6 +541,9 @@ export default function McpServiceDetailModal({
                 </Can>
               </div>
             </Can>
+            {isApi ? (
+              <p className="text-xs text-slate-400 -mt-3">此添加方式不支持分组和权限设置</p>
+            ) : null}
 
             <div className="flex flex-col gap-4">
               <TagEditor

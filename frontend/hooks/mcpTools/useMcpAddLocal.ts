@@ -125,6 +125,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           mcp_config: mcpConfig,
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
+          shared_fields: draft.sharedFields ?? undefined,
         });
       } else {
         await addMcpToolService({
@@ -139,6 +140,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           tags: draft.tags,
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
+          shared_fields: draft.sharedFields ?? undefined,
         });
       }
 

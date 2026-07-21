@@ -224,6 +224,7 @@ export function useMcpServiceDetail({
         config_json: currentDraft.configJson,
         group_ids: currentDraft.groupIds ?? undefined,
         ingroup_permission: currentDraft.ingroupPermission ?? undefined,
+        shared_fields: currentDraft.sharedFields ?? undefined,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();
@@ -271,6 +272,7 @@ export function useMcpServiceDetail({
       containerConfigJson?: string;
       groupIds?: number[];
       ingroupPermission?: string;
+      sharedFields?: Record<string, boolean>;
     }) => {
       if (!selectedService || selectedService.mcpId < 0) return false;
       setPublishing(true);
@@ -309,6 +311,7 @@ export function useMcpServiceDetail({
           ...(parsedConfig ? { config_json: parsedConfig } : {}),
           ...(override?.groupIds !== undefined ? { group_ids: override.groupIds } : {}),
           ...(override?.ingroupPermission !== undefined ? { ingroup_permission: override.ingroupPermission } : {}),
+          ...(override?.sharedFields !== undefined ? { shared_fields: override.sharedFields } : {}),
         });
 
         message.success(t("mcpTools.community.publishSuccess"));

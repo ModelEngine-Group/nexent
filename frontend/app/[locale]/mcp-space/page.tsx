@@ -585,6 +585,11 @@ function MineView({
     item: MineMcpCardItem,
     onlineService?: CommunityMcpCard
   ) => {
+    const sharedFields = item.service.sharedFields;
+    if (!sharedFields || !Object.values(sharedFields).some(Boolean)) {
+      message.warning("未勾选共享配置信息");
+      return;
+    }
     if (item.kind === "community") {
       // Community items: submit directly
       doSubmitVersionUpdate(item, onlineService);
@@ -620,6 +625,7 @@ function MineView({
           version: (service.version || "").trim(),
           tags: service.tags || [],
           registry_json: service.registryJson,
+          shared_fields: item.service.sharedFields,
         });
       } else if (onlineService?.marketId) {
         const service = item.service;
@@ -636,6 +642,7 @@ function MineView({
             ? McpTransportType.CONTAINER
             : McpTransportType.URL,
           config_json: configJson,
+          shared_fields: item.service.sharedFields,
         });
       } else if (item.kind === "local") {
         const service = item.service;
@@ -648,14 +655,20 @@ function MineView({
           tags: service.tags || [],
           mcp_server: configJson ? undefined : service.serverUrl,
           config_json: configJson,
+          shared_fields: item.service.sharedFields,
         });
       }
-      message.success(t("mcpTools.mine.submitVersionUpdateSuccess"));
+      const isInitialPublish = item.kind === "local" && !onlineService?.marketId;
+      message.success(
+        isInitialPublish
+          ? "上架申请成功"
+          : "上架申请成功"
+      );
       // Optimistically update local cache to show pending status
       updateLocalReviewStatus(item, "pending");
       await refreshMineData();
     } catch {
-      message.error(t("mcpTools.mine.submitVersionUpdateFailed"));
+      message.error("上架申请失败");
     } finally {
       setPublishingKey(null);
     }

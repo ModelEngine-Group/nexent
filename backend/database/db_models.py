@@ -664,6 +664,8 @@ class McpRecord(TableBase):
     group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
     ingroup_permission = Column(String(30), default="READ_ONLY",
                                  doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    shared_fields = Column(JSON, default=None,
+                           doc="JSON object of field-level sharing flags (e.g. {\"serverUrl\": true, \"authorizationToken\": false})")
 
 
 class McpCommunityRecord(TableBase):
@@ -727,6 +729,8 @@ class McpMarketRecord(TableBase):
     group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
     ingroup_permission = Column(String(30), default="READ_ONLY",
                                  doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    shared_fields = Column(JSON, default=None,
+                           doc="Snapshot of shared_fields at submission time")
 
 
 class UserTenant(TableBase):
