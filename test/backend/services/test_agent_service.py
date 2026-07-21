@@ -12723,6 +12723,83 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(monkeypatch, caplog):
+    """_stream_agent_chunks should continue when search placeholders cannot persist."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "search_content",
+            "content": json.dumps([{"title": "Result", "url": "https://example.com"}]),
+        })
+
+    class FailingFuture:
+        def result(self):
+            raise RuntimeError("placeholder write failed")
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+
+    with caplog.at_level("ERROR", logger=agent_service.logger.name):
+        collected = [
+            chunk async for chunk in agent_service._stream_agent_chunks(
+                agent_request, "user", "tenant", MagicMock(), MagicMock()
+            )
+        ]
+
+    assert len(collected) == 1
+    assert "search_content" in collected[0]
+    assert "Failed to persist search_content placeholder" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monkeypatch, caplog):
+    """_stream_agent_chunks should continue when a streaming unit cannot persist."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    class FailingFuture:
+        def result(self):
+            raise RuntimeError("unit write failed")
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+
+    with caplog.at_level("ERROR", logger=agent_service.logger.name):
+        collected = [
+            chunk async for chunk in agent_service._stream_agent_chunks(
+                agent_request, "user", "tenant", MagicMock(), MagicMock()
+            )
+        ]
+
+    assert len(collected) == 1
+    assert "final_answer" in collected[0]
+    assert "Failed to persist streaming message unit" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
     """_stream_agent_chunks should handle update_unit_content exceptions in finally block."""
     from backend.services import agent_service

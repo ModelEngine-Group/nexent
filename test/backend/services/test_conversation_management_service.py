@@ -682,6 +682,48 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(tool_unit["unit_index"], 2)
         self.assertEqual(tool_unit["unit_status"], "completed")
 
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_preserves_invalid_tool_json(self, mock_get_conversation_history):
+        """Tool units with invalid JSON should retain their original content."""
+        invalid_tool_content = "{invalid tool payload"
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123,
+            "create_time": "2023-04-01",
+            "message_records": [
+                {
+                    "message_id": 2,
+                    "role": "assistant",
+                    "message_content": "Done",
+                    "units": [
+                        {
+                            "unit_id": 100,
+                            "unit_type": "tool",
+                            "unit_content": invalid_tool_content,
+                            "unit_index": 2,
+                            "unit_status": "completed",
+                        },
+                        {
+                            "unit_id": 101,
+                            "unit_type": "final_answer",
+                            "unit_content": "Done",
+                            "unit_index": 3,
+                            "unit_status": "completed",
+                        },
+                    ],
+                    "opinion_flag": None,
+                }
+            ],
+            "search_records": [],
+            "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        tool_unit = result[0]["message"][0]["message"][0]
+        self.assertEqual(tool_unit["content"], invalid_tool_content)
+        self.assertNotIn("tool_name", tool_unit)
+        self.assertNotIn("tool_arguments", tool_unit)
+
     @patch('backend.services.conversation_management_service.get_conversation')
     @patch('backend.services.conversation_management_service.get_source_searches_by_message')
     @patch('backend.services.conversation_management_service.get_source_images_by_message')

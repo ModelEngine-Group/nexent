@@ -43,6 +43,35 @@ class TestMessage:
         parsed = json.loads(json_str)
         assert parsed["content"] == unicode_content
 
+    def test_message_to_json_preserves_dict_content_and_tool_metadata(self):
+        """Test Message.to_json() preserves structured content and tool metadata."""
+        content = {"status": "complete", "items": ["one", "two"]}
+        tool_arguments = {"query": "test", "limit": 10}
+        message = Message(
+            ProcessType.TOOL,
+            content,
+            tool_name="search_documents",
+            tool_arguments=tool_arguments,
+        )
+
+        parsed = json.loads(message.to_json())
+
+        assert parsed == {
+            "type": ProcessType.TOOL.value,
+            "content": content,
+            "tool_name": "search_documents",
+            "tool_arguments": tool_arguments,
+        }
+
+    def test_message_to_json_omits_unset_tool_metadata(self):
+        """Test Message.to_json() omits tool metadata when it is not provided."""
+        parsed = json.loads(Message(ProcessType.OTHER, "Test content").to_json())
+
+        assert parsed == {
+            "type": ProcessType.OTHER.value,
+            "content": "Test content",
+        }
+
 
 class TestDefaultTransformer:
     """Test DefaultTransformer class"""
