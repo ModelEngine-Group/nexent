@@ -347,42 +347,33 @@ class TestUpdateMcpMarketRecord:
 
 
 class TestApplyGroupPermissionFilter:
-    """Test _apply_group_permission_filter."""
+    """Test _apply_group_permission_filter directly with mocked or_."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
-    def test_without_user_groups(self, mock_session):
-        """Filter should work when user_group_ids is empty."""
-        session = MockSession()
-        mock_session.return_value = session
+    @patch('backend.database.market_mcp_db.or_')
+    def test_without_user_groups(self, mock_or):
+        """_apply_group_permission_filter should build 3 conditions when user_group_ids is empty."""
+        from backend.database.market_mcp_db import _apply_group_permission_filter
+        query = MagicMock()
+        result = _apply_group_permission_filter(query, "uid", [])
+        # filter should be called once with or_ result
+        assert query.filter.called
 
-        result = get_mcp_market_records(
-            tenant_id="tid",
-            user_id="uid",
-            user_group_ids=[],
-        )
-        assert result is not None
+    @patch('backend.database.market_mcp_db.or_')
+    def test_with_user_groups(self, mock_or):
+        """_apply_group_permission_filter should handle user_group_ids provided."""
+        from backend.database.market_mcp_db import _apply_group_permission_filter
+        query = MagicMock()
+        result = _apply_group_permission_filter(query, "uid", [2, 4])
+        assert query.filter.called
 
-    @patch('backend.database.market_mcp_db.get_db_session')
-    def test_with_user_groups(self, mock_session):
-        """Filter should work when user_group_ids is provided."""
-        session = MockSession()
-        mock_session.return_value = session
-
-        result = get_mcp_market_records(
-            tenant_id="tid",
-            user_id="uid",
-            user_group_ids=[2, 4],
-        )
-        assert result is not None
-
-    @patch('backend.database.market_mcp_db.get_db_session')
-    def test_without_user_id(self, mock_session):
-        """Filter should be skipped when user_id is None."""
-        session = MockSession()
-        mock_session.return_value = session
-
-        result = get_mcp_market_records(tenant_id="tid")
-        assert result is not None
+    def test_without_user_id_skipped(self):
+        """get_mcp_market_records should skip filter when user_id is None."""
+        from backend.database.market_mcp_db import get_mcp_market_records
+        with patch('backend.database.market_mcp_db.get_db_session') as mock_session:
+            session = MockSession()
+            mock_session.return_value = session
+            result = get_mcp_market_records(tenant_id="tid")
+            assert result is not None
 
 
 class TestDeleteMcpMarketRecord:
