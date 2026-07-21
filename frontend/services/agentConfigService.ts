@@ -201,6 +201,7 @@ export const fetchPublishedAgentList = async () => {
     // Convert backend data to frontend format
     const formattedAgents = data.map((agent: any) => ({
       id: String(agent.agent_id),
+      agent_id: Number(agent.agent_id),
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
@@ -422,6 +423,7 @@ export interface UpdateAgentInfoPayload {
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
@@ -787,6 +789,7 @@ export const searchAgentInfo = async (
         data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
+      is_main_agent: data.is_main_agent ?? true,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,

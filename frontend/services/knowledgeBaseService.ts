@@ -17,7 +17,9 @@ import type {
   AidpKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse,
 } from "@/types/agentConfig";
+import type { QuotaStatusResponse } from "@/types/quota";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { emitQuotaUsageChanged } from "@/lib/quotaEvents";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -947,6 +949,7 @@ class KnowledgeBaseService {
         group_ids?: number[];
         is_multimodal?: boolean;
         preserve_source_file?: boolean;
+        quota_limit_bytes?: number | null;
       } = {
         name: params.name,
         description: params.description || "",
@@ -963,6 +966,9 @@ class KnowledgeBaseService {
       }
       if (params.preserve_source_file !== undefined) {
         requestBody.preserve_source_file = params.preserve_source_file;
+      }
+      if (params.quota_limit_bytes !== undefined) {
+        requestBody.quota_limit_bytes = params.quota_limit_bytes;
       }
 
       const response = await fetch(
@@ -1021,6 +1027,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete knowledge base");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete knowledge base:", error);
       throw error;
@@ -1101,7 +1108,7 @@ class KnowledgeBaseService {
     files: File[],
     chunkingStrategy?: string,
     modelId?: number
-  ): Promise<void> {
+  ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
       // Create FormData object
       const formData = new FormData();
@@ -1180,7 +1187,8 @@ class KnowledgeBaseService {
 
       // Handle successful response (201)
       if (processResponse.status === 201) {
-        return;
+        emitQuotaUsageChanged();
+        return { quota_status: uploadResult?.quota_status };
       }
 
       throw new Error("Unknown response status during processing");
@@ -1208,6 +1216,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete document");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete document:", error);
       throw error;

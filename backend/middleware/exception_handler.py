@@ -16,6 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from consts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from consts.error_message import ErrorMessage
+from consts.exceptions import QuotaExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,23 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                         "trace_id": trace_id,
                         "details": exc.details if exc.details else None
                     }
+                )
+            elif isinstance(exc, QuotaExceededError):
+                # Handle tenant storage quota exceeded: HTTP 413
+                logger.warning(
+                    f"[{trace_id}] QuotaExceededError: {exc}",
+                    extra={"trace_id": trace_id},
+                )
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "TenantStorageFull",
+                        "message": str(exc),
+                        "usage_bytes": exc.usage_bytes,
+                        "hard_limit_bytes": exc.hard_limit_bytes,
+                        "exceeded_by_bytes": exc.exceeded_by_bytes,
+                        "trace_id": trace_id,
+                    },
                 )
             elif isinstance(exc, HTTPException):
                 # Handle FastAPI HTTPException for backward compatibility

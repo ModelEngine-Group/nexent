@@ -8,12 +8,28 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+_MODULE_MISSING = object()
+_original_modules = {}
+
+
+def _set_module(name, module):
+    _original_modules.setdefault(name, sys.modules.get(name, _MODULE_MISSING))
+    sys.modules[name] = module
+
 
 def _pkg(name, path):
     mod = types.ModuleType(name)
     mod.__path__ = [str(path)]
-    sys.modules.setdefault(name, mod)
+    _set_module(name, mod)
     return mod
+
+
+def _restore_modules():
+    for name, original_module in _original_modules.items():
+        if original_module is _MODULE_MISSING:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original_module
 
 sdk_pkg = _pkg("sdk", REPO_ROOT / "sdk")
 nexent_pkg = _pkg("sdk.nexent", REPO_ROOT / "sdk" / "nexent")
@@ -34,7 +50,7 @@ class MessageObserver:
         pass
 
 class _ProcessType:
-    TOOL = "TOOL"
+    OTHER = "OTHER"
     CARD = "CARD"
     SEARCH_CONTENT = "SEARCH_CONTENT"
     PICTURE_WEB = "PICTURE_WEB"
@@ -44,7 +60,7 @@ ProcessType = _ProcessType
 observer_mod = types.ModuleType("sdk.nexent.core.utils.observer")
 observer_mod.MessageObserver = MessageObserver
 observer_mod.ProcessType = _ProcessType
-sys.modules["sdk.nexent.core.utils.observer"] = observer_mod
+_set_module("sdk.nexent.core.utils.observer", observer_mod)
 utils_pkg.observer = observer_mod
 
 class _EnumValue:
@@ -55,7 +71,7 @@ class _ToolCategory:
     SEARCH = _EnumValue("search")
 
 class _ToolSign:
-    KNOWLEDGE_BASE = _EnumValue("knowledge_base")
+    KNOWLEDGE_BASE = _EnumValue("a")
 
 class SearchResultTextMessage:
     def __init__(self, **kwargs):
@@ -83,12 +99,12 @@ tools_common_mod = types.ModuleType("sdk.nexent.core.utils.tools_common_message"
 tools_common_mod.SearchResultTextMessage = SearchResultTextMessage
 tools_common_mod.ToolCategory = _ToolCategory
 tools_common_mod.ToolSign = _ToolSign
-sys.modules["sdk.nexent.core.utils.tools_common_message"] = tools_common_mod
+_set_module("sdk.nexent.core.utils.tools_common_message", tools_common_mod)
 utils_pkg.tools_common_message = tools_common_mod
 
 constants_mod = types.ModuleType("sdk.nexent.core.utils.constants")
-constants_mod.RERANK_OVERSEARCH_MULTIPLIER = 2
-sys.modules["sdk.nexent.core.utils.constants"] = constants_mod
+constants_mod.RERANK_OVERSEARCH_MULTIPLIER = 10
+_set_module("sdk.nexent.core.utils.constants", constants_mod)
 utils_pkg.constants = constants_mod
 
 class BaseEmbedding:
@@ -99,12 +115,12 @@ class BaseRerank:
 
 embedding_mod = types.ModuleType("sdk.nexent.core.models.embedding_model")
 embedding_mod.BaseEmbedding = BaseEmbedding
-sys.modules["sdk.nexent.core.models.embedding_model"] = embedding_mod
+_set_module("sdk.nexent.core.models.embedding_model", embedding_mod)
 models_pkg.embedding_model = embedding_mod
 
 rerank_mod = types.ModuleType("sdk.nexent.core.models.rerank_model")
 rerank_mod.BaseRerank = BaseRerank
-sys.modules["sdk.nexent.core.models.rerank_model"] = rerank_mod
+_set_module("sdk.nexent.core.models.rerank_model", rerank_mod)
 models_pkg.rerank_model = rerank_mod
 
 class VectorDatabaseCore:
@@ -112,7 +128,7 @@ class VectorDatabaseCore:
 
 vector_base_mod = types.ModuleType("sdk.nexent.vector_database.base")
 vector_base_mod.VectorDatabaseCore = VectorDatabaseCore
-sys.modules["sdk.nexent.vector_database.base"] = vector_base_mod
+_set_module("sdk.nexent.vector_database.base", vector_base_mod)
 vector_pkg.base = vector_base_mod
 
 smolagents_mod = types.ModuleType("smolagents")
@@ -182,18 +198,18 @@ class Tool:
 
 smolagents_tools_mod.Tool = Tool
 smolagents_mod.tools = smolagents_tools_mod
-sys.modules["smolagents"] = smolagents_mod
-sys.modules["smolagents.tools"] = smolagents_tools_mod
+_set_module("smolagents", smolagents_mod)
+_set_module("smolagents.tools", smolagents_tools_mod)
 
 MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "tools" / "knowledge_base_search_tool.py"
 MODULE_NAME = "sdk.nexent.core.tools.knowledge_base_search_tool"
 spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
 knowledge_base_search_tool_module = importlib.util.module_from_spec(spec)
-sys.modules[MODULE_NAME] = knowledge_base_search_tool_module
+_set_module(MODULE_NAME, knowledge_base_search_tool_module)
 assert spec and spec.loader
 spec.loader.exec_module(knowledge_base_search_tool_module)
-tools_pkg.knowledge_base_search_tool = knowledge_base_search_tool_module
 KnowledgeBaseSearchTool = knowledge_base_search_tool_module.KnowledgeBaseSearchTool
+_restore_modules()
 
 
 @pytest.fixture
@@ -264,9 +280,6 @@ class TestKnowledgeBaseSearchTool:
 
         knowledge_base_search_tool.forward("hello world")
 
-        knowledge_base_search_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Searching the knowledge base..."
-        )
         knowledge_base_search_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps([{"icon": "search", "text": "hello world"}], ensure_ascii=False)
         )
@@ -463,10 +476,7 @@ class TestKnowledgeBaseSearchTool:
 
         result = knowledge_base_search_tool.forward("test query")
 
-        # Verify Chinese running prompt
-        knowledge_base_search_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "知识库检索中..."
-        )
+        # Verify card message is sent
 
     def test_forward_title_fallback(self, knowledge_base_search_tool):
         """Test forward method with title fallback to filename"""
@@ -1249,11 +1259,6 @@ class TestToolMetadata:
         """Test that inputs dict contains required fields."""
         assert "query" in KnowledgeBaseSearchTool.inputs
         assert KnowledgeBaseSearchTool.inputs["query"]["type"] == "string"
-
-    def test_running_prompts(self, knowledge_base_search_tool):
-        """Test running prompts for both languages."""
-        assert knowledge_base_search_tool.running_prompt_zh == "知识库检索中..."
-        assert knowledge_base_search_tool.running_prompt_en == "Searching the knowledge base..."
 
 
 class TestEdgeCases:

@@ -354,7 +354,13 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
                 "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             logger.error(f"Error checking model connectivity: {str(e)}")
             update_model_record(model["model_id"], update_data)
-            raise e
+            if isinstance(e, ValueError):
+                raise e
+            return {
+                "connectivity": False,
+                "model_name": model_name,
+                "error": str(e),
+            }
 
         if connectivity:
             logger.info(
@@ -367,10 +373,11 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
         if ssl_verify_fallback:
             update_data["ssl_verify"] = False
         update_model_record(model["model_id"], update_data)
-        return {
+        result = {
             "connectivity": connectivity,
             "model_name": model_name,
         }
+        return result
     except Exception as e:
         logger.error(f"Error checking model connectivity: {str(e)}")
         if 'model' in locals() and model:

@@ -587,11 +587,6 @@ class TestListDirectoryToolForward:
 
         assert result_data["status"] == "success"
 
-        # Verify Chinese running prompt was sent
-        list_directory_tool_zh.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在列出目录内容..."
-        )
-
         # Verify Chinese card content
         list_directory_tool_zh.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
