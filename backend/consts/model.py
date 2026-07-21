@@ -1406,6 +1406,7 @@ class AddContainerMcpServiceRequest(BaseModel):
     mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
     group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "description", "authorization_token", mode="before")
     @classmethod

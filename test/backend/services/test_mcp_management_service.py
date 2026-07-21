@@ -355,10 +355,10 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.get_mcp_market_records')
     async def test_list_empty(self, mock_get):
         mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
-        result = await list_community_mcp_services(tenant_id="tid", limit=30)
+        result = await list_community_mcp_services(tenant_id="tid", user_id="uid", limit=30)
         self.assertEqual(result["count"], 0)
         mock_get.assert_called_once_with(
-            tenant_id="tid", search=None, tag=None,
+            tenant_id="tid", user_id="uid", search=None, tag=None,
             transport_type=None, cursor=None, limit=30,
         )
 
@@ -368,7 +368,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             "count": 1, "nextCursor": None,
             "items": [MARKET_RECORD],
         }
-        result = await list_community_mcp_services(tenant_id="tid")
+        result = await list_community_mcp_services(tenant_id="tid", user_id="uid")
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["items"][0]["name"], "svc1")
         self.assertEqual(result["items"][0]["marketId"], 1)
@@ -377,11 +377,11 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
     async def test_list_with_filters(self, mock_get):
         mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
         await list_community_mcp_services(
-            tenant_id="tid", search="key", tag="python",
+            tenant_id="tid", user_id="uid", search="key", tag="python",
             transport_type="url", cursor="10", limit=20,
         )
         mock_get.assert_called_once_with(
-            tenant_id="tid", search="key", tag="python",
+            tenant_id="tid", user_id="uid", search="key", tag="python",
             transport_type="url", cursor="10", limit=20,
         )
 
