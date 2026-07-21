@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from contextvars import ContextVar
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from smolagents import tool
@@ -141,7 +142,11 @@ class RunSkillScriptTool:
         try:
             from ..utils.observer import ProcessType
         except ImportError:
-            from sdk.nexent.core.utils.observer import ProcessType
+            try:
+                from sdk.nexent.core.utils.observer import ProcessType
+            except ImportError:
+                class ProcessType(Enum):
+                    SKILL_ARTIFACT = "skill_artifact"
 
         self.observer.add_message("", ProcessType.SKILL_ARTIFACT, content)
 
