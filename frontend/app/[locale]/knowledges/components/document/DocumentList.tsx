@@ -747,7 +747,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         {/* Document list */}
 
         <div
-          className="p-2 overflow-auto flex-grow"
+          className={`p-2 flex-grow min-h-0 ${
+            showChunk ? "overflow-hidden" : "overflow-auto"
+          }`}
           onDragOver={(e) => {
             if (!isCreatingMode && knowledgeBaseName) {
               return;
@@ -769,7 +771,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           }}
         >
           {showChunk ? (
-            <div className="flex h-full flex-col px-8">
+            <div className="flex h-full min-h-0 flex-col px-8">
               <DocumentChunk
                 knowledgeBaseName={knowledgeBaseName}
                 knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}

@@ -840,6 +840,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           className={`h-full w-full min-h-0 ${TABS_ROOT_CLASS}`}
           rootClassName="h-full"
         />
+        {/* Scoped to .document-chunk-tabs only; targets antd v6's renamed
+            content-holder classes (ant-tabs-body-holder / ant-tabs-body) so
+            height: 100% propagates down to the scrollable chunk list. */}
+        <style jsx global>{`
+          .${TABS_ROOT_CLASS} .ant-tabs-body-holder,
+          .${TABS_ROOT_CLASS} .ant-tabs-body {
+            height: 100%;
+          }
+        `}</style>
         {shouldShowPagination && (
           <div className="sticky bottom-0 left-0 z-10 flex w-full justify-center bg-white px-8 pb-4 pt-2 shadow-[0_-4px_12px_rgba(15,23,42,0.04)]">
             <Pagination
