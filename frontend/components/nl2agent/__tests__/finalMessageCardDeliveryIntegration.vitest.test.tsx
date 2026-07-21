@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatMessageType } from "@/types/chat";
@@ -64,6 +64,13 @@ vi.mock("@/components/nl2agent/Nl2AgentWorkflowContext", () => ({
 
 vi.mock("@/services/nl2agentService", () => ({
   getNl2AgentSessionState: serviceMocks.getSessionState,
+  isNl2AgentStaleCard: (error: unknown) =>
+    Boolean(
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "030203"
+    ),
   reportNl2AgentCardDelivery: serviceMocks.reportCardDelivery,
 }));
 
@@ -228,5 +235,50 @@ describe("ChatStreamFinalMessage NL2AGENT delivery gate", () => {
     expect(testState.markdownProps?.nl2AgentCardRegistrationEnabled).toBe(
       false
     );
+  });
+
+  it("silently retires a stale delivery receipt without offering retry", async () => {
+    testState.workflow.active = true;
+    testState.workflow.claimCardDelivery.mockReturnValue(true);
+    testState.validation.cards = [
+      {
+        agentId: 202,
+        cardType: "final_review" as never,
+        language: "nl2agent-finalize" as never,
+        payload: { agent_id: 202 } as never,
+        requiresRegistration: false,
+      } as never,
+    ];
+    serviceMocks.reportCardDelivery.mockRejectedValueOnce({
+      status: 409,
+      code: "030203",
+      message: "The NL2AGENT card delivery receipt is stale.",
+    });
+    const message: ChatMessageType = {
+      id: "assistant-74",
+      message_id: 74,
+      role: "assistant",
+      content: "stale final card",
+      isComplete: true,
+      timestamp: new Date(0),
+    };
+
+    render(
+      <ChatStreamFinalMessage
+        message={message}
+        nl2AgentDraftAgentId={202}
+        isLatestMessage
+        isStreaming={false}
+        enableNl2AgentCardRecovery
+      />
+    );
+
+    await waitFor(() =>
+      expect(testState.workflow.completeCardDelivery).toHaveBeenCalled()
+    );
+    expect(screen.queryByText(/stale/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Retry receipt/i })
+    ).not.toBeInTheDocument();
   });
 });

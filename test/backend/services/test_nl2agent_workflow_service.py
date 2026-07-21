@@ -106,6 +106,76 @@ async def test_card_delivery_accepts_valid_card_in_persisted_message(monkeypatch
     assert result["message_id"] == 10
 
 
+@pytest.mark.asyncio
+async def test_revision_routing_accepts_the_targeted_model_card(monkeypatch):
+    _confirm_requirements()
+    nl2agent_session_catalog.set_model_selection_confirmed("tenant_1", 202, True)
+    _register_local_batch("local_empty", [], [])
+    nl2agent_session_catalog.resolve_recommendation_batch(
+        "tenant_1", 202, "local_empty", "skipped"
+    )
+    for batch_id, resource_type in (("online_mcp", "mcp"), ("online_skill", "skill")):
+        nl2agent_session_catalog._record_trusted_search_batch(
+            "tenant_1",
+            202,
+            recommendation_batch_id=batch_id,
+            resource_type=resource_type,
+            item_keys=[],
+        )
+        nl2agent_session_catalog.register_online_recommendation_batch(
+            "tenant_1", 202, batch_id, resource_type, []
+        )
+    nl2agent_session_catalog.complete_online_configuration("tenant_1", 202)
+    nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
+    nl2agent_session_catalog.record_card_delivery(
+        "tenant_1", 202, 71, "final_review", "rendered"
+    )
+    nl2agent_session_catalog.enter_revision_mode("tenant_1", 202)
+    monkeypatch.setattr(
+        nl2agent_service,
+        "search_agent_info_by_agent_id",
+        MagicMock(
+            return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_message",
+        MagicMock(
+            return_value={
+                "message_id": 72,
+                "conversation_id": 902,
+                "message_role": "assistant",
+                "status": "completed",
+                "message_content": (
+                    '```nl2agent-model-selection\n{"agent_id": 202}\n```'
+                ),
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_latest_assistant_message_id",
+        MagicMock(return_value=72),
+    )
+
+    result = await nl2agent_service.report_card_delivery(
+        agent_id=202,
+        message_id=72,
+        card_type="model_selection",
+        status="rendered",
+        card_key=None,
+        reason=None,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["status"] == "rendered"
+    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
+    assert state["revision_mode"] is True
+    assert state["card_delivery"]["model_selection"]["message_id"] == 72
+
+
 async def test_requirements_card_delivery_omits_fingerprint_card_key(monkeypatch):
     review = nl2agent_session_catalog.register_requirements_summary(
         "tenant_1", 202, _REQUIREMENTS_SUMMARY

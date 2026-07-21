@@ -144,6 +144,15 @@ def _prepare_online_review():
     _register_online_batch("online_skill", "skill", ["skill:12"])
 
 
+def _prepare_final_review():
+    _prepare_online_review()
+    catalog_module.complete_online_configuration("tenant_1", 202)
+    catalog_module.confirm_agent_identity("tenant_1", 202)
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 71, "final_review", "rendered"
+    )
+
+
 def test_catalogs_round_trip_through_shared_redis(fake_redis, monkeypatch):
     catalog_module.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
 
@@ -1103,3 +1112,81 @@ def test_mcp_installation_lock_is_owned_and_recoverable(fake_redis):
     assert catalog_module.acquire_mcp_installation_lock(
         "tenant_1", 202, "stable-key"
     )
+
+
+def test_revision_routing_preserves_idempotent_final_receipt(fake_redis):
+    _prepare_final_review()
+
+    catalog_module.enter_revision_mode("tenant_1", 202)
+    summary = catalog_module.get_workflow_summary("tenant_1", 202)
+
+    assert summary["current_stage"] == "revision_routing"
+    assert summary["expected_card_types"] == []
+    assert "model_selection" in summary["allowed_card_types"]
+    assert "select_models" in summary["allowed_actions"]
+
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 71, "final_review", "rendered"
+    )
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert state["revision_mode"] is True
+    assert state["card_delivery"]["final_review"]["message_id"] == 71
+
+
+def test_model_revision_returns_to_a_fresh_final_review(fake_redis):
+    _prepare_final_review()
+    catalog_module.enter_revision_mode("tenant_1", 202)
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 72, "model_selection", "rendered"
+    )
+
+    catalog_module.set_model_selection_confirmed("tenant_1", 202, True)
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    summary = catalog_module.get_workflow_summary("tenant_1", 202)
+    assert state["revision_mode"] is False
+    assert "final_review" not in state["card_delivery"]
+    assert summary["current_stage"] == "final_review"
+    assert summary["expected_card_types"] == ["final_review"]
+
+
+def test_new_final_card_completes_direct_proposal_revision(fake_redis):
+    _prepare_final_review()
+    catalog_module.enter_revision_mode("tenant_1", 202)
+
+    catalog_module.record_card_delivery(
+        "tenant_1", 202, 73, "final_review", "rendered"
+    )
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert state["revision_mode"] is False
+    assert state["card_delivery"]["final_review"]["message_id"] == 73
+
+
+def test_requirements_revision_reconfirms_without_resetting_other_stages(fake_redis):
+    _prepare_final_review()
+    catalog_module.enter_revision_mode("tenant_1", 202)
+    review = catalog_module.register_requirements_summary(
+        "tenant_1",
+        202,
+        {
+            "goal": "Build a revised agent",
+            "audience_or_scenario": "Operators",
+            "primary_input": "Requests",
+            "expected_output": "Actions",
+            "key_constraints": "Use trusted resources",
+        },
+    )
+
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert state["revision_mode"] is True
+    assert state["requirements_review"]["status"] == "awaiting_confirmation"
+
+    catalog_module.confirm_requirements_summary(
+        "tenant_1", 202, review["fingerprint"]
+    )
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
+    assert state["revision_mode"] is False
+    assert state["model_selection_confirmed"] is True
+    assert state["identity_confirmed"] is True
+    assert "final_review" not in state["card_delivery"]

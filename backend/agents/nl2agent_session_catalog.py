@@ -162,6 +162,39 @@ def assert_workflow_action_allowed(
     return summary
 
 
+def _finish_revision(
+    state: Nl2AgentWorkflowState,
+    *,
+    invalidate_final_review: bool = True,
+) -> None:
+    """Leave edit routing and require a fresh final card after an action."""
+    if not state.revision_mode:
+        return
+    state.revision_mode = False
+    if invalidate_final_review:
+        state.card_delivery.pop("final_review", None)
+
+
+def enter_revision_mode(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> Dict[str, Any]:
+    """Open edit routing for one active session at final review."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        summary = evaluate_workflow(state)
+        if summary.current_stage == "revision_routing":
+            return state_to_dict(state)
+        if summary.current_stage != "final_review":
+            raise Nl2AgentSessionCatalogError(
+                "NL2AGENT editing can only start from final review."
+            )
+        state.revision_mode = True
+        return state_to_dict(state)
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
 def _normalize_requirement_text(value: Any) -> str:
     """Normalize one persisted requirement field without changing its meaning."""
     normalized = unicodedata.normalize("NFKC", str(value or "")).strip()
@@ -199,7 +232,15 @@ def register_requirements_summary(
         review = state.requirements_review
         existing_fingerprint = review.fingerprint
         is_current = False
-        if not existing_fingerprint or (
+        if state.revision_mode:
+            review = RequirementsReview(
+                status="awaiting_confirmation",
+                summary=normalized_summary,
+                fingerprint=fingerprint,
+            )
+            state.requirements_review = review
+            is_current = True
+        elif not existing_fingerprint or (
             review.status == "collecting" and existing_fingerprint != fingerprint
         ):
             review = RequirementsReview(
@@ -286,6 +327,7 @@ def confirm_requirements_summary(
             )
         if review.status == "awaiting_confirmation":
             review.status = "confirmed"
+            _finish_revision(state)
         elif review.status != "confirmed":
             raise Nl2AgentSessionCatalogError(
                 "The requirements summary is not awaiting confirmation."
@@ -308,12 +350,18 @@ def assert_requirements_confirmed(
 
 
 def set_model_selection_confirmed(
-    tenant_id: Optional[str], draft_agent_id: Optional[int], confirmed: bool = True
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    confirmed: bool = True,
+    *,
+    finish_revision: bool = True,
 ) -> Dict[str, Any]:
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         state.model_selection_confirmed = bool(confirmed)
+        if confirmed and finish_revision:
+            _finish_revision(state)
         return {"model_selection_confirmed": state.model_selection_confirmed}
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -362,6 +410,8 @@ def record_card_delivery(
             retry_count=retry_count,
         )
         state.card_delivery[card_type] = delivery
+        if card_type == "final_review" and status == "rendered":
+            _finish_revision(state, invalidate_final_review=False)
         return delivery.model_dump(mode="json")
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -375,6 +425,7 @@ def confirm_agent_identity(
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         state.identity_confirmed = True
+        _finish_revision(state)
         return state_to_dict(state)
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -633,6 +684,7 @@ def complete_online_configuration(
         for batch in batches.values():
             batch.status = "completed"
         state.online_configuration_confirmed = True
+        _finish_revision(state)
         return sorted(batches)
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -902,6 +954,7 @@ def resolve_recommendation_batch(
                 "Recommendation batch is already being applied or resolved."
             )
         batch.status = "skipped"
+        _finish_revision(state)
         return _recommendation_batch_response(batch)
 
     return _mutate_session_state(tenant, draft_id, mutate)
@@ -987,6 +1040,7 @@ def complete_recommendation_batch_apply(
                 "Recommendation apply reservation is no longer owned by this operation."
             )
         batch.status = "applied"
+        _finish_revision(state)
         return _recommendation_batch_response(batch)
 
     return _mutate_session_state(tenant, draft_id, mutate)

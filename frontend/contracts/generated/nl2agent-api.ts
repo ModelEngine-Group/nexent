@@ -338,7 +338,7 @@ export interface paths {
     put?: never;
     /**
      * Resume Session Api
-     * @description Resume one completed NL2AGENT session without resetting its workflow.
+     * @description Resume a final-review NL2AGENT session in targeted editing mode.
      */
     post: operations["resume_session_api_nl2agent_session__agent_id__resume_post"];
     delete?: never;
@@ -1093,6 +1093,7 @@ export interface components {
        * @enum {string}
        */
       current_stage:
+        | "revision_routing"
         | "requirements_collecting"
         | "requirements_confirmation"
         | "model_selection"
@@ -1339,6 +1340,11 @@ export interface components {
        * @default 0
        */
       revision?: number;
+      /**
+       * Revision Mode
+       * @default false
+       */
+      revision_mode?: boolean;
       /**
        * Schema Version
        * @default 2

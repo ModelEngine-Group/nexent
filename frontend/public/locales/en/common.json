@@ -3129,6 +3129,8 @@
   "nl2agent.finalize.viewAgent": "View Agent",
   "nl2agent.finalize.resumed": "You can continue editing this agent.",
   "nl2agent.finalize.resumeError": "Failed to resume this agent session.",
+  "nl2agent.finalize.editingSession": "Editing is in progress",
+  "nl2agent.finalize.editingSessionDescription": "Describe one change in the conversation to reopen its corresponding review card.",
   "nl2agent.finalize.historyExpired": "The editable NL2AGENT session has expired",
   "nl2agent.finalize.historyExpiredDescription": "The proposal saved in this conversation remains available, but its persisted workflow can no longer be resumed.",
   "nl2agent.cardDelivery.generating": "Generating card…",

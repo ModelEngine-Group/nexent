@@ -4,14 +4,28 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
-from agents.nl2agent_session_catalog import delete_nl2agent_session_catalogs
+from agents.nl2agent_session_catalog import (
+    delete_nl2agent_session_catalogs,
+    enter_revision_mode,
+)
+from agents.nl2agent_session_store import recover_committed_cache_best_effort
+from agents.nl2agent_workflow import (
+    WORKFLOW_SCHEMA_VERSION,
+    Nl2AgentWorkflowState,
+    evaluate_workflow,
+    state_to_dict,
+)
 from consts.const import (
     NL2AGENT_ACTIVE_RETENTION_DAYS,
     NL2AGENT_ABANDONED_RETENTION_DAYS,
     NL2AGENT_CLEANUP_BATCH_SIZE,
     NL2AGENT_COMPLETED_RETENTION_DAYS,
 )
-from consts.exceptions import Nl2AgentDraftNotFoundError, Nl2AgentValidationError
+from consts.exceptions import (
+    Nl2AgentDraftNotFoundError,
+    Nl2AgentValidationError,
+    Nl2AgentWorkflowConflictError,
+)
 from database.nl2agent_session_db import (
     NL2AGENT_SESSION_ACTIVE,
     NL2AGENT_SESSION_ABANDONED,
@@ -111,18 +125,32 @@ def require_readable_session(
 def resume_session(
     *, draft_agent_id: int, tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
-    """Reactivate one owned completed session without resetting workflow state."""
+    """Open edit routing for one owned completed or final-review session."""
     record = require_readable_session(
         draft_agent_id=draft_agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
     if record.get("status") == NL2AGENT_SESSION_ACTIVE:
+        enter_revision_mode(tenant_id, draft_agent_id)
         return _public_session(record)
+
+    state = Nl2AgentWorkflowState.model_validate(record.get("workflow_state"))
+    if evaluate_workflow(state).current_stage != "final_review":
+        raise Nl2AgentWorkflowConflictError(
+            "Only a completed final-review session can be resumed for editing."
+        )
+    expected_revision = state.revision
+    state.revision_mode = True
+    state.revision += 1
+    next_state = state_to_dict(state)
     if not resume_nl2agent_session(
         tenant_id=tenant_id,
         draft_agent_id=draft_agent_id,
         user_id=user_id,
+        expected_revision=expected_revision,
+        workflow_schema_version=WORKFLOW_SCHEMA_VERSION,
+        workflow_state=next_state,
     ):
         current = require_readable_session(
             draft_agent_id=draft_agent_id,
@@ -131,7 +159,15 @@ def resume_session(
         )
         if current.get("status") != NL2AGENT_SESSION_ACTIVE:
             raise Nl2AgentDraftNotFoundError()
+        current_state = Nl2AgentWorkflowState.model_validate(
+            current.get("workflow_state")
+        )
+        if not current_state.revision_mode:
+            raise Nl2AgentWorkflowConflictError(
+                "The NL2AGENT session changed while editing was being resumed."
+            )
         record = current
+    recover_committed_cache_best_effort(tenant_id, draft_agent_id)
     return {**_public_session(record), "status": NL2AGENT_SESSION_ACTIVE}
 
 

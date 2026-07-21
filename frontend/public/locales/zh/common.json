@@ -3134,6 +3134,8 @@
   "nl2agent.finalize.viewAgent": "查看智能体",
   "nl2agent.finalize.resumed": "现在可以继续编辑该智能体。",
   "nl2agent.finalize.resumeError": "恢复智能体会话失败。",
+  "nl2agent.finalize.editingSession": "正在编辑智能体",
+  "nl2agent.finalize.editingSessionDescription": "请在对话中描述一项修改，系统将重新打开对应的确认卡片。",
   "nl2agent.finalize.historyExpired": "可编辑的 NL2AGENT 会话已过期",
   "nl2agent.finalize.historyExpiredDescription": "对话中保存的方案仍可查看，但其工作流状态已无法恢复。",
   "nl2agent.cardDelivery.generating": "正在生成卡片…",

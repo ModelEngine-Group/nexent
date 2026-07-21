@@ -65,6 +65,13 @@ export const isNl2AgentWorkflowConflict = (
 ): error is Nl2AgentRequestError =>
   error instanceof Nl2AgentRequestError && error.status === 409;
 
+export const isNl2AgentStaleCard = (
+  error: unknown
+): error is Nl2AgentRequestError =>
+  error instanceof Nl2AgentRequestError &&
+  error.status === 409 &&
+  error.code === "030203";
+
 export const getAvailablePlatformLlms = async (): Promise<
   Array<{ id: number; displayName: string }>
 > => {

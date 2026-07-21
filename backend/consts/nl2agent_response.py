@@ -197,6 +197,7 @@ class Nl2AgentMcpWorkflowResponse(Nl2AgentResponse):
 class Nl2AgentWorkflowStateResponse(Nl2AgentResponse):
     schema_version: Literal[2] = 2
     revision: int = 0
+    revision_mode: bool = False
     conversation_id: int
     requirements_review: Nl2AgentRequirementsReviewResponse
     model_selection_confirmed: bool = False
@@ -264,6 +265,7 @@ class Nl2AgentSessionStateResponse(Nl2AgentResponse):
     schema_version: Literal[2]
     revision: int
     current_stage: Literal[
+        "revision_routing",
         "requirements_collecting",
         "requirements_confirmation",
         "model_selection",

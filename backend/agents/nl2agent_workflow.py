@@ -25,6 +25,7 @@ CardType = Literal[
 ]
 
 WorkflowStage = Literal[
+    "revision_routing",
     "requirements_collecting",
     "requirements_confirmation",
     "model_selection",
@@ -135,6 +136,7 @@ class Nl2AgentWorkflowState(BaseModel):
 
     schema_version: Literal[2] = WORKFLOW_SCHEMA_VERSION
     revision: int = Field(default=0, ge=0)
+    revision_mode: bool = False
     conversation_id: PositiveStrictInt
     requirements_review: RequirementsReview = Field(default_factory=RequirementsReview)
     model_selection_confirmed: bool = False
@@ -172,6 +174,7 @@ class WorkflowSummary(BaseModel):
 
     current_stage: WorkflowStage
     expected_card_types: List[CardType]
+    allowed_card_types: List[CardType]
     allowed_actions: List[str]
     requirements_status: str
     model_selection_confirmed: bool
@@ -204,6 +207,7 @@ class _WorkflowFacts:
 class _StageDecision:
     stage: WorkflowStage
     expected: List[CardType]
+    allowed_cards: List[CardType]
     allowed: List[str]
 
 
@@ -247,10 +251,38 @@ def _select_stage(
     state: Nl2AgentWorkflowState,
     facts: _WorkflowFacts,
 ) -> _StageDecision:
+    if state.revision_mode:
+        return _StageDecision(
+            "revision_routing",
+            [],
+            [
+                "requirements_summary",
+                "model_selection",
+                "local_resources",
+                "web_mcp",
+                "web_skill",
+                "agent_identity",
+                "final_review",
+            ],
+            [
+                "render_requirements_summary",
+                "confirm_requirements",
+                "revise_requirements",
+                "select_models",
+                "search_local_resources",
+                "apply_local_resources",
+                "skip_local_resources",
+                "search_online_resources",
+                "configure_online_resources",
+                "complete_online_configuration",
+                "save_identity",
+            ],
+        )
     requirements_status = state.requirements_review.status
     if requirements_status == "collecting":
         return _StageDecision(
             "requirements_collecting",
+            [],
             [],
             ["clarify_requirements", "render_requirements_summary"],
         )
@@ -258,11 +290,13 @@ def _select_stage(
         return _StageDecision(
             "requirements_confirmation",
             _unrendered_cards(state, "requirements_summary"),
+            _unrendered_cards(state, "requirements_summary"),
             ["confirm_requirements", "revise_requirements"],
         )
     if not state.model_selection_confirmed:
         return _StageDecision(
             "model_selection",
+            _unrendered_cards(state, "model_selection"),
             _unrendered_cards(state, "model_selection"),
             ["select_models"],
         )
@@ -270,11 +304,13 @@ def _select_stage(
         return _StageDecision(
             "local_resource_search",
             ["local_resources"],
+            ["local_resources"],
             ["search_local_resources"],
         )
     if facts.local_status == "pending":
         return _StageDecision(
             "local_resource_review",
+            _unrendered_cards(state, "local_resources"),
             _unrendered_cards(state, "local_resources"),
             ["apply_local_resources", "skip_local_resources"],
         )
@@ -292,10 +328,11 @@ def _select_stage(
             if facts.mcp_registered or facts.skill_registered
             else []
         )
-        return _StageDecision("online_resource_search", expected, allowed)
+        return _StageDecision("online_resource_search", expected, expected, allowed)
     if not state.online_configuration_confirmed:
         return _StageDecision(
             "online_resource_review",
+            _unrendered_cards(state, "web_mcp", "web_skill"),
             _unrendered_cards(state, "web_mcp", "web_skill"),
             ["configure_online_resources", "complete_online_configuration"],
         )
@@ -303,10 +340,12 @@ def _select_stage(
         return _StageDecision(
             "agent_identity",
             _unrendered_cards(state, "agent_identity"),
+            _unrendered_cards(state, "agent_identity"),
             ["save_identity"],
         )
     return _StageDecision(
         "final_review",
+        _unrendered_cards(state, "final_review"),
         _unrendered_cards(state, "final_review"),
         ["publish_agent"],
     )
@@ -320,6 +359,7 @@ def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
     return WorkflowSummary(
         current_stage=decision.stage,
         expected_card_types=decision.expected,
+        allowed_card_types=decision.allowed_cards,
         allowed_actions=decision.allowed,
         requirements_status=state.requirements_review.status,
         model_selection_confirmed=state.model_selection_confirmed,

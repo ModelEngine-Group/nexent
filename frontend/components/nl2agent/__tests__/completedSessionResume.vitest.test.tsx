@@ -79,7 +79,11 @@ describe("completed NL2AGENT final review", () => {
     vi.mocked(getNl2AgentSessionState)
       .mockResolvedValueOnce(completedState)
       .mockResolvedValueOnce(completedState)
-      .mockResolvedValue({ ...completedState, session_status: "active" });
+      .mockResolvedValue({
+        ...completedState,
+        session_status: "active",
+        current_stage: "revision_routing",
+      });
     const activeSession = {
       nl2agent_agent_id: 101,
       draft_agent_id: 202,
@@ -99,7 +103,10 @@ describe("completed NL2AGENT final review", () => {
       expect(resumeNl2AgentSession).toHaveBeenCalledWith(202)
     );
     expect(onSessionResumed).toHaveBeenCalledWith(activeSession);
-    await screen.findByRole("button", { name: "Review & Publish" });
+    await screen.findByText("Editing is in progress");
+    expect(
+      screen.queryByRole("button", { name: "Review & Publish" })
+    ).not.toBeInTheDocument();
   });
 
   it("falls back to the persisted proposal after session retention expires", async () => {
@@ -117,5 +124,45 @@ describe("completed NL2AGENT final review", () => {
     expect(
       within(container).queryByRole("button", { name: "Continue Editing" })
     ).not.toBeInTheDocument();
+  });
+
+  it("allows an active final review to enter another editing round", async () => {
+    const activeState = {
+      ...completedState,
+      session_status: "active" as const,
+      current_stage: "final_review" as const,
+    };
+    vi.mocked(getNl2AgentSessionState).mockResolvedValue(activeState);
+    vi.mocked(resumeNl2AgentSession).mockResolvedValue({
+      nl2agent_agent_id: 101,
+      draft_agent_id: 202,
+      conversation_id: 902,
+      status: "active",
+    });
+    render(
+      <Nl2AgentWorkflowProvider
+        enabled
+        editable
+        agentId={202}
+        scopeKey="conversation:902:draft:202"
+        onContinue={vi.fn(async () => undefined)}
+      >
+        <FinalizeCard
+          data={{
+            agent_id: 202,
+            business_description: "Build presentations",
+            duty_prompt: "Create accurate slides.",
+            greeting_message: "Hello",
+          }}
+        />
+      </Nl2AgentWorkflowProvider>
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Continue Editing" })
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Review & Publish" })
+    ).toBeEnabled();
   });
 });

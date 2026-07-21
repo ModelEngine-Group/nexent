@@ -201,7 +201,10 @@ async def report_card_delivery(
             )
 
     summary = dependencies.summarize_workflow_state(state)
-    if card_type not in summary["expected_card_types"]:
+    allowed_card_types = summary.get(
+        "allowed_card_types", summary["expected_card_types"]
+    )
+    if card_type not in allowed_card_types:
         existing = state.get("card_delivery", {}).get(card_type) or {}
         is_idempotent_receipt = (
             existing.get("message_id") == message_id
@@ -220,7 +223,7 @@ async def report_card_delivery(
                 card_key=card_key,
                 message=message,
                 latest_message_id=latest_message_id,
-                expected_card_types=list(summary["expected_card_types"]),
+                expected_card_types=list(allowed_card_types),
             )
 
     delivery = dependencies.record_card_delivery(

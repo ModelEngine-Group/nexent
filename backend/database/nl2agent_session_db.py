@@ -417,8 +417,14 @@ def resume_nl2agent_session(
     tenant_id: str,
     draft_agent_id: int,
     user_id: str,
+    expected_revision: int,
+    workflow_schema_version: int,
+    workflow_state: Dict[str, Any],
 ) -> bool:
-    """Atomically move one owned completed session back to active."""
+    """Atomically reactivate one completed session with its editing state."""
+    next_revision = int(workflow_state.get("revision", -1))
+    if next_revision != expected_revision + 1:
+        raise ValueError("workflow_state revision must advance exactly once")
     with get_db_session() as session:
         updated = (
             session.query(Nl2AgentSession)
@@ -427,11 +433,15 @@ def resume_nl2agent_session(
                 Nl2AgentSession.draft_agent_id == draft_agent_id,
                 Nl2AgentSession.user_id == user_id,
                 Nl2AgentSession.status == NL2AGENT_SESSION_COMPLETED,
+                Nl2AgentSession.workflow_revision == expected_revision,
                 Nl2AgentSession.delete_flag != "Y",
             )
             .update(
                 {
                     "status": NL2AGENT_SESSION_ACTIVE,
+                    "workflow_schema_version": workflow_schema_version,
+                    "workflow_revision": next_revision,
+                    "workflow_state": workflow_state,
                     "updated_by": user_id,
                     "update_time": func.now(),
                 },

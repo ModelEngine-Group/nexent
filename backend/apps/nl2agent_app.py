@@ -191,7 +191,7 @@ async def resume_session_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    """Resume one completed NL2AGENT session without resetting its workflow."""
+    """Resume a final-review NL2AGENT session in targeted editing mode."""
     user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
         return resume_session(agent_id, tenant_id, user_id)

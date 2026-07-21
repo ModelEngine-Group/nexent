@@ -64,6 +64,7 @@ export const canPublishFinalReview = (
 ) =>
   Boolean(
     state?.session_status === "active" &&
+    state?.current_stage === "final_review" &&
     state?.identity_confirmed &&
     proposalComplete &&
     !state.invalid_references.length &&
@@ -324,6 +325,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
 
   const resourceGroups = groupFinalReviewResources(sessionState);
   const completed = sessionState.session_status === "completed";
+  const editing = sessionState.current_stage === "revision_routing";
   const primaryModels = sessionState.models.filter(
     (model) => model.role === "primary" && model.display_name
   );
@@ -357,6 +359,20 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
               description={t(
                 "nl2agent.finalize.completedSessionDescription",
                 "Continue editing to reopen the workflow from final review."
+              )}
+              className="mb-3"
+            />
+          ) : editing ? (
+            <Alert
+              type="info"
+              showIcon
+              message={t(
+                "nl2agent.finalize.editingSession",
+                "Editing is in progress"
+              )}
+              description={t(
+                "nl2agent.finalize.editingSessionDescription",
+                "Describe one change in the conversation to reopen its corresponding review card."
               )}
               className="mb-3"
             />
@@ -634,23 +650,32 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
                   {t("nl2agent.finalize.continueEditing", "Continue Editing")}
                 </Button>
               </>
-            ) : (
-              <Button
-                size="small"
-                type="primary"
-                onClick={handlePublish}
-                loading={loading}
-                disabled={!canPublish}
-                icon={
-                  loading ? (
-                    <Loader2 className="h-3.5 w-3.5" />
-                  ) : (
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  )
-                }
-              >
-                {t("nl2agent.finalize.publish", "Review & Publish")}
-              </Button>
+            ) : editing ? null : (
+              <>
+                <Button
+                  size="small"
+                  loading={workflow.resuming}
+                  onClick={() => void handleResume()}
+                >
+                  {t("nl2agent.finalize.continueEditing", "Continue Editing")}
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={handlePublish}
+                  loading={loading}
+                  disabled={!canPublish}
+                  icon={
+                    loading ? (
+                      <Loader2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  {t("nl2agent.finalize.publish", "Review & Publish")}
+                </Button>
+              </>
             )}
           </Flex>
         </div>

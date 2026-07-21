@@ -463,6 +463,7 @@ async def select_models(
                     tenant_id,
                     agent_id,
                     previous_confirmation,
+                    finish_revision=False,
                 )
             except Exception:
                 logger.exception(

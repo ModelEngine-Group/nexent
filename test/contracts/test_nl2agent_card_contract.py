@@ -261,6 +261,8 @@ def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:
             / f"nl2agent_system_prompt_{language}.yaml"
         )
         prompt = yaml.safe_load(prompt_path.read_text(encoding="utf-8"))["system_prompt"]
+        assert "`revision_routing`" in prompt
+        assert "`allowed_card_types`" in prompt
         examples = re.findall(r"```(nl2agent-[^\n]+)\n(.+?)\n```", prompt, re.DOTALL)
         assert examples
         for card_language, raw_payload in examples:

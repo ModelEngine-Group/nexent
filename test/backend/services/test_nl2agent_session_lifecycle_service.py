@@ -9,6 +9,52 @@ from consts.exceptions import Nl2AgentDraftNotFoundError, Nl2AgentValidationErro
 from services import nl2agent_session_lifecycle_service as lifecycle
 
 
+def _workflow_state(*, revision_mode=False):
+    return {
+        "schema_version": 2,
+        "revision": 7,
+        "revision_mode": revision_mode,
+        "conversation_id": 902,
+        "requirements_review": {
+            "status": "confirmed",
+            "summary": {
+                "goal": "Build an agent",
+                "audience_or_scenario": "Operators",
+                "primary_input": "Requests",
+                "expected_output": "Actions",
+                "key_constraints": "None",
+            },
+            "fingerprint": "fingerprint",
+        },
+        "model_selection_confirmed": True,
+        "recommendation_batches": {
+            "local": {"status": "skipped", "tool_ids": [], "skill_ids": []}
+        },
+        "identity_confirmed": True,
+        "online_recommendation_batches": {
+            "mcp": {
+                "resource_type": "mcp",
+                "item_keys": [],
+                "status": "completed",
+            },
+            "skill": {
+                "resource_type": "skill",
+                "item_keys": [],
+                "status": "completed",
+            },
+        },
+        "online_configuration_confirmed": True,
+        "card_delivery": {
+            "final_review": {
+                "message_id": 71,
+                "card_type": "final_review",
+                "status": "rendered",
+                "retry_count": 0,
+            }
+        },
+    }
+
+
 def _record(**overrides):
     return {
         "runner_agent_id": 101,
@@ -17,6 +63,7 @@ def _record(**overrides):
         "status": "active",
         "create_time": datetime(2026, 7, 1),
         "update_time": datetime(2026, 7, 2),
+        "workflow_state": _workflow_state(),
         **overrides,
     }
 
@@ -127,6 +174,8 @@ def test_resume_session_is_idempotent_and_preserves_session(monkeypatch):
     update = MagicMock()
     monkeypatch.setattr(lifecycle, "get_nl2agent_session", lookup)
     monkeypatch.setattr(lifecycle, "resume_nl2agent_session", update)
+    enter = MagicMock(return_value={"revision_mode": True})
+    monkeypatch.setattr(lifecycle, "enter_revision_mode", enter)
 
     result = lifecycle.resume_session(
         draft_agent_id=202,
@@ -135,6 +184,7 @@ def test_resume_session_is_idempotent_and_preserves_session(monkeypatch):
     )
 
     assert result["status"] == "active"
+    enter.assert_called_once_with("tenant-a", 202)
     update.assert_not_called()
 
 
@@ -146,6 +196,8 @@ def test_resume_session_reactivates_completed_session(monkeypatch):
     )
     update = MagicMock(return_value=True)
     monkeypatch.setattr(lifecycle, "resume_nl2agent_session", update)
+    cache = MagicMock()
+    monkeypatch.setattr(lifecycle, "recover_committed_cache_best_effort", cache)
 
     result = lifecycle.resume_session(
         draft_agent_id=202,
@@ -154,22 +206,35 @@ def test_resume_session_reactivates_completed_session(monkeypatch):
     )
 
     assert result["status"] == "active"
-    update.assert_called_once_with(
-        tenant_id="tenant-a",
-        draft_agent_id=202,
-        user_id="user-a",
-    )
+    call = update.call_args.kwargs
+    assert call["tenant_id"] == "tenant-a"
+    assert call["draft_agent_id"] == 202
+    assert call["user_id"] == "user-a"
+    assert call["expected_revision"] == 7
+    assert call["workflow_state"]["revision"] == 8
+    assert call["workflow_state"]["revision_mode"] is True
+    assert "final_review" in call["workflow_state"]["card_delivery"]
+    cache.assert_called_once_with("tenant-a", 202)
 
 
 def test_resume_session_accepts_concurrent_reactivation(monkeypatch):
     lookup = MagicMock(
-        side_effect=[_record(status="completed"), _record(status="active")]
+        side_effect=[
+            _record(status="completed"),
+            _record(
+                status="active",
+                workflow_state=_workflow_state(revision_mode=True),
+            ),
+        ]
     )
     monkeypatch.setattr(lifecycle, "get_nl2agent_session", lookup)
     monkeypatch.setattr(
         lifecycle,
         "resume_nl2agent_session",
         MagicMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        lifecycle, "recover_committed_cache_best_effort", MagicMock()
     )
 
     result = lifecycle.resume_session(

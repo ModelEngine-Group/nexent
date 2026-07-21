@@ -256,11 +256,16 @@ def test_resume_session_only_updates_completed_owner_session(
             tenant_id="tenant-a",
             draft_agent_id=11,
             user_id="user-a",
+            expected_revision=3,
+            workflow_schema_version=2,
+            workflow_state={"revision": 4, "revision_mode": True},
         )
         is expected
     )
     values = query.update.call_args.args[0]
     assert values["status"] == nl2agent_session_db.NL2AGENT_SESSION_ACTIVE
+    assert values["workflow_revision"] == 4
+    assert values["workflow_state"]["revision_mode"] is True
     assert values["updated_by"] == "user-a"
 
 

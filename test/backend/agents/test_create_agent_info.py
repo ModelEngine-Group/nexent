@@ -656,6 +656,20 @@ def test_build_nl2agent_current_session_projects_workflow_state(
     assert summary["identity_confirmed"] is expected["identity_confirmed"]
 
 
+def test_build_nl2agent_current_session_exposes_revision_routing():
+    summary = _build_nl2agent_current_session(
+        202,
+        True,
+        {"conversation_id": 300, "revision_mode": True},
+    )
+
+    assert summary["revision_mode"] is True
+    assert summary["current_stage"] == "revision_routing"
+    assert summary["expected_card_types"] == []
+    assert "model_selection" in summary["allowed_card_types"]
+    assert "select_models" in summary["allowed_actions"]
+
+
 def test_build_nl2agent_current_session_includes_authoritative_requirements():
     requirements = {
         "goal": "Build presentations",

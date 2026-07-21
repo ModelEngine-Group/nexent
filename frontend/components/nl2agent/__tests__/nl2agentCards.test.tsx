@@ -621,6 +621,7 @@ describe("final review persisted names", () => {
   it("blocks publication while any persisted reference is invalid", () => {
     const validState = {
       session_status: "active",
+      current_stage: "final_review",
       identity_confirmed: true,
       invalid_references: [],
     } as unknown as Nl2AgentSessionState;

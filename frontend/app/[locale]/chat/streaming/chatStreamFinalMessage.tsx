@@ -53,6 +53,7 @@ import {
 } from "@/components/nl2agent/cardValidation";
 import {
   getNl2AgentSessionState,
+  isNl2AgentStaleCard,
   reportNl2AgentCardDelivery,
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
@@ -183,6 +184,11 @@ function ChatStreamFinalMessageInner({
         });
         completeCardDelivery(deliveryKey);
       } catch (error) {
+        if (isNl2AgentStaleCard(error)) {
+          completeCardDelivery(deliveryKey);
+          notifyStateChanged();
+          return;
+        }
         failCardDelivery(deliveryKey);
         throw error;
       }
@@ -196,6 +202,7 @@ function ChatStreamFinalMessageInner({
       claimCardDelivery,
       completeCardDelivery,
       failCardDelivery,
+      notifyStateChanged,
       enableNl2AgentCardRecovery,
     ]
   );
@@ -236,6 +243,11 @@ function ChatStreamFinalMessageInner({
           }).then(
             () => completeCardDelivery(deliveryKey),
             (error) => {
+              if (isNl2AgentStaleCard(error)) {
+                completeCardDelivery(deliveryKey);
+                notifyStateChanged();
+                return;
+              }
               failCardDelivery(deliveryKey);
               throw error;
             }
@@ -269,10 +281,16 @@ function ChatStreamFinalMessageInner({
             return response;
           },
           (error) => {
+            if (isNl2AgentStaleCard(error)) {
+              completeCardDelivery(failureKey);
+              notifyStateChanged();
+              return null;
+            }
             failCardDelivery(failureKey);
             throw error;
           }
         );
+        if (!result) return;
         notifyStateChanged();
         if (result.auto_retry_allowed && result.chat_injection_text) {
           await continueWithText(result.chat_injection_text);
@@ -280,6 +298,10 @@ function ChatStreamFinalMessageInner({
           setManualCardRetryText(result.chat_injection_text ?? undefined);
         }
       } catch (error) {
+        if (isNl2AgentStaleCard(error)) {
+          notifyStateChanged();
+          return;
+        }
         setCardDeliveryError(
           error instanceof Error
             ? error.message
