@@ -414,23 +414,26 @@ class GuardrailEngine:
             The concatenated text, or ``""`` if none can be extracted.
         """
         content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
-        if content is None:
-            return ""
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            parts = []
+            out = []
             for item in content:
-                if isinstance(item, dict):
-                    text = item.get("text")
-                    if text is None:
-                        text = item.get("content")
-                    if text:
-                        parts.append(str(text))
-                elif isinstance(item, str):
-                    parts.append(item)
-            return "".join(parts)
-        return str(content)
+                text = GuardrailEngine._part_text(item)
+                if text:
+                    out.append(text)
+            return "".join(out)
+        return str(content) if content is not None else ""
+
+    @staticmethod
+    def _part_text(item: Any) -> str:
+        """Text of one list part: a raw string, or a dict with ``text``/``content``."""
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            text = item.get("text") or item.get("content")
+            return str(text) if text else ""
+        return ""
 
     @staticmethod
     def _set_msg_text(msg: Any, text: str) -> None:

@@ -118,6 +118,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'skill_creation_complicated': {
             LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
+        },
+        'agent_automation': {
+            LANGUAGE["ZH"]: 'backend/prompts/agent_automation_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/agent_automation_en.yaml'
         }
     }
 

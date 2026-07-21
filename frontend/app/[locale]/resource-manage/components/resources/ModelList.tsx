@@ -2,7 +2,15 @@
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag, Segmented, Tooltip } from "antd";
+import {
+  Table,
+  Button,
+  Popconfirm,
+  message,
+  Tag,
+  Segmented,
+  Tooltip,
+} from "antd";
 import { Edit, Trash2, RefreshCw, TriangleAlert } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
@@ -17,7 +25,13 @@ import { MODEL_TYPES } from "@/const/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
-import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
+import {
+  CheckCircle,
+  CircleSlash,
+  XCircle,
+  CircleEllipsis,
+  CircleHelp,
+} from "lucide-react";
 
 interface UnifiedModelRow extends ModelOption {
   request_count?: number;
@@ -48,18 +62,20 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   });
 
   const {
-  models: monitoringModels,
-  loading: monitoringLoading,
-  refresh: refreshMonitoring,
-  timeRange: monitoringTimeRange,
-  setTimeRange: setMonitoringTimeRange,
-} = useMonitoringData();
+    models: monitoringModels,
+    loading: monitoringLoading,
+    refresh: refreshMonitoring,
+    timeRange: monitoringTimeRange,
+    setTimeRange: setMonitoringTimeRange,
+  } = useMonitoringData();
 
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
 
-  const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(new Set());
+  const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(
+    new Set()
+  );
 
   const monitoringMap = useMemo(() => {
     const map = new Map<string, ModelMonitoringItem>();
@@ -135,7 +151,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   // Handle checking model connectivity
-  const handleCheckConnectivity = async (displayName: string, modelType: string) => {
+  const handleCheckConnectivity = async (
+    displayName: string,
+    modelType: string
+  ) => {
     if (!tenantId) {
       message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
@@ -143,11 +162,15 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
     setCheckingConnectivity((prev) => new Set(prev).add(displayName));
     try {
-      const isConnected = await modelService.verifyCustomModel(displayName, modelType);
+      const isConnected = await modelService.checkManageTenantModelConnectivity(
+        tenantId,
+        displayName,
+        modelType
+      );
       if (isConnected) {
         message.success(t("tenantResources.models.connectivitySuccess"));
       } else {
-        message.warning(t("tenantResources.models.connectivityFailed"));
+        message.error(t("tenantResources.models.connectivityFailed"));
       }
       refetch();
     } catch (error) {
@@ -232,7 +255,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         // type list that drifted -- it silently hid the badge on vlm2
         // (image-gen) and vlm3 (video-und) rows even when backend marked
         // them bare. Drop the guard and trust the authoritative set.
-        const isBareCapacity = Boolean(record.id && bareModelIds.has(record.id));
+        const isBareCapacity = Boolean(
+          record.id && bareModelIds.has(record.id)
+        );
 
         return (
           <div className="flex items-center">
@@ -267,21 +292,34 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       width: 110,
       render: (status: string) => {
         const color =
-                status === "available" ? "#229954" :
-                status === "unavailable" ? "#E74C3C" :
-                status === "detecting" ? "#5499C7" :
-                status === "not_detected" ? "#AEB6BF" : "#2E4053";
+          status === "available"
+            ? "#229954"
+            : status === "unavailable"
+              ? "#E74C3C"
+              : status === "detecting"
+                ? "#5499C7"
+                : status === "not_detected"
+                  ? "#AEB6BF"
+                  : "#2E4053";
 
-        const icon = status === "available" ? <CheckCircle className="w-3 h-3 mr-1" /> :
-                status === "unavailable" ? <CircleSlash className="w-3 h-3 mr-1" /> :
-                status === "detecting" ? <CircleEllipsis className="w-3 h-3 mr-1" /> :
-                status === "not_detected" ? <CircleHelp className="w-3.5 h-3.5 mr-1" /> :
-                <XCircle className="w-3 h-3 mr-1" />;
+        const icon =
+          status === "available" ? (
+            <CheckCircle className="w-3 h-3 mr-1" />
+          ) : status === "unavailable" ? (
+            <CircleSlash className="w-3 h-3 mr-1" />
+          ) : status === "detecting" ? (
+            <CircleEllipsis className="w-3 h-3 mr-1" />
+          ) : status === "not_detected" ? (
+            <CircleHelp className="w-3.5 h-3.5 mr-1" />
+          ) : (
+            <XCircle className="w-3 h-3 mr-1" />
+          );
         return (
           <Tag
             color={color}
             className="inline-flex items-center"
-            variant="solid">
+            variant="solid"
+          >
             {icon}
             {t(`tenantResources.models.status.${status}`)}
           </Tag>
@@ -300,41 +338,56 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       dataIndex: "request_count",
       key: "request_count",
       width: 100,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.request_count ?? 0) - (b.request_count ?? 0),
-      render: (v: number | undefined) => v !== undefined ? v.toLocaleString() : "--",
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.request_count ?? 0) - (b.request_count ?? 0),
+      render: (v: number | undefined) =>
+        v !== undefined ? v.toLocaleString() : "--",
     },
     {
       title: t("monitoring.table.errorRate"),
       dataIndex: "error_rate",
       key: "error_rate",
       width: 100,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.error_rate ?? 0) - (b.error_rate ?? 0),
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.error_rate ?? 0) - (b.error_rate ?? 0),
       render: (v: number | undefined) =>
-        v !== undefined ? <Tag color={getErrorRateColor(v)}>{v.toFixed(2)}%</Tag> : "--",
+        v !== undefined ? (
+          <Tag color={getErrorRateColor(v)}>{v.toFixed(2)}%</Tag>
+        ) : (
+          "--"
+        ),
     },
     {
       title: t("monitoring.table.avgDuration"),
       dataIndex: "avg_duration",
       key: "avg_duration",
       width: 110,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_duration ?? 0) - (b.avg_duration ?? 0),
-      render: (v: number | undefined) => v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.avg_duration ?? 0) - (b.avg_duration ?? 0),
+      render: (v: number | undefined) =>
+        v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
     },
     {
       title: t("monitoring.table.avgTTFT"),
       dataIndex: "avg_ttft",
       key: "avg_ttft",
       width: 110,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        renderTextModelMetric(v, record, (val) => `${val.toFixed(0)} ${t("monitoring.time.ms")}`),
+        renderTextModelMetric(
+          v,
+          record,
+          (val) => `${val.toFixed(0)} ${t("monitoring.time.ms")}`
+        ),
     },
     {
       title: t("monitoring.table.tokens"),
       dataIndex: "total_tokens",
       key: "total_tokens",
       width: 100,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
         renderTextModelMetric(v, record, (val) => val.toLocaleString()),
     },
@@ -343,9 +396,14 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       dataIndex: "token_generation_rate",
       key: "token_generation_rate",
       width: 120,
-      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
+        (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        renderTextModelMetric(v, record, (val) => `${val.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}`),
+        renderTextModelMetric(
+          v,
+          record,
+          (val) => `${val.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}`
+        ),
     },
     {
       key: "actions",
@@ -355,8 +413,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           <Tooltip title={t("tenantResources.models.checkConnectivity")}>
             <Button
               type="text"
-              icon={checkingConnectivity.has(record.displayName) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              onClick={() => handleCheckConnectivity(record.displayName, record.type)}
+              icon={
+                checkingConnectivity.has(record.displayName) ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )
+              }
+              onClick={() =>
+                handleCheckConnectivity(record.displayName, record.type)
+              }
               size="small"
               loading={checkingConnectivity.has(record.displayName)}
             />

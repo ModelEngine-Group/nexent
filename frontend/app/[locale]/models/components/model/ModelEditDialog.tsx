@@ -5,12 +5,9 @@ import { Alert, Modal, Select, Input, Button, Switch, App } from "antd";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
+import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
 import { modelService } from "@/services/modelService";
-import {
-  CapacitySuggestion,
-  ModelOption,
-  ModelType,
-} from "@/types/modelConfig";
+import { ModelOption, ModelType } from "@/types/modelConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import {
   ModelChunkSizeSlider,
@@ -52,6 +49,15 @@ export const ModelEditDialog = ({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { updateModelConfig } = useConfig();
+  const {
+    suggestion: capacitySuggestion,
+    setSuggestion: setCapacitySuggestion,
+    acceptedSuggestion: acceptedCapacitySuggestion,
+    setAcceptedSuggestion: setAcceptedCapacitySuggestion,
+    checking: checkingCapacitySuggestion,
+    suggest: suggestCapacity,
+    reset: resetCapacitySuggestion,
+  } = useCapacitySuggestion();
   const [form, setForm] = useState({
     type: MODEL_TYPES.LLM as ModelType,
     name: "",
@@ -75,14 +81,8 @@ export const ModelEditDialog = ({
   });
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
-  const [checkingCapacitySuggestion, setCheckingCapacitySuggestion] =
-    useState(false);
   const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
     useState(true);
-  const [capacitySuggestion, setCapacitySuggestion] =
-    useState<CapacitySuggestion | null>(null);
-  const [acceptedCapacitySuggestion, setAcceptedCapacitySuggestion] =
-    useState<CapacitySuggestion | null>(null);
   const [connectivityStatus, setConnectivityStatus] = useState<{
     status: ConnectivityStatusType;
     message: string;
@@ -90,14 +90,6 @@ export const ModelEditDialog = ({
     status: null,
     message: "",
   });
-
-  // Monotonic request token for /suggest-capacity. Used by manual Check
-  // clicks: when the operator clicks twice quickly with different inputs,
-  // the slower response must not overwrite the faster newer one. The
-  // navigation race (open A, cancel, open B) is handled by the
-  // key-based remount on the parent (ModelDeleteDialog), so we no longer
-  // need a separate "reset on close" effect here.
-  const suggestionRequestRef = useRef(0);
 
   // Auto-suggest fires at most once per dialog instance. With the parent's
   // key remount, "per instance" == "per model", which is the desired
@@ -131,10 +123,9 @@ export const ModelEditDialog = ({
         ...capacityFormFromModel(model),
       });
       setCapacitySuggestionEnabled(true);
-      setCapacitySuggestion(null);
-      setAcceptedCapacitySuggestion(null);
+      resetCapacitySuggestion();
     }
-  }, [model]);
+  }, [model, resetCapacitySuggestion]);
 
   const handleFormChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -180,7 +171,9 @@ export const ModelEditDialog = ({
   const canSuggestCapacity = () =>
     supportsCapacityFields && form.name.trim() !== "" && form.url.trim() !== "";
 
-  const applyCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
+  const applyCapacitySuggestion = (
+    suggestion: typeof acceptedCapacitySuggestion
+  ) => {
     const next = capacityFormFromSuggestion(suggestion);
     if (!next || Object.keys(next).length === 0) return;
     setForm((prev) => ({
@@ -194,44 +187,6 @@ export const ModelEditDialog = ({
       // from the active list and the edit dropdown.
     }));
     setAcceptedCapacitySuggestion(suggestion);
-  };
-
-  const handleSuggestCapacity = async () => {
-    if (!canSuggestCapacity()) {
-      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
-      return;
-    }
-    // Capture a token for this call. The [isOpen] reset effect and any
-    // subsequent handleSuggestCapacity invocation will bump the ref;
-    // when we receive our response we check the ref hasn't moved on. If
-    // it has -- the user cancelled and reopened a different model, or
-    // they clicked "Check" again with different inputs -- silently drop
-    // the response so it cannot overwrite the newer state.
-    const myToken = (suggestionRequestRef.current += 1);
-    setCheckingCapacitySuggestion(true);
-    try {
-      const suggestion = await modelService.suggestCapacity({
-        modelName: form.name.trim(),
-        baseUrl: form.url.trim(),
-        providerHint: form.modelFactory || model?.source,
-        apiKey: form.apiKey.trim() || undefined,
-        modelType: connectivityModelType,
-      });
-      if (myToken !== suggestionRequestRef.current) return;
-      setCapacitySuggestion(suggestion);
-      if (!suggestion.suggestions) {
-        setAcceptedCapacitySuggestion(null);
-      }
-    } catch (error) {
-      if (myToken !== suggestionRequestRef.current) return;
-      setCapacitySuggestion(null);
-      setAcceptedCapacitySuggestion(null);
-      message.error(t("model.dialog.capacity.suggestion.failed"));
-    } finally {
-      if (myToken === suggestionRequestRef.current) {
-        setCheckingCapacitySuggestion(false);
-      }
-    }
   };
 
   // W11 V1.5: when the dialog opens on a bare-capacity LLM/VLM row
@@ -254,8 +209,8 @@ export const ModelEditDialog = ({
   // or url -- only the populate transition should kick off auto-suggest.
   const isBareCapacityModel = Boolean(
     model &&
-      supportsCapacityFields &&
-      (!model.contextWindowTokens || !model.maxOutputTokens)
+    supportsCapacityFields &&
+    (!model.contextWindowTokens || !model.maxOutputTokens)
   );
   useEffect(() => {
     if (autoSuggestFiredRef.current) return;
@@ -263,7 +218,13 @@ export const ModelEditDialog = ({
     if (!capacitySuggestionEnabled) return;
     if (!canSuggestCapacity()) return;
     autoSuggestFiredRef.current = true;
-    handleSuggestCapacity();
+    suggestCapacity({
+      modelName: form.name.trim(),
+      baseUrl: form.url.trim(),
+      providerHint: form.modelFactory || model?.source,
+      apiKey: form.apiKey.trim() || undefined,
+      modelType: connectivityModelType,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isOpen,
@@ -703,7 +664,15 @@ export const ModelEditDialog = ({
                 />
                 <Button
                   size="small"
-                  onClick={handleSuggestCapacity}
+                  onClick={() =>
+                    suggestCapacity({
+                      modelName: form.name.trim(),
+                      baseUrl: form.url.trim(),
+                      providerHint: form.modelFactory || model?.source,
+                      apiKey: form.apiKey.trim() || undefined,
+                      modelType: connectivityModelType,
+                    })
+                  }
                   loading={checkingCapacitySuggestion}
                   disabled={!capacitySuggestionEnabled || !canSuggestCapacity()}
                 >
@@ -915,6 +884,9 @@ interface ProviderConfigEditDialogProps {
   hideCapacityFields?: boolean; // Suppress capacity controls when caller is a provider-level batch (not per-model)
   modelType?: ModelType;
   showApiKeyField?: boolean; // Whether to show API Key field (default: true)
+  modelName?: string;
+  baseUrl?: string;
+  providerHint?: string;
   onClose: () => void;
   onSave: (config: {
     apiKey?: string;
@@ -927,6 +899,8 @@ interface ProviderConfigEditDialogProps {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }) => Promise<void> | void;
 }
 
@@ -940,6 +914,9 @@ export const ProviderConfigEditDialog = ({
   hideCapacityFields = false,
   modelType,
   showApiKeyField = true,
+  modelName,
+  baseUrl,
+  providerHint,
   onClose,
   onSave,
 }: ProviderConfigEditDialogProps) => {
@@ -956,6 +933,16 @@ export const ProviderConfigEditDialog = ({
     initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
   );
   const [saving, setSaving] = useState<boolean>(false);
+  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
+    useState(true);
+  const {
+    suggestion: capacitySuggestion,
+    acceptedSuggestion: acceptedCapacitySuggestion,
+    setAcceptedSuggestion: setAcceptedCapacitySuggestion,
+    checking: checkingCapacitySuggestion,
+    suggest: suggestCapacity,
+    reset: resetCapacitySuggestion,
+  } = useCapacitySuggestion();
 
   useEffect(() => {
     setApiKey(initialApiKey);
@@ -967,12 +954,18 @@ export const ProviderConfigEditDialog = ({
         ? capacityFormFromModel(initialCapacity)
         : emptyCapacityForm
     );
+    resetCapacitySuggestion();
+    setCapacitySuggestionEnabled(true);
   }, [
     initialApiKey,
     initialMaxTokens,
     initialTimeoutSeconds,
     initialConcurrencyLimit,
     initialCapacity,
+    modelName,
+    baseUrl,
+    providerHint,
+    resetCapacitySuggestion,
   ]);
 
   const isEmbeddingModel =
@@ -1010,6 +1003,15 @@ export const ProviderConfigEditDialog = ({
     value: string
   ) => {
     setCapacityForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const applyCapacitySuggestion = (
+    suggestion: typeof acceptedCapacitySuggestion
+  ) => {
+    const next = capacityFormFromSuggestion(suggestion);
+    if (!next || Object.keys(next).length === 0) return;
+    setCapacityForm((prev) => ({ ...prev, ...next }));
+    setAcceptedCapacitySuggestion(suggestion);
   };
 
   const valid = () => {
@@ -1076,6 +1078,17 @@ export const ProviderConfigEditDialog = ({
           : supportsBulkCapacity
             ? buildCapacityPayload(capacityForm, { applyDefaults: false })
             : {}),
+        ...(supportsCapacityFields && acceptedCapacitySuggestion
+          ? {
+              acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
+              ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                ? {
+                    acceptedCapabilityProfileVersion:
+                      acceptedCapacitySuggestion.capabilityProfileVersion,
+                  }
+                : {}),
+            }
+          : {}),
       });
       onClose();
     } finally {
@@ -1105,6 +1118,39 @@ export const ProviderConfigEditDialog = ({
           </div>
         )}
         {supportsCapacityFields && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 mb-3">
+            <div className="text-sm font-medium text-gray-700">
+              {t("model.dialog.capacity.suggestion.title")}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Switch
+                size="small"
+                checked={capacitySuggestionEnabled}
+                onChange={setCapacitySuggestionEnabled}
+              />
+              <Button
+                size="small"
+                onClick={() =>
+                  suggestCapacity({
+                    modelName: modelName?.trim() || "",
+                    baseUrl: baseUrl?.trim() || undefined,
+                    providerHint: providerHint?.trim() || undefined,
+                    modelType: modelType || undefined,
+                  })
+                }
+                loading={checkingCapacitySuggestion}
+                disabled={
+                  !capacitySuggestionEnabled ||
+                  !modelName?.trim() ||
+                  (!baseUrl?.trim() && !providerHint?.trim())
+                }
+              >
+                {t("model.dialog.capacity.suggestion.check")}
+              </Button>
+            </div>
+          </div>
+        )}
+        {supportsCapacityFields && (
           <ModelCapacityFields
             value={capacityForm}
             onChange={handleCapacityChange}
@@ -1113,10 +1159,15 @@ export const ProviderConfigEditDialog = ({
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
             // context_window/max_output optional; DEFAULT_* substitute at save.
             legacyMaxTokensCandidate={
-              initialCapacity?.contextWindowTokens && initialCapacity?.maxOutputTokens
+              initialCapacity?.contextWindowTokens &&
+              initialCapacity?.maxOutputTokens
                 ? undefined
                 : initialCapacity?.maxTokens
             }
+            suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
+            suggestionLoading={checkingCapacitySuggestion}
+            onUseSuggestion={() => applyCapacitySuggestion(capacitySuggestion)}
+            acceptedSuggestion={acceptedCapacitySuggestion}
           />
         )}
         {supportsBulkCapacity && (

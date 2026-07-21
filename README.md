@@ -20,11 +20,7 @@ Nexent is a zero-code platform for auto-generating production-grade AI agents, b
 
 > ⭐ Before you get started, please star us on [GitHub](https://github.com/ModelEngine-Group/nexent) — your support drives us forward!
 
-## Option 1: Try Our Official Demo
-
-No installation required — jump right in with our **[online demo environment](http://60.204.251.153:3000/en)** to experience Nexent's capabilities instantly.
-
-## Option 2: Deploy on Your Own
+## Deploy on Your Own
 
 If you need to run Nexent locally or in your private infrastructure, we offer two deployment options:
 
@@ -50,13 +46,13 @@ cd nexent
 bash deploy.sh docker
 ```
 
-The root `deploy.sh` only forwards to the target deploy script; the native Docker implementation is `bash deploy/docker/deploy.sh`. The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source. `infrastructure` is required; `application`, `data-process`, and `supabase` are selected by default and can be disabled when you want a smaller deployment. Use `b`/Backspace to return to the previous TUI step and `q` to quit. Non-interactive runs can pass the same choices with `--version`, `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
+The root `deploy.sh` only forwards to the target deploy script; the native Docker implementation is `bash deploy/docker/deploy.sh`. The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source. `infrastructure` is required; `application`, `data-process`, and `supabase` are selected by default and can be disabled when you want a smaller deployment. Use `b`/Backspace to return to the previous TUI step and `q` to quit. Use `--defaults` to skip the TUI and deploy with saved `deploy.options` or built-in defaults. Non-interactive runs can also pass the same choices with `--version`, `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
 
-Docker and Kubernetes both use `deploy/env/.env` as the runtime configuration file. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`.
+Docker and Kubernetes both use `deploy/env/.env` as the runtime configuration file. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`. Monitoring-specific settings are generated from `deploy/env/monitoring.env.example` into `deploy/env/monitoring.env`.
 
 Docker uninstall is handled by `bash uninstall.sh docker`. It can preserve or delete data volumes: run it interactively, pass `--delete-volumes true|false`, or use `bash uninstall.sh docker delete-all` to remove containers and persistent data.
 
-Offline image packages can be built with `bash deploy/offline/build_offline_package.sh --target docker --compress true`. The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, deployment scripts, SQL files, `manifest.yaml`, and `checksums.txt`; deploy it with `bash deploy.sh --load-images docker ...` on the target host.
+Offline image packages can be built with `bash build.sh --package --target docker --compress true` or `bash deploy/offline/build_offline_package.sh --target docker --compress true`. The package includes image tar files, `load-images.sh`, `push-images.sh`, root deploy/uninstall entrypoints, deployment scripts, SQL files, `manifest.yaml`, and `checksums.txt`. Package deploys use saved `deploy.options` or built-in defaults without opening the TUI; add `--config` to configure interactively. Deploy with `bash deploy.sh --load-images docker ...` on the target host, or use `bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker ...` to push loaded images to an internal registry and deploy with that image prefix. When `--push-images` is used without a prefix, `deploy.sh` asks for it before `push-images.sh` prompts for the registry username and password.
 
 For detailed deployment instructions, see [Docker Installation](https://modelengine-group.github.io/nexent/en/quick-start/installation.html).
 
@@ -74,7 +70,7 @@ The native Kubernetes implementation is `bash deploy/k8s/deploy.sh`. It reads th
 
 Kubernetes uninstall is handled by `bash uninstall.sh k8s`. It removes the Helm release first, then can optionally delete the namespace and local PV data. Use `--delete-namespace true|false`, `--delete-local-data true|false`, or `bash uninstall.sh k8s delete-all`; pass `--keep-local-data` with `delete-all` to preserve local volume contents.
 
-Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or push the loaded images to an internal registry before deploying with the same version and image-source options used during packaging.
+Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or use `--push-images --image-registry-prefix registry.example.com/nexent` to push the images to an internal registry before deploying with the same version, image source, and image registry prefix.
 
 For detailed deployment instructions, see [Kubernetes Installation](https://modelengine-group.github.io/nexent/en/quick-start/kubernetes-installation.html).
 

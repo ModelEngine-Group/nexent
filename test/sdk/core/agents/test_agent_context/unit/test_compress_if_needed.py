@@ -1,5 +1,8 @@
 from factories import make_cm, make_pair, make_model, make_memory_mixed, make_original_messages
-from loader import AgentMemory, TaskStep, SystemPromptStep, CurrentSummaryCache, PreviousSummaryCache, ContextManager
+from loader import (
+    AgentMemory, TaskStep, SystemPromptStep, CurrentSummaryCache, PreviousSummaryCache,
+    ContextManager, pair_fingerprint, action_fingerprint, estimate_tokens, msg_token_count,
+)
 
 
 def _all_texts(messages):
@@ -103,7 +106,7 @@ class TestCompressIfNeeded:
         all_steps.append(TaskStep(task="New Task"))
         memory = AgentMemory(steps=all_steps, system_prompt=SystemPromptStep(system_prompt="system prompt"))
         last_t, last_a = pairs[1]
-        fp = cm._pair_fingerprint(last_t.task, last_a.action_output)
+        fp = pair_fingerprint(last_t.task, last_a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache("short summary", 2, fp)
 
         model = make_model('{"task_overview": "summary"}')
@@ -126,7 +129,7 @@ class TestCompressIfNeeded:
         curr_t, curr_a = make_pair("curr_task", "curr_action", 0)
         memory = AgentMemory(steps=[curr_t, curr_a], system_prompt=SystemPromptStep(system_prompt="system prompt"))
 
-        fp = ContextManager._action_fingerprint(curr_a)
+        fp = action_fingerprint(curr_a)
         cm._current_summary_cache = CurrentSummaryCache("sum_cc", 1, fp)
 
         model = make_model()
@@ -154,11 +157,11 @@ class TestCompressIfNeeded:
             system_prompt=SystemPromptStep(system_prompt="system prompt"),
         )
 
-        assert cm._estimate_tokens(memory) > cm.config.token_threshold
-        prev_fp = cm._pair_fingerprint(prev_t.task, prev_a.action_output)
+        assert estimate_tokens(memory, cm.config.chars_per_token) > cm.config.token_threshold
+        prev_fp = pair_fingerprint(prev_t.task, prev_a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache("prev_sum", 1, prev_fp)
 
-        curr_fp = ContextManager._action_fingerprint(curr_a)
+        curr_fp = action_fingerprint(curr_a)
         cm._current_summary_cache = CurrentSummaryCache("curr_sum", 1, curr_fp)
 
         model = make_model()
@@ -177,7 +180,7 @@ class TestCompressIfNeeded:
         ]
         assert any("prev_sum" in t for t in texts)
         assert any("curr_sum" in t for t in texts)
-        assert cm._msg_token_count(result) < cm.config.token_threshold
+        assert msg_token_count(result, cm.config.chars_per_token) < cm.config.token_threshold
 
     def test_mixed_prev_and_curr_over_threshold(self):
         """previous + current both present and over threshold, should trigger compression separately."""

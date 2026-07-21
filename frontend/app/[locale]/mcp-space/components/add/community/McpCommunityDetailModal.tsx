@@ -31,7 +31,7 @@ import TransportIcon from "../../shared/TransportIcon";
 interface McpCommunityDetailModalProps {
   service: CommunityMcpCard;
   onClose: () => void;
-  onQuickAdd: (service: CommunityMcpCard) => void;
+  onQuickAdd?: (service: CommunityMcpCard) => void;
 }
 
 export default function McpCommunityDetailModal({
@@ -59,6 +59,9 @@ export default function McpCommunityDetailModal({
   );
   const serverTypeText = t(getTransportLabelKey(service.transportType));
   const sourceText = t("mcpTools.source.community");
+  const reviewTypeText = service.reviewType
+    ? t(`mcpTools.review.type.${service.reviewType}`)
+    : undefined;
 
   return (
     <>
@@ -91,9 +94,6 @@ export default function McpCommunityDetailModal({
                   </div>
                 </div>
                 <p className="mt-1.5 text-sm text-slate-500 truncate">
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 mr-1">
-                    {service.version ? formatRegistryVersion(service.version) : "v1.0.0"}
-                  </span>
                   {service.description || t("mcpTools.detail.noDescription")}
                 </p>
               </div>
@@ -131,6 +131,13 @@ export default function McpCommunityDetailModal({
                   label={t("mcpTools.detail.status")}
                   customValue={<RegistryStatusBadge status={service.status} />}
                 />
+                {reviewTypeText ? (
+                  <InfoRow
+                    icon={<FileText className="h-3.5 w-3.5" />}
+                    label={t("mcpTools.review.typeLabel")}
+                    value={reviewTypeText}
+                  />
+                ) : null}
               </div>
             </section>
 
@@ -226,16 +233,17 @@ export default function McpCommunityDetailModal({
             )}
           </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-3 border-t border-slate-200/60 bg-white px-6 py-4">
-            <Button
-              type="primary"
-              className="rounded-md"
-              onClick={() => onQuickAdd(service)}
-            >
-              {t("mcpTools.community.quickAdd")}
-            </Button>
-          </div>
+          {onQuickAdd ? (
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200/60 bg-white px-6 py-4">
+              <Button
+                type="primary"
+                className="rounded-md"
+                onClick={() => onQuickAdd(service)}
+              >
+                {t("mcpTools.community.quickAdd")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </Modal>
 

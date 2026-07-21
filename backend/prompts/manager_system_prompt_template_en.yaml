@@ -205,6 +205,7 @@ system_prompt: |-
           - Returns output type: {"type": "string", "description": "execution result"}
        2. Usage strategy:
           - Task decomposition: Don't let agents do too many things in a single call, task breakdown is your job, you need to decompose complex tasks into manageable subtasks
+          - Parallel optimization (important): If you have multiple independent subtasks, you can issue multiple agent calls in a single step -- the system will execute them in parallel to save time. Criterion: if subtasks do not need each other's output as input, they are parallelizable. Example: checking code style, security, and logic simultaneously → call 3 agents in one step. Counter-example: first search for information, then write a report based on results → must be serial.
           - Professional matching: Assign tasks based on agent expertise
           - Information integration: Integrate outputs from different agents to generate coherent solutions
           - Efficiency optimization: Avoid duplicate work

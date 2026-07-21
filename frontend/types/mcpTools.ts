@@ -2,6 +2,7 @@ import {
   FILTER_ALL,
   McpSource,
   type McpContainerStatus,
+  type McpDeploymentType,
   type McpHealthStatus,
   type McpServiceStatus,
   type McpTransportType,
@@ -123,6 +124,9 @@ export interface RegistryQuickAddOption {
 
 export interface CommunityMcpCard {
   communityId?: number;
+  marketId?: number;
+  reviewId?: number;
+  sourceMcpId?: number;
   name: string;
   version?: string;
   description: string;
@@ -137,6 +141,15 @@ export interface CommunityMcpCard {
   configJson?: Record<string, unknown>;
   registryJson?: Record<string, unknown>;
   tags?: string[];
+  authorName?: string;
+  authorDisplayName?: string;
+  rating?: number;
+  installCount?: number;
+  deploymentType?: McpDeploymentType;
+  reviewStatus?: "pending" | "approved" | "rejected" | "offline";
+  reviewType?: "initial_listing" | "version_update";
+  previousVersion?: string;
+  pendingVersion?: string;
 }
 
 export interface McpServiceItem {
@@ -159,6 +172,13 @@ export interface McpServiceItem {
   containerStatus?: McpContainerStatus;
   authorizationToken?: string;
   customHeaders?: Record<string, string>;
+  isListedInRepository?: boolean;
+  communityId?: number;
+  marketId?: number;
+  deploymentType?: McpDeploymentType;
+  reviewStatus?: "pending" | "approved" | "rejected" | "offline";
+  reviewType?: "initial_listing" | "version_update";
+  permission?: "EDIT" | "READ_ONLY";
 }
 
 export interface McpTagStat {
@@ -176,8 +196,11 @@ export interface AddMcpServicePayload {
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
+  config_json?: Record<string, unknown>;
   version?: string;
   registry_json?: Record<string, unknown>;
+  enabled?: boolean;
+  market_id?: number;
 }
 
 export interface UpdateMcpServicePayload {
@@ -188,6 +211,9 @@ export interface UpdateMcpServicePayload {
   tags: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  config_json?: Record<string, unknown>;
+  version?: string;
+  community_id?: number;
 }
 
 export interface ToggleMcpServicePayload {
@@ -222,13 +248,17 @@ export interface McpContainerConfigPayload {
 export interface LocalAddMcpDraft {
   name: string;
   description?: string;
+  deploymentType?: McpDeploymentType;
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
   customHeaders?: string;
+  openApiJson?: string;
   containerConfigJson: string;
   containerPort?: number;
+  uploadImageFile?: File | null;
   tags: string[];
+  version?: string;
 }
 
 /**

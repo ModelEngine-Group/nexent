@@ -82,6 +82,7 @@ export function useMcpServiceDetail({
         description: currentDraft.description,
         server_url: currentDraft.serverUrl.trim(),
         tags: newTags,
+        version: currentDraft.version,
         authorization_token: (currentDraft.authorizationToken ?? "").trim() || undefined,
         custom_headers: currentDraft.customHeaders,
       });
@@ -188,8 +189,8 @@ export function useMcpServiceDetail({
     );
   }, [draft, selectedService]);
 
-  const save = useCallback(async () => {
-    const currentDraft = draftRef.current;
+  const save = useCallback(async (draftOverride?: McpServiceItem | null) => {
+    const currentDraft = draftOverride ?? draftRef.current;
     const currentSelected = selectedService;
     if (!currentDraft || !currentSelected) return;
     const nextName = currentDraft.name.trim();
@@ -215,8 +216,10 @@ export function useMcpServiceDetail({
         description: currentDraft.description,
         server_url: nextUrl,
         tags: nextTags,
+        version: currentDraft.version,
         authorization_token: nextToken || undefined,
         custom_headers: currentDraft.customHeaders,
+        config_json: currentDraft.configJson,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();

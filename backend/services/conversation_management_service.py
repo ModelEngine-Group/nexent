@@ -28,6 +28,7 @@ from database.conversation_db import (
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    update_conversation_agent_id,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -102,7 +103,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
-                      unit_type: str, unit_content: str,
+                      unit_type: str, unit_content: Any,
                       user_id: Optional[str] = None,
                       unit_status: str = 'completed') -> int:
     """
@@ -290,19 +291,20 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     return success
 
 
-def create_new_conversation(title: str, user_id: str) -> Dict[str, Any]:
+def create_new_conversation(title: str, user_id: str, agent_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Create a new conversation
 
     Args:
         title: Conversation title
         user_id: User ID
+        agent_id: Agent used by the latest run in this conversation
 
     Returns:
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(title, user_id)
+        conversation_data = create_conversation(title, user_id, agent_id=agent_id)
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -321,6 +323,20 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         return conversations
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
+        raise Exception(str(e))
+
+
+def update_conversation_agent_id_service(conversation_id: int, agent_id: int, user_id: str) -> bool:
+    """
+    Update the latest agent associated with a conversation.
+    """
+    try:
+        success = update_conversation_agent_id(conversation_id, agent_id, user_id)
+        if not success:
+            raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to update conversation agent: {str(e)}")
         raise Exception(str(e))
 
 
@@ -358,6 +374,16 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         bool: Whether the deletion was successful
     """
     try:
+        try:
+            from services.agent_automation.facade import agent_automation_facade
+            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+        except Exception as automation_error:
+            logging.warning(
+                "Failed to cleanup automation task for conversation %s: %s",
+                conversation_id,
+                automation_error,
+            )
+
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
@@ -510,10 +536,24 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                             'content': json.dumps(placeholder_content, ensure_ascii=False)
                         })
                     else:
-                        processed_units.append({
+                        processed_unit = {
                             'type': unit_type,
-                            'content': unit_content
-                        })
+                            'content': unit_content,
+                            'unit_index': unit.get('unit_index'),
+                            'unit_status': unit.get('unit_status'),
+                        }
+                        if unit_type in ('tool', 'tool-call') and isinstance(unit_content, str):
+                            try:
+                                tool_data = json.loads(unit_content)
+                            except (json.JSONDecodeError, TypeError):
+                                tool_data = None
+                            if isinstance(tool_data, dict) and 'content' in tool_data:
+                                processed_unit['content'] = tool_data.get('content', '')
+                                processed_unit['tool_name'] = tool_data.get('tool_name')
+                                processed_unit['tool_arguments'] = tool_data.get('tool_arguments')
+                                if 'role' in tool_data:
+                                    processed_unit['role'] = tool_data['role']
+                        processed_units.append(processed_unit)
 
                 # Add final_answer type message unit only if not already present
                 has_final_answer = any(u.get('type') == 'final_answer' for u in processed_units)
@@ -560,6 +600,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
         formatted_history = {
             # Convert to string
             'conversation_id': str(history_data['conversation_id']),
+            'agent_id': history_data.get('agent_id'),
             'create_time': history_data['create_time'],
             'message': messages
         }

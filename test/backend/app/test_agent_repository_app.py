@@ -25,7 +25,6 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     icon: Optional[str] = None
     downloads: int = Field(0, ge=0)
     tags: Optional[List[str]] = None
-    category_id: Optional[int] = 0
     tool_count: Optional[int] = Field(None, ge=0)
 
 
@@ -67,7 +66,6 @@ def test_list_agent_repository_listings_api_success(
         "test_tenant_id",
         status=None,
         agent_id=None,
-        category_id=None,
         page=1,
         page_size=10,
         search=None,
@@ -99,7 +97,6 @@ def test_list_agent_repository_listings_api_passes_agent_id(
         "test_tenant_id",
         status=None,
         agent_id=123,
-        category_id=None,
         page=1,
         page_size=10,
         search=None,
@@ -131,7 +128,6 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
         "test_tenant_id",
         status="pending_review",
         agent_id=None,
-        category_id=None,
         page=1,
         page_size=10,
         search=None,
@@ -171,7 +167,6 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         "test_tenant_id",
         status=None,
         agent_id=None,
-        category_id=None,
         page=2,
         page_size=6,
         search="alpha",
@@ -411,7 +406,6 @@ def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_aut
 
     payload = {
         "icon": "🤖",
-        "category_id": 2,
         "tags": ["代码审查", "自定义"],
         "downloads": 0,
     }

@@ -370,6 +370,19 @@ sys.modules['nexent.core.agents.agent_model'].AgentRunInfo = mock_agent_run_info
 sys.modules['nexent.core.agents.agent_model'].AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observer
 
+# Stub parallel_executor so that create_agent_info can import ParallelExecutorTool
+_mock_parallel_executor_tool_cls = MagicMock()
+_mock_parallel_executor_tool_cls.__name__ = "ParallelExecutorTool"
+_mock_parallel_executor_tool_cls.name = "parallel_executor"
+_mock_parallel_executor_tool_cls.description = "Execute multiple independent calls in parallel."
+_mock_parallel_executor_tool_cls.inputs = {"tasks": {"type": "array"}}
+_mock_parallel_executor_tool_cls.output_type = "any"
+_parallel_executor_mod = _create_stub_module(
+    "nexent.core.tools.parallel_executor",
+    ParallelExecutorTool=_mock_parallel_executor_tool_cls,
+)
+sys.modules["nexent.core.tools.parallel_executor"] = _parallel_executor_mod
+
 # Mock BASE_BUILTIN_MODULES
 sys.modules['smolagents.utils'].BASE_BUILTIN_MODULES = ["os", "sys", "json"]
 
@@ -1820,6 +1833,8 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_uses_raw_components_not_legacy_prompt(self):
         """Managed path should build components and avoid rendering legacy system prompt."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=True,
@@ -1835,8 +1850,40 @@ class TestCreateAgentConfig:
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
+        """Managed path should describe the same builtin tools that AgentConfig exposes."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
+        builtin_tools = [
+            types.SimpleNamespace(name="run_skill_script"),
+            types.SimpleNamespace(name="read_skill_md"),
+            types.SimpleNamespace(name="read_skill_config"),
+            types.SimpleNamespace(name="write_skill_file"),
+        ]
+        with patch(
+            'backend.agents.create_agent_info._get_skill_script_tools',
+            return_value=builtin_tools,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                template="legacy {{duty}}",
+                prepared_prompt="",
+            )
+
+        context_tools = mocks["build_components"].call_args.kwargs["tools"]
+        agent_tools = mocks["agent_config"].call_args.kwargs["tools"]
+
+        assert "run_skill_script" in context_tools
+        assert "read_skill_md" in context_tools
+        assert "read_skill_config" in context_tools
+        assert "write_skill_file" in context_tools
+        assert set(context_tools) == {tool.name for tool in agent_tools}
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
         """Legacy path should render the Jinja prompt and not build managed components."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         mocks = await self._run_context_manager_case(
             enable_context_manager=False,
             template="{{duty}} | {{constraint}}",
@@ -1851,6 +1898,12 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
+        # Reset module-level mock — parallel_executor appends an extra
+        # ToolConfig call after create_tool_config_list returns.  Both
+        # call history and side_effect must be cleared because prior
+        # tests may have left an exhausted iterator on the shared mock.
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
@@ -1909,6 +1962,14 @@ class TestCreateAgentConfig:
                 safe_input_budget_snapshot=ANY,
                 verification_config=ANY
             )
+            # Verify parallel_executor ToolConfig call was made
+            pe_calls = [
+                c for c in mock_tool_config.call_args_list
+                if c[1].get("class_name") == "ParallelExecutorTool"
+            ]
+            assert len(pe_calls) == 1
+            assert pe_calls[0][1]["name"] == "parallel_executor"
+            assert pe_calls[0][1]["source"] == "local"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
@@ -3063,6 +3124,43 @@ class TestCreateAgentConfig:
 
             # Verify that error was logged
             mock_logger.error.assert_any_call("Failed to build knowledge base summary: Test Error")
+
+        @pytest.mark.asyncio
+        async def test_create_agent_config_includes_parallel_executor(self):
+            """parallel_executor is always included as a system-managed tool."""
+            with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search, \
+                    patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
+                    patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
+                    patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                    patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                    patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                    patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                    patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
+                    patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                    patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]):
+                mock_search.return_value = {
+                    "name": "test_agent", "description": "desc",
+                    "duty_prompt": "d", "constraint_prompt": "c",
+                    "few_shots_prompt": "f", "max_steps": 5,
+                    "model_id": 123, "provide_run_summary": False,
+                }
+                mock_get_template.return_value = {"system_prompt": "{{duty}}"}
+                mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
+                mock_build_memory.return_value = Mock(
+                    user_config=Mock(memory_switch=False),
+                    memory_config={}, tenant_id="t", user_id="u", agent_id="a",
+                )
+                mock_prepare_templates.return_value = {"system_prompt": "p"}
+                mock_get_model_by_id.return_value = {"display_name": "m"}
+
+                await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "")
+
+                tools = mock_agent_config.call_args[1]["tools"]
+                # Last tool should be parallel_executor
+                last_tool = tools[-1]
+                assert last_tool.name == "parallel_executor"
+                assert last_tool.class_name == "ParallelExecutorTool"
+                assert last_tool.source == "local"
 
 
 class TestCreateModelConfigList:

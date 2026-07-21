@@ -1,5 +1,6 @@
 import json
 import ast
+import logging
 import time
 import threading
 from datetime import datetime
@@ -233,6 +234,165 @@ def _screened_tool_forward(engine, tool_name, controller, logger, original_forwa
         if decision.masked_kwargs is not None:
             kwargs = decision.masked_kwargs
     return original_forward(*args, **kwargs)
+def _coerce_observer_arguments(arguments: Any) -> Any:
+    """Coerce AST/Python-literal arguments into a JSON-serializable payload.
+
+    smolagents may pass arguments either as a dict (after Python execution) or
+    as a JSON-encoded string (OpenAI-style). We accept both and emit a JSON-
+    friendly value into the observer so the downstream SSE chunk stays
+    consistent with the shape produced by builtin tools.
+    """
+    if arguments is None:
+        return None
+    if isinstance(arguments, (str, int, float, bool)):
+        return arguments
+    if isinstance(arguments, (dict, list)):
+        return arguments
+    return str(arguments)
+
+
+def _collect_call_arguments(call_node: "ast.Call") -> Dict[str, Any]:
+    """Extract positional + keyword arguments from an AST ``Call`` node.
+
+    Uses ``ast.literal_eval`` so we never reach into untrusted input at runtime:
+    the parsed code has not been executed yet, and ast literal-eval only accepts
+    safe Python literals.
+    """
+    arguments: Dict[str, Any] = {}
+
+    for index, arg in enumerate(call_node.args):
+        key = f"arg{index}"
+        try:
+            arguments[key] = ast.literal_eval(arg)
+        except (ValueError, SyntaxError):
+            # Fall back to source snippet when the argument is a complex
+            # expression (variable references, attribute access, etc.).
+            arguments[key] = ast.unparse(arg)
+
+    for keyword in call_node.keywords:
+        if keyword.arg is None:
+            # ``**kwargs`` spread; surface as a tagged entry for diagnostics.
+            try:
+                arguments["**kwargs"] = ast.unparse(keyword.value)
+            except Exception:
+                arguments["**kwargs"] = "<unparseable>"
+            continue
+        try:
+            arguments[keyword.arg] = ast.literal_eval(keyword.value)
+        except (ValueError, SyntaxError):
+            try:
+                arguments[keyword.arg] = ast.unparse(keyword.value)
+            except Exception:
+                arguments[keyword.arg] = "<unparseable>"
+
+    return arguments
+
+
+def _scan_code_for_tool_calls(
+    code_action: str,
+    known_tool_names: set,
+) -> List[Dict[str, Any]]:
+    """Walk ``code_action`` looking for calls to real tools.
+
+    Returns a list of dicts ``{name, arguments, line}`` preserving source order.
+    Tools not exposed via ``self.tools``/``self.managed_agents`` (e.g. builtin
+    Python helpers such as ``print`` or ``final_answer``) are ignored to keep
+    the emitted `tool` chunks accurate and aligned with the user's intent of
+    surfacing MCP / managed-agent invocations only.
+    """
+    if not code_action or not known_tool_names:
+        return []
+    try:
+        tree = ast.parse(code_action)
+    except SyntaxError:
+        # The smolagents parser will raise a more specific error downstream,
+        # so just return an empty list here.
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen_keys = set()  # dedupe identical call expressions
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if not name or name not in known_tool_names:
+            continue
+
+        arguments = _collect_call_arguments(node)
+        dedup_key = (name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        results.append(
+            {
+                "name": name,
+                "arguments": arguments,
+                "line": getattr(node, "lineno", None),
+            }
+        )
+
+    return results
+
+
+def _emit_real_tool_chunks_from_code(
+    observer: "MessageObserver",
+    agent_name: str,
+    code_action: str,
+    known_tool_names,
+) -> None:
+    """Translate real tool calls in ``code_action`` into observer TOOL chunks.
+
+    CodeAgent wraps every step in a synthetic ``python_interpreter`` ToolCall,
+    so without this bridge the SSE stream never sees the actual MCP /
+    managed-agent names the LLM invoked. We emit one `type=tool` chunk per
+    unique tool call AFTER the PARSE chunk has been published and BEFORE
+    ``python_executor(code_action)`` runs, so the downstream stream order is:
+
+        parse -> tool -> execution_logs
+
+    matching what the user sees during a real builtin-tool invocation.
+    """
+    if observer is None or not code_action:
+        return
+
+    normalized_names = {str(name) for name in (known_tool_names or set())}
+
+    calls = _scan_code_for_tool_calls(code_action, normalized_names)
+    fallback_logger = logging.getLogger(__name__)
+    if not calls:
+        # Visibility aid: when we expected real tools but found none, log at
+        # DEBUG so operators can confirm the bridge ran instead of silently
+        # skipping. Disabled by default to avoid noisy logs in production.
+        if normalized_names:
+            fallback_logger.debug(
+                "Tool bridge: no tool calls matched known tool names "
+                "(known=%d) in code_action of %d chars",
+                len(normalized_names),
+                len(code_action or ""),
+            )
+        return
+
+    for call in calls:
+        try:
+            observer.add_message(
+                agent_name or "",
+                ProcessType.TOOL,
+                "",
+                tool_name=call["name"],
+                tool_arguments=_coerce_observer_arguments(call["arguments"]),
+            )
+        except Exception:
+            fallback_logger.debug(
+                "Failed to bridge real tool call into observer: %s",
+                call["name"],
+                exc_info=True,
+            )
 
 
 class CoreAgent(CodeAgent):
@@ -280,6 +440,20 @@ class CoreAgent(CodeAgent):
                 continue
         names.add("final_answer")
         return sorted(names)
+
+    def _known_tool_names(self) -> set:
+        """Return the set of callable tool names exposed to ``code_action``.
+
+        Includes both flat tools (e.g. MCP tool functions) and managed agents
+        so the AST scanner below can attribute each call to a real tool name.
+        """
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                names.update(str(name) for name in container.keys())
+            except AttributeError:
+                continue
+        return names
 
     def _context_tools(self) -> List[Any]:
         """Return a stable tool list for ContextRuntime/ContextManager evidence.
@@ -474,7 +648,20 @@ Additional Args:
         )
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
-        self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
+        # Baseline for the per-step compression ratio. ``final_context.messages``
+        # is already the COMPRESSED payload, so using it here made save%
+        # structurally ~0%. Use the ContextManager's truly-uncompressed memory
+        # token count (computed in compress_if_needed from the raw memory) as the
+        # baseline; fall back to the (compressed) input size when no
+        # ContextManager is active -- the legacy path does not compress, so 0% is
+        # correct there.
+        uncompressed_tokens = None
+        if self.context_manager is not None:
+            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        if uncompressed_tokens:
+            self._last_uncompressed_est = uncompressed_tokens
+        else:
+            self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
@@ -563,6 +750,19 @@ Additional Args:
             id=f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
+
+        # Bridge the real tools invoked by `code_action` into the observer so the
+        # SSE stream carries `type=tool` chunks with the actual MCP/managed-agent
+        # name and arguments, instead of the synthetic `python_interpreter`
+        # placeholder below. We deliberately emit AFTER the PARSE chunk and BEFORE
+        # `python_executor(code_action)` runs so the chunk order matches the
+        # user-visible flow: parse -> tool call -> execution result.
+        _emit_real_tool_chunks_from_code(
+            self.observer,
+            self.agent_name,
+            code_action,
+            known_tool_names=self._known_tool_names(),
+        )
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",

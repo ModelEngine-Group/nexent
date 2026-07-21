@@ -20,6 +20,7 @@ from nexent.core.models.capacity_budget import (
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.memory.memory_service import search_memory_in_levels
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
@@ -707,6 +708,19 @@ async def create_agent_config(
         tool_params=normalized_tool_params,
     )
 
+    # Append parallel_executor as a system-managed tool (always available,
+    # like store_memory / search_memory).  Description and inputs are read
+    # from the Tool class so they stay in sync with the SDK definition.
+    tool_list.append(ToolConfig(
+        class_name=ParallelExecutorTool.__name__,
+        name=ParallelExecutorTool.name,
+        description=ParallelExecutorTool.description,
+        inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
+        output_type=ParallelExecutorTool.output_type,
+        params={},
+        source="local",
+    ))
+
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
     constraint_prompt = agent_info.get("constraint_prompt", "")
@@ -862,12 +876,14 @@ async def create_agent_config(
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+    builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
+    available_tools = tool_list + builtin_tools
 
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
         "few_shots": few_shots_prompt,
-        "tools": {tool.name: tool for tool in tool_list},
+        "tools": {tool.name: tool for tool in available_tools},
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
@@ -958,6 +974,7 @@ async def create_agent_config(
         token_threshold=context_token_threshold,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
+        strategy="full",
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
@@ -968,7 +985,7 @@ async def create_agent_config(
             language=language,
             agent_id=agent_id
         ),
-        tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
+        tools=available_tools,
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
@@ -1092,7 +1109,7 @@ async def create_tool_config_list(
                     f"No embedding model found for index '{index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
-        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
+        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
@@ -83,10 +83,43 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Version list state for each agent
   const [agentVersions, setAgentVersions] = useState<Map<number, AgentVersion[]>>(new Map());
   const [loadingVersions, setLoadingVersions] = useState<Map<number, boolean>>(new Map());
-  // Selected version for each agent (0 means current version)
+  // User's manual selection for each agent (not persisted, cleared on refresh/switch)
   const [selectedVersions, setSelectedVersions] = useState<Map<number, number>>(new Map());
 
   const { agents, isLoading, refetch } = useAgentList(tenantId);
+
+  // Incremented on every component mount so version fetching always runs
+  const [mountKey, setMountKey] = useState(0);
+  useEffect(() => {
+    setMountKey((k) => k + 1);
+  }, []);
+
+  // Auto-fetch versions for all published agents so the Select label renders immediately
+  useEffect(() => {
+    if (!agents || agents.length === 0) return;
+    (agents as AgentListRow[]).forEach((agent: AgentListRow) => {
+      const agentId = Number(agent.id);
+      if (!agent.is_published) return;
+      // Skip if already fetched for current mount
+      if (agentVersions.has(agentId)) return;
+      setLoadingVersions((prev) => new Map(prev).set(agentId, true));
+      fetchAgentVersionList(agentId, tenantId ?? undefined)
+        .then((res) => {
+          if (res.success && res.data) {
+            setAgentVersions((prev) => new Map(prev).set(agentId, res.data.items || []));
+          }
+        })
+        .finally(() => {
+          setLoadingVersions((prev) => {
+            const next = new Map(prev);
+            next.delete(agentId);
+            return next;
+          });
+        });
+    });
+    // mountKey added to dep array ensures this re-runs on component re-mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents, tenantId, mountKey]);
 
   // Fetch groups for group name mapping and selection
   const { data: groupData } = useGroupList(tenantId);
@@ -131,15 +164,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       const agentId = Number(agent.id);
       const isPublished = agent.is_published === true;
 
-      // For published agents, use selected version or current_version_no
-      // For unpublished agents, use version_no=0 (draft)
-      let selectedVersionNo: number;
-      if (isPublished) {
-        const currentVersionNo = agent.current_version_no || 0;
-        selectedVersionNo = selectedVersions.get(agentId) ?? currentVersionNo;
-      } else {
-        selectedVersionNo = 0;
-      }
+      // For published agents: user's manual selection takes priority; otherwise use current_version_no.
+      // For unpublished agents, use version_no=0 (draft).
+      const selectedVersionNo = isPublished
+        ? (selectedVersions.get(agentId) ?? agent.current_version_no ?? 0)
+        : 0;
 
       const res = await searchAgentInfo(agentId, tenantId ?? undefined, selectedVersionNo);
       if (res.success && res.data) {
@@ -288,11 +317,16 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         const isLoading = loadingVersions.get(agentId) || false;
         const currentVersionNo = record.current_version_no || 0;
 
-        // Default to current_version_no if not selected, fallback to first version
-        // Must have a default value, cannot be undefined
-        const selectedVersionNo = selectedVersions.has(agentId)
+        // User's manual selection takes priority; otherwise show current_version_no (the bound version).
+        // Fall back to highest version only if current_version_no is 0 and versions have loaded.
+        const hasUserSelected = selectedVersions.has(agentId);
+        const selectedVersionNo = hasUserSelected
           ? selectedVersions.get(agentId)!
-          : currentVersionNo > 0 ? currentVersionNo : (versions[0]?.version_no || undefined);
+          : currentVersionNo > 0
+          ? currentVersionNo
+          : versions.length > 0
+          ? versions[0].version_no
+          : undefined;
 
         // Build options: only published versions (no draft version 0)
         const options = versions.map((version) => ({
@@ -307,7 +341,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             loading={isLoading}
             onDropdownVisibleChange={(open) => handleVersionDropdownOpen(agentId, open)}
             onChange={(value) => {
-              setSelectedVersions(prev => new Map(prev).set(agentId, value));
+              setSelectedVersions((prev) => new Map(prev).set(agentId, value));
             }}
             style={{ width: "100%" }}
             options={options}

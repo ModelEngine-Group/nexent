@@ -89,8 +89,15 @@ export const fetchTools = async () => {
       category: tool.category,
       labels: Array.isArray(tool.labels)
         ? tool.labels
-        : typeof tool.labels === 'string'
-          ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+        : typeof tool.labels === "string"
+          ? (() => {
+              try {
+                const p = JSON.parse(tool.labels);
+                return Array.isArray(p) ? p : [];
+              } catch {
+                return [];
+              }
+            })()
           : [],
       updated_by: tool.updated_by || "",
       inputs: tool.inputs,
@@ -148,7 +155,8 @@ export const fetchAgentList = async (tenantId?: string) => {
       description: agent.description,
       author: agent.author,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
+      model_names:
+        agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -193,12 +201,14 @@ export const fetchPublishedAgentList = async () => {
     // Convert backend data to frontend format
     const formattedAgents = data.map((agent: any) => ({
       id: String(agent.agent_id),
+      agent_id: Number(agent.agent_id),
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
+      model_names:
+        agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -250,7 +260,8 @@ export const getCreatingSubAgentId = async () => {
         description: data.description,
         enabledToolIds: data.enable_tool_id_list || [],
         modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames: data.model_names || (data.model_name ? [data.model_name] : []),
+        modelNames:
+          data.model_names || (data.model_name ? [data.model_name] : []),
         maxSteps: data.max_steps,
         requestedOutputTokens: data.requested_output_tokens ?? null,
         businessDescription: data.business_description,
@@ -412,6 +423,7 @@ export interface UpdateAgentInfoPayload {
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
@@ -767,11 +779,17 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
-      model: data.model_name || (Array.isArray(data.model_names) && data.model_names.length > 0 ? data.model_names[0] : ""),
+      model:
+        data.model_name ||
+        (Array.isArray(data.model_names) && data.model_names.length > 0
+          ? data.model_names[0]
+          : ""),
       model_ids: data.model_ids || (data.model_id ? [data.model_id] : []),
-      model_names: data.model_names || (data.model_name ? [data.model_name] : []),
+      model_names:
+        data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
+      is_main_agent: data.is_main_agent ?? true,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,
@@ -806,6 +824,9 @@ export const searchAgentInfo = async (
               is_available: tool.is_available,
               usage: tool.usage,
               category: tool.category,
+              unavailable_reasons: Array.isArray(tool.unavailable_reasons)
+                ? tool.unavailable_reasons
+                : [],
               // Pass through `inputs` so the ToolTestPanel can parse runtime
               // input parameters when reopening a tool from the selected
               // tools list. Without this, the test panel falls back to
@@ -815,7 +836,14 @@ export const searchAgentInfo = async (
               labels: Array.isArray(tool.labels)
                 ? tool.labels
                 : typeof tool.labels === "string"
-                  ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                  ? (() => {
+                      try {
+                        const p = JSON.parse(tool.labels);
+                        return Array.isArray(p) ? p : [];
+                      } catch {
+                        return [];
+                      }
+                    })()
                   : [],
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
@@ -1068,6 +1096,8 @@ export const fetchSkills = async (tenantId?: string | null) => {
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
+      created_by: skill.created_by ?? null,
+      updated_by: skill.updated_by ?? null,
       update_time: skill.update_time,
       create_time: skill.create_time,
     }));
@@ -1329,6 +1359,101 @@ export const updateSkill = async (
   }
 };
 
+export const updateSkillById = async (
+  skillId: number,
+  skillData: {
+    name?: string;
+    description?: string;
+    source?: string;
+    tags?: string[];
+    content?: string;
+    config_values?: Record<string, unknown>;
+    files?: Array<{ path: string; content: string }>;
+  },
+  tenantId?: string | null
+) => {
+  try {
+    const requestBody: Record<string, any> = {};
+    if (skillData.name !== undefined) requestBody.name = skillData.name;
+    if (skillData.description !== undefined)
+      requestBody.description = skillData.description;
+    if (skillData.source !== undefined) requestBody.source = skillData.source;
+    if (skillData.tags !== undefined)
+      requestBody.tags = normalizeTags(skillData.tags);
+    if (skillData.content !== undefined)
+      requestBody.content = skillData.content;
+    if (skillData.config_values !== undefined)
+      requestBody.config_values = skillData.config_values;
+    if (skillData.files !== undefined) requestBody.files = skillData.files;
+
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.updateById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.updateById(skillId);
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error updating skill by ID:", error);
+    return {
+      success: false,
+      data: null,
+      message:
+        error instanceof Error ? error.message : "Failed to update skill",
+    };
+  }
+};
+
+export const fetchSkillById = async (
+  skillId: number,
+  tenantId?: string | null
+) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.getById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.getById(skillId);
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error fetching skill by ID:", error);
+    return {
+      success: false,
+      data: null,
+      message: error instanceof Error ? error.message : "Failed to fetch skill",
+    };
+  }
+};
+
 /**
  * Create or update skill from file upload
  * @param skillName skill name (optional for new skill)
@@ -1347,6 +1472,7 @@ export const createSkillFromFile = async (
     if (skillName) {
       formData.append("skill_name", skillName);
     }
+    formData.append("source", "custom");
 
     const endpoint =
       isUpdate && skillName
