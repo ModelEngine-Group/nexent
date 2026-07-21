@@ -91,7 +91,7 @@ def test_context_contract_defaults_and_unconfigured_runtime_guards():
         "cache_types": [],
     }
     assert runtime.consume_history_summary_event() is None
-    assert runtime.chars_per_token == 1.5
+    assert runtime.chars_per_token == pytest.approx(1.5)
     assert runtime.token_threshold is None
 
     guarded_calls = [
