@@ -2563,6 +2563,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
