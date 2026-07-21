@@ -235,6 +235,8 @@ ALLOWED_CHUNK_FIELDS = {
 # Configure logging
 logger = logging.getLogger("vectordatabase_service")
 
+_QUOTA_LIMIT_UNSET = object()
+
 
 def get_vector_db_core(
     db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
@@ -765,6 +767,7 @@ class ElasticSearchService:
             embedding_model_name: Optional[str] = None,
             is_multimodal: Optional[bool] = None,
             preserve_source_file: Optional[bool] = None,
+            quota_limit_bytes: Optional[int] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -827,6 +830,8 @@ class ElasticSearchService:
                 knowledge_data["group_ids"] = group_ids
             if preserve_source_file is not None:
                 knowledge_data["preserve_source_file"] = preserve_source_file
+            if quota_limit_bytes is not None:
+                knowledge_data["quota_limit_bytes"] = quota_limit_bytes
 
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
@@ -858,6 +863,7 @@ class ElasticSearchService:
             group_ids: Optional[List[int]] = None,
             tenant_id: Optional[str] = None,
             user_id: Optional[str] = None,
+            quota_limit_bytes: Any = _QUOTA_LIMIT_UNSET,
     ) -> bool:
         """
         Update knowledge base information (name, group permission, group assignments).
@@ -869,6 +875,7 @@ class ElasticSearchService:
             group_ids: List of group IDs to assign (optional)
             tenant_id: ID of the tenant (optional, for validation)
             user_id: ID of the user making the update
+            quota_limit_bytes: New soft quota in bytes; None removes the quota
 
         Returns:
             bool: Whether the update was successful
@@ -897,6 +904,9 @@ class ElasticSearchService:
         if group_ids is not None:
             # Convert list to string for database storage
             update_data["group_ids"] = convert_list_to_string(group_ids)
+
+        if quota_limit_bytes is not _QUOTA_LIMIT_UNSET:
+            update_data["quota_limit_bytes"] = quota_limit_bytes
 
         # Call database update function
         result = update_knowledge_record(update_data)
@@ -1185,6 +1195,10 @@ class ElasticSearchService:
         response = {
             "indices": indices,
             "count": len(indices),
+            "index_permissions": {
+                record["index_name"]: record["permission"]
+                for record in visible_knowledgebases
+            },
         }
 
         if include_stats:

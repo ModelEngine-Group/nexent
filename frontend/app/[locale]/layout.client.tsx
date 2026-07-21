@@ -17,6 +17,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
 
 const { Header, Sider, Content, Footer } = Layout;
 
@@ -122,6 +123,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
   return (
     <Layout style={layoutStyle}>
+      <QuotaWarningMonitor enabled={!isSetupPage} />
       <Header style={headerStyle}>
         <TopNavbar isChatPage={isChatPage} />
       </Header>

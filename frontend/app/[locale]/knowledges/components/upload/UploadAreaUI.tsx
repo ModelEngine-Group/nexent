@@ -19,6 +19,7 @@ interface UploadAreaUIProps {
   nameStatus: string;
   isUploading: boolean;
   disabled: boolean;
+  disabledMessage?: string;
   componentHeight: string;
   newKnowledgeBaseName: string;
   selectedFiles: File[];
@@ -35,6 +36,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   nameStatus,
   isUploading,
   disabled,
+  disabledMessage,
   componentHeight,
   newKnowledgeBaseName,
   modelMismatch = false,
@@ -87,7 +89,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
         <div className="border-2 border-dashed border-gray-300 bg-white rounded-md p-4 text-center flex flex-col items-center justify-center h-full">
           <div className="mb-0.5 text-blue-500 text-lg">📄</div>
           <p className="mb-0.5 text-gray-700 text-xs font-medium">
-            {t("knowledgeBase.hint.selectFirst")}
+            {disabledMessage || t("knowledgeBase.hint.selectFirst")}
           </p>
         </div>
       </div>
