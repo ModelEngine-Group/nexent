@@ -727,15 +727,15 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         names = [r['remote_mcp_server_name'] for r in result]
         self.assertIn("public", names)
 
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user', side_effect=Exception('query failed'))
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
     async def test_group_query_failure_falls_back_gracefully(
-        self, mock_tenant, mock_records, mock_mgr
+        self, mock_tenant, mock_records, mock_mgr, mock_groups
     ):
         """get_remote_mcp_server_list should handle query_group_ids_by_user failure gracefully."""
         mock_tenant.return_value = {"user_role": "DEV"}
-        # query_group_ids_by_user is NOT mocked, so it will raise ImportError/AttributeError
         mock_mgr.return_value.list_mcp_containers.return_value = []
         mock_records.return_value = []
 
@@ -1115,6 +1115,25 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             remote_mcp_server='https://srv/mcp',
             authorization_token='tok',
             custom_headers=None,
+        )
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    @patch('backend.services.remote_mcp_service.mcp_server_health', side_effect=MCPConnectionError('health failed'))
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_non_container_enable_health_fail_raises_error(
+        self, mock_records, mock_get, mock_health, mock_status, mock_enabled
+    ):
+        """Non-container enable with health check failure should raise MCPConnectionError."""
+        mock_get.return_value = self._make_record()
+        mock_records.return_value = []
+
+        with self.assertRaises(MCPConnectionError):
+            await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_status.assert_called_once_with(
+            mcp_id=1, tenant_id='tid', user_id='uid', status=False,
         )
 
     @patch('backend.services.remote_mcp_service.check_runtime_host_port_available', return_value=True)
