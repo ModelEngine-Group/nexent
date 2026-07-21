@@ -124,7 +124,7 @@ class TestCheckInput:
     def test_new_input_block_resolves_to_terminate(self):
         engine = _engine([_rule(severity="block")])
         messages = [_msg("user", f"分析{KEYWORD}内容")]
-        decision = engine.check_input(input_messages=messages, step_number=1)
+        decision = engine.check_input(input_messages=messages)
         assert decision.effective_action == "terminate"  # new_input + block -> terminate
         assert decision.rule_name == "confidential"
         assert KEYWORD in decision.matched_texts
@@ -134,7 +134,7 @@ class TestCheckInput:
         engine = _engine([_rule(severity="block")])
         # last user (new_input) has no keyword; the earlier user turn is history
         messages = [_msg("user", f"记住{KEYWORD}的资料"), _msg("assistant", "ok"), _msg("user", "你好")]
-        decision = engine.check_input(input_messages=messages, step_number=1)
+        decision = engine.check_input(input_messages=messages)
         assert decision.effective_action == "mask"  # history + block -> mask
         assert decision.downgraded is True
         assert decision.masked_messages is not None
@@ -144,7 +144,7 @@ class TestCheckInput:
     def test_mask_redacts_all_occurrences_in_message(self):
         engine = _engine([_rule(severity="mask")])
         messages = [_msg("user", f"{KEYWORD}和{KEYWORD}都在")]
-        decision = engine.check_input(input_messages=messages, step_number=1)
+        decision = engine.check_input(input_messages=messages)
         assert decision.effective_action == "mask"
         redacted = decision.masked_messages[0]["content"]
         assert KEYWORD not in redacted
@@ -153,14 +153,14 @@ class TestCheckInput:
     def test_new_input_block_wins_over_history_mask_for_overall(self):
         engine = _engine([_rule(severity="block")])
         messages = [_msg("user", f"历史{KEYWORD}"), _msg("assistant", "ok"), _msg("user", f"分析{KEYWORD}")]
-        decision = engine.check_input(input_messages=messages, step_number=1)
+        decision = engine.check_input(input_messages=messages)
         # history -> mask, new_input -> terminate; overall highest rank is terminate
         assert decision.effective_action == "terminate"
 
     def test_no_match_returns_pass(self):
         engine = _engine([_rule(severity="block")])
         messages = [_msg("user", "今天天气不错")]
-        decision = engine.check_input(input_messages=messages, step_number=1)
+        decision = engine.check_input(input_messages=messages)
         assert decision.effective_action == "pass"
         assert decision.passed is True
         assert decision.rule_name == ""
@@ -168,7 +168,7 @@ class TestCheckInput:
     def test_engine_error_degrades_to_pass(self):
         engine = _engine([_rule(severity="block")])
         # Passing a non-iterable triggers the fail-open except branch
-        decision = engine.check_input(input_messages=None, step_number=1)
+        decision = engine.check_input(input_messages=None)
         assert decision.effective_action == "pass"
 
 
@@ -180,8 +180,7 @@ class TestCheckOutput:
     def test_block_on_tool_output_downgrades_to_mask(self):
         engine = _engine([_rule(severity="block")])
         decision = engine.check_output(
-            observation=f"doc: {KEYWORD} 营收7000亿", code_action="kb()", step_number=1,
-            is_final_answer=False)
+            observation=f"doc: {KEYWORD} 营收7000亿", code_action="kb()")
         assert decision.effective_action == "mask"  # tool_output + block -> mask
         assert decision.downgraded is True
         assert KEYWORD not in decision.cleaned_content
@@ -190,21 +189,20 @@ class TestCheckOutput:
     def test_mask_redacts_observation(self):
         engine = _engine([_rule(severity="mask")])
         decision = engine.check_output(
-            observation=f"返回{KEYWORD}的数据", code_action="kb()", step_number=1,
-            is_final_answer=False)
+            observation=f"返回{KEYWORD}的数据", code_action="kb()")
         assert decision.effective_action == "mask"
         assert KEYWORD not in decision.cleaned_content
 
     def test_no_match_returns_pass(self):
         engine = _engine([_rule(severity="block")])
         decision = engine.check_output(
-            observation="普通内容", code_action="kb()", step_number=1, is_final_answer=False)
+            observation="普通内容", code_action="kb()")
         assert decision.effective_action == "pass"
 
     def test_empty_observation_passes(self):
         engine = _engine([_rule(severity="block")])
         decision = engine.check_output(
-            observation="", code_action="kb()", step_number=1, is_final_answer=False)
+            observation="", code_action="kb()")
         assert decision.effective_action == "pass"
 
 
@@ -215,16 +213,14 @@ class TestCheckOutput:
 class TestCheckToolArgs:
     def test_block_is_genuine_tool_input_block(self):
         engine = _engine([_rule(severity="block")])
-        decision = engine.check_tool_args(
-            tool_name="send_email", args=(f"把{KEYWORD}发给客户",), kwargs={}, step_number=1)
+        decision = engine.check_tool_args(args=(f"把{KEYWORD}发给客户",), kwargs={})
         assert decision.effective_action == "block"  # tool_input + block -> block (genuine)
         assert decision.masked_args is None  # block does not mask args
 
     def test_mask_redacts_string_args_and_kwargs(self):
         engine = _engine([_rule(severity="mask")])
-        decision = engine.check_tool_args(
-            tool_name="send_email", args=(f"正文{KEYWORD}", 42),
-            kwargs={"subject": f"{KEYWORD}标题"}, step_number=1)
+        decision = engine.check_tool_args(args=(f"正文{KEYWORD}", 42),
+            kwargs={"subject": f"{KEYWORD}标题"})
         assert decision.effective_action == "mask"
         assert KEYWORD not in decision.masked_args[0]
         assert decision.masked_args[1] == 42  # non-string arg passes through
@@ -232,8 +228,7 @@ class TestCheckToolArgs:
 
     def test_no_match_returns_pass(self):
         engine = _engine([_rule(severity="block")])
-        decision = engine.check_tool_args(
-            tool_name="send_email", args=("普通内容",), kwargs={}, step_number=1)
+        decision = engine.check_tool_args(args=("普通内容",), kwargs={})
         assert decision.effective_action == "pass"
 
     def test_unstringifiable_arg_does_not_break_screening(self):
@@ -243,8 +238,7 @@ class TestCheckToolArgs:
             def __str__(self):
                 raise ValueError("nope")
 
-        decision = engine.check_tool_args(
-            tool_name="t", args=(_Explodes(), f"{KEYWORD}"), kwargs={}, step_number=1)
+        decision = engine.check_tool_args(args=(_Explodes(), f"{KEYWORD}"), kwargs={})
         # the keyword arg still triggers a block; the exploding arg did not abort screening
         assert decision.effective_action == "block"
 
@@ -449,21 +443,20 @@ class TestFailOpen:
     def test_check_input_fail_open_on_engine_error(self, monkeypatch):
         engine = _engine([_rule()])
         monkeypatch.setattr(engine, "_scan", _raising_scan)
-        decision = engine.check_input(input_messages=[_msg("user", KEYWORD)], step_number=1)
+        decision = engine.check_input(input_messages=[_msg("user", KEYWORD)])
         assert decision.effective_action == "pass"
 
     def test_check_output_fail_open_on_engine_error(self, monkeypatch):
         engine = _engine([_rule()])
         monkeypatch.setattr(engine, "_scan", _raising_scan)
         decision = engine.check_output(
-            observation=KEYWORD, code_action="kb()", step_number=1, is_final_answer=False)
+            observation=KEYWORD, code_action="kb()")
         assert decision.effective_action == "pass"
 
     def test_check_tool_args_fail_open_on_engine_error(self, monkeypatch):
         engine = _engine([_rule()])
         monkeypatch.setattr(engine, "_scan", _raising_scan)
-        decision = engine.check_tool_args(
-            tool_name="send_email", args=(KEYWORD,), kwargs={}, step_number=1)
+        decision = engine.check_tool_args(args=(KEYWORD,), kwargs={})
         assert decision.effective_action == "pass"
 
 

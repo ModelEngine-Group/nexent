@@ -188,7 +188,6 @@ class GuardrailEngine:
     def check_input(
         self,
         input_messages: List[Dict[str, Any]],
-        step_number: int,
     ) -> GuardrailDecision:
         """Screen the messages about to be sent to the LLM, per message.
 
@@ -199,7 +198,6 @@ class GuardrailEngine:
 
         Args:
             input_messages: Messages about to be sent to the LLM.
-            step_number: Current ReAct step number, for telemetry.
 
         Returns:
             A GuardrailDecision; carries ``masked_messages`` when masking.
@@ -278,8 +276,6 @@ class GuardrailEngine:
         self,
         observation: str,
         code_action: str,
-        step_number: int,
-        is_final_answer: bool,
     ) -> GuardrailDecision:
         """Screen a tool's observation before it enters agent memory.
 
@@ -291,8 +287,6 @@ class GuardrailEngine:
         Args:
             observation: The tool's output text.
             code_action: The code_action that produced this observation.
-            step_number: The current ReAct step number, for telemetry.
-            is_final_answer: Whether this observation is a final-answer candidate.
 
         Returns:
             A GuardrailDecision; when masking, ``cleaned_content`` carries the
@@ -309,14 +303,7 @@ class GuardrailEngine:
             matched_text = matches[0][2][0] if matches[0][2] else ""
             eff = self._apply_breaker(first_rule.name, matched_text, "tool_output", eff)
             downgraded = SeverityResolver.is_downgraded(user_sev, eff)
-            cleaned = None
-            if eff == "mask":
-                cleaned = text
-                for compiled, _rule, _texts in matches:
-                    try:
-                        cleaned = compiled.sub(self._mask_token, cleaned)
-                    except Exception:
-                        pass
+            cleaned = self._mask_value(text, matches) if eff == "mask" else None
             vr = self._build_vr(
                 first_rule, matched_text, eff, "guardrail_output",
                 "tool_output", downgraded,
@@ -336,10 +323,8 @@ class GuardrailEngine:
 
     def check_tool_args(
         self,
-        tool_name: str,
         args: tuple,
         kwargs: Dict[str, Any],
-        step_number: int = 0,
     ) -> GuardrailDecision:
         """Screen the resolved arguments of a tool call before it executes.
 
@@ -349,10 +334,8 @@ class GuardrailEngine:
         content that flowed in via a variable or a prior tool's return.
 
         Args:
-            tool_name: Name of the tool whose call is being screened.
             args: Positional argument values as resolved at runtime.
             kwargs: Keyword argument values as resolved at runtime.
-            step_number: Current ReAct step number, for telemetry.
 
         Returns:
             A GuardrailDecision; carries ``masked_args`` / ``masked_kwargs``
@@ -431,23 +414,26 @@ class GuardrailEngine:
             The concatenated text, or ``""`` if none can be extracted.
         """
         content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
-        if content is None:
-            return ""
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            parts = []
+            out = []
             for item in content:
-                if isinstance(item, dict):
-                    text = item.get("text")
-                    if text is None:
-                        text = item.get("content")
-                    if text:
-                        parts.append(str(text))
-                elif isinstance(item, str):
-                    parts.append(item)
-            return "".join(parts)
-        return str(content)
+                text = GuardrailEngine._part_text(item)
+                if text:
+                    out.append(text)
+            return "".join(out)
+        return str(content) if content is not None else ""
+
+    @staticmethod
+    def _part_text(item: Any) -> str:
+        """Text of one list part: a raw string, or a dict with ``text``/``content``."""
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            text = item.get("text") or item.get("content")
+            return str(text) if text else ""
+        return ""
 
     @staticmethod
     def _set_msg_text(msg: Any, text: str) -> None:
@@ -629,7 +615,8 @@ class GuardrailEngine:
             phase=phase,
             failed_criteria=[rule.name] if rule.name else [],
             repair_instruction=(
-                f"Guardrail rule '{rule.name}' matched: '{matched_text}'. "
+                f"Guardrail rule '{rule.name}' matched: "
+                f"'{self._mask_token if effective_action == 'mask' else matched_text}'. "
                 f"Source: {source}. Effective action: {effective_action}."
             ),
             user_visible_note=note,
@@ -715,30 +702,11 @@ def latest_user_message_text(messages: List[Any]) -> str:
     """
     last_idx = -1
     for i, msg in enumerate(messages or []):
-        role = getattr(msg, "role", None) if not isinstance(msg, dict) else msg.get("role")
-        value = getattr(role, "value", None)
-        role_str = str(value if value is not None else role).lower()
-        if role_str == "user":
+        if GuardrailEngine._msg_role(msg) == "user":
             last_idx = i
     if last_idx < 0:
         return ""
-    msg = messages[last_idx]
-    content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text") if item.get("text") is not None else item.get("content")
-                if text:
-                    parts.append(str(text))
-            elif isinstance(item, str):
-                parts.append(item)
-        return "".join(parts)
-    return str(content)
+    return GuardrailEngine._msg_text(messages[last_idx])
 
 
 def render_guardrail_refusal(decision: "GuardrailDecision", messages: List[Any]) -> str:

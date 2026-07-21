@@ -219,7 +219,7 @@ def _screened_tool_forward(engine, tool_name, controller, logger, original_forwa
         Whatever ``original_forward`` returns (masked args are substituted on
         ``mask``); raises ``ToolInputBlockedError`` on ``block``/``terminate``.
     """
-    decision = engine.check_tool_args(tool_name=tool_name, args=args, kwargs=kwargs)
+    decision = engine.check_tool_args(args=args, kwargs=kwargs)
     action = decision.effective_action
     if action != "pass":
         controller.emit(decision.verification_result, message=decision.message)
@@ -679,7 +679,6 @@ Additional Args:
         if guardrail_engine:
             decision = guardrail_engine.check_input(
                 input_messages=input_messages,
-                step_number=memory_step.step_number,
             )
             self.verification_controller.emit(
                 decision.verification_result, message=decision.message
@@ -865,8 +864,6 @@ Additional Args:
             decision = guardrail_engine.check_output(
                 observation=memory_step.observations,
                 code_action=code_action,
-                step_number=memory_step.step_number,
-                is_final_answer=bool(code_output.is_final_answer),
             )
             verification_controller.emit(
                 decision.verification_result, message=decision.message
