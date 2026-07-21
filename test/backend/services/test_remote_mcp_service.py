@@ -727,6 +727,21 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         names = [r['remote_mcp_server_name'] for r in result]
         self.assertIn("public", names)
 
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    async def test_group_query_failure_falls_back_gracefully(
+        self, mock_tenant, mock_records, mock_mgr
+    ):
+        """get_remote_mcp_server_list should handle query_group_ids_by_user failure gracefully."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        # query_group_ids_by_user is NOT mocked, so it will raise ImportError/AttributeError
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = []
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+        self.assertEqual(len(result), 0)
+
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
     @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')

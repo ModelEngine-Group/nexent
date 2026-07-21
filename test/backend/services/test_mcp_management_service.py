@@ -166,6 +166,17 @@ class TestToCommunityCard(unittest.TestCase):
         self.assertEqual(card["ingroupPermission"], "EDIT")
         self.assertEqual(card["sharedFields"], {"serverUrl": True, "authorizationToken": False})
 
+    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant', side_effect=Exception('DB error'))
+    def test_source_mcp_lookup_exception_handled(self, mock_get):
+        """_to_community_card should handle get_mcp_record_by_id_and_tenant exception gracefully."""
+        card = _to_community_card({
+            **MARKET_RECORD,
+            "source_mcp_id": 10,
+        })
+        # Should not raise - exception is caught silently
+        self.assertIsNotNone(card)
+        self.assertEqual(card["sharedFields"], None)
+
 
 class TestGetMcpReviewAdminScope(unittest.TestCase):
     """Test _get_mcp_review_admin_scope checks user role."""
@@ -423,7 +434,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=[2, 4],
         )
 
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user')
+    @patch('backend.services.mcp_management_service.query_group_ids_by_user', side_effect=Exception('query failed'))
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.mcp_management_service.get_mcp_market_records')
     async def test_list_handles_group_query_failure(self, mock_get, mock_tenant, mock_groups):
