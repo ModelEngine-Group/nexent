@@ -20,7 +20,11 @@ import {
 } from "antd";
 import { CloudOutlined, DatabaseOutlined } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
-import type { PlatformQuotaOverview, QuotaUsageResponse } from "@/types/quota";
+import {
+  getQuotaConflictTranslationKey,
+  type PlatformQuotaOverview,
+  type QuotaUsageResponse,
+} from "@/types/quota";
 
 interface SuQuotaModalProps {
   open: boolean;
@@ -112,7 +116,13 @@ export function SuQuotaModal({
       message.success(t("quota.saveSuccess", "Tenant quota updated"));
       onSuccess();
     } catch (err: any) {
-      if (err.message) message.error(err.message);
+      const errorKey = getQuotaConflictTranslationKey(err);
+      message.error(
+        errorKey
+          ? t(errorKey)
+          : err.message ||
+              t("quota.updateTenantQuotaFailed", "Tenant quota update failed")
+      );
     } finally {
       setSaving(false);
     }
@@ -133,7 +143,8 @@ export function SuQuotaModal({
     platformOverview?.platform_capacity_bytes == null
       ? undefined
       : Math.floor(
-          ((platformOverview.remaining_allocatable_bytes || 0) + currentQuotaBytes) /
+          ((platformOverview.remaining_allocatable_bytes || 0) +
+            currentQuotaBytes) /
             unitBytes
         );
   const validMaximumQuota =
@@ -146,7 +157,9 @@ export function SuQuotaModal({
     const valueBytes = quotaValue == null ? null : quotaValue * unitBytes;
     setUnit(nextUnit);
     setQuotaValue(
-      valueBytes == null ? null : Math.round(valueBytes / (nextUnit === "GB" ? GB : MB))
+      valueBytes == null
+        ? null
+        : Math.round(valueBytes / (nextUnit === "GB" ? GB : MB))
     );
   };
 

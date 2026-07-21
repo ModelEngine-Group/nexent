@@ -24,7 +24,11 @@ import {
   InfoCircleOutlined,
 } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
-import type { PlatformQuotaOverview, PlatformTenantQuota } from "@/types/quota";
+import {
+  getQuotaConflictTranslationKey,
+  type PlatformQuotaOverview,
+  type PlatformTenantQuota,
+} from "@/types/quota";
 
 const { Text, Title } = Typography;
 
@@ -119,8 +123,9 @@ export function PlatformQuotaPanel() {
       setEditingTenant(null);
       fetchData();
     } catch (err: any) {
+      const errorKey = getQuotaConflictTranslationKey(err);
       message.error(
-        err.message ||
+        (errorKey ? t(errorKey) : err.message) ||
           t("quota.updateTenantQuotaFailed", "Failed to update tenant quota")
       );
     } finally {
@@ -140,8 +145,9 @@ export function PlatformQuotaPanel() {
       setCapacityModalOpen(false);
       fetchData();
     } catch (err: any) {
+      const errorKey = getQuotaConflictTranslationKey(err);
       message.error(
-        err.message ||
+        (errorKey ? t(errorKey) : err.message) ||
           t(
             "quota.updatePlatformCapacityFailed",
             "Failed to update platform capacity"

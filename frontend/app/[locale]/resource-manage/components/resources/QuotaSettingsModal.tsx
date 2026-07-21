@@ -27,10 +27,11 @@ import {
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
-import type {
-  TenantQuotaConfig,
-  KBQuotaStatus,
-  QuotaUsageResponse,
+import {
+  getQuotaConflictTranslationKey,
+  type TenantQuotaConfig,
+  type KBQuotaStatus,
+  type QuotaUsageResponse,
 } from "@/types/quota";
 
 const { Text, Title } = Typography;
@@ -274,9 +275,16 @@ export function QuotaSettingsModal({
       );
       onSuccess();
     } catch (err: any) {
-      if (err.message) {
-        message.error(err.message);
-      }
+      const errorKey = getQuotaConflictTranslationKey(err);
+      message.error(
+        errorKey
+          ? t(errorKey)
+          : err.message ||
+              t(
+                "quota.updateTenantQuotaFailed",
+                "Failed to update tenant quota"
+              )
+      );
     } finally {
       setSaving(false);
     }

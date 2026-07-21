@@ -135,6 +135,26 @@ export interface UpdateTenantHardQuotaPayload {
 
 // ── Error types ──────────────────────────────────────────────
 
+const QUOTA_CONFLICT_TRANSLATION_KEYS: Record<string, string> = {
+  PlatformCapacityExceeded: "quota.error.platformCapacityExceeded",
+  PlatformCapacityBelowAllocation:
+    "quota.error.platformCapacityBelowAllocation",
+  TenantQuotaBelowUsage: "quota.error.tenantQuotaBelowUsage",
+};
+
+/** Return the translation key for a known quota allocation conflict. */
+export function getQuotaConflictTranslationKey(
+  error: unknown
+): string | undefined {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return undefined;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string"
+    ? QUOTA_CONFLICT_TRANSLATION_KEYS[code]
+    : undefined;
+}
+
 /** Detects if an HTTP error response indicates tenant storage is full (HTTP 413). */
 export function isQuotaExceededError(status: number, body: any): boolean {
   return status === 413 && body?.error === "TenantStorageFull";

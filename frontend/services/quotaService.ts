@@ -24,7 +24,7 @@ class QuotaService {
     const data = await response.json();
     if (!response.ok) {
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to get quota config"
       );
     }
@@ -43,7 +43,7 @@ class QuotaService {
     const data = await response.json();
     if (!response.ok) {
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || data.detail || "Failed to update quota"
       );
     }
@@ -59,7 +59,7 @@ class QuotaService {
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to delete quota"
       );
     }
@@ -87,7 +87,7 @@ class QuotaService {
     const data = await response.json();
     if (!response.ok) {
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to get quota usage"
       );
     }
@@ -104,7 +104,7 @@ class QuotaService {
     const data = await response.json();
     if (!response.ok) {
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to get platform overview"
       );
     }
@@ -122,7 +122,7 @@ class QuotaService {
     const data = await response.json();
     if (!response.ok) {
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to set platform capacity"
       );
     }
@@ -138,7 +138,7 @@ class QuotaService {
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to delete platform capacity"
       );
     }
@@ -160,7 +160,7 @@ class QuotaService {
     const data = await response.json();
     if (!response.ok) {
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to set tenant hard quota"
       );
     }
@@ -179,7 +179,7 @@ class QuotaService {
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new ApiError(
-        response.status,
+        data.error || response.status,
         data.message || "Failed to delete tenant hard quota"
       );
     }
