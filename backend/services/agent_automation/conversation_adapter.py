@@ -26,9 +26,10 @@ class AutomationConversationAdapter:
     ) -> Dict[str, int]:
         history_payload = get_conversation_history_service(conversation_id, user_id)
         messages = history_payload[0].get("message", []) if history_payload else []
+        user_role_count = sum(message.get("role") == "user" for message in messages)
         user_request = MessageRequest(
             conversation_id=conversation_id,
-            message_idx=len(messages),
+            message_idx=user_role_count * 2,
             role="user",
             message=[MessageUnit(type="string", content=user_instruction)],
         )
@@ -44,7 +45,7 @@ class AutomationConversationAdapter:
         content = json.dumps(payload, ensure_ascii=False)
         request = MessageRequest(
             conversation_id=conversation_id,
-            message_idx=len(messages) + 1,
+            message_idx=user_role_count * 2 + 1,
             role="assistant",
             message=[MessageUnit(type="automation_proposal", content=content)],
         )

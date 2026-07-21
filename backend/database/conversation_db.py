@@ -772,7 +772,10 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.conversation_id == conversation_id,
 
             ConversationMessage.delete_flag == 'N'
-        ).order_by(ConversationMessage.message_id)
+        ).order_by(
+            asc(ConversationMessage.message_index),
+            asc(ConversationMessage.message_id),
+        )
 
         message_records = session.execute(query).all()
 

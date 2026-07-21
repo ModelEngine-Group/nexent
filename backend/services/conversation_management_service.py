@@ -551,6 +551,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 processed_unit['content'] = tool_data.get('content', '')
                                 processed_unit['tool_name'] = tool_data.get('tool_name')
                                 processed_unit['tool_arguments'] = tool_data.get('tool_arguments')
+                                if 'role' in tool_data:
+                                    processed_unit['role'] = tool_data['role']
                         processed_units.append(processed_unit)
 
                 # Add final_answer type message unit only if not already present
