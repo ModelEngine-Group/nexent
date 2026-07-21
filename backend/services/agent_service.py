@@ -91,7 +91,6 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
     get_latest_assistant_message,
     get_last_unit_for_message,
     save_conversation_user,
@@ -237,14 +236,19 @@ def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> lis
 
 
 async def _process_skill_file_uploads(
-    content: str,
+    payloads: list[dict] | str,
     user_id: str,
     tenant_id: str,
 ) -> list[dict]:
     """Upload generated skill files to storage and return upload metadata."""
 
     upload_results: list[dict] = []
-    for payload in _extract_skill_file_upload_payloads(content):
+    structured_payloads = (
+        payloads
+        if isinstance(payloads, list)
+        else _extract_skill_file_upload_payloads(payloads)
+    )
+    for payload in structured_payloads:
         absolute_path = str(payload.get("absolute_path") or "").strip()
         file_name = str(
             payload.get("file_name")
@@ -1026,6 +1030,34 @@ async def _stream_agent_chunks(
             if chunk_type == "final_answer":
                 captured_final_answer = chunk_content
 
+            if chunk_type == ProcessType.SKILL_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    absolute_path = str(artifact.get("absolute_path") or "").strip()
+                    if not absolute_path or absolute_path in captured_skill_files:
+                        continue
+                    captured_skill_files[absolute_path] = artifact
+
+                logger.info(
+                    "[skill-file] received structured artifacts count=%s current_total=%s",
+                    len(artifacts),
+                    len(captured_skill_files),
+                )
+                continue
+
             should_parse_skill_file = (
                 chunk_type in {"execution_logs", "parse"}
                 or data.get("role") == "tool-response"
@@ -1139,16 +1171,24 @@ async def _stream_agent_chunks(
                     # and inserts each search result as a source_search row
                     # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        placeholder_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type="search_content_placeholder",
-                            unit_content='{"placeholder": true}',
-                            user_id=user_id,
-                            unit_status="completed",
-                        ).result()
+                        try:
+                            placeholder_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type="search_content_placeholder",
+                                unit_content='{"placeholder": true}',
+                                user_id=user_id,
+                                unit_status="completed",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist search_content placeholder: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                            placeholder_unit_id = None
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
@@ -1197,24 +1237,32 @@ async def _stream_agent_chunks(
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
-                        new_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type=chunk_type,
-                            unit_content=chunk_content,
-                            user_id=user_id,
-                            unit_status="streaming",
-                        ).result()
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": chunk_content,
-                            "unit_id": new_unit_id,
-                            "unit_index": next_unit_index,
-                            "mergeable": mergeable,
-                        }
-                        next_unit_index += 1
+                        try:
+                            new_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type=chunk_type,
+                                unit_content=chunk_content,
+                                user_id=user_id,
+                                unit_status="streaming",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist streaming message unit: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                        else:
+                            current_unit = {
+                                "type": chunk_type,
+                                "content": chunk_content,
+                                "unit_id": new_unit_id,
+                                "unit_index": next_unit_index,
+                                "mergeable": mergeable,
+                            }
+                            next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
@@ -1284,13 +1332,10 @@ async def _stream_agent_chunks(
             )
 
         try:
-            skill_file_content_local = "\n".join(
-                json.dumps(payload, ensure_ascii=False)
-                for payload in captured_skill_files.values()
-            )
-            if skill_file_content_local:
+            skill_file_payloads = list(captured_skill_files.values())
+            if skill_file_payloads:
                 skill_file_uploads = await _process_skill_file_uploads(
-                    content=skill_file_content_local,
+                    payloads=skill_file_payloads,
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
@@ -1659,6 +1704,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
                 "requested_output_tokens": request.requested_output_tokens,
+                "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
                 "duty_prompt": request.duty_prompt,
@@ -2190,6 +2236,7 @@ async def export_agent_by_agent_id(
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
+                                          is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
                                           duty_prompt=agent_info.get(
@@ -2352,6 +2399,7 @@ async def import_agent_by_agent_id(
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
+                                         "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
@@ -2530,6 +2578,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
@@ -3330,28 +3379,15 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk()
-        finally:
-            # Auto-generate title for new conversations after stream completes
-            if is_new_conversation:
-                try:
-                    await generate_conversation_title_service(
-                        conversation_id=agent_request.conversation_id,
-                        question=agent_request.query,
-                        user_id=resolved_user_id,
-                        tenant_id=resolved_tenant_id,
-                        language=language,
-                    )
-                except Exception as title_exc:
-                    logger.warning(
-                        "Failed to auto-generate title for conversation_id=%s: %r",
-                        agent_request.conversation_id,
-                        title_exc,
-                    )
+
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    if agent_request.conversation_id is not None:
+        headers["conversation_id"] = str(agent_request.conversation_id)
 
     return StreamingResponse(
         stream_with_agent_context(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=headers,
     )
 
 

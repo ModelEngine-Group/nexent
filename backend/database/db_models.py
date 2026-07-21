@@ -595,6 +595,7 @@ class AgentInfo(TableBase):
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")
+    is_main_agent = Column(Boolean, default=True, nullable=False, doc="Whether this agent is a main agent")
     provide_run_summary = Column(
         Boolean, doc="Whether to provide the running summary to the manager agent")
     business_description = Column(
@@ -717,6 +718,10 @@ class KnowledgeRecord(TableBase):
         Boolean,
         default=True,
         doc="Whether to preserve uploaded source documents after vectorization",
+    )
+    quota_limit_bytes = Column(
+        BigInteger, nullable=True,
+        doc="Per-KB soft storage quota in bytes. NULL means no per-KB limit (shares tenant pool freely)."
     )
 
 

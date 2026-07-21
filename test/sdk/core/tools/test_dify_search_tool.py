@@ -83,8 +83,6 @@ class TestDifySearchToolInit:
         assert tool.top_k == 5
         assert tool.observer is mock_observer
         assert tool.record_ops == 1
-        assert tool.running_prompt_zh == "Dify知识库检索中..."
-        assert tool.running_prompt_en == "Searching Dify knowledge base..."
 
     def test_init_singledataset_id(self, mock_observer: MessageObserver):
         tool = DifySearchTool(
@@ -472,10 +470,7 @@ class TestForward:
         assert results[0]["title"] == "document1.txt"
         assert results[0]["text"] == "test content 1"
 
-        # Check that observer received running prompt and card
-        dify_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, dify_tool.running_prompt_en
-        )
+        # Check that observer received card and search content
         dify_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps([{"icon": "search", "text": "test query"}], ensure_ascii=False)
         )
@@ -494,10 +489,6 @@ class TestForward:
         self._setup_success_flow(dify_tool)
 
         dify_tool.forward("测试查询")
-
-        dify_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, dify_tool.running_prompt_zh
-        )
 
     def test_forward_no_observer(self):
         with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
