@@ -546,17 +546,12 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     ]
     mock_skill_service.return_value = mock_skill_service_instance
 
-    # Mock query_external_sub_agents
-    mock_query_external_sub_agents.return_value = []
-
-    # Mock get_model_by_model_id - return None for model_id=None
-    mock_get_model_by_model_id.return_value = None
-
-    # Mock check_agent_availability - agent is available
-    mock_check_availability.return_value = (True, [])
-
-    # Execute
-    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+    # skill_db.get_valid_skill_ids is hit as a fallback check; mock it to keep the
+    # flow self-contained without requiring a live DB.
+    with patch("backend.services.agent_service.skill_db.get_valid_skill_ids",
+               return_value={1}):
+        # Execute
+        result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 
     # Assert
     expected_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
@@ -4274,6 +4269,7 @@ async def test_prepare_agent_run(
         override_model_id=None,
         requested_output_tokens=4096,
         tool_params=None,
+        enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
