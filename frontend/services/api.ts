@@ -253,6 +253,7 @@ export const API_ENDPOINTS = {
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    models: `${API_BASE_URL}/aidp-mgmt/models`,
   },
   config: {
     save: `${API_BASE_URL}/config/save_config`,

@@ -2808,5 +2808,10 @@
   "aidpKnowledge.createChunkOverlapNumMin": "分块重叠 Token 数必须 ≥ 0",
   "aidpKnowledge.createCaptionEnable": "启用多模态",
   "aidpKnowledge.createCaptionEnableHint": "开启后将对知识库中的图片进行文字描述提取",
-  "aidpKnowledge.showTotal": "共 {{count}} 条"
+  "aidpKnowledge.showTotal": "共 {{count}} 条",
+  "aidpKnowledge.createVlmModel": "视觉语言模型 (VLM)",
+  "aidpKnowledge.createVlmModelHint": "用于多模态知识库中的图片 caption 生成",
+  "aidpKnowledge.createVlmModelLoading": "加载模型列表中…",
+  "aidpKnowledge.createVlmModelNone": "暂无可用模型",
+  "aidpKnowledge.createVlmModelSearch": "搜索或选择 VLM 模型"
 }

@@ -2817,5 +2817,10 @@
   "aidpKnowledge.createChunkOverlapNumMin": "Chunk overlap token count must be ≥ 0",
   "aidpKnowledge.createCaptionEnable": "Enable Multimodal ",
   "aidpKnowledge.createCaptionEnableHint": "When enabled, text descriptions will be extracted from images in the knowledge base",
+  "aidpKnowledge.createVlmModel": "Vision-Language Model (VLM)",
+  "aidpKnowledge.createVlmModelHint": "Used for image caption generation in multimodal knowledge bases",
+  "aidpKnowledge.createVlmModelLoading": "Loading models…",
+  "aidpKnowledge.createVlmModelNone": "No models available",
+  "aidpKnowledge.createVlmModelSearch": "Search or select a VLM model",
   "aidpKnowledge.showTotal": "Total {{count}} items"
 }

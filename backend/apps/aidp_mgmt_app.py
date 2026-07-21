@@ -21,6 +21,7 @@ from services.aidp_service import (
     fetch_aidp_knowledge_bases_impl,
     get_aidp_kb_impl,
     list_aidp_docs_impl,
+    list_aidp_models_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
@@ -39,13 +40,29 @@ def _get_aidp_credentials() -> tuple[str, str]:
 
 
 class CreateKbRequest(BaseModel):
-    """Request body for creating a knowledge base."""
+    """Request body for creating a knowledge base.
+
+    All optional fields (chunk_token_num, vlm_model, caption_enable, etc.)
+    must be explicitly declared so Pydantic v2 preserves them when the frontend
+    sends them. Missing fields are filled in by ``_apply_create_defaults`` on
+    the service side, aligned with AIDP's expected payload schema.
+    """
 
     name: str = Field(..., description="Knowledge base name (required)")
     description: Optional[str] = Field(None, description="Knowledge base description")
     embedding_model: Optional[str] = Field(None, description="Embedding model identifier")
     is_multimodal: Optional[bool] = Field(None, description="Whether KB supports multimodal content")
     vision_model: Optional[str] = Field(None, description="Vision model identifier for multimodal KBs")
+    # AIDP chunk pipeline configuration — forwarded verbatim to AIDP.
+    chunk_token_num: Optional[int] = Field(None, description="Chunk size in tokens (> 0)")
+    chunk_overlap_num: Optional[int] = Field(None, description="Chunk overlap in tokens (>= 0)")
+    vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
+    is_personal: Optional[int] = Field(None, ge=0, le=1, description="Personal KB flag, int 0 or 1")
+    topk: Optional[int] = Field(None, description="Top-K retrieval count")
+    similarity: Optional[float] = Field(None, description="Similarity score threshold")
+    smartsplit: Optional[int] = Field(None, ge=0, le=1, description="Smart chunking mode, int 0 or 1")
+    # AIDP caption_enable: int 0/1.
+    caption_enable: Optional[int] = Field(None, ge=0, le=1, description="Caption generation toggle, int 0 or 1")
 
 
 class UpdateKbRequest(BaseModel):
@@ -331,4 +348,34 @@ async def list_documents(
         raise AppException(
             ErrorCode.AIDP_SERVICE_ERROR,
             f"Failed to list AIDP documents: {str(e)}",
+        )
+
+
+@aidp_mgmt_router.get("/models")
+async def list_models(
+    service: Annotated[str, Query(description="Model service category (default: llm)")] = "llm",
+    app: Annotated[str, Query(description="Application filter (default: KnowledgeBase)")] = "KnowledgeBase",
+) -> JSONResponse:
+    """List available models from AIDP ModelService.
+
+    Queries the AIDP ModelService for models applicable to the given
+    ``app`` (default ``KnowledgeBase``). Response is post-filtered on
+    the server side — AIDP's own query filtering is advisory only.
+    """
+    try:
+        server_url, api_key = _get_aidp_credentials()
+        result = list_aidp_models_impl(
+            server_url=server_url,
+            api_key=api_key,
+            service=service,
+            app=app,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to list AIDP models: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"Failed to list AIDP models: {str(e)}",
         )

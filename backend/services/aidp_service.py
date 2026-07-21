@@ -447,11 +447,13 @@ _AIDP_CREATE_DEFAULTS: Dict[str, Any] = {
     "chunk_token_num": 1024,
     "chunk_overlap_num": 128,
     "embedding_model": "default",
-    "vlm_model": "",
+    # AIDP expects the VLM model identifier exactly as registered in its system.
+    "vlm_model": "Qwen3-VL-8B-Instruct",
     "is_personal": 0,
     "topk": 10,
     "similarity": 0.0,
     "smartsplit": 1,
+    # caption_enable: int 0/1, not string or bool.
     "caption_enable": 0,
 }
 
@@ -464,7 +466,12 @@ def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
     AIDP_CREATE_DEFAULTS and the SDK build_create_payload defaults exactly.
 
     Special rule: if payload.is_multimodal is truthy, caption_enable defaults
-    to 1 (matching SDK mapper logic).
+    to ``1`` (matching SDK mapper logic).
+
+    Inverse rule: when caption_enable is disabled (``0`` or ``"0"``), clear
+    ``vlm_model`` so AIDP never receives a stale model identifier for a
+    non-multimodal KB. Callers that omit the field entirely still get the
+    ``_AIDP_CREATE_DEFAULTS`` default above.
     """
     result = dict(payload)
     for key, default in _AIDP_CREATE_DEFAULTS.items():
@@ -472,6 +479,10 @@ def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
             result[key] = default
     if result.get("is_multimodal") and "caption_enable" not in payload:
         result["caption_enable"] = 1
+
+    caption = result.get("caption_enable")
+    if caption in (0, "0", False):
+        result["vlm_model"] = ""
     return result
 
 
@@ -963,4 +974,127 @@ def list_aidp_docs_impl(
         raise AppException(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+# AIDP ModelService endpoint for listing applicable models.
+_MODELS_PATH = "/ModelService/Tenants/aidp/Service"
+
+
+def _is_kb_applicable(model: Dict[str, Any]) -> bool:
+    """Return True if an AIDP model is applicable to the KnowledgeBase application.
+
+    The ``application`` field can be:
+      - the string "All" (applicable to every app, including KnowledgeBase)
+      - a string like "KnowledgeBase"
+      - a list like ["KnowledgeBase", "..."]
+      - the list ["All"] (treated as universal)
+      - None / missing (excluded — safer to skip than guess)
+    """
+    app_val = model.get("application")
+    if not app_val:
+        return False
+    if isinstance(app_val, str):
+        return app_val.lower() == "all" or app_val == "KnowledgeBase"
+    if isinstance(app_val, list):
+        return "All" in app_val or "KnowledgeBase" in app_val
+    return False
+
+
+def list_aidp_models_impl(
+    server_url: str,
+    api_key: str,
+    service: str = "llm",
+    app: str = "KnowledgeBase",
+) -> Dict[str, Any]:
+    """Fetch available models from AIDP ModelService.
+
+    Queries ``GET /ModelService/Tenants/aidp/Service?service=<service>&app=<app>``
+    and post-filters the response to only include models whose ``application``
+    field matches ``All`` or the requested ``app`` (AIDP's query parameter is
+    advisory; it does not enforce filtering on its own).
+
+    Returns:
+        {
+          "service": <str>,
+          "app": <str>,
+          "models": [ { "model_name": str, ... }, ... ],
+          "total_count": int,
+        }
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    models_path = f"{_MODELS_PATH}?service={service}&app={app}"
+    models_url = urljoin(f"{normalized_url}/", models_path.lstrip("/"))
+    logger.info("Fetching AIDP models from %s", models_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=60.0,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.get(models_url, headers=headers),
+            context=f"list-models:service={service},app={app}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP models response format",
+            )
+        raw_models = result.get("models") or []
+        if not isinstance(raw_models, list):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "AIDP models response: 'models' field is not a list",
+            )
+        filtered = [
+            m for m in raw_models
+            if isinstance(m, dict) and _is_kb_applicable(m)
+        ]
+        return {
+            "service": service,
+            "app": app,
+            "models": filtered,
+            "total_count": len(filtered),
+        }
+    except httpx.RequestError as e:
+        logger.exception("AIDP models request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP models API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP models API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP models API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP models response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP models response: {str(e)}",
         )

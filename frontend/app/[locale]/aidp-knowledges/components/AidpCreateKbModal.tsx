@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   Modal,
@@ -17,14 +18,20 @@ import {
   Collapse,
   Switch,
   Tooltip,
+  Select,
 } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { InboxOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import type { AidpModelItem } from "@/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/services/aidpKnowledgeService";
 
 const { Dragger } = Upload;
+
+// Preferred VLM model name when present in AIDP's available list.
+// Falls back to the first model in the list if this specific one is absent.
+const PREFERRED_VLM_MODEL = "Qwen3-VL-8B-Instruct";
 
 /**
  * Default AIDP knowledge base configuration.
@@ -32,18 +39,20 @@ const { Dragger } = Upload;
  *
  * Required fields per AIDP schema:
  *   chunk_token_num (> 0), chunk_overlap_num (>= 0)
- * Reference fills the rest (vlm_model, is_personal, topk, similarity, smartsplit, caption_enable)
- * so the backend can pass them through unchanged.
+ * Reference fills the rest (is_personal, topk, similarity, smartsplit, caption_enable).
+ * ``vlm_model`` is no longer a hardcoded constant — it is resolved at runtime
+ * from the list of models AIDP advertises as applicable to the KnowledgeBase
+ * application (see ``useQuery(["aidp-models"])``).
  */
 const AIDP_CREATE_DEFAULTS = {
   chunk_token_num: 1024,
   chunk_overlap_num: 128,
   embedding_model: "default",
-  vlm_model: "",
-  is_personal: "0",
+  is_personal: 0,
   topk: 10,
   similarity: 0.0,
   smartsplit: 1,
+  // caption_enable: int 0/1.
   caption_enable: 0,
 };
 
@@ -68,7 +77,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   const [formValues, setFormValues] = useState<{
     name: string;
     description?: string;
-    embedding_model?: string;
+    vlm_model?: string;
     chunk_token_num: number;
     chunk_overlap_num: number;
     caption_enable: number;
@@ -78,6 +87,48 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
     caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
   });
+
+  // Drive the vlm_model dropdown's visibility off the live Switch value.
+  // useWatch gives us a re-render whenever caption_enable toggles, without
+  // forcing the user to manually sync the form value to local state.
+  const captionEnabled = Form.useWatch("caption_enable", form);
+
+  // Fetch applicable VLM models from AIDP. Only run when modal is open to
+  // avoid hitting the (relatively slow) admin endpoint unnecessarily.
+  const { data: vlmModelsData, isLoading: vlmModelsLoading } = useQuery({
+    queryKey: ["aidp-models", "llm", "KnowledgeBase"],
+    queryFn: () => aidpKnowledgeService.listModels("llm", "KnowledgeBase"),
+    enabled: open,
+    staleTime: 5 * 60 * 1000, // 5 min
+  });
+
+  const vlmModelOptions = useMemo(() => {
+    const models: AidpModelItem[] = vlmModelsData?.models ?? [];
+    return models
+      .map((m) => m.model_name)
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
+  }, [vlmModelsData]);
+
+  // Resolve the default VLM model: prefer the hardcoded
+  // PREFERRED_VLM_MODEL if present, otherwise the first in the list.
+  // Falls back to PREFERRED_VLM_MODEL (sent to AIDP as-is) when the
+  // models endpoint returns empty, matching the previous behavior.
+  const defaultVlmModel = useMemo(() => {
+    if (vlmModelOptions.length === 0) return PREFERRED_VLM_MODEL;
+    if (vlmModelOptions.includes(PREFERRED_VLM_MODEL)) return PREFERRED_VLM_MODEL;
+    return vlmModelOptions[0];
+  }, [vlmModelOptions]);
+
+  // Pre-populate vlm_model on the form whenever the default is resolved,
+  // so the user sees a meaningful default on first open.
+  useEffect(() => {
+    if (!open) return;
+    if (!defaultVlmModel) return;
+    const current = form.getFieldValue("vlm_model");
+    if (!current || !vlmModelOptions.includes(current)) {
+      form.setFieldValue("vlm_model", defaultVlmModel);
+    }
+  }, [open, defaultVlmModel, vlmModelOptions, form]);
 
   // Duplicate name check against existing KBs
   const existingNames = useMemo(
@@ -104,12 +155,18 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       setFormValues({
         name,
         description: values.description?.trim() || undefined,
-        embedding_model: values.embedding_model?.trim() || undefined,
+        // VLM model is only meaningful for multimodal KBs. When the Switch
+        // is OFF we intentionally blank it here so the submit step also sends
+        // an empty ``vlm_model`` (AIDP ignores the field in that case).
+        vlm_model: values.caption_enable
+          ? values.vlm_model || defaultVlmModel || undefined
+          : "",
         // AIDP requires these chunk fields; fall back to defaults if missing.
         chunk_token_num:
           values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num,
         chunk_overlap_num:
           values.chunk_overlap_num ?? AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+        // caption_enable: int 0/1.
         caption_enable: values.caption_enable ? 1 : 0,
       });
       setCurrent(1);
@@ -141,11 +198,20 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       const created = await aidpKnowledgeService.createKb({
         name: formValues.name.trim(),
         description: formValues.description || "",
-        chunk_token_num: String(formValues.chunk_token_num),
-        chunk_overlap_num: String(formValues.chunk_overlap_num),
-        embedding_model:
-          formValues.embedding_model || AIDP_CREATE_DEFAULTS.embedding_model,
-        vlm_model: AIDP_CREATE_DEFAULTS.vlm_model,
+        // AIDP expects int for chunk size fields.
+        chunk_token_num: formValues.chunk_token_num,
+        chunk_overlap_num: formValues.chunk_overlap_num,
+        // embedding_model is no longer exposed in the UI — always send the
+        // server-side default via _AIDP_CREATE_DEFAULTS.
+        embedding_model: AIDP_CREATE_DEFAULTS.embedding_model,
+        // When multimodal captioning is disabled, AIDP should receive an
+        // empty vlm_model — ``formValues.vlm_model`` is already blanked in
+        // handleNext, and the guard below preserves that even if a stale
+        // ``defaultVlmModel`` is resolved via the useEffect hook.
+        vlm_model:
+          formValues.caption_enable === 1
+            ? formValues.vlm_model || defaultVlmModel || ""
+            : "",
         is_personal: AIDP_CREATE_DEFAULTS.is_personal,
         topk: AIDP_CREATE_DEFAULTS.topk,
         similarity: AIDP_CREATE_DEFAULTS.similarity,
@@ -253,6 +319,45 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           <Switch />
         </Form.Item>
 
+        {/* VLM model picker is only relevant when multimodal captioning is
+            enabled. Hide the dropdown entirely when the Switch is off so
+            users aren't shown an irrelevant choice, and so the backend
+            receives an empty ``vlm_model`` (see handleSubmit). */}
+        {captionEnabled && (
+          <Form.Item
+            name="vlm_model"
+            label={
+              <Space>
+                <span>{t("aidpKnowledge.createVlmModel")}</span>
+                <Tooltip title={t("aidpKnowledge.createVlmModelHint")}>
+                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+                </Tooltip>
+              </Space>
+            }
+          >
+            <Select
+              showSearch
+              allowClear
+              loading={vlmModelsLoading}
+              notFoundContent={
+                vlmModelsLoading
+                  ? t("aidpKnowledge.createVlmModelLoading")
+                  : t("aidpKnowledge.createVlmModelNone")
+              }
+              placeholder={t("aidpKnowledge.createVlmModelSearch")}
+              options={vlmModelOptions.map((name) => ({
+                label: name,
+                value: name,
+              }))}
+              filterOption={(input, option) =>
+                (option?.label as string)
+                  ?.toLowerCase()
+                  .includes(input.toLowerCase()) ?? false
+              }
+            />
+          </Form.Item>
+        )}
+
         <Collapse
           ghost
           size="small"
@@ -262,12 +367,6 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
               label: t("aidpKnowledge.createAdvancedOptions"),
               children: (
                 <>
-                  <Form.Item
-                    name="embedding_model"
-                    label={t("aidpKnowledge.embeddingModel")}
-                  >
-                    <Input placeholder={t("aidpKnowledge.embeddingModelPlaceholder")} />
-                  </Form.Item>
                   <Form.Item
                     name="chunk_token_num"
                     label={t("aidpKnowledge.createChunkTokenNum")}

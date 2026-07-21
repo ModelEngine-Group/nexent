@@ -45,20 +45,47 @@ export interface AidpDocumentListResponse {
   total_reliable?: boolean;
 }
 
+export interface AidpModelItem {
+  /** Display / identifier used for the model (sent to AIDP as ``vlm_model``). */
+  model_name: string;
+  /** "llm", "embedding", etc. — informational only on the frontend. */
+  service?: string;
+  /**
+   * Applicability scope: either the string "All", the literal
+   * "KnowledgeBase", or an array containing any of those.
+   */
+  application?: string | string[];
+  properties?: {
+    description?: string;
+    model_type?: string;
+    [key: string]: unknown;
+  };
+  url?: string;
+  api_key?: string;
+  max_tokens?: number | null;
+  temperature?: number | null;
+  top_k?: number | null;
+  top_p?: number | null;
+}
+
+export interface AidpModelListResponse {
+  service: string;
+  app: string;
+  models: AidpModelItem[];
+  total_count: number;
+}
+
 export interface AidpCreateKbPayload {
   name: string;
   description?: string;
   embedding_model?: string;
   is_multimodal?: boolean;
   vision_model?: string;
-  /**
-   * AIDP requires chunk_token_num (string, > 0) and chunk_overlap_num (string, >= 0).
-   * Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload defaults.
-   */
-  chunk_token_num?: string;
-  chunk_overlap_num?: string;
+  /** AIDP requires chunk_token_num (int, > 0) and chunk_overlap_num (int, >= 0). */
+  chunk_token_num?: number;
+  chunk_overlap_num?: number;
   vlm_model?: string;
-  is_personal?: string;
+  is_personal?: number;
   topk?: number;
   similarity?: number;
   smartsplit?: number;
@@ -255,6 +282,36 @@ class AidpKnowledgeService {
       failed:
         typeof result.failed_count === "number" ? result.failed_count : 0,
       errors: Array.isArray(result.errors) ? result.errors : [],
+    };
+  }
+
+  /**
+   * List available models from AIDP ModelService (filtered server-side to
+   * models applicable to the given ``app``).
+   */
+  async listModels(
+    service: string = "llm",
+    app: string = "KnowledgeBase"
+  ): Promise<AidpModelListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.models, { service, app });
+
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const result = await response.json();
+
+    return {
+      service:
+        typeof result.service === "string" ? result.service : service,
+      app: typeof result.app === "string" ? result.app : app,
+      models: Array.isArray(result.models) ? result.models : [],
+      total_count:
+        typeof result.total_count === "number"
+          ? result.total_count
+          : Array.isArray(result.models)
+            ? result.models.length
+            : 0,
     };
   }
 
