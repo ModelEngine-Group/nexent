@@ -449,7 +449,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         mock_get.assert_called_once_with(
             tenant_id="tid", search=None, tag=None,
             transport_type=None, cursor=None, limit=30,
-            user_id="uid", user_group_ids=[],
+            user_id="uid", user_group_ids=None,
         )
 
     @patch('backend.services.mcp_management_service.query_group_ids_by_user')
