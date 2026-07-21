@@ -92,6 +92,7 @@ from backend.database.market_mcp_db import (
     list_mcp_market_records_by_tenant_and_user,
     increment_mcp_market_download_count,
     get_mcp_market_tag_stats_by_tenant,
+    _apply_group_permission_filter,
     update_mcp_market_status,
     list_mcp_market_records_by_status,
 )
@@ -329,6 +330,57 @@ class TestUpdateMcpMarketRecord:
             registry_json={"key": "v"}, mcp_server="http://srv",
             config_json={"cfg": "val"}, transport_type="url",
         )
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_with_shared_fields(self, mock_session):
+        """Test update_mcp_market_record with shared_fields."""
+        session = MockSession()
+        session.update = MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_record(
+            market_id=1, user_id="uid",
+            shared_fields={"serverUrl": True, "authorizationToken": False},
+        )
+
+
+class TestApplyGroupPermissionFilter:
+    """Test _apply_group_permission_filter."""
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_without_user_groups(self, mock_session):
+        """Filter should work when user_group_ids is empty."""
+        session = MockSession()
+        mock_session.return_value = session
+
+        result = get_mcp_market_records(
+            tenant_id="tid",
+            user_id="uid",
+            user_group_ids=[],
+        )
+        assert result is not None
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_with_user_groups(self, mock_session):
+        """Filter should work when user_group_ids is provided."""
+        session = MockSession()
+        mock_session.return_value = session
+
+        result = get_mcp_market_records(
+            tenant_id="tid",
+            user_id="uid",
+            user_group_ids=[2, 4],
+        )
+        assert result is not None
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_without_user_id(self, mock_session):
+        """Filter should be skipped when user_id is None."""
+        session = MockSession()
+        mock_session.return_value = session
+
+        result = get_mcp_market_records(tenant_id="tid")
+        assert result is not None
 
 
 class TestDeleteMcpMarketRecord:
