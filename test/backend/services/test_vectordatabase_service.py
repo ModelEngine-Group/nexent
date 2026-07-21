@@ -7383,5 +7383,222 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("embedding model", str(ctx.exception).lower())
 
 
+def _patch_kb_permission_context(
+    monkeypatch,
+    record,
+    user_tenant=None,
+    user_group_ids=None,
+    speed_mode=False,
+):
+    import backend.services.vectordatabase_service as vdb_service
+
+    monkeypatch.setattr(vdb_service, "get_knowledge_record", lambda _filters: record)
+    monkeypatch.setattr(
+        vdb_service,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: user_tenant,
+    )
+    monkeypatch.setattr(
+        vdb_service,
+        "query_group_ids_by_user",
+        lambda _user_id: user_group_ids or [],
+    )
+    monkeypatch.setattr(vdb_service, "IS_SPEED_MODE", speed_mode)
+    monkeypatch.setattr(vdb_service, "ASSET_OWNER_TENANT_ID", "asset-owner")
+
+
+def test_resolve_knowledge_base_permission_not_found(monkeypatch):
+    _patch_kb_permission_context(monkeypatch, record=None)
+
+    with pytest.raises(ValueError, match="not found"):
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "missing-kb", "user-1", "tenant-1"
+        )
+
+
+def test_resolve_knowledge_base_permission_datamate_is_read_only(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={"index_name": "datamate-kb", "knowledge_sources": "datamate"},
+    )
+
+    permission = ElasticSearchService.resolve_knowledge_base_permission(
+        "datamate-kb", "user-1", "tenant-1"
+    )
+
+    assert permission == "READ_ONLY"
+
+
+def test_resolve_knowledge_base_permission_without_user_tenant_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant=None,
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "user-1", "tenant-1")
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "user_id,user_tenant,speed_mode,expected",
+    [
+        ("tenant-1", {"tenant_id": "tenant-1"}, False, "EDIT"),
+        ("user-speed", None, True, "EDIT"),
+        ("admin-user", {"user_role": "ADMIN", "tenant_id": "tenant-1"}, False, "EDIT"),
+    ],
+)
+def test_resolve_knowledge_base_permission_admin_like_roles_edit(
+    monkeypatch,
+    user_id,
+    user_tenant,
+    speed_mode,
+    expected,
+):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant=user_tenant,
+        speed_mode=speed_mode,
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", user_id, "tenant-1")
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "role,expected",
+    [
+        ("ASSET_OWNER", "EDIT"),
+        ("SU", "READ_ONLY"),
+        ("DEV", "READ_ONLY"),
+        ("USER", None),
+    ],
+)
+def test_resolve_knowledge_base_permission_asset_owner_record(monkeypatch, role, expected):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "asset-kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "asset-owner",
+        },
+        user_tenant={"user_role": role, "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("asset-kb", "user-1", "tenant-1")
+        == expected
+    )
+
+
+def test_resolve_knowledge_base_permission_cross_tenant_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-2",
+        },
+        user_tenant={"user_role": "ADMIN", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "admin-user", "tenant-1")
+        is None
+    )
+
+
+def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant={"user_role": "GUEST", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "guest-user", "tenant-1")
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "record,user_group_ids,expected",
+    [
+        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], "EDIT"),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], "READ_ONLY"),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "PRIVATE"}, [1], None),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
+        ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
+        ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
+    ],
+)
+def test_resolve_knowledge_base_permission_user_group_rules(
+    monkeypatch,
+    record,
+    user_group_ids,
+    expected,
+):
+    record = {
+        "index_name": "kb",
+        "knowledge_sources": "elasticsearch",
+        "tenant_id": "tenant-1",
+        **record,
+    }
+    _patch_kb_permission_context(
+        monkeypatch,
+        record=record,
+        user_tenant={"user_role": "USER", "tenant_id": "tenant-1"},
+        user_group_ids=user_group_ids,
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "user-1", "tenant-1")
+        == expected
+    )
+
+
+@pytest.mark.parametrize("permission", ["EDIT", "CREATOR"])
+def test_require_knowledge_base_edit_permission_allows_editors(monkeypatch, permission):
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: permission),
+    )
+
+    assert (
+        ElasticSearchService.require_knowledge_base_edit_permission("kb", "user-1", "tenant-1")
+        == permission
+    )
+
+
+def test_require_knowledge_base_edit_permission_rejects_read_only(monkeypatch):
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: "READ_ONLY"),
+    )
+
+    with pytest.raises(PermissionError, match="No permission"):
+        ElasticSearchService.require_knowledge_base_edit_permission("kb", "user-1", "tenant-1")
+
+
 if __name__ == '__main__':
     unittest.main()

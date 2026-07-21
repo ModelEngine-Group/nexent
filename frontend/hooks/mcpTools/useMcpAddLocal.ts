@@ -10,6 +10,7 @@ import {
   addMcpToolService,
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
+import { getMcpAddErrorMessage } from "@/lib/mcpTools";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
@@ -106,7 +107,10 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
           : undefined;
 
-        await uploadMcpImage(file, draft.containerPort, trimmedName, envVars);
+        const result = await uploadMcpImage(file, draft.containerPort, trimmedName, envVars);
+        if (!result.success) {
+          throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));
+        }
       } else if (isContainer) {
         const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
         if (!mcpConfig) {
@@ -157,14 +161,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return true;
     } catch (error) {
       log.error("[useMcpAddLocal] Failed to add service", { error });
-      const msg = error instanceof Error ? error.message : "";
-      if (/already exists|name conflict|name already used/i.test(msg)) {
-        message.error(t("mcpTools.add.error.nameExists"));
-      } else if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
-        message.error(t("mcpTools.add.error.connectionFailed"));
-      } else {
-        message.error(msg || t("mcpTools.add.failed"));
-      }
+      message.error(getMcpAddErrorMessage(error, t));
       return false;
     } finally {
       setSubmitting(false);

@@ -189,7 +189,10 @@ async def add_mcp_service_endpoint(
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="MCP name already exists")
     except MCPConnectionError as e:
         logger.error(f"Failed to add MCP service: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="MCP connection failed")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=str(e) or "MCP connection failed"
+        )
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -260,7 +263,7 @@ async def add_container_mcp_service_endpoint(
         logger.error(f"MCP connection failed when adding container service: {e}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed"
+            detail=str(e) or "MCP connection failed"
         )
     except Exception as e:
         logger.error(f"Failed to add container MCP service: {e}")

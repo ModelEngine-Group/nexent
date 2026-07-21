@@ -16,6 +16,7 @@ export type AgentConfigUpdate = Partial<
     | "model_ids"
     | "max_step"
     | "requested_output_tokens"
+    | "is_main_agent"
     | "provide_run_summary"
     | "description"
     | "duty_prompt"
@@ -86,6 +87,7 @@ export interface Agent {
   model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;

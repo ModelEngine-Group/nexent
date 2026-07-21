@@ -1644,6 +1644,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
                 "requested_output_tokens": request.requested_output_tokens,
+                "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
                 "duty_prompt": request.duty_prompt,
@@ -2175,6 +2176,7 @@ async def export_agent_by_agent_id(
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
+                                          is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
                                           duty_prompt=agent_info.get(
@@ -2337,6 +2339,7 @@ async def import_agent_by_agent_id(
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
+                                         "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
@@ -3336,6 +3339,86 @@ async def run_agent_stream(
     )
 
 
+async def run_agent_background(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    skip_user_save: bool = False,
+) -> Dict[str, Any]:
+    """
+    Run an agent without returning an SSE response.
+
+    This path is used by background automation tasks. It reuses the same
+    preparation, monitoring, memory and message persistence flow as
+    run_agent_stream, but consumes generated chunks internally.
+    """
+    if not agent_request.conversation_id:
+        raise ValueError("conversation_id is required for background agent runs")
+
+    if not agent_request.is_debug and not skip_user_save:
+        save_messages(
+            agent_request,
+            target=MESSAGE_ROLE["USER"],
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+
+    memory_ctx_preview = build_memory_context(
+        user_id, tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
+    )
+    memory_enabled = memory_ctx_preview.user_config.memory_switch
+
+    agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        query=agent_request.query,
+        is_debug=agent_request.is_debug,
+        language=language,
+        memory_enabled=memory_enabled,
+        history_count=len(agent_request.history) if agent_request.history else 0,
+        minio_files_count=len(agent_request.minio_files) if agent_request.minio_files else 0,
+        extra_metadata={
+            "background": True,
+            "skip_user_save": skip_user_save,
+            "agent_share_option": getattr(
+                memory_ctx_preview.user_config,
+                "agent_share_option",
+                "unknown",
+            ),
+        },
+    ))
+
+    if memory_enabled and not agent_request.is_debug:
+        stream_gen = generate_stream_with_memory(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+    else:
+        stream_gen = generate_stream_no_memory(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+
+    chunks = 0
+    with agent_monitoring_context(agent_metadata):
+        async for _ in stream_gen:
+            chunks += 1
+
+    latest_message = get_latest_assistant_message(agent_request.conversation_id, user_id)
+    return {
+        "conversation_id": agent_request.conversation_id,
+        "assistant_message_id": latest_message.get("message_id") if latest_message else None,
+        "chunks": chunks,
+    }
+
+
 def stop_agent_tasks(conversation_id: int, user_id: str):
     """
     Stop agent run and preprocess tasks for the specified conversation_id.
@@ -3362,6 +3445,10 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message, "already_stopped": True}
+
+
+def is_agent_running(conversation_id: int, user_id: str) -> bool:
+    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:

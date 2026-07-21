@@ -11,11 +11,7 @@ import {
   CARD_HEADER,
 } from "@/const/layoutConstants";
 
-import { AppConfigSection } from "./components/appConfig";
-import {
-  ModelConfigSection,
-  ModelConfigSectionRef,
-} from "./components/modelConfig";
+import { ModelConfigSection, ModelConfigSectionRef } from "./components/modelConfig";
 
 const { Title } = Typography;
 
@@ -66,45 +62,11 @@ export default function AppModelConfig({
         <div className="w-full h-full">
           <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
             <Col
-              className="h-full"
-              xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
-              md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
-              lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
-              xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
-              xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
-            >
-              <div
-                className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
-                style={{
-                  padding: STANDARD_CARD.PADDING,
-                }}
-              >
-                <div
-                  style={{
-                    padding: CARD_HEADER.PADDING,
-                    flexShrink: 0,
-                  }}
-                >
-                  <Title level={4}>{t("setup.config.appSettings")}</Title>
-                  <div className={CARD_HEADER.DIVIDER_CLASSES}></div>
-                </div>
-                <div
-                  style={{
-                    flex: 1,
-                    ...STANDARD_CARD.CONTENT_SCROLL,
-                  }}
-                >
-                  <AppConfigSection />
-                </div>
-              </div>
-            </Col>
-
-            <Col
               xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
               md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
-              lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
-              xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
-              xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
+              lg={24}
+              xl={24}
+              xxl={24}
             >
               <div
                 className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}

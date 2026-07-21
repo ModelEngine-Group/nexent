@@ -167,7 +167,6 @@
   scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
 }
 
-
 /* Tool Pool Tabs scroll fix */
 .tool-pool-tabs .ant-tabs-content-holder {
   overflow: hidden;
@@ -184,7 +183,11 @@
 }
 
 /* Ensure tool pool tabs content area can scroll */
-.tool-pool-tabs .ant-tabs-content-holder .ant-tabs-content .ant-tabs-tabpane > div {
+.tool-pool-tabs
+  .ant-tabs-content-holder
+  .ant-tabs-content
+  .ant-tabs-tabpane
+  > div {
   height: 100%;
   max-height: 100%;
 }
@@ -205,19 +208,25 @@
 }
 
 /* Ensure skill pool tabs content area can scroll */
-.skill-pool-tabs .ant-tabs-content-holder .ant-tabs-content .ant-tabs-tabpane>div {
+.skill-pool-tabs
+  .ant-tabs-content-holder
+  .ant-tabs-content
+  .ant-tabs-tabpane
+  > div {
   height: 100%;
   max-height: 100%;
 }
 
 /* Adjust tabs content area left and right padding - use stronger selector */
-.skill-pool-tabs.ant-tabs.ant-tabs-left>.ant-tabs-content-holder {
+.skill-pool-tabs.ant-tabs.ant-tabs-left > .ant-tabs-content-holder {
   padding-left: 12px !important;
   padding-right: 9px !important;
   margin-left: 0 !important;
 }
 
-.skill-pool-tabs.ant-tabs.ant-tabs-left>.ant-tabs-content-holder>.ant-tabs-content {
+.skill-pool-tabs.ant-tabs.ant-tabs-left
+  > .ant-tabs-content-holder
+  > .ant-tabs-content {
   padding-left: 0 !important;
   margin-left: 0 !important;
 }
@@ -251,7 +260,9 @@
   margin-left: 0 !important;
 }
 
-.tool-pool-tabs.ant-tabs.ant-tabs-left > .ant-tabs-content-holder > .ant-tabs-content {
+.tool-pool-tabs.ant-tabs.ant-tabs-left
+  > .ant-tabs-content-holder
+  > .ant-tabs-content {
   padding-left: 0 !important;
   margin-left: 0 !important;
 }
@@ -319,7 +330,7 @@
 }
 
 .document-chunk-tabs .ant-tabs-tab.ant-tabs-tab-active::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 0;
@@ -397,4 +408,39 @@ tr.selected-row > td:first-child::before {
 /* Dropdown menu title content full width */
 .ant-dropdown-menu-title-content {
   @apply w-full;
+}
+
+/* Automation date-time picker */
+.automation-date-time-picker.ant-picker {
+  min-height: 40px;
+  padding-inline: 12px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.automation-date-time-picker .ant-picker-input > input {
+  cursor: pointer;
+}
+
+.automation-date-time-picker-popup .ant-picker-panel-container {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 14%);
+}
+
+.automation-date-time-picker-popup .ant-picker-panel {
+  border: 0;
+}
+
+.automation-date-time-picker-popup .ant-picker-cell-inner {
+  border-radius: 6px;
+}
+
+.automation-date-time-picker-popup .ant-picker-time-panel-column {
+  scrollbar-width: thin;
+}
+
+.automation-date-time-picker-popup .ant-picker-footer {
+  padding: 6px 8px;
 }
