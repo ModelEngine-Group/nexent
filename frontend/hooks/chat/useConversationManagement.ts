@@ -1,5 +1,5 @@
 import type React from "react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,6 +22,8 @@ export interface ConversationManagement {
   conversationListQuery: UseQueryResult<ConversationListItem[], Error>;
   fetchConversationList: () => Promise<ConversationListItem[]>;
   invalidateConversationList: () => void;
+  prependConversation: (conversationId: number, title: string, agentId?: number | null) => void;
+  updateConversationAgentId: (conversationId: number, agentId: number | null) => void;
   handleNewConversation: () => void;
   handleConversationSelect: (conversation: ConversationListItem) => Promise<void>;
   updateConversationTitle: (conversationId: number, title: string) => Promise<void>;
@@ -74,6 +76,52 @@ export const useConversationManagement = (): ConversationManagement => {
     setIsNewConversation(true);
   };
 
+  // Prepend a newly created conversation to the sidebar list so it appears
+  // immediately (without waiting for a refetch).
+  const prependConversation = useCallback(
+    (conversationId: number, title: string, agentId?: number | null) => {
+      queryClient.setQueryData<ConversationListItem[]>(
+        CONVERSATION_LIST_QUERY_KEY,
+        (prev) => {
+          const existing = prev ?? [];
+          // Avoid duplicates if the backend has already populated it.
+          if (existing.some((c) => c.conversation_id === conversationId)) {
+            return existing;
+          }
+          const now = Date.now();
+          const newItem: ConversationListItem = {
+            conversation_id: conversationId,
+            conversation_title: title,
+            agent_id: agentId ?? null,
+            create_time: now,
+            update_time: now,
+          };
+          return [newItem, ...existing];
+        }
+      );
+    },
+    [queryClient]
+  );
+
+  const updateConversationAgentId = useCallback(
+    (conversationId: number, agentId: number | null) => {
+      queryClient.setQueryData<ConversationListItem[]>(
+        CONVERSATION_LIST_QUERY_KEY,
+        (prev) => {
+          if (!prev) {
+            return prev;
+          }
+          return prev.map((conversation) =>
+            conversation.conversation_id === conversationId
+              ? { ...conversation, agent_id: agentId }
+              : conversation
+          );
+        }
+      );
+    },
+    [queryClient]
+  );
+
   // Handle conversation selection
   const handleConversationSelect = async (conversation: ConversationListItem) => {
     setSelectedConversationId(conversation.conversation_id);
@@ -125,6 +173,8 @@ export const useConversationManagement = (): ConversationManagement => {
     // Methods
     fetchConversationList,
     invalidateConversationList,
+    prependConversation,
+    updateConversationAgentId,
     handleNewConversation,
     handleConversationSelect,
     updateConversationTitle,

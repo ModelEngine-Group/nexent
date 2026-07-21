@@ -22,7 +22,7 @@ from nexent.skills.skill_loader import SkillLoader
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import ModelConfig
 from consts.const import CONTAINER_SKILLS_PATH, OFFICIAL_SKILLS_ZIP_PATH, ROOT_DIR
-from consts.exceptions import SkillException
+from consts.exceptions import ForbiddenError, SkillException
 from database import skill_db
 from agents.skill_creation_agent import create_skill_from_request
 from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
@@ -760,12 +760,61 @@ def _get_skill_inputs_from_zip(
 
 def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> str:
     """Absolute path to <local_skills_dir>/<skill_name>/config/config.yaml."""
-    return os.path.join(local_skills_dir, skill_name, "config", "config.yaml")
+    return _resolve_local_skill_path(
+        local_skills_dir,
+        skill_name,
+        "config",
+        "config.yaml",
+    )
 
 
 def _local_skill_schema_yaml_path(skill_name: str, local_skills_dir: str) -> str:
     """Absolute path to <local_skills_dir>/<skill_name>/config/schema.yaml."""
-    return os.path.join(local_skills_dir, skill_name, "config", "schema.yaml")
+    return _resolve_local_skill_path(
+        local_skills_dir,
+        skill_name,
+        "config",
+        "schema.yaml",
+    )
+
+
+def _resolve_local_skill_path(
+    local_skills_dir: str,
+    skill_name: str,
+    *parts: str,
+) -> str:
+    """Resolve a path below the configured skills root and one skill directory."""
+    name = str(skill_name or "").strip()
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+        or os.path.basename(name) != name
+    ):
+        raise SkillException("Invalid skill name for local file access")
+
+    allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
+    local_root = os.path.realpath(local_skills_dir)
+    if (
+        local_root != allowed_root
+        and not local_root.startswith(allowed_root + os.sep)
+    ):
+        raise SkillException("Unsafe local skills directory")
+
+    candidate = os.path.realpath(os.path.join(local_root, name, *parts))
+    if (
+        candidate != allowed_root
+        and not candidate.startswith(allowed_root + os.sep)
+    ):
+        raise SkillException("Unsafe local skill path")
+    if (
+        candidate != local_root
+        and not candidate.startswith(local_root + os.sep)
+    ):
+        raise SkillException("Unsafe local skill path")
+    return candidate
 
 
 def _write_skill_params_to_local_config_yaml(
@@ -778,9 +827,9 @@ def _write_skill_params_to_local_config_yaml(
 
     if not local_skills_dir:
         return
-    config_dir = os.path.join(local_skills_dir, skill_name, "config")
-    os.makedirs(config_dir, exist_ok=True)
     path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
+    config_dir = os.path.dirname(path)
+    os.makedirs(config_dir, exist_ok=True)
     text = params_dict_to_roundtrip_yaml_text(params)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
@@ -822,7 +871,12 @@ class SkillService:
 
     def _resolve_local_skills_dir_for_overlay(self) -> Optional[str]:
         """Directory where skill folders live: ``SKILLS_PATH``, else ``ROOT_DIR/skills`` if present."""
-        d = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
+        manager_dir = getattr(self.skill_manager, "local_skills_dir", None)
+        d = (
+            manager_dir
+            if isinstance(manager_dir, str)
+            else CONTAINER_SKILLS_PATH
+        )
         if d:
             return str(d).rstrip(os.sep) or None
         if ROOT_DIR:
@@ -970,8 +1024,10 @@ class SkillService:
 
         # Check if skill directory already exists locally
         resolved = self._resolve_local_skills_dir_for_overlay()
-        if resolved and os.path.exists(os.path.join(resolved, skill_name)):
-            raise SkillException(f"Skill '{skill_name}' already exists locally")
+        if resolved:
+            local_skill_dir = _resolve_local_skill_path(resolved, skill_name)
+            if os.path.exists(local_skill_dir):
+                raise SkillException(f"Skill '{skill_name}' already exists locally")
 
         # Set created_by and updated_by if user_id is provided
         if user_id:
@@ -1013,7 +1069,7 @@ class SkillService:
         file_content: Union[bytes, str, io.BytesIO],
         skill_name: Optional[str] = None,
         file_type: str = "auto",
-        source: str = "自定义",
+        source: str = "custom",
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -1027,7 +1083,7 @@ class SkillService:
             file_content: File content as bytes, string, or BytesIO
             skill_name: Optional skill name (extracted from ZIP if not provided)
             file_type: File type hint - "md", "zip", or "auto" (detect)
-            source: Source identifier for the skill (e.g., "自定义", "官方", "导入")
+            source: Source identifier for the skill (e.g., "custom", "official", "repository")
             tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
             user_id: User ID of the creator
 
@@ -1058,7 +1114,7 @@ class SkillService:
         self,
         content_bytes: bytes,
         skill_name: Optional[str] = None,
-        source: str = "自定义",
+        source: str = "custom",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -1073,6 +1129,9 @@ class SkillService:
         name = skill_name or skill_data.get("name")
         if not name:
             raise SkillException("Skill name is required")
+        local_dir = self._resolve_local_skills_dir_for_overlay()
+        if local_dir:
+            _resolve_local_skill_path(local_dir, name)
 
         # Check if skill already exists in database
         existing = skill_db.get_skill_by_name(name, tenant_id)
@@ -1113,7 +1172,7 @@ class SkillService:
         self,
         zip_bytes: bytes,
         skill_name: Optional[str] = None,
-        source: str = "自定义",
+        source: str = "custom",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -1168,6 +1227,9 @@ class SkillService:
         name = skill_name or detected_skill_name
         if not name:
             raise SkillException("Skill name is required")
+        local_dir = self._resolve_local_skills_dir_for_overlay()
+        if local_dir:
+            _resolve_local_skill_path(local_dir, name)
 
         # Check if skill already exists in database
         existing = skill_db.get_skill_by_name(name, tenant_id)
@@ -1332,7 +1394,7 @@ class SkillService:
                     # Only strip the first component when the ZIP has a subdirectory structure
                     # (SKILL.md is inside a folder, not at root level)
                     if needs_rename and len(parts) >= 2 and parts[0] == original_folder_name:
-                        relative_path = parts[0].replace(original_folder_name, skill_name) + "/" + "/".join(parts[1:])
+                        relative_path = "/".join(parts[1:])
                     elif len(parts) >= 2 and not has_root_skill_md:
                         # Strip first component (ZIP has subdirectory structure without root SKILL.md)
                         relative_path = "/".join(parts[1:])
@@ -1613,6 +1675,110 @@ class SkillService:
             raise
         except Exception as e:
             logger.error(f"Error updating skill {skill_name}: {e}")
+            raise SkillException(f"Failed to update skill: {str(e)}") from e
+
+    def update_skill_by_id(
+        self,
+        skill_id: int,
+        skill_data: Dict[str, Any],
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Update an existing skill by ID for a tenant."""
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
+        try:
+            existing = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
+            if not existing:
+                raise SkillException(f"Skill not found: {skill_id}")
+            if not user_id or existing.get("created_by") != user_id:
+                raise ForbiddenError("Not authorized to update this skill")
+
+            local_dir = self._resolve_local_skills_dir_for_overlay()
+            if local_dir and "name" in skill_data:
+                _resolve_local_skill_path(
+                    local_dir,
+                    str(skill_data["name"] or ""),
+                )
+
+            result = skill_db.update_skill_by_id(
+                skill_id,
+                skill_data,
+                effective_tenant_id,
+                updated_by=user_id or None,
+            )
+
+            if not local_dir:
+                return self._enrich_configs_from_yaml(result)
+
+            persisted_skill_id = int(existing["skill_id"])
+            skill_id_directory = _resolve_local_skill_path(
+                local_dir,
+                f"skill_{persisted_skill_id}",
+            )
+            local_skill_name = (
+                f"skill_{persisted_skill_id}"
+                if os.path.isdir(skill_id_directory)
+                else str(result.get("name") or existing.get("name") or "")
+            )
+            if not local_skill_name:
+                return self._enrich_configs_from_yaml(result)
+
+            if local_dir and "config_values" in skill_data:
+                try:
+                    raw_config_values = skill_data["config_values"]
+                    if raw_config_values is None:
+                        _remove_local_skill_config_yaml(local_skill_name, local_dir)
+                    else:
+                        _write_skill_params_to_local_config_yaml(
+                            local_skill_name,
+                            _params_dict_to_storable(raw_config_values),
+                            local_dir,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Local config/config.yaml sync failed after skill ID update for %s: %s",
+                        skill_id,
+                        exc,
+                    )
+
+            if not local_dir:
+                return self._enrich_configs_from_yaml(result)
+
+            try:
+                allowed_tools = skill_db.get_tool_names_by_skill_name(
+                    str(existing.get("name") or ""),
+                    effective_tenant_id,
+                )
+                local_skill_dict = {
+                    "name": local_skill_name,
+                    "description": skill_data.get("description", existing.get("description", "")),
+                    "content": skill_data.get("content", existing.get("content", "")),
+                    "tags": skill_data.get("tags", existing.get("tags", [])),
+                    "allowed-tools": allowed_tools,
+                    "files": skill_data.get("files", []),
+                }
+                self.skill_manager.save_skill(local_skill_dict)
+                previous_name = str(existing.get("name") or "").strip()
+                if (
+                    local_skill_name != f"skill_{skill_id}"
+                    and previous_name
+                    and previous_name != local_skill_name
+                ):
+                    self.skill_manager.delete_skill(previous_name)
+            except Exception as exc:
+                logger.warning(
+                    "Local SKILL.md sync failed after DB update for skill ID %s: %s",
+                    skill_id,
+                    exc,
+                )
+
+            return self._enrich_configs_from_yaml(result)
+        except (ForbiddenError, SkillException):
+            raise
+        except Exception as e:
+            logger.exception("Error updating skill by ID %s", skill_id)
             raise SkillException(f"Failed to update skill: {str(e)}") from e
 
     def delete_skill(
@@ -2078,7 +2244,6 @@ class SkillService:
         result = skill_db.create_skill(skill_dict, tenant_id)
 
         self.skill_manager.save_skill(skill_dict)
-
         self._upload_zip_files(zip_bytes, name, detected_skill_name)
 
         return self._enrich_configs_from_yaml(result)
@@ -2111,8 +2276,23 @@ class SkillService:
                 skill_name
             )
             if not os.path.isdir(skill_dir):
-                logger.warning(f"Skill directory not found for export: {skill_name}")
-                continue
+                skill_info = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
+                if not skill_info:
+                    logger.warning(f"Skill directory and DB record not found for export: {skill_name}")
+                    continue
+                logger.warning(
+                    "Skill directory not found for export, rebuilding SKILL.md from DB snapshot: %s",
+                    skill_name,
+                )
+                self.skill_manager.save_skill({
+                    "name": skill_info.get("name") or skill_name,
+                    "description": skill_info.get("description", ""),
+                    "content": skill_info.get("content", ""),
+                    "tags": skill_info.get("tags", []),
+                })
+                if not os.path.isdir(skill_dir):
+                    logger.warning(f"Failed to rebuild skill directory for export: {skill_name}")
+                    continue
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:

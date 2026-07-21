@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
   ConversationListItem,
+  ApiConversationDetail,
   ApiConversationResponse,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
@@ -33,6 +34,23 @@ export const conversationService = {
     }
 
     throw new ApiError(data.code, data.message);
+  },
+
+  // Get conversation detail
+  async getById(conversationId: string): Promise<ApiConversationDetail> {
+    const response = await fetch(API_ENDPOINTS.conversation.detail(Number(conversationId)), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    const data = (await response.json()) as ApiConversationResponse;
+    const conversationData = data.data?.[0];
+
+    if (data.code === 0 && conversationData) {
+      return conversationData;
+    }
+
+    throw new Error(`Conversation ${conversationId} not found`);
   },
 
   // Create new conversation
@@ -887,7 +905,7 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
-      conversation_id: number;
+      conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
       minio_files?: Array<{
@@ -916,6 +934,11 @@ export const conversationService = {
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
       };
+
+      // Only include conversation_id if it has a value
+      if (params.conversation_id !== undefined && params.conversation_id !== null) {
+        requestParams.conversation_id = params.conversation_id;
+      }
 
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {

@@ -1,5 +1,6 @@
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 
 export type MessageRole = (typeof MESSAGE_ROLES)[keyof typeof MESSAGE_ROLES];
 
@@ -204,6 +205,7 @@ export interface ChatMessageType {
   searchResults?: SearchResult[];
   attachments?: FileAttachment[];
   thinking?: any[];
+  automationProposal?: AgentAutomationProposalData;
 }
 
 // Message processing structure
@@ -342,12 +344,14 @@ export interface ApiMessage {
 export interface ApiConversationDetail {
   create_time: number;
   conversation_id: number;
+  agent_id?: number | null;
   message: ApiMessage[];
 }
 
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;
+  agent_id?: number | null;
   create_time: number;
   update_time: number;
 }

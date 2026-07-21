@@ -236,6 +236,17 @@ class NexentAgent:
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+            elif class_name == "RAGFlowSearchTool":
+                # RAGFlowSearchTool does not accept rerank/rerank_model_name as
+                # init params — RAGFlow handles reranking internally via its API.
+                # The rerank_model attribute is set post-init for display and
+                # observability purposes only (e.g., showing model info in the UI).
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model", "rerank", "rerank_model_name"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
             elif class_name == "HaotianSearchTool":
                 # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
                 filtered_params = {k: v for k, v in params.items()
@@ -320,6 +331,7 @@ class NexentAgent:
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
+                observer=self.observer,
             )
             from nexent.core.tools.run_skill_script_tool import run_skill_script
             return run_skill_script
@@ -531,6 +543,14 @@ class NexentAgent:
                         # Add content to observer
                         if not isinstance(step_log, ActionStep):
                             continue
+
+                        # Real tool-call chunks are emitted by CoreAgent
+                        # (_emit_real_tool_chunks_from_code) right after the
+                        # PARSE chunk, so we deliberately skip re-emitting them
+                        # here to avoid duplicating the synthetic
+                        # ``python_interpreter`` ToolCall that smolagents
+                        # stamps on every action step.
+
                         # Emit token stats after each action step
                         step_duration = getattr(step_log.timing, "duration", None)
                         step_input = None

@@ -122,6 +122,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'guardrail_regex': {
             LANGUAGE["ZH"]: 'backend/prompts/utils/guardrail_regex_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/utils/guardrail_regex_en.yaml'
+        },
+        'agent_automation': {
+            LANGUAGE["ZH"]: 'backend/prompts/agent_automation_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/agent_automation_en.yaml'
         }
     }
 

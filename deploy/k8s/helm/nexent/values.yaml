@@ -6,7 +6,7 @@ global:
     mode: "local"
     storageClassName: "nexent-local"
     accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     workspace:
       size: "10Gi"
       localPath: "/var/lib/nexent"
@@ -90,14 +90,18 @@ nexent-minio:
   enabled: true
 nexent-config:
   enabled: true
+  replicaCount: 1
 nexent-runtime:
   enabled: true
+  replicaCount: 1
 nexent-mcp:
   enabled: true
 nexent-northbound:
   enabled: true
+  replicaCount: 1
 nexent-web:
   enabled: true
+  replicaCount: 1
 nexent-data-process:
   enabled: true
 nexent-supabase-kong:

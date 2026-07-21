@@ -1,6 +1,53 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tw-shimmer";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-sidebar-background: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from { height: 0; }
+  to { height: var(--radix-accordion-content-height); }
+}
+
+@keyframes accordion-up {
+  from { height: var(--radix-accordion-content-height); }
+  to { height: 0; }
+}
 
 @layer base {
   :root {
@@ -24,6 +71,14 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 210 100% 50%;
     --radius: 0.5rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
   .dark {
@@ -46,6 +101,14 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 210 100% 50%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 }
 
@@ -68,10 +131,65 @@
   }
 }
 
+/* Ant Design Light Theme Override - Force light mode */
+.ant-layout {
+  background-color: #ffffff !important;
+}
+
+.ant-layout-header {
+  background-color: #ffffff !important;
+}
+
+/* Override Ant Design link colors in header/navbar */
+.ant-layout-header a,
+.navbar-link,
+.topnav-link {
+  color: rgb(75 85 99) !important;
+  text-decoration: none !important;
+}
+
+.ant-layout-header a:hover {
+  color: rgb(15 23 42) !important;
+}
+
+.ant-layout-sider {
+  background-color: #ffffff !important;
+}
+
+.ant-layout-sider .ant-layout-sider-children {
+  background-color: #ffffff !important;
+}
+
+.ant-menu-dark {
+  background-color: #ffffff !important;
+}
+
+.ant-menu-dark .ant-menu-item-selected {
+  background-color: #f0f0f0 !important;
+  color: #000000e6 !important;
+}
+
+.ant-menu-dark .ant-menu-item {
+  color: #00000073 !important;
+}
+
+.ant-menu-dark .ant-menu-item:hover {
+  color: #000000d9 !important;
+  background-color: #fafafa !important;
+}
+
 /* Ant Design Button Icon with Lucide icons */
 .ant-btn-icon {
   display: inline-flex !important;
   align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Ensure Lucide icons render correctly in buttons */
+button svg,
+.ant-btn svg {
+  display: inline-flex !important;
+  flex-shrink: 0;
 }
 
 .ant-collapse-header {
@@ -91,6 +209,7 @@
 .ant-collapse-item-active > .ant-collapse-header {
   @apply shadow-md;
 }
+
 .ant-collapse-item-disabled > .ant-collapse-header {
   @apply cursor-default;
 }
@@ -167,7 +286,6 @@
   scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
 }
 
-
 /* Tool Pool Tabs scroll fix */
 .tool-pool-tabs .ant-tabs-content-holder {
   overflow: hidden;
@@ -184,7 +302,11 @@
 }
 
 /* Ensure tool pool tabs content area can scroll */
-.tool-pool-tabs .ant-tabs-content-holder .ant-tabs-content .ant-tabs-tabpane > div {
+.tool-pool-tabs
+  .ant-tabs-content-holder
+  .ant-tabs-content
+  .ant-tabs-tabpane
+  > div {
   height: 100%;
   max-height: 100%;
 }
@@ -205,19 +327,25 @@
 }
 
 /* Ensure skill pool tabs content area can scroll */
-.skill-pool-tabs .ant-tabs-content-holder .ant-tabs-content .ant-tabs-tabpane>div {
+.skill-pool-tabs
+  .ant-tabs-content-holder
+  .ant-tabs-content
+  .ant-tabs-tabpane
+  > div {
   height: 100%;
   max-height: 100%;
 }
 
 /* Adjust tabs content area left and right padding - use stronger selector */
-.skill-pool-tabs.ant-tabs.ant-tabs-left>.ant-tabs-content-holder {
+.skill-pool-tabs.ant-tabs.ant-tabs-left > .ant-tabs-content-holder {
   padding-left: 12px !important;
   padding-right: 9px !important;
   margin-left: 0 !important;
 }
 
-.skill-pool-tabs.ant-tabs.ant-tabs-left>.ant-tabs-content-holder>.ant-tabs-content {
+.skill-pool-tabs.ant-tabs.ant-tabs-left
+  > .ant-tabs-content-holder
+  > .ant-tabs-content {
   padding-left: 0 !important;
   margin-left: 0 !important;
 }
@@ -244,6 +372,7 @@
   padding: 0 !important;
   line-height: 1.2 !important;
 }
+
 /* Adjust tabs content area left and right padding - use stronger selector */
 .tool-pool-tabs.ant-tabs.ant-tabs-left > .ant-tabs-content-holder {
   padding-left: 12px !important;
@@ -251,7 +380,9 @@
   margin-left: 0 !important;
 }
 
-.tool-pool-tabs.ant-tabs.ant-tabs-left > .ant-tabs-content-holder > .ant-tabs-content {
+.tool-pool-tabs.ant-tabs.ant-tabs-left
+  > .ant-tabs-content-holder
+  > .ant-tabs-content {
   padding-left: 0 !important;
   margin-left: 0 !important;
 }
@@ -319,14 +450,16 @@
 }
 
 .document-chunk-tabs .ant-tabs-tab.ant-tabs-tab-active::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
   width: 4px;
   background-color: #3b82f6;
-  /* border-radius: 0 2px 2px 0; */
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 0 4px 4px 0;
 }
 
 .document-chunk-tabs .ant-tabs-tab.ant-tabs-tab-active::after {
@@ -376,6 +509,7 @@ tr.selected-row > td:first-child {
   position: relative;
   z-index: 0;
 }
+
 tr.selected-row > td:first-child::before {
   content: "";
   position: absolute;
@@ -383,7 +517,7 @@ tr.selected-row > td:first-child::before {
   top: 0;
   bottom: 0;
   width: 4px;
-  background-color: #3b82f6; /* tailwind border-blue-500 */
+  background-color: #3b82f6;
   z-index: 5;
   pointer-events: none;
   border-radius: 0 4px 4px 0;
@@ -397,4 +531,72 @@ tr.selected-row > td:first-child::before {
 /* Dropdown menu title content full width */
 .ant-dropdown-menu-title-content {
   @apply w-full;
+}
+
+/* Automation date-time picker */
+.automation-date-time-picker.ant-picker {
+  min-height: 40px;
+  padding-inline: 12px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.automation-date-time-picker .ant-picker-input > input {
+  cursor: pointer;
+}
+
+.automation-date-time-picker-popup .ant-picker-panel-container {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 14%);
+}
+
+.automation-date-time-picker-popup .ant-picker-panel {
+  border: 0;
+}
+
+.automation-date-time-picker-popup .ant-picker-cell-inner {
+  border-radius: 6px;
+}
+
+.automation-date-time-picker-popup .ant-picker-time-panel-column {
+  scrollbar-width: thin;
+}
+
+.automation-date-time-picker-popup .ant-picker-footer {
+  padding: 6px 8px;
+}
+
+:root {
+  --sidebar: hsl(0 0% 98%);
+  --sidebar-foreground: hsl(240 5.3% 26.1%);
+  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(240 4.8% 95.9%);
+  --sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --sidebar-border: hsl(220 13% 91%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+.dark {
+  --sidebar: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }

@@ -3,9 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Spin, Tag, theme } from "antd";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, FileInput, Settings, ChevronDown, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
+import { Plus, FileInput, Settings, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -47,6 +48,11 @@ export default function AgentSelectorHeader({
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
+  const showBackFromRepository = searchParams.get("from") === "agent-space";
   const queryClient = useQueryClient();
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
@@ -282,6 +288,7 @@ export default function AgentSelectorHeader({
         model_ids: modelIdsForCopy,
         max_steps: detail.max_step,
         requested_output_tokens: detail.requested_output_tokens ?? null,
+        is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,
@@ -372,8 +379,9 @@ export default function AgentSelectorHeader({
           setCurrentAgent(null);
         }
 
-        // Refresh agent list
+        // Refresh agent lists
         queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
       },
       onError: () => {
         message.error(t("businessLogic.config.error.agentDeleteFailed"));
@@ -578,6 +586,14 @@ export default function AgentSelectorHeader({
     return divider ? [agentItem, divider] : [agentItem];
   });
 
+  const handleBackToRepository = async () => {
+    const canLeave = await checkUnsavedChanges.saveWithModal();
+    if (!canLeave) {
+      return;
+    }
+    router.push(`/${locale}/agent-space?tab=mine`);
+  };
+
   return (
     <>
       <div className="w-full h-full px-6" style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -594,7 +610,18 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex min-w-0"
           >
-            <Dropdown
+            <Flex vertical className="min-w-0 w-full">
+              {showBackFromRepository ? (
+                <Button
+                  type="text"
+                  className="mb-1 flex w-fit items-center gap-1 px-2 text-gray-600"
+                  icon={<ChevronLeft className="size-4" aria-hidden />}
+                  onClick={handleBackToRepository}
+                >
+                  {t("agentRepository.mine.backToRepository")}
+                </Button>
+              ) : null}
+              <Dropdown
               trigger={["click"]}
               placement="bottomLeft"
               open={dropdownOpen}
@@ -636,6 +663,7 @@ export default function AgentSelectorHeader({
                 <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
               </div>
             </Dropdown>
+            </Flex>
 
 
           </Col>
@@ -647,51 +675,46 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex justify-end"
           >
-          {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
-              <Flex
-                align="center"
-                gap={4}
-                className="py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700"
-              >
+          <Flex align="center" gap={12} wrap="nowrap" justify="flex-end" className="w-full mr-6">
+            {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
+              <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
                 <History size={16} />
-
                 <Tag color="cyan" variant="outlined" className="rounded-md font-mono text-sm">
-                  {agentVersionDetail?.version.version_name} 
+                  {agentVersionDetail?.version.version_name}
                 </Tag>
-                <span className="text-xs text-gray-500 ml-1">
-                / {t("agent.version.totalVersions", { count: total ?? 0 })}
+                <span className="text-xs text-gray-500">
+                  / {t("agent.version.totalVersions", { count: total ?? 0 })}
                 </span>
-              </Flex>
+              </div>
             )}
-          {/* Right side: Agent count + Version management button */}
-          <Flex align="center" gap={12} className="mr-6">
-            {/* Create and Import buttons outside dropdown */}
-            <Flex align="center" gap={8} className="ml-4">
+            <Flex align="center" gap={12} wrap="nowrap">
+              <Flex align="center" gap={8} className="ml-4">
+                <Button
+                  size="middle"
+                  onClick={enterCreateMode}
+                  className="flex items-center gap-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{t("agentConfig.button.new")}</span>
+                </Button>
+                <Button
+                  size="middle"
+                  onClick={handleImportAgent}
+                  className="flex items-center gap-1"
+                >
+                  <FileInput className="w-4 h-4" />
+                  <span>{t("agentConfig.button.import")}</span>
+                </Button>
+              </Flex>
+
               <Button
-                size="middle"
-                onClick={enterCreateMode}
-                className="flex items-center gap-1"
+                icon={<GitBranch size={16} />}
+                onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
+                type={isShowVersionManagePanel ? "primary" : "default"}
               >
-                <Plus className="w-4 h-4" />
-                <span>{t("agentConfig.button.new")}</span>
-              </Button>
-              <Button
-                size="middle"
-                onClick={handleImportAgent}
-                className="flex items-center gap-1"
-              >
-                <FileInput className="w-4 h-4" />
-                <span>{t("agentConfig.button.import")}</span>
+                {t("agent.version.manage")}
               </Button>
             </Flex>
-
-            <Button
-              icon={<GitBranch size={16} />}
-              onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
-              type={isShowVersionManagePanel ? "primary" : "default"}
-            >
-              {t("agent.version.manage")}
-            </Button>
           </Flex>
           </Col>
         </Row>

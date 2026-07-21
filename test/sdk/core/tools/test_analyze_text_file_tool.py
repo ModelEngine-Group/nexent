@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import sdk.nexent.core.tools.analyze_text_file_tool as module
-from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool, ProcessType
+from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool
 
 
 class _NoopLoadSaveObjectManager:
@@ -84,7 +84,22 @@ class TestAnalyzeTextFileTool:
         result = tool._forward_impl([b"x"], "question")
 
         assert result == ["answer"]
-        observer_en.add_message.assert_any_call("", ProcessType.TOOL, "Analyzing file...")
+        tool.process_text_file.assert_called_once_with("file_1.txt", b"x")
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            b'{"name":"alice","age":18}',
+            b'[{"id":1},{"id":2}]',
+        ],
+    )
+    def test_forward_impl_preserves_json_format(self, tool, payload):
+        tool.process_text_file = MagicMock(return_value="text")
+        tool.analyze_file = MagicMock(return_value=("answer", 0.0))
+
+        result = tool._forward_impl([payload], "question")
+
+        assert result == ["answer"]
+        tool.process_text_file.assert_called_once_with("file_1.json", payload)
 
     @pytest.mark.parametrize(
         "payload,error",
@@ -120,6 +135,22 @@ class TestAnalyzeTextFileTool:
 
         assert result == "converted"
         tool._mock_http_client.post.assert_called_once()
+        request_kwargs = tool._mock_http_client.post.call_args.kwargs
+        assert request_kwargs["files"]["file"] == (
+            "doc.txt", b"bytes", "application/octet-stream")
+
+    def test_process_text_file_uses_json_content_type(self, tool):
+        mock_response = MagicMock(status_code=200)
+        mock_response.json.return_value = {"text": "converted"}
+        tool._mock_http_client.post.return_value = mock_response
+        payload = b'{"name":"alice"}'
+
+        result = tool.process_text_file("doc.json", payload)
+
+        assert result == "converted"
+        request_kwargs = tool._mock_http_client.post.call_args.kwargs
+        assert request_kwargs["files"]["file"] == (
+            "doc.json", payload, "application/json")
 
     def test_process_text_file_http_error_json_detail(self, tool):
         mock_response = MagicMock(status_code=400)

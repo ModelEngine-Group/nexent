@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from unittest.mock import MagicMock
@@ -101,6 +102,7 @@ db_models_mod = types.ModuleType("database.db_models")
 class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
+    agent_id = MagicMock(name="ConversationRecord.agent_id")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -206,6 +208,7 @@ from backend.database.conversation_db import (
     get_source_searches_by_message,
     rename_conversation,
     soft_delete_all_conversations_by_user,
+    update_conversation_agent_id,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -479,19 +482,22 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     mock_record = MagicMock()
     mock_record.conversation_id = 42
     mock_record.conversation_title = "Test Title"
+    mock_record.agent_id = 7
     mock_record.create_time = 1234567890.123
     mock_record.update_time = 1234567890.456
     session.execute.return_value.fetchone.return_value = mock_record
 
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
 
-    result = create_conversation("Test Title", user_id="user-1")
+    result = create_conversation("Test Title", user_id="user-1", agent_id=7)
 
     assert result["conversation_id"] == 42
     assert result["conversation_title"] == "Test Title"
+    assert result["agent_id"] == 7
     assert result["create_time"] == 1234567890
     assert result["update_time"] == 1234567890
     session.execute.assert_called_once()
+    assert _captured_insert_values["agent_id"] == 7
 
 
 def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
@@ -500,6 +506,7 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
     mock_record = MagicMock()
     mock_record.conversation_id = 1
     mock_record.conversation_title = "No User Title"
+    mock_record.agent_id = None
     mock_record.create_time = 1000.0
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record
@@ -629,6 +636,30 @@ def test_create_message_unit_inserts_single_row(monkeypatch):
     assert _captured_insert_values["updated_by"] == "actor"
 
 
+def test_create_message_unit_serializes_structured_content(monkeypatch):
+    """create_message_unit serializes mappings before inserting into the text column."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one.return_value = 11
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    unit_id = create_message_unit(
+        message_id=1,
+        conversation_id=2,
+        unit_index=0,
+        unit_type="skill_artifact",
+        unit_content={"skill_name": "create-docx", "artifacts": [{"file_name": "output.docx"}]},
+    )
+
+    assert unit_id == 11
+    assert json.loads(_captured_insert_values["unit_content"]) == {
+        "skill_name": "create-docx",
+        "artifacts": [{"file_name": "output.docx"}],
+    }
+
+
 def test_create_message_unit_without_user_id(monkeypatch):
     """create_message_unit works without user_id."""
     session = MagicMock()
@@ -756,6 +787,20 @@ def test_update_conversation_message_content(monkeypatch):
     session.execute.assert_called_once()
     assert _captured_update_values["message_content"] == "new text"
     assert _captured_update_values["updated_by"] == "actor"
+
+
+def test_update_message_unit_content_serializes_structured_content(monkeypatch):
+    """update_message_unit_content serializes mappings before updating the text column."""
+    session = MagicMock()
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    update_message_unit_content(42, {"status": "ready"}, user_id="editor")
+
+    assert json.loads(_captured_update_values["unit_content"]) == {"status": "ready"}
+    assert _captured_update_values["updated_by"] == "editor"
 
 
 def test_update_message_unit_content(monkeypatch):
@@ -928,8 +973,12 @@ def test_get_conversation_list(monkeypatch, mock_session_ctx):
     """get_conversation_list returns all conversations ordered by create_time desc."""
     session, ctx = mock_session_ctx
     mock_records = [
-        MagicMock(conversation_id=2, conversation_title="Second", create_time=2000.0, update_time=2000.0),
-        MagicMock(conversation_id=1, conversation_title="First", create_time=1000.0, update_time=1000.0),
+        MagicMock(
+            conversation_id=2, conversation_title="Second", agent_id=22, create_time=2000.0, update_time=2000.0
+        ),
+        MagicMock(
+            conversation_id=1, conversation_title="First", agent_id=11, create_time=1000.0, update_time=1000.0
+        ),
     ]
     session.execute.return_value = iter(mock_records)
 
@@ -937,6 +986,7 @@ def test_get_conversation_list(monkeypatch, mock_session_ctx):
         return {
             "conversation_id": record.conversation_id,
             "conversation_title": record.conversation_title,
+            "agent_id": record.agent_id,
             "create_time": record.create_time,
             "update_time": record.update_time,
         }
@@ -948,18 +998,24 @@ def test_get_conversation_list(monkeypatch, mock_session_ctx):
 
     assert len(result) == 2
     assert result[0]["conversation_id"] == 2
+    assert result[0]["agent_id"] == 22
 
 
 def test_get_conversation_list_filtered_by_user(monkeypatch, mock_session_ctx):
     """get_conversation_list filters by user_id when provided."""
     session, ctx = mock_session_ctx
-    mock_records = [MagicMock(conversation_id=1, conversation_title="User Chat", create_time=1000.0, update_time=1000.0)]
+    mock_records = [
+        MagicMock(
+            conversation_id=1, conversation_title="User Chat", agent_id=15, create_time=1000.0, update_time=1000.0
+        )
+    ]
     session.execute.return_value = iter(mock_records)
 
     def as_dict_side_effect(record):
         return {
             "conversation_id": record.conversation_id,
             "conversation_title": record.conversation_title,
+            "agent_id": record.agent_id,
             "create_time": record.create_time,
             "update_time": record.update_time,
         }
@@ -970,6 +1026,37 @@ def test_get_conversation_list_filtered_by_user(monkeypatch, mock_session_ctx):
     result = get_conversation_list(user_id="specific-user")
 
     assert len(result) == 1
+    assert result[0]["agent_id"] == 15
+
+
+def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):
+    """update_conversation_agent_id updates the latest agent and returns True."""
+    session, ctx = mock_session_ctx
+    update_result = MagicMock()
+    update_result.rowcount = 1
+    session.execute.return_value = update_result
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_conversation_agent_id("123", "45", user_id="user-1")
+
+    assert result is True
+    session.execute.assert_called_once()
+
+
+def test_update_conversation_agent_id_not_found(monkeypatch, mock_session_ctx):
+    """update_conversation_agent_id returns False when no row is updated."""
+    session, ctx = mock_session_ctx
+    update_result = MagicMock()
+    update_result.rowcount = 0
+    session.execute.return_value = update_result
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_conversation_agent_id(123, 45)
+
+    assert result is False
+    session.execute.assert_called_once()
 
 
 # =============================================================================
@@ -1867,7 +1954,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
 
     # Use SimpleNamespace for accurate attribute checks
-    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+    mock_conv = SimpleNamespace(conversation_id=1, agent_id=9, create_time=1000.0)
     mock_message = SimpleNamespace(
         message_id=1,
         message_index=0,
@@ -1909,7 +1996,11 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
                 "units": getattr(record, 'units', None),
             }
         elif hasattr(record, 'conversation_id'):
-            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
+            return {
+                "conversation_id": record.conversation_id,
+                "agent_id": record.agent_id,
+                "create_time": record.create_time,
+            }
         return {}
 
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
@@ -1919,6 +2010,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
 
     assert result is not None
     assert result['conversation_id'] == 1
+    assert result['agent_id'] == 9
 
 
 def test_create_message_units_creates_all_units_with_user_id(monkeypatch):

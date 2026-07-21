@@ -346,7 +346,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_agent_repository_t (
     description TEXT,
     author VARCHAR(100),
     submitted_by VARCHAR(100),
-    category_id INTEGER,
     tags TEXT[],
     tool_count INTEGER,
     icon VARCHAR(100),
@@ -408,7 +407,6 @@ COMMENT ON COLUMN nexent.ag_agent_repository_t.display_name IS 'Root agent displ
 COMMENT ON COLUMN nexent.ag_agent_repository_t.description IS 'Root agent description';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.author IS 'Agent author';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.submitted_by IS 'Submitter email when listing enters pending_review';
-COMMENT ON COLUMN nexent.ag_agent_repository_t.category_id IS 'Optional marketplace category ID';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.tags IS 'Marketplace tags';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.tool_count IS 'Total tool count across all agents in the bundle (display only)';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.version_name IS 'Repository entry version name for display (from ag_tenant_agent_version_t)';

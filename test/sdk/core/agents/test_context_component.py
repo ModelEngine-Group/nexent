@@ -742,7 +742,7 @@ class TestExtendedContextManagerConfig:
 
     def test_default_strategy(self):
         config = summary_config_module.ContextManagerConfig()
-        assert config.strategy == "token_budget"
+        assert config.strategy == "full"
 
     def test_all_injection_flags_default_true(self):
         config = summary_config_module.ContextManagerConfig()

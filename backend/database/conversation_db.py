@@ -24,6 +24,13 @@ class MessageRecord(TypedDict):
     opinion_flag: Optional[str]
 
 
+def _serialize_unit_content(content: Any) -> str:
+    """Serialize structured unit content for the text database column."""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
 class SearchRecord(TypedDict):
     message_id: int
     source_type: str
@@ -46,19 +53,22 @@ class ImageRecord(TypedDict):
 
 class ConversationHistory(TypedDict):
     conversation_id: int
+    agent_id: Optional[int]
     create_time: int
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
     image_records: List[ImageRecord]
 
 
-def create_conversation(conversation_title: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+def create_conversation(conversation_title: str, user_id: Optional[str] = None,
+                        agent_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
     Args:
         conversation_title: Conversation title
         user_id: Reserved parameter for created_by and updated_by fields
+        agent_id: Agent used by the latest run in this conversation
 
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
@@ -66,12 +76,15 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
     with get_db_session() as session:
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": 'N'}
+        if agent_id is not None:
+            data["agent_id"] = agent_id
         if user_id:
             data = add_creation_tracking(data, user_id)
 
         stmt = insert(ConversationRecord).values(**data).returning(
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
+            ConversationRecord.agent_id,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -84,6 +97,7 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
         result_dict = {
             "conversation_id": record.conversation_id,
             "conversation_title": record.conversation_title,
+            "agent_id": record.agent_id,
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -168,7 +182,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "conversation_id": conversation_id,
                 "unit_index": idx,
                 "unit_type": unit['type'],
-                "unit_content": unit['content'],
+                "unit_content": _serialize_unit_content(unit['content']),
                 "delete_flag": 'N'
             }
 
@@ -187,7 +201,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
 
 
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
-                        unit_type: str, unit_content: str,
+                        unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,
                         unit_status: str = 'completed') -> int:
     """
@@ -215,7 +229,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "conversation_id": conversation_id,
             "unit_index": unit_index,
             "unit_type": unit_type,
-            "unit_content": unit_content,
+            "unit_content": _serialize_unit_content(unit_content),
             "unit_status": unit_status,
             "delete_flag": 'N',
         }
@@ -307,7 +321,7 @@ def update_message_unit_status(unit_id: int, status: str,
         )
 
 
-def update_message_unit_content(unit_id: int, content: str,
+def update_message_unit_content(unit_id: int, content: Any,
                                 user_id: Optional[str] = None) -> None:
     """
     Update the unit_content field of a message unit.
@@ -320,7 +334,7 @@ def update_message_unit_content(unit_id: int, content: str,
     with get_db_session() as session:
         unit_id = int(unit_id)
         update_data = {
-            "unit_content": content,
+            "unit_content": _serialize_unit_content(content),
             "update_time": func.current_timestamp(),
         }
         if user_id:
@@ -433,6 +447,7 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
         stmt = select(
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
+            ConversationRecord.agent_id,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -459,6 +474,36 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
             result.append(conversation)
 
         return result
+
+
+def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: Optional[str] = None) -> bool:
+    """
+    Update the agent associated with a conversation.
+
+    Args:
+        conversation_id: Conversation ID (integer)
+        agent_id: Latest agent ID used by this conversation
+        user_id: Reserved parameter for updated_by field
+
+    Returns:
+        bool: Whether the operation was successful
+    """
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+        update_data = {
+            "agent_id": int(agent_id),
+            "update_time": func.current_timestamp()
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+
+        stmt = update(ConversationRecord).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.delete_flag == 'N'
+        ).values(update_data)
+
+        result = session.execute(stmt)
+        return result.rowcount > 0
 
 
 def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[str] = None) -> bool:
@@ -678,6 +723,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         # First check if conversation exists
         check_stmt = select(
             ConversationRecord.conversation_id,
+            ConversationRecord.agent_id,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -726,7 +772,10 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.conversation_id == conversation_id,
 
             ConversationMessage.delete_flag == 'N'
-        ).order_by(ConversationMessage.message_index)
+        ).order_by(
+            asc(ConversationMessage.message_index),
+            asc(ConversationMessage.message_id),
+        )
 
         message_records = session.execute(query).all()
 
@@ -769,6 +818,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
 
         return {
             'conversation_id': conversation['conversation_id'],
+            'agent_id': conversation.get('agent_id'),
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],

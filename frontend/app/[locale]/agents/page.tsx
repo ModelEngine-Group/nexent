@@ -81,9 +81,10 @@ export default function AgentSetupOrchestrator() {
 
   const headerStyle: React.CSSProperties = {
     padding: 0,
-    height: 120,
-    lineHeight: '120px',
-    background: '#fff',
+    minHeight: 120,
+    height: "auto",
+    lineHeight: "normal",
+    background: "#fff",
     flexShrink: 0,
   };
 
