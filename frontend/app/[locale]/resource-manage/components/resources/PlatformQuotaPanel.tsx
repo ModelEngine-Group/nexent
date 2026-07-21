@@ -302,7 +302,15 @@ export function PlatformQuotaPanel() {
   ];
 
   return (
-    <div style={{ padding: 16 }}>
+    <div
+      style={{
+        height: "100%",
+        minHeight: 0,
+        overflowX: "hidden",
+        overflowY: "auto",
+        padding: 16,
+      }}
+    >
       {/* Platform Capacity Header */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={[32, 20]} align="middle">
