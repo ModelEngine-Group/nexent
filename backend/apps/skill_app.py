@@ -17,6 +17,7 @@ from services.skill_service import (
     stream_skill_creation,
     update_skill_list,
     get_official_skills_with_status,
+    install_skills_from_zip_for_tenant,
 )
 from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
@@ -127,8 +128,6 @@ async def install_skills(
     """
     try:
         user_id, current_tenant_id = get_current_user_id(authorization)
-        from services.skill_service import install_skills_from_zip_for_tenant
-
         effective_tenant_id = tenant_id if tenant_id else current_tenant_id
         installed_names = install_skills_from_zip_for_tenant(
             skill_names=request.skill_names,

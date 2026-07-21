@@ -202,6 +202,13 @@ services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("tas
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+
+
+def setup_function():
+    """Restore module-level service stubs after tests that isolate imports."""
+    sys.modules['services'] = services_mock
+    sys.modules['services.skill_service'] = services_skill_service_mock
+    sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
@@ -2278,7 +2285,7 @@ class TestInstallSkillsEndpoint:
         """Test successful skill installation."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = ["skill1", "skill2"]
 
                 app = FastAPI()
@@ -2305,7 +2312,7 @@ class TestInstallSkillsEndpoint:
         """Test installing empty skill list."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = []
 
                 app = FastAPI()
@@ -2344,7 +2351,7 @@ class TestInstallSkillsEndpoint:
         """Test super admin installing skills for a specific tenant via tenant_id query param."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("super_user", "super_tenant")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = ["skill1"]
 
                 app = FastAPI()
@@ -2371,7 +2378,7 @@ class TestInstallSkillsEndpoint:
         """Test installing skills with error."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.side_effect = Exception("Installation failed")
 
                 app = FastAPI()

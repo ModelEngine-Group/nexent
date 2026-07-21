@@ -60,11 +60,11 @@ if consts_const_module is not None:
     if not hasattr(consts_const_module, "CAN_EDIT_ALL_USER_ROLES"):
         consts_const_module.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
     if not hasattr(consts_const_module, "PERMISSION_EDIT"):
-        consts_const_module.PERMISSION_EDIT = "edit"
+        consts_const_module.PERMISSION_EDIT = "EDIT"
     if not hasattr(consts_const_module, "PERMISSION_READ"):
-        consts_const_module.PERMISSION_READ = "read"
+        consts_const_module.PERMISSION_READ = "READ_ONLY"
     if not hasattr(consts_const_module, "PERMISSION_PRIVATE"):
-        consts_const_module.PERMISSION_PRIVATE = "private"
+        consts_const_module.PERMISSION_PRIVATE = "PRIVATE"
 
 _skill_repo_db_mock = MagicMock()
 _skill_repo_db_mock.get_skill_repository_by_id_and_publisher = MagicMock()
