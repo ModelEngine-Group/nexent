@@ -6,7 +6,7 @@ import pytest
 
 from sdk.nexent.core.tools import analyze_image_tool
 from sdk.nexent.core.tools.analyze_image_tool import AnalyzeImageTool
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
+from sdk.nexent.core.utils.observer import MessageObserver
 
 
 @pytest.fixture
@@ -207,24 +207,6 @@ class TestAnalyzeImageToolEdgeCases:
 
         assert tool._is_chinese is False
 
-    def test_running_prompt_properties(self, observer_en, observer_zh, mock_vlm_model, mock_storage_client):
-        """Test that running prompt properties are set correctly."""
-        tool_en = AnalyzeImageTool(
-            observer=observer_en,
-            vlm_model=mock_vlm_model,
-            storage_client=mock_storage_client,
-        )
-        tool_zh = AnalyzeImageTool(
-            observer=observer_zh,
-            vlm_model=mock_vlm_model,
-            storage_client=mock_storage_client,
-        )
-
-        assert tool_en.running_prompt_en == "Analyzing image..."
-        assert tool_en.running_prompt_zh == "正在分析图片..."
-        assert tool_zh.running_prompt_en == "Analyzing image..."
-        assert tool_zh.running_prompt_zh == "正在分析图片..."
-
     def test_load_save_object_manager_created(self, mock_vlm_model, mock_storage_client):
         """Test that LoadSaveObjectManager is created with storage client."""
         with patch('sdk.nexent.core.tools.analyze_image_tool.LoadSaveObjectManager') as mock_manager_class:
@@ -321,19 +303,6 @@ class TestAnalyzeImageToolEdgeCases:
         assert "validate_url_access" in tool.init_param_descriptions
         assert "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)" in tool.init_param_descriptions["validate_url_access"]["description"]
 
-    def test_observer_add_message_called(self, tool, mock_vlm_model, mock_prompt_loader):
-        """Test that observer.add_message is called with running prompt."""
-        mock_vlm_model.analyze_image.return_value = SimpleNamespace(
-            content="Result")
-
-        tool._forward_impl([b"img"], "question")
-
-        tool.observer.add_message.assert_called_once()
-        call_args = tool.observer.add_message.call_args
-        assert call_args[0][0] == ""  # first arg is empty string
-        assert call_args[0][1] == ProcessType.TOOL
-        assert call_args[0][2] == "Analyzing image..."
-
     def test_observer_add_message_not_called_when_none(self, mock_vlm_model, mock_storage_client):
         """Test that observer.add_message is not called when observer is None."""
         tool = AnalyzeImageTool(
@@ -363,32 +332,3 @@ class TestAnalyzeImageToolEdgeCases:
         assert tool.inputs["image_urls_list"]["type"] == "array"
         assert tool.inputs["query"]["type"] == "string"
         assert tool.output_type == "array"
-
-    def test_tool_category_and_sign(self, tool):
-        """Test that tool category and sign are set correctly."""
-        from sdk.nexent.core.utils.tools_common_message import ToolCategory, ToolSign
-        assert tool.category == ToolCategory.MULTIMODAL.value
-        assert tool.tool_sign == ToolSign.MULTIMODAL_OPERATION.value
-
-    @pytest.mark.parametrize("lang,expected_prompt", [
-        ("en", "Analyzing image..."),
-        ("zh", "正在分析图片..."),
-    ])
-    def test_running_prompt_by_language(self, mock_vlm_model, mock_storage_client, lang, expected_prompt):
-        """Test that running prompt is correctly selected based on language."""
-        observer = MagicMock(spec=MessageObserver)
-        observer.lang = lang
-
-        tool = AnalyzeImageTool(
-            observer=observer,
-            vlm_model=mock_vlm_model,
-            storage_client=mock_storage_client,
-        )
-
-        mock_vlm_model.analyze_image.return_value = SimpleNamespace(
-            content="result")
-        tool._forward_impl([b"img"], "question")
-
-        # Get the actual prompt passed to add_message
-        call_args = tool.observer.add_message.call_args[0]
-        assert call_args[2] == expected_prompt

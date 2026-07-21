@@ -103,7 +103,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
-                      unit_type: str, unit_content: str,
+                      unit_type: str, unit_content: Any,
                       user_id: Optional[str] = None,
                       unit_status: str = 'completed') -> int:
     """
@@ -536,10 +536,24 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                             'content': json.dumps(placeholder_content, ensure_ascii=False)
                         })
                     else:
-                        processed_units.append({
+                        processed_unit = {
                             'type': unit_type,
-                            'content': unit_content
-                        })
+                            'content': unit_content,
+                            'unit_index': unit.get('unit_index'),
+                            'unit_status': unit.get('unit_status'),
+                        }
+                        if unit_type in ('tool', 'tool-call') and isinstance(unit_content, str):
+                            try:
+                                tool_data = json.loads(unit_content)
+                            except (json.JSONDecodeError, TypeError):
+                                tool_data = None
+                            if isinstance(tool_data, dict) and 'content' in tool_data:
+                                processed_unit['content'] = tool_data.get('content', '')
+                                processed_unit['tool_name'] = tool_data.get('tool_name')
+                                processed_unit['tool_arguments'] = tool_data.get('tool_arguments')
+                                if 'role' in tool_data:
+                                    processed_unit['role'] = tool_data['role']
+                        processed_units.append(processed_unit)
 
                 # Add final_answer type message unit only if not already present
                 has_final_answer = any(u.get('type') == 'final_answer' for u in processed_units)

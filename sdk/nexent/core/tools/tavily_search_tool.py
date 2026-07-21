@@ -61,8 +61,6 @@ class TavilySearchTool(Tool):
         self.max_results = max_results
         self.image_filter = image_filter
         self.record_ops = 1  # Used to record sequence number
-        self.running_prompt_en = "Searching the web..."
-        self.running_prompt_zh = "网络搜索中..."
         
         # TODO add data_process_service
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
@@ -82,8 +80,9 @@ class TavilySearchTool(Tool):
 
         # Send tool running message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang=="zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py so it is consistent across direct and code_action
+            # invocations. We only emit the search card from inside the tool.
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(
                 card_content, ensure_ascii=False))

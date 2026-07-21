@@ -190,8 +190,6 @@ class AidpSearchTool(Tool):
         )
 
         self.record_ops = 1
-        self.running_prompt_zh = "AIDP 知识库检索中..."
-        self.running_prompt_en = "Searching AIDP knowledge base..."
 
     def _build_retrieve_url(self) -> str:
         return urljoin(self.base_url, _RETRIEVE_PATH)
@@ -223,12 +221,6 @@ class AidpSearchTool(Tool):
         """Push the running prompt + query card to the observer if any."""
         if not self.observer:
             return
-        prompt = (
-            self.running_prompt_zh
-            if self.observer.lang == "zh"
-            else self.running_prompt_en
-        )
-        self.observer.add_message("", ProcessType.TOOL, prompt)
         card_content = [{"icon": "search", "text": query.strip()}]
         self.observer.add_message(
             "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)

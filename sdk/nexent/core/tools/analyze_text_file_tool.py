@@ -114,9 +114,6 @@ class AnalyzeTextFileTool(Tool):
             validate_url_access=validate_callback
         )
         self.time_out = 60 * 5
-
-        self.running_prompt_zh = "正在分析文件..."
-        self.running_prompt_en = "Analyzing file..."
         # Dynamically apply the load_object decorator to forward method
         self.forward = self.mm.load_object(
             input_names=["file_url_list"])(self._forward_impl)
@@ -140,10 +137,6 @@ class AnalyzeTextFileTool(Tool):
         Returns:
             List[str]: One analysis string per file that aligns with the order
         """
-        # Send tool run message
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
         if file_url_list is None:
             raise ValueError("file_url_list cannot be None")

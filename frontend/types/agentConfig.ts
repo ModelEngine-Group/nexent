@@ -75,6 +75,27 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
 
 // ========== Core Interfaces ==========
 
+export interface PublishedAgent {
+  id: string;
+  agent_id: number;
+  name: string;
+  display_name?: string;
+  description: string;
+  author?: string;
+  unavailable_reasons?: string[];
+  model_ids?: number[];
+  model_names?: string[];
+  /** Single model name resolved from model_ids for display purposes */
+  model_name?: string;
+  is_available?: boolean;
+  is_new?: boolean;
+  group_ids?: string;
+  permission?: "EDIT" | "READ_ONLY";
+  current_version_no?: number;
+  greeting_message?: string;
+  example_questions?: string[];
+}
+
 export interface Agent {
   id: string;
   name: string;
