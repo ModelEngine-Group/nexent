@@ -236,6 +236,34 @@ def test_status_update_only_accepts_terminal_states(monkeypatch):
     )
 
 
+@pytest.mark.parametrize("updated_count, expected", [(1, True), (0, False)])
+def test_resume_session_only_updates_completed_owner_session(
+    monkeypatch, updated_count, expected
+):
+    query = MagicMock()
+    query.filter.return_value = query
+    query.update.return_value = updated_count
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(
+        nl2agent_session_db,
+        "get_db_session",
+        lambda: _session_context(session),
+    )
+
+    assert (
+        nl2agent_session_db.resume_nl2agent_session(
+            tenant_id="tenant-a",
+            draft_agent_id=11,
+            user_id="user-a",
+        )
+        is expected
+    )
+    values = query.update.call_args.args[0]
+    assert values["status"] == nl2agent_session_db.NL2AGENT_SESSION_ACTIVE
+    assert values["updated_by"] == "user-a"
+
+
 def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
     records = [
         SimpleNamespace(

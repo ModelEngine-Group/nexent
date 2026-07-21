@@ -8,7 +8,7 @@ export interface paths {
     };
     /**
      * Resolve Session Api
-     * @description Resolve an active owned draft after local browser state is lost.
+     * @description Resolve an owned active or completed session after browser state is lost.
      */
     get: operations["resolve_session_api_nl2agent_session_by_conversation__conversation_id__get"];
     put?: never;
@@ -321,6 +321,26 @@ export interface paths {
     put?: never;
     /** Register Requirements Api */
     post: operations["register_requirements_api_nl2agent_session__agent_id__requirements_register_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nl2agent/session/{agent_id}/resume": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resume Session Api
+     * @description Resume one completed NL2AGENT session without resetting its workflow.
+     */
+    post: operations["resume_session_api_nl2agent_session__agent_id__resume_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1118,6 +1138,11 @@ export interface components {
        * @constant
        */
       schema_version: 2;
+      /**
+       * Session Status
+       * @enum {string}
+       */
+      session_status: "active" | "completed";
       /** Skills */
       skills: components["schemas"]["Nl2AgentSkillSummary"][];
       /** Tools */
@@ -2030,6 +2055,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Nl2AgentRequirementsRegistrationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  resume_session_api_nl2agent_session__agent_id__resume_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        authorization?: string | null;
+      };
+      path: {
+        agent_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Nl2AgentSessionSummaryResponse"];
         };
       };
       /** @description Validation Error */

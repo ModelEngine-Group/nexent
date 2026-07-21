@@ -183,7 +183,7 @@ async def test_resolve_session_api_passes_authenticated_owner(monkeypatch) -> No
             "status": "active",
         }
     )
-    monkeypatch.setattr(nl2agent_app, "resolve_active_session", resolve)
+    monkeypatch.setattr(nl2agent_app, "resolve_session", resolve)
 
     result = await nl2agent_app.resolve_session_api(902, MagicMock(), None)
 
@@ -193,6 +193,29 @@ async def test_resolve_session_api_passes_authenticated_owner(monkeypatch) -> No
         tenant_id="tenant",
         user_id="user",
     )
+
+
+@pytest.mark.asyncio
+async def test_resume_session_api_passes_authenticated_owner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nl2agent_app,
+        "_current_user",
+        MagicMock(return_value=("user", "tenant", "en")),
+    )
+    resume = MagicMock(
+        return_value={
+            "nl2agent_agent_id": 101,
+            "draft_agent_id": 202,
+            "conversation_id": 902,
+            "status": "active",
+        }
+    )
+    monkeypatch.setattr(nl2agent_app, "resume_session", resume)
+
+    result = await nl2agent_app.resume_session_api(202, MagicMock(), None)
+
+    assert result["status"] == "active"
+    resume.assert_called_once_with(202, "tenant", "user")
 
 
 @pytest.mark.asyncio
@@ -206,7 +229,7 @@ async def test_resolve_session_http_contract_restores_complete_execution_context
     )
     monkeypatch.setattr(
         nl2agent_app,
-        "resolve_active_session",
+        "resolve_session",
         MagicMock(
             return_value={
                 "nl2agent_agent_id": 101,

@@ -1763,6 +1763,14 @@
             "title": "Schema Version",
             "type": "integer"
           },
+          "session_status": {
+            "enum": [
+              "active",
+              "completed"
+            ],
+            "title": "Session Status",
+            "type": "string"
+          },
           "skills": {
             "items": {
               "$ref": "#/components/schemas/Nl2AgentSkillSummary"
@@ -1780,6 +1788,7 @@
         },
         "required": [
           "agent_id",
+          "session_status",
           "schema_version",
           "revision",
           "current_stage",
@@ -2577,7 +2586,7 @@
   "paths": {
     "/nl2agent/session/by-conversation/{conversation_id}": {
       "get": {
-        "description": "Resolve an active owned draft after local browser state is lost.",
+        "description": "Resolve an owned active or completed session after browser state is lost.",
         "operationId": "resolve_session_api_nl2agent_session_by_conversation__conversation_id__get",
         "parameters": [
           {
@@ -3708,6 +3717,62 @@
           }
         },
         "summary": "Register Requirements Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/resume": {
+      "post": {
+        "description": "Resume one completed NL2AGENT session without resetting its workflow.",
+        "operationId": "resume_session_api_nl2agent_session__agent_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Session Api"
       }
     },
     "/nl2agent/session/{agent_id}/state": {

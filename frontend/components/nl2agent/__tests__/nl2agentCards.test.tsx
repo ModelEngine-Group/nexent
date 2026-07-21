@@ -620,6 +620,7 @@ describe("final review persisted names", () => {
 
   it("blocks publication while any persisted reference is invalid", () => {
     const validState = {
+      session_status: "active",
       identity_confirmed: true,
       invalid_references: [],
     } as unknown as Nl2AgentSessionState;
@@ -636,6 +637,15 @@ describe("final review persisted names", () => {
 
     assert.equal(canPublishFinalReview(validState, true, false, null), true);
     assert.equal(canPublishFinalReview(invalidState, true, false, null), false);
+    assert.equal(
+      canPublishFinalReview(
+        { ...validState, session_status: "completed" },
+        true,
+        false,
+        null
+      ),
+      false
+    );
   });
 });
 

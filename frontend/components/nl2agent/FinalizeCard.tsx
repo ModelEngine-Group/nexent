@@ -10,12 +10,14 @@ import { useParams } from "next/navigation";
 import {
   finalizeNl2Agent,
   getNl2AgentSessionState,
+  Nl2AgentRequestError,
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
 import type {
   FinalizeCardData,
   FinalizeVerificationConfig,
 } from "./cardPayloadTypes";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export type { FinalizeCardData } from "./cardPayloadTypes";
 
@@ -61,6 +63,7 @@ export const canPublishFinalReview = (
   stateError: string | null
 ) =>
   Boolean(
+    state?.session_status === "active" &&
     state?.identity_confirmed &&
     proposalComplete &&
     !state.invalid_references.length &&
@@ -157,22 +160,29 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const router = useRouter();
   const params = useParams<{ locale: string }>();
   const locale = params?.locale || "en";
+  const workflow = useNl2AgentWorkflow();
   const [loading, setLoading] = useState(false);
   const [sessionState, setSessionState] = useState<Nl2AgentSessionState | null>(
     null
   );
   const [stateLoading, setStateLoading] = useState(true);
   const [stateError, setStateError] = useState<string | null>(null);
+  const [stateExpired, setStateExpired] = useState(false);
 
   const agentId = data.agent_id;
 
   const loadState = useCallback(async () => {
     setStateLoading(true);
     setStateError(null);
+    setStateExpired(false);
     try {
       setSessionState(await getNl2AgentSessionState(agentId));
     } catch (error: unknown) {
       setSessionState(null);
+      if (error instanceof Nl2AgentRequestError && error.status === 404) {
+        setStateExpired(true);
+        return;
+      }
       setStateError(
         error instanceof Error
           ? error.message
@@ -233,11 +243,63 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
     }
   };
 
+  const handleResume = async () => {
+    try {
+      await workflow.resumeSession();
+      await loadState();
+      message.success(
+        t("nl2agent.finalize.resumed", "You can continue editing this agent.")
+      );
+    } catch (error: unknown) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t(
+              "nl2agent.finalize.resumeError",
+              "Failed to resume this agent session."
+            )
+      );
+    }
+  };
+
   if (stateLoading) {
     return (
       <div className="my-3 rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
         <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
         Loading persisted agent state...
+      </div>
+    );
+  }
+
+  if (stateExpired) {
+    return (
+      <div className="my-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <Alert
+          type="warning"
+          showIcon
+          message={t(
+            "nl2agent.finalize.historyExpired",
+            "The editable NL2AGENT session has expired"
+          )}
+          description={t(
+            "nl2agent.finalize.historyExpiredDescription",
+            "The proposal saved in this conversation remains available, but its persisted workflow can no longer be resumed."
+          )}
+        />
+        <div className="mt-3 text-xs text-gray-700">
+          <FieldLine label="Description" value={data.description} />
+          <FieldLine label="Task" value={data.business_description} />
+          <FieldLine label="Duty" value={data.duty_prompt} />
+          <FieldLine label="Greeting" value={data.greeting_message} />
+        </div>
+        <Flex justify="flex-end" className="mt-3">
+          <Button
+            size="small"
+            onClick={() => router.push(`/${locale}/agents?agent_id=${agentId}`)}
+          >
+            {t("nl2agent.finalize.viewAgent", "View Agent")}
+          </Button>
+        </Flex>
       </div>
     );
   }
@@ -261,6 +323,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   }
 
   const resourceGroups = groupFinalReviewResources(sessionState);
+  const completed = sessionState.session_status === "completed";
   const primaryModels = sessionState.models.filter(
     (model) => model.role === "primary" && model.display_name
   );
@@ -283,7 +346,21 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             {t("nl2agent.finalize.title", "Your agent is ready")}
           </div>
 
-          {!sessionState.identity_confirmed ? (
+          {completed ? (
+            <Alert
+              type="info"
+              showIcon
+              message={t(
+                "nl2agent.finalize.completedSession",
+                "This NL2AGENT session is complete"
+              )}
+              description={t(
+                "nl2agent.finalize.completedSessionDescription",
+                "Continue editing to reopen the workflow from final review."
+              )}
+              className="mb-3"
+            />
+          ) : !sessionState.identity_confirmed ? (
             <Alert
               type="warning"
               showIcon
@@ -538,22 +615,43 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             <span className="text-[11px] text-gray-400">
               agent_id: {agentId}
             </span>
-            <Button
-              size="small"
-              type="primary"
-              onClick={handlePublish}
-              loading={loading}
-              disabled={!canPublish}
-              icon={
-                loading ? (
-                  <Loader2 className="h-3.5 w-3.5" />
-                ) : (
-                  <ArrowRight className="h-3.5 w-3.5" />
-                )
-              }
-            >
-              {t("nl2agent.finalize.publish", "Review & Publish")}
-            </Button>
+            {completed ? (
+              <>
+                <Button
+                  size="small"
+                  onClick={() =>
+                    router.push(`/${locale}/agents?agent_id=${agentId}`)
+                  }
+                >
+                  {t("nl2agent.finalize.viewAgent", "View Agent")}
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={workflow.resuming}
+                  onClick={() => void handleResume()}
+                >
+                  {t("nl2agent.finalize.continueEditing", "Continue Editing")}
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="small"
+                type="primary"
+                onClick={handlePublish}
+                loading={loading}
+                disabled={!canPublish}
+                icon={
+                  loading ? (
+                    <Loader2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  )
+                }
+              >
+                {t("nl2agent.finalize.publish", "Review & Publish")}
+              </Button>
+            )}
           </Flex>
         </div>
       </div>

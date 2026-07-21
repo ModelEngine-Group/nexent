@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database.client import as_dict, get_db_session
@@ -406,6 +406,35 @@ def update_nl2agent_session_status(
             )
             .update(
                 {"status": status, "updated_by": user_id},
+                synchronize_session=False,
+            )
+        )
+        return updated == 1
+
+
+def resume_nl2agent_session(
+    *,
+    tenant_id: str,
+    draft_agent_id: int,
+    user_id: str,
+) -> bool:
+    """Atomically move one owned completed session back to active."""
+    with get_db_session() as session:
+        updated = (
+            session.query(Nl2AgentSession)
+            .filter(
+                Nl2AgentSession.tenant_id == tenant_id,
+                Nl2AgentSession.draft_agent_id == draft_agent_id,
+                Nl2AgentSession.user_id == user_id,
+                Nl2AgentSession.status == NL2AGENT_SESSION_COMPLETED,
+                Nl2AgentSession.delete_flag != "Y",
+            )
+            .update(
+                {
+                    "status": NL2AGENT_SESSION_ACTIVE,
+                    "updated_by": user_id,
+                    "update_time": func.now(),
+                },
                 synchronize_session=False,
             )
         )

@@ -1,6 +1,7 @@
 """Focused NL2AGENT service tests."""
 # ruff: noqa: F405
 
+from consts.exceptions import Nl2AgentDraftNotFoundError
 from test.backend.services.nl2agent_test_support import *  # noqa: F403
 
 
@@ -660,14 +661,17 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     )
     monkeypatch.setattr(
         nl2agent_service,
-        "_get_owned_draft",
-        MagicMock(
-            return_value={
-                "agent_id": 202,
-                "display_name": "Customer Support",
-                "business_logic_model_id": 7,
-                "model_ids": [7],
-            }
+        "_readable_draft_reader",
+        lambda _user_id: MagicMock(
+            return_value=(
+                {
+                    "agent_id": 202,
+                    "display_name": "Customer Support",
+                    "business_logic_model_id": 7,
+                    "model_ids": [7],
+                },
+                "completed",
+            )
         ),
     )
     monkeypatch.setattr(
@@ -720,6 +724,9 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     Nl2AgentSessionStateResponse.model_validate(result)
 
     assert result["agent_id"] == 202
+    assert result["session_status"] == "completed"
+    assert result["expected_card_types"] == []
+    assert result["allowed_actions"] == []
     assert result["internal_name"] == "customer_support"
     assert result["business_logic_model_id"] == 7
     assert result["model_ids"] == [7]
@@ -748,14 +755,17 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
 async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "_get_owned_draft",
-        MagicMock(
-            return_value={
-                "agent_id": 202,
-                "display_name": "Document Assistant",
-                "business_logic_model_id": 7,
-                "model_ids": [7, 8],
-            }
+        "_readable_draft_reader",
+        lambda _user_id: MagicMock(
+            return_value=(
+                {
+                    "agent_id": 202,
+                    "display_name": "Document Assistant",
+                    "business_logic_model_id": 7,
+                    "model_ids": [7, 8],
+                },
+                "active",
+            )
         ),
     )
     monkeypatch.setattr(
@@ -884,14 +894,17 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
 async def test_get_session_state_reports_invalid_persisted_references(monkeypatch):
     monkeypatch.setattr(
         nl2agent_service,
-        "_get_owned_draft",
-        MagicMock(
-            return_value={
-                "agent_id": 202,
-                "display_name": "Document Assistant",
-                "business_logic_model_id": 7,
-                "model_ids": [7],
-            }
+        "_readable_draft_reader",
+        lambda _user_id: MagicMock(
+            return_value=(
+                {
+                    "agent_id": 202,
+                    "display_name": "Document Assistant",
+                    "business_logic_model_id": 7,
+                    "model_ids": [7],
+                },
+                "active",
+            )
         ),
     )
     monkeypatch.setattr(
@@ -930,6 +943,106 @@ async def test_get_session_state_reports_invalid_persisted_references(monkeypatc
         {"reference_type": "tool", "reference_id": 11, "reason": "not_found"},
         {"reference_type": "skill", "reference_id": 21, "reason": "not_found"},
     ]
+
+
+def test_resume_session_validates_draft_and_conversation_before_reactivation(
+    monkeypatch,
+):
+    session = {
+        "draft_agent_id": 202,
+        "conversation_id": 902,
+        "status": "completed",
+    }
+    readable = MagicMock(return_value=session)
+    draft = MagicMock(return_value={"agent_id": 202})
+    conversation = MagicMock(return_value={"conversation_id": 902})
+    resume = MagicMock(return_value={**session, "status": "active"})
+    monkeypatch.setattr(nl2agent_service, "require_readable_session", readable)
+    monkeypatch.setattr(nl2agent_service, "_get_draft_configuration", draft)
+    monkeypatch.setattr(nl2agent_service, "get_conversation", conversation)
+    monkeypatch.setattr(nl2agent_service, "resume_session_lifecycle", resume)
+
+    result = nl2agent_service.resume_session(202, "tenant_1", "user_1")
+
+    assert result["status"] == "active"
+    draft.assert_called_once_with(202, "tenant_1")
+    conversation.assert_called_once_with(902, user_id="user_1")
+    resume.assert_called_once_with(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+
+def test_resume_session_rejects_missing_conversation(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "require_readable_session",
+        MagicMock(
+            return_value={
+                "draft_agent_id": 202,
+                "conversation_id": 902,
+                "status": "completed",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_draft_configuration",
+        MagicMock(return_value={"agent_id": 202}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_conversation",
+        MagicMock(return_value=None),
+    )
+    resume = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "resume_session_lifecycle", resume)
+
+    with pytest.raises(Nl2AgentDraftNotFoundError):
+        nl2agent_service.resume_session(202, "tenant_1", "user_1")
+
+    resume.assert_not_called()
+
+
+def test_resume_session_maps_missing_draft_to_not_found(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "require_readable_session",
+        MagicMock(
+            return_value={
+                "draft_agent_id": 202,
+                "conversation_id": 902,
+                "status": "completed",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_draft_configuration",
+        MagicMock(side_effect=Nl2AgentOperationError("missing draft")),
+    )
+
+    with pytest.raises(Nl2AgentDraftNotFoundError):
+        nl2agent_service.resume_session(202, "tenant_1", "user_1")
+
+
+def test_completed_state_reader_maps_missing_draft_to_not_found(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "require_readable_session",
+        MagicMock(return_value={"status": "completed"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "_get_draft_configuration",
+        MagicMock(side_effect=Nl2AgentOperationError("missing draft")),
+    )
+
+    reader = nl2agent_service._readable_draft_reader("user_1")
+
+    with pytest.raises(Nl2AgentDraftNotFoundError):
+        reader(202, "tenant_1")
 
 
 def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatch):

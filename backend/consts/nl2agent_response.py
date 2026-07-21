@@ -260,6 +260,7 @@ class Nl2AgentInvalidReference(Nl2AgentResponse):
 
 class Nl2AgentSessionStateResponse(Nl2AgentResponse):
     agent_id: int
+    session_status: Literal["active", "completed"]
     schema_version: Literal[2]
     revision: int
     current_stage: Literal[

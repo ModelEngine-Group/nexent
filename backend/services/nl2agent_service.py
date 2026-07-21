@@ -158,7 +158,11 @@ from services.nl2agent_session_service import (
     SessionInitializationDependencies,
     start_session as initialize_session,
 )
-from services.nl2agent_session_lifecycle_service import require_active_session
+from services.nl2agent_session_lifecycle_service import (
+    require_active_session,
+    require_readable_session,
+    resume_session as resume_session_lifecycle,
+)
 from services.nl2agent_seed_service import (
     SeedDependencies,
     ensure_builder_ready,
@@ -374,6 +378,27 @@ def _require_active_run_session(
 def _owned_draft_reader(user_id: str):
     """Bind request-scoped user authority into focused service dependencies."""
     return partial(_get_owned_draft, user_id=user_id)
+
+
+def _readable_draft_reader(user_id: str):
+    """Bind owner-scoped read access for active and completed sessions."""
+
+    def read(agent_id: int, tenant_id: str) -> tuple[Dict[str, Any], str]:
+        session = require_readable_session(
+            draft_agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        session_status = str(session["status"])
+        try:
+            draft = _get_draft_configuration(agent_id, tenant_id)
+        except Nl2AgentOperationError as exc:
+            if session_status == "completed":
+                raise Nl2AgentDraftNotFoundError() from exc
+            raise
+        return draft, session_status
+
+    return read
 
 
 def _require_workflow_action(
@@ -705,6 +730,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
     """Build workflow dependencies from facade-level operations."""
     return WorkflowDependencies(
         get_owned_draft=_owned_draft_reader(user_id),
+        get_readable_draft=_readable_draft_reader(user_id),
         register_online_batch=register_online_recommendation_batch,
         get_session_state=get_nl2agent_session_state,
         summarize_workflow_state=summarize_workflow_state,
@@ -884,6 +910,26 @@ async def get_session_state(
         _workflow_dependencies(user_id),
         agent_id=agent_id,
         tenant_id=tenant_id,
+    )
+
+
+def resume_session(agent_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    """Resume one completed session after validating its durable dependencies."""
+    session = require_readable_session(
+        draft_agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    try:
+        _get_draft_configuration(agent_id, tenant_id)
+    except Nl2AgentOperationError as exc:
+        raise Nl2AgentDraftNotFoundError() from exc
+    if not get_conversation(int(session["conversation_id"]), user_id=user_id):
+        raise Nl2AgentDraftNotFoundError()
+    return resume_session_lifecycle(
+        draft_agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
 
 

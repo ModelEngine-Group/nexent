@@ -4,6 +4,7 @@ import { fetchWithAuth } from "@/lib/auth";
 import {
   Nl2AgentRequestError,
   resolveNl2AgentSessionByConversation,
+  resumeNl2AgentSession,
   startNl2AgentSession,
 } from "@/services/nl2agentService";
 
@@ -31,6 +32,29 @@ describe("NL2AGENT durable session discovery", () => {
     );
     expect(fetchWithAuth).toHaveBeenCalledWith(
       expect.stringContaining("/nl2agent/session/by-conversation/902")
+    );
+  });
+
+  it("resolves a completed session for historical review", async () => {
+    const completed = { ...session, status: "completed" as const };
+    vi.mocked(fetchWithAuth).mockResolvedValue(
+      new Response(JSON.stringify(completed), { status: 200 })
+    );
+
+    await expect(resolveNl2AgentSessionByConversation(902)).resolves.toEqual(
+      completed
+    );
+  });
+
+  it("resumes a completed session explicitly", async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue(
+      new Response(JSON.stringify(session), { status: 200 })
+    );
+
+    await expect(resumeNl2AgentSession(202)).resolves.toEqual(session);
+    expect(fetchWithAuth).toHaveBeenCalledWith(
+      expect.stringContaining("/nl2agent/session/202/resume"),
+      { method: "POST" }
     );
   });
 

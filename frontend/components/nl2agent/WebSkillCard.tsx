@@ -68,8 +68,8 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
   }, [agentId, item.name, item.skill_id, item.skill_name]);
 
   useEffect(() => {
-    if (!installed) void loadConfiguration();
-  }, [installed, loadConfiguration]);
+    if (workflow.active && !installed) void loadConfiguration();
+  }, [installed, loadConfiguration, workflow.active]);
 
   React.useEffect(() => {
     const normalizedName = (item.skill_name || item.name).trim().toLowerCase();

@@ -38,6 +38,26 @@ describe("NL2AGENT session recovery", () => {
     expect(resolveNl2AgentSessionByConversation).toHaveBeenCalledOnce();
   });
 
+  it("retains a completed session so the final card can offer resume", async () => {
+    const completed = { ...session, status: "completed" as const };
+    vi.mocked(resolveNl2AgentSessionByConversation).mockResolvedValue(
+      completed
+    );
+
+    const { result } = renderHook(() =>
+      useNl2AgentSessionRecovery({
+        conversationId: 902,
+        onActivate: vi.fn(),
+        onDeactivate: vi.fn(),
+        onError: vi.fn(),
+      })
+    );
+
+    await waitFor(() =>
+      expect(result.current.activeSession).toEqual(completed)
+    );
+  });
+
   it("reuses the verified session when switching away and back", async () => {
     vi.mocked(resolveNl2AgentSessionByConversation).mockImplementation(
       async (conversationId) => (conversationId === 902 ? session : null)

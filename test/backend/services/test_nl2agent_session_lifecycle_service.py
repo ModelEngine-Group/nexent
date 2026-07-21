@@ -21,11 +21,12 @@ def _record(**overrides):
     }
 
 
-def test_resolve_active_session_uses_tenant_user_and_conversation(monkeypatch):
-    lookup = MagicMock(return_value=_record())
+@pytest.mark.parametrize("status", ["active", "completed"])
+def test_resolve_session_uses_tenant_user_and_conversation(monkeypatch, status):
+    lookup = MagicMock(return_value=_record(status=status))
     monkeypatch.setattr(lifecycle, "get_nl2agent_session_by_conversation", lookup)
 
-    result = lifecycle.resolve_active_session(
+    result = lifecycle.resolve_session(
         conversation_id=902,
         tenant_id="tenant-a",
         user_id="user-a",
@@ -34,10 +35,11 @@ def test_resolve_active_session_uses_tenant_user_and_conversation(monkeypatch):
     assert result["draft_agent_id"] == 202
     assert result["nl2agent_agent_id"] == 101
     assert "workflow_state" not in result
-    lookup.assert_called_once_with("tenant-a", "user-a", 902)
+    assert result["status"] == status
+    lookup.assert_called_once_with("tenant-a", "user-a", 902, status=None)
 
 
-def test_resolve_active_session_does_not_disclose_missing_or_foreign_session(
+def test_resolve_session_does_not_disclose_missing_foreign_or_abandoned_session(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -47,7 +49,19 @@ def test_resolve_active_session_does_not_disclose_missing_or_foreign_session(
     )
 
     with pytest.raises(Nl2AgentDraftNotFoundError):
-        lifecycle.resolve_active_session(
+        lifecycle.resolve_session(
+            conversation_id=902,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    monkeypatch.setattr(
+        lifecycle,
+        "get_nl2agent_session_by_conversation",
+        MagicMock(return_value=_record(status="abandoned")),
+    )
+    with pytest.raises(Nl2AgentDraftNotFoundError):
+        lifecycle.resolve_session(
             conversation_id=902,
             tenant_id="tenant-a",
             user_id="user-a",
@@ -89,6 +103,82 @@ def test_require_active_session_rejects_missing_terminal_or_mismatched_session(
             user_id="user-a",
             conversation_id=conversation_id,
         )
+
+
+@pytest.mark.parametrize("status", ["active", "completed"])
+def test_require_readable_session_accepts_active_and_completed(monkeypatch, status):
+    monkeypatch.setattr(
+        lifecycle,
+        "get_nl2agent_session",
+        MagicMock(return_value=_record(status=status)),
+    )
+
+    result = lifecycle.require_readable_session(
+        draft_agent_id=202,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["status"] == status
+
+
+def test_resume_session_is_idempotent_and_preserves_session(monkeypatch):
+    lookup = MagicMock(return_value=_record(status="active"))
+    update = MagicMock()
+    monkeypatch.setattr(lifecycle, "get_nl2agent_session", lookup)
+    monkeypatch.setattr(lifecycle, "resume_nl2agent_session", update)
+
+    result = lifecycle.resume_session(
+        draft_agent_id=202,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["status"] == "active"
+    update.assert_not_called()
+
+
+def test_resume_session_reactivates_completed_session(monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "get_nl2agent_session",
+        MagicMock(return_value=_record(status="completed")),
+    )
+    update = MagicMock(return_value=True)
+    monkeypatch.setattr(lifecycle, "resume_nl2agent_session", update)
+
+    result = lifecycle.resume_session(
+        draft_agent_id=202,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["status"] == "active"
+    update.assert_called_once_with(
+        tenant_id="tenant-a",
+        draft_agent_id=202,
+        user_id="user-a",
+    )
+
+
+def test_resume_session_accepts_concurrent_reactivation(monkeypatch):
+    lookup = MagicMock(
+        side_effect=[_record(status="completed"), _record(status="active")]
+    )
+    monkeypatch.setattr(lifecycle, "get_nl2agent_session", lookup)
+    monkeypatch.setattr(
+        lifecycle,
+        "resume_nl2agent_session",
+        MagicMock(return_value=False),
+    )
+
+    result = lifecycle.resume_session(
+        draft_agent_id=202,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["status"] == "active"
 
 
 def test_list_active_sessions_bounds_limit_and_projects_public_fields(monkeypatch):

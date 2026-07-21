@@ -12,6 +12,8 @@ import React, {
 import { NL2AGENT_AUTO_CONTINUE_PREFIX } from "@/lib/chat/nl2agentContinuation";
 import {
   getNl2AgentSessionState,
+  resumeNl2AgentSession,
+  type Nl2AgentSessionSummary,
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
 
@@ -30,6 +32,8 @@ interface Nl2AgentWorkflowContextValue {
   sessionStateLoading: boolean;
   sessionStateError?: string;
   refreshSessionState: () => Promise<void>;
+  resumeSession: () => Promise<void>;
+  resuming: boolean;
   continuationError?: string;
   retryContinuation: () => Promise<void>;
   claimCardDelivery: (key: string) => boolean;
@@ -48,6 +52,8 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   stateVersion: 0,
   sessionStateLoading: false,
   refreshSessionState: async () => {},
+  resumeSession: async () => {},
+  resuming: false,
   retryContinuation: async () => {},
   claimCardDelivery: () => false,
   completeCardDelivery: () => {},
@@ -58,9 +64,19 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   children: React.ReactNode;
   onContinue: (text: string) => Promise<void>;
   enabled: boolean;
+  editable?: boolean;
   scopeKey: string;
   agentId?: number | null;
-}> = ({ children, onContinue, enabled, scopeKey, agentId }) => {
+  onSessionResumed?: (session: Nl2AgentSessionSummary) => void;
+}> = ({
+  children,
+  onContinue,
+  enabled,
+  editable = enabled,
+  scopeKey,
+  agentId,
+  onSessionResumed,
+}) => {
   const [actionCount, setActionCount] = useState(0);
   const [continuing, setContinuing] = useState(false);
   const [inputBlockers, setInputBlockers] = useState<Set<string>>(new Set());
@@ -68,6 +84,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   const [sessionState, setSessionState] = useState<Nl2AgentSessionState>();
   const [sessionStateLoading, setSessionStateLoading] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string>();
+  const [resuming, setResuming] = useState(false);
   const [retries, setRetries] = useState<
     Record<string, { text: string; error: string }>
   >({});
@@ -147,6 +164,17 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     () => setStateVersion((version) => version + 1),
     []
   );
+  const resumeSession = useCallback(async () => {
+    if (!enabled || !agentId || resuming) return;
+    setResuming(true);
+    try {
+      const session = await resumeNl2AgentSession(agentId);
+      onSessionResumed?.(session);
+      setStateVersion((version) => version + 1);
+    } finally {
+      setResuming(false);
+    }
+  }, [agentId, enabled, onSessionResumed, resuming]);
   const setInputBlocked = useCallback((key: string, blocked: boolean) => {
     setInputBlockers((current) => {
       const next = new Set(current);
@@ -158,7 +186,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
 
   const continueWithText = useCallback(
     async (text?: string) => {
-      if (!enabled || !text || continuingRef.current) return;
+      if (!editable || !text || continuingRef.current) return;
       continuingRef.current = true;
       setContinuing(true);
       setRetries((current) => {
@@ -184,7 +212,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
         setContinuing(false);
       }
     },
-    [enabled, onContinue, scopeKey]
+    [editable, onContinue, scopeKey]
   );
 
   const retryContinuation = useCallback(async () => {
@@ -196,18 +224,24 @@ export const Nl2AgentWorkflowProvider: React.FC<{
 
   const value = useMemo<Nl2AgentWorkflowContextValue>(
     () => ({
-      active: enabled,
+      active: enabled && editable,
       continueWithText,
       beginAction,
       endAction,
       setInputBlocked,
       notifyStateChanged,
-      busy: continuing || actionCount > 0 || inputBlockers.size > 0,
+      busy:
+        continuing ||
+        actionCount > 0 ||
+        inputBlockers.size > 0 ||
+        (enabled && !editable),
       stateVersion,
       sessionState,
       sessionStateLoading,
       sessionStateError,
       refreshSessionState,
+      resumeSession,
+      resuming,
       continuationError,
       retryContinuation,
       claimCardDelivery,
@@ -222,9 +256,12 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       continuing,
       endAction,
       enabled,
+      editable,
       inputBlockers,
       notifyStateChanged,
       refreshSessionState,
+      resumeSession,
+      resuming,
       retryContinuation,
       claimCardDelivery,
       completeCardDelivery,

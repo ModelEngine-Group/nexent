@@ -106,6 +106,17 @@ export const resolveNl2AgentSessionByConversation = async (
   return response.json();
 };
 
+export const resumeNl2AgentSession = async (
+  agentId: number
+): Promise<Nl2AgentSessionSummary> => {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.nl2agent.resumeSession(agentId),
+    { method: "POST" }
+  );
+  if (!response.ok) await throwNl2AgentRequestError(response);
+  return response.json();
+};
+
 export type Nl2AgentApplyLocalResourcesPayload =
   Nl2AgentApiSchemas["Nl2AgentApplyLocalResourcesRequest"] & {
     tool_ids: number[];

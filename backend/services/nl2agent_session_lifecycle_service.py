@@ -13,13 +13,16 @@ from consts.const import (
 )
 from consts.exceptions import Nl2AgentDraftNotFoundError, Nl2AgentValidationError
 from database.nl2agent_session_db import (
+    NL2AGENT_SESSION_ACTIVE,
     NL2AGENT_SESSION_ABANDONED,
+    NL2AGENT_SESSION_COMPLETED,
     abandon_stale_active_nl2agent_sessions,
     cleanup_abandoned_nl2agent_sessions,
     cleanup_completed_nl2agent_sessions,
     get_nl2agent_session,
     get_nl2agent_session_by_conversation,
     list_nl2agent_sessions,
+    resume_nl2agent_session,
     update_nl2agent_session_status,
 )
 
@@ -44,17 +47,21 @@ def _public_session(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def resolve_active_session(
+def resolve_session(
     *, conversation_id: int, tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
-    """Resolve one active session by conversation with owner isolation."""
+    """Resolve one readable session by conversation with owner isolation."""
     conversation_id = _positive_identifier(conversation_id, "conversation_id")
     record = get_nl2agent_session_by_conversation(
         tenant_id,
         user_id,
         conversation_id,
+        status=None,
     )
-    if record is None:
+    if record is None or record.get("status") not in {
+        NL2AGENT_SESSION_ACTIVE,
+        NL2AGENT_SESSION_COMPLETED,
+    }:
         raise Nl2AgentDraftNotFoundError()
     return _public_session(record)
 
@@ -78,6 +85,54 @@ def require_active_session(
     if conversation_id is not None and int(record["conversation_id"]) != conversation_id:
         raise Nl2AgentDraftNotFoundError()
     return record
+
+
+def require_readable_session(
+    *,
+    draft_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Authorize an owned active or completed session for read-only projection."""
+    draft_agent_id = _positive_identifier(draft_agent_id, "draft_agent_id")
+    record = get_nl2agent_session(
+        tenant_id,
+        draft_agent_id,
+        user_id=user_id,
+    )
+    if record is None or record.get("status") not in {
+        NL2AGENT_SESSION_ACTIVE,
+        NL2AGENT_SESSION_COMPLETED,
+    }:
+        raise Nl2AgentDraftNotFoundError()
+    return record
+
+
+def resume_session(
+    *, draft_agent_id: int, tenant_id: str, user_id: str
+) -> Dict[str, Any]:
+    """Reactivate one owned completed session without resetting workflow state."""
+    record = require_readable_session(
+        draft_agent_id=draft_agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    if record.get("status") == NL2AGENT_SESSION_ACTIVE:
+        return _public_session(record)
+    if not resume_nl2agent_session(
+        tenant_id=tenant_id,
+        draft_agent_id=draft_agent_id,
+        user_id=user_id,
+    ):
+        current = require_readable_session(
+            draft_agent_id=draft_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if current.get("status") != NL2AGENT_SESSION_ACTIVE:
+            raise Nl2AgentDraftNotFoundError()
+        record = current
+    return {**_public_session(record), "status": NL2AGENT_SESSION_ACTIVE}
 
 
 def list_active_sessions(

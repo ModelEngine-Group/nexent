@@ -65,6 +65,7 @@ class WorkflowDependencies:
     """Persistence and evaluator operations consumed by workflow actions."""
 
     get_owned_draft: Callable[..., Dict[str, Any]]
+    get_readable_draft: Callable[..., tuple[Dict[str, Any], str]]
     register_online_batch: Callable[..., Dict[str, Any]]
     get_session_state: Callable[..., Dict[str, Any]]
     summarize_workflow_state: Callable[[Dict[str, Any]], Dict[str, Any]]
@@ -337,7 +338,7 @@ async def get_session_state(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """Return authoritative draft models, resources, and workflow state."""
-    draft = dependencies.get_owned_draft(agent_id, tenant_id)
+    draft, session_status = dependencies.get_readable_draft(agent_id, tenant_id)
     tool_instances = (
         dependencies.query_enabled_tool_instances(
             agent_id,
@@ -435,11 +436,18 @@ async def get_session_state(
     }
     return {
         "agent_id": agent_id,
+        "session_status": session_status,
         "schema_version": workflow_state["schema_version"],
         "revision": workflow_state["revision"],
         "current_stage": workflow_summary["current_stage"],
-        "expected_card_types": workflow_summary["expected_card_types"],
-        "allowed_actions": workflow_summary["allowed_actions"],
+        "expected_card_types": (
+            workflow_summary["expected_card_types"]
+            if session_status == "active"
+            else []
+        ),
+        "allowed_actions": (
+            workflow_summary["allowed_actions"] if session_status == "active" else []
+        ),
         "display_name": draft.get("display_name"),
         "internal_name": dependencies.generate_internal_agent_name(
             draft.get("display_name") or "",

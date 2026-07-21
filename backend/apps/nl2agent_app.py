@@ -72,6 +72,7 @@ from services.nl2agent_service import (
     register_online_resource_recommendations,
     register_requirements_review,
     report_card_delivery,
+    resume_session,
     save_agent_identity,
     select_models,
     skip_mcp_tool_binding,
@@ -82,7 +83,7 @@ from services.nl2agent_session_lifecycle_service import (
     abandon_session,
     cleanup_expired_sessions,
     list_active_sessions,
-    resolve_active_session,
+    resolve_session,
 )
 from utils.auth_utils import get_current_user_info
 
@@ -168,14 +169,32 @@ async def resolve_session_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    """Resolve an active owned draft after local browser state is lost."""
+    """Resolve an owned active or completed session after browser state is lost."""
     user_id, tenant_id, _ = _current_user(authorization, http_request)
     try:
-        return resolve_active_session(
+        return resolve_session(
             conversation_id=conversation_id,
             tenant_id=tenant_id,
             user_id=user_id,
         )
+    except Exception as exc:
+        raise _session_http_error(exc) from exc
+
+
+@router.post(
+    "/session/{agent_id}/resume",
+    response_model=Nl2AgentSessionSummaryResponse,
+    response_model_exclude_none=True,
+)
+async def resume_session_api(
+    agent_id: int,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Resume one completed NL2AGENT session without resetting its workflow."""
+    user_id, tenant_id, _ = _current_user(authorization, http_request)
+    try:
+        return resume_session(agent_id, tenant_id, user_id)
     except Exception as exc:
         raise _session_http_error(exc) from exc
 

@@ -529,6 +529,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/nl2agent/session/by-conversation/${conversationId}`,
     abandonSession: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/abandon`,
+    resumeSession: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/resume`,
     selectModels: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/models`,
     installMcp: (agentId: number) =>

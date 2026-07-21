@@ -179,14 +179,19 @@ export function ChatInterface() {
     onDeactivate: deactivateNl2AgentSession,
     onError: reportNl2AgentRecoveryError,
   });
-  const activeNl2AgentDraftAgentId =
-    verifiedNl2AgentSession?.draft_agent_id ??
-    resolveNl2AgentDraftAgentId(
-      selectedConversationId,
-      {},
-      nl2agentConversationId,
-      nl2agentDraftAgentId
-    );
+  const fallbackNl2AgentDraftAgentId = resolveNl2AgentDraftAgentId(
+    selectedConversationId,
+    {},
+    nl2agentConversationId,
+    nl2agentDraftAgentId
+  );
+  const readableNl2AgentDraftAgentId =
+    verifiedNl2AgentSession?.draft_agent_id ?? fallbackNl2AgentDraftAgentId;
+  const activeNl2AgentDraftAgentId = verifiedNl2AgentSession
+    ? verifiedNl2AgentSession.status === "active"
+      ? verifiedNl2AgentSession.draft_agent_id
+      : null
+    : fallbackNl2AgentDraftAgentId;
   const activeConversationIdRef = useRef<number | null>(null);
   const activeNl2AgentDraftIdRef = useRef<number | null>(null);
   activeConversationIdRef.current = selectedConversationId;
@@ -1898,12 +1903,14 @@ export function ChatInterface() {
               )}
 
               <Nl2AgentWorkflowProvider
-                enabled={activeNl2AgentDraftAgentId != null}
-                agentId={activeNl2AgentDraftAgentId}
+                enabled={readableNl2AgentDraftAgentId != null}
+                editable={activeNl2AgentDraftAgentId != null}
+                agentId={readableNl2AgentDraftAgentId}
                 scopeKey={nl2AgentContinuationScopeKey(
                   conversationManagement.selectedConversationId,
-                  activeNl2AgentDraftAgentId
+                  readableNl2AgentDraftAgentId
                 )}
+                onSessionResumed={primeNl2AgentSession}
                 onContinue={(text) =>
                   handleSend(
                     text,
@@ -1943,7 +1950,7 @@ export function ChatInterface() {
                   selectedAgentId={selectedAgentId}
                   onAgentSelect={handleAgentSelectWithGreeting}
                   onCitationHover={clearCompletedIndicator}
-                  nl2AgentDraftAgentId={activeNl2AgentDraftAgentId}
+                  nl2AgentDraftAgentId={readableNl2AgentDraftAgentId}
                   onScroll={clearCompletedIndicator}
                   agentGreeting={agentGreeting}
                   agentExampleQuestions={agentExampleQuestions}
