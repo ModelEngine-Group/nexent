@@ -284,6 +284,63 @@ class TestGetUsers:
         assert result["total"] == 25
         assert result["total_pages"] == 3  # Calculated: ceil(25/10) = 3
 
+    def test_get_users_includes_group_names(self):
+        """Test that get_users returns group_names populated from batch query"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        mock_group_db = user_service.query_groups_by_users
+        tenant_id = "tenant123"
+
+        mock_relationships = [
+            {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": tenant_id},
+            {"user_id": "user2", "user_email": "user2@example.com", "user_role": "ADMIN", "tenant_id": tenant_id}
+        ]
+        mock_db.return_value = {"users": mock_relationships, "total": 2}
+        mock_group_db.return_value = {
+            "user1": ["engineering", "qa"],
+            "user2": ["engineering"],
+        }
+
+        result = get_users(tenant_id, 1, 20)
+
+        assert result["users"][0]["group_names"] == ["engineering", "qa"]
+        assert result["users"][1]["group_names"] == ["engineering"]
+        mock_group_db.assert_called_once_with(["user1", "user2"])
+
+    def test_get_users_with_no_groups_returns_empty_list(self):
+        """Test that users with no group memberships get empty group_names list"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        mock_group_db = user_service.query_groups_by_users
+        tenant_id = "tenant123"
+
+        mock_relationships = [
+            {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": tenant_id}
+        ]
+        mock_db.return_value = {"users": mock_relationships, "total": 1}
+        mock_group_db.return_value = {}
+
+        result = get_users(tenant_id, 1, 20)
+
+        assert result["users"][0]["group_names"] == []
+
+    def test_get_users_batch_query_passes_user_ids(self):
+        """Test that query_groups_by_users is called with the tenant's user IDs"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        mock_group_db = user_service.query_groups_by_users
+
+        mock_relationships = [
+            {"user_id": "user_a", "user_email": "a@test.com", "user_role": "USER", "tenant_id": "t1"},
+            {"user_id": "user_b", "user_email": "b@test.com", "user_role": "ADMIN", "tenant_id": "t1"},
+        ]
+        mock_db.return_value = {"users": mock_relationships, "total": 2}
+        mock_group_db.return_value = {}
+
+        get_users("t1", 1, 20)
+
+        mock_group_db.assert_called_once_with(["user_a", "user_b"])
+
 
 @pytest.mark.asyncio
 class TestUpdateUser:
