@@ -358,8 +358,9 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         result = await list_community_mcp_services(tenant_id="tid", user_id="uid", limit=30)
         self.assertEqual(result["count"], 0)
         mock_get.assert_called_once_with(
-            tenant_id="tid", user_id="uid", search=None, tag=None,
+            tenant_id="tid", search=None, tag=None,
             transport_type=None, cursor=None, limit=30,
+            user_id="uid", user_group_ids=[],
         )
 
     @patch('backend.services.mcp_management_service.get_mcp_market_records')
@@ -381,8 +382,9 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             transport_type="url", cursor="10", limit=20,
         )
         mock_get.assert_called_once_with(
-            tenant_id="tid", user_id="uid", search="key", tag="python",
+            tenant_id="tid", search="key", tag="python",
             transport_type="url", cursor="10", limit=20,
+            user_id="uid", user_group_ids=[],
         )
 
 
