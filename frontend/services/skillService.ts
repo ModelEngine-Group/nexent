@@ -14,6 +14,7 @@ import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import { InstallableSkill } from "@/types/agentConfig";
 import {
   THINKING_STEPS_ZH,
+  THINKING_STEPS_EN,
   type CreateSkillStreamRequest,
   type SkillFileContent,
 } from "@/types/skill";
@@ -78,7 +79,7 @@ export interface ThinkingStep {
  * Get thinking steps based on language
  */
 export const getThinkingSteps = (lang: string): ThinkingStep[] => {
-  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_ZH;
+  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_EN;
 };
 
 /**
