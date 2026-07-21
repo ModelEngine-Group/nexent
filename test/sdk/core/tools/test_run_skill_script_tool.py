@@ -3,6 +3,8 @@ Unit tests for nexent.core.tools.run_skill_script_tool module.
 
 This test module follows the pattern from test_ragflow_search_tool.py with proper mocking.
 """
+import json
+import logging
 import os
 import sys
 import types
@@ -123,10 +125,32 @@ from sdk.nexent.core.tools.run_skill_script_tool import (
     _run_skill_script_without_context,
 )
 
+for name, original_module in _original_modules.items():
+    if original_module is None:
+        sys.modules.pop(name, None)
+    else:
+        sys.modules[name] = original_module
+
+RunSkillScriptTool = run_skill_script_tool_module.RunSkillScriptTool
+get_run_skill_script_tool = run_skill_script_tool_module.get_run_skill_script_tool
+run_skill_script = run_skill_script_tool_module.run_skill_script
 
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def mock_skill_dependencies():
+    with patch.dict(
+        sys.modules,
+        {
+            "nexent": mock_nexent,
+            "nexent.skills": mock_nexent_skills,
+            "nexent.skills.skill_manager": mock_skill_manager_module,
+        },
+    ):
+        yield
+
 
 @pytest.fixture
 def temp_skills_dir():
@@ -344,6 +368,225 @@ class TestExecute:
 
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] is None
+
+    def test_execute_publishes_structured_file_artifact(self, tmp_path):
+        """Test that declared file results publish an observer event."""
+        output_path = tmp_path / "report.docx"
+        output_path.write_bytes(b"docx")
+        observer = MagicMock()
+        tool = RunSkillScriptTool(observer=observer)
+        manager = MagicMock()
+        manager.run_skill_script.return_value = json.dumps({
+            "status": "success",
+            "artifacts": [{
+                "kind": "file",
+                "absolute_path": str(output_path),
+                "file_name": "report.docx",
+                "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "file_size_bytes": 4,
+            }],
+        })
+        manager.load_skill.return_value = {
+            "script_outputs": {
+                "scripts/generate_docx.py": {
+                    "kind": "file",
+                    "mime_types": [
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                }
+            },
+        }
+        tool.skill_manager = manager
+
+        tool.execute("create-docx", "scripts/generate_docx.py")
+
+        observer.add_message.assert_called_once()
+        args = observer.add_message.call_args.args
+        assert args[1].value == "skill_artifact"
+        assert args[2]["artifacts"][0]["file_name"] == "report.docx"
+
+    def test_execute_does_not_publish_legacy_file_result(self, tmp_path):
+        """Test that top-level file fields do not implicitly create artifacts."""
+        output_path = tmp_path / "report.docx"
+        output_path.write_bytes(b"docx")
+        observer = MagicMock()
+        tool = RunSkillScriptTool(observer=observer)
+        manager = MagicMock()
+        manager.run_skill_script.return_value = json.dumps({
+            "status": "success",
+            "absolute_path": str(output_path),
+            "file_name": "report.docx",
+            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        })
+        manager.load_skill.return_value = {
+            "script_outputs": {
+                "scripts/generate_docx.py": {
+                    "kind": "file",
+                    "mime_types": [
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ],
+                }
+            },
+        }
+        tool.skill_manager = manager
+
+        tool.execute("create-docx", "scripts/generate_docx.py")
+
+        observer.add_message.assert_not_called()
+
+    def test_execute_does_not_publish_artifact_from_undeclared_script(self, tmp_path):
+        """Test that only script_outputs entries can publish artifacts."""
+        output_path = tmp_path / "report.docx"
+        output_path.write_bytes(b"docx")
+        observer = MagicMock()
+        tool = RunSkillScriptTool(observer=observer)
+        manager = MagicMock()
+        manager.run_skill_script.return_value = json.dumps({
+            "status": "success",
+            "artifacts": [{
+                "kind": "file",
+                "absolute_path": str(output_path),
+                "file_name": "report.docx",
+                "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }],
+        })
+        manager.load_skill.return_value = {
+            "script_outputs": {},
+        }
+        tool.skill_manager = manager
+
+        tool.execute("create-docx", "scripts/get_document_info.py")
+
+        observer.add_message.assert_not_called()
+
+
+class TestFileArtifactValidation:
+    """Test file artifact validation before publication."""
+
+    SCRIPT_PATH = "scripts/generate_report.py"
+    MIME_TYPE = "application/pdf"
+
+    def _manager(self, mime_types=None):
+        manager = MagicMock()
+        manager.load_skill.return_value = {
+            "script_outputs": {
+                self.SCRIPT_PATH: {
+                    "kind": "file",
+                    "mime_types": mime_types or [self.MIME_TYPE],
+                }
+            }
+        }
+        return manager
+
+    def _payload(self, artifacts):
+        return {
+            "status": "success",
+            "artifacts": artifacts,
+        }
+
+    def _artifact(self, output_path, **overrides):
+        artifact = {
+            "kind": "file",
+            "absolute_path": str(output_path),
+            "file_name": "report.pdf",
+            "mime_type": self.MIME_TYPE,
+            "file_size_bytes": output_path.stat().st_size,
+        }
+        artifact.update(overrides)
+        return artifact
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"absolute_path": ""},
+            {"absolute_path": None},
+            {"file_name": "   "},
+            {"file_name": 1},
+            {"mime_type": ""},
+            {"mime_type": None},
+        ],
+    )
+    def test_extract_file_artifacts_ignores_invalid_string_fields(self, tmp_path, overrides):
+        """Test artifact strings must be non-empty strings."""
+        output_path = tmp_path / "report.pdf"
+        output_path.write_bytes(b"pdf")
+        tool = RunSkillScriptTool()
+
+        artifacts = tool._extract_file_artifacts(
+            self._manager(),
+            "report-skill",
+            self.SCRIPT_PATH,
+            self._payload([self._artifact(output_path, **overrides)]),
+        )
+
+        assert artifacts == []
+
+    @pytest.mark.parametrize("file_size_bytes", [True, "3", -1, None])
+    def test_extract_file_artifacts_ignores_invalid_file_size(self, tmp_path, file_size_bytes):
+        """Test artifact file size must be a non-negative integer."""
+        output_path = tmp_path / "report.pdf"
+        output_path.write_bytes(b"pdf")
+        tool = RunSkillScriptTool()
+
+        artifacts = tool._extract_file_artifacts(
+            self._manager(),
+            "report-skill",
+            self.SCRIPT_PATH,
+            self._payload([self._artifact(output_path, file_size_bytes=file_size_bytes)]),
+        )
+
+        assert artifacts == []
+
+    def test_extract_file_artifacts_ignores_missing_file(self, tmp_path):
+        """Test artifact paths must resolve to a file."""
+        output_path = tmp_path / "report.pdf"
+        missing_path = tmp_path / "missing.pdf"
+        output_path.write_bytes(b"pdf")
+        tool = RunSkillScriptTool()
+
+        artifacts = tool._extract_file_artifacts(
+            self._manager(),
+            "report-skill",
+            self.SCRIPT_PATH,
+            self._payload([self._artifact(output_path, absolute_path=str(missing_path))]),
+        )
+
+        assert artifacts == []
+
+    def test_extract_file_artifacts_warns_and_ignores_size_mismatch(self, tmp_path, caplog):
+        """Test artifacts with mismatched file sizes are rejected."""
+        output_path = tmp_path / "report.pdf"
+        output_path.write_bytes(b"pdf")
+        tool = RunSkillScriptTool()
+
+        with caplog.at_level(logging.WARNING, logger=run_skill_script_tool_module.__name__):
+            artifacts = tool._extract_file_artifacts(
+                self._manager(),
+                "report-skill",
+                self.SCRIPT_PATH,
+                self._payload([self._artifact(output_path, file_size_bytes=4)]),
+            )
+
+        assert artifacts == []
+        assert "Ignoring skill artifact with mismatched file size skill=report-skill" in caplog.text
+        assert str(output_path) in caplog.text
+
+    def test_extract_file_artifacts_warns_and_ignores_undeclared_mime_type(self, tmp_path, caplog):
+        """Test artifacts with undeclared MIME types are rejected."""
+        output_path = tmp_path / "report.pdf"
+        output_path.write_bytes(b"pdf")
+        tool = RunSkillScriptTool()
+
+        with caplog.at_level(logging.WARNING, logger=run_skill_script_tool_module.__name__):
+            artifacts = tool._extract_file_artifacts(
+                self._manager(),
+                "report-skill",
+                self.SCRIPT_PATH,
+                self._payload([self._artifact(output_path, mime_type="text/plain")]),
+            )
+
+        assert artifacts == []
+        assert "Ignoring undeclared skill artifact MIME type skill=report-skill mime_type=text/plain" in caplog.text
 
 
 class TestModuleFunctions:

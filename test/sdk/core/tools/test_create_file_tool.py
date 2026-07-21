@@ -152,10 +152,7 @@ class TestCreateFileTool:
         assert result_data["encoding"] == "utf-8"
         assert "created successfully" in result_data["message"]
 
-        # Verify observer messages
-        create_file_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Creating file..."
-        )
+        # Verify CARD observer message
         create_file_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "file-plus", "text": f"Creating {file_path}"}], ensure_ascii=False)
@@ -360,11 +357,6 @@ class TestCreateFileTool:
             f.write("old content")
 
         result = create_file_tool.forward(file_path, content)
-
-        # Verify Chinese running prompt
-        create_file_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在创建文件..."
-        )
 
         # Verify Chinese overwrite warning message
         create_file_tool.observer.add_message.assert_any_call(

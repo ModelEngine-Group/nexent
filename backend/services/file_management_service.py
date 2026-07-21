@@ -19,7 +19,7 @@ from consts.const import (
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
-from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
+from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, QuotaExceededError, UnsupportedFileTypeException
 from database.attachment_db import (
     copy_file,
     delete_file,
@@ -259,6 +259,24 @@ def validate_urls_access(
                 validate_s3_url_access(object_name, user_id, caller_tenant_id)
 
 
+class UploadFilesResult(tuple):
+    """Backward-compatible three-item upload result with optional quota metadata."""
+
+    quota_status: Optional[dict]
+
+    def __new__(
+        cls,
+        errors: list,
+        uploaded_file_paths: list,
+        uploaded_filenames: list,
+        quota_status: Optional[dict] = None,
+    ):
+        result = super().__new__(
+            cls, (errors, uploaded_file_paths, uploaded_filenames))
+        result.quota_status = quota_status
+        return result
+
+
 async def upload_files_impl(
     destination: str,
     file: List[UploadFile],
@@ -279,11 +297,12 @@ async def upload_files_impl(
         uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
 
     Returns:
-        tuple: (errors, uploaded_file_paths, uploaded_filenames)
+        UploadFilesResult: Three-item tuple-compatible result with quota metadata
     """
     uploaded_filenames = []
     uploaded_file_paths = []
     errors = []
+    quota_status = None
     if destination == "local":
         async with upload_semaphore:
             for f in file:
@@ -305,6 +324,23 @@ async def upload_files_impl(
     elif destination == "minio":
         actual_folder = resolve_minio_upload_folder(
             folder, user_id, uploader_tenant_id)
+
+        # Pre-write quota check: compute total file sizes and check against tenant hard limit
+        total_file_size = 0
+        if uploader_tenant_id:
+            for f in file:
+                file_size = getattr(f, "size", 0) if f else 0
+                if isinstance(file_size, int) and file_size > 0:
+                    total_file_size += file_size
+        if total_file_size > 0:
+            from services.quota_service import QuotaService
+            try:
+                quota_service = QuotaService(uploader_tenant_id, user_id)
+                quota_status = quota_service.check_hard_limit(
+                    total_file_size, index_name=index_name)
+            except QuotaExceededError:
+                raise  # Re-raise to be handled by caller (HTTP 413)
+
         minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:
             if result.get("success"):
@@ -355,7 +391,29 @@ async def upload_files_impl(
                     f"Failed to resolve filename conflicts for index '{index_name}': {str(e)}")
     else:
         raise Exception("Invalid destination. Must be 'local' or 'minio'.")
-    return errors, uploaded_file_paths, uploaded_filenames
+
+    # Post-write belt-and-suspenders check for minio uploads (race condition handling)
+    if destination == "minio" and uploader_tenant_id and uploaded_file_paths:
+        try:
+            from services.quota_service import QuotaService
+            quota_service = QuotaService(uploader_tenant_id, user_id)
+            quota_status = quota_service.check_hard_limit_post_write(
+                0, index_name=index_name)
+        except QuotaExceededError:
+            # Clean up uploaded files from MinIO on race condition
+            from database.attachment_db import delete_file
+            for object_name in uploaded_file_paths:
+                try:
+                    delete_file(object_name=object_name)
+                except Exception as cleanup_err:
+                    logger.error(
+                        "Failed to clean up MinIO file %s after quota exceeded: %s",
+                        object_name, cleanup_err,
+                    )
+            raise
+
+    return UploadFilesResult(
+        errors, uploaded_file_paths, uploaded_filenames, quota_status)
 
 
 async def upload_to_minio(

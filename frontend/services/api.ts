@@ -113,6 +113,30 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
+  agentAutomation: {
+    list: `${API_BASE_URL}/agent/automations`,
+    detail: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    update: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    delete: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    pause: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/pause`,
+    resume: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/resume`,
+    run: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}/run`,
+    runs: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/runs`,
+    cancelRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}/cancel`,
+    deleteRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}`,
+    proposals: `${API_BASE_URL}/agent/automations/proposals`,
+    updateProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}`,
+    confirmProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}/confirm`,
+    conversation: (conversationId: number) =>
+      `${API_BASE_URL}/conversation/${conversationId}/automation`,
+  },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
     update: `${API_BASE_URL}/tool/update`,
@@ -573,6 +597,16 @@ export const API_ENDPOINTS = {
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
   },
+  // Quota management endpoints
+  quota: {
+    // Tenant-level quota
+    config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
+    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    // Platform-level quota (SU/ASSET_OWNER only)
+    platformOverview: `${API_BASE_URL}/platform/quota/overview`,
+    platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
+    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+  },
   users: {
     list: `${API_BASE_URL}/users/list`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
@@ -635,13 +669,17 @@ export const fetchWithErrorHandling = async (
       let errorMessage = `Request failed: ${response.status}`;
       const errorText = await response.text();
 
-      let parsedErrorData = null;
       try {
         const errorData = JSON.parse(errorText);
-        if (errorData && errorData.code) {
-          parsedErrorData = errorData;
-          errorCode = errorData.code;
-          errorMessage = errorData.message || errorMessage;
+        const errorDetail =
+          errorData?.detail && typeof errorData.detail === "object"
+            ? errorData.detail
+            : errorData?.message && typeof errorData.message === "object"
+              ? errorData.message
+              : errorData;
+        if (errorDetail?.code) {
+          errorCode = errorDetail.code;
+          errorMessage = errorDetail.message || errorMessage;
         } else {
           errorMessage = errorText || errorMessage;
         }

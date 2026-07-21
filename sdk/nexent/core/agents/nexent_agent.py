@@ -331,6 +331,7 @@ class NexentAgent:
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
+                observer=self.observer,
             )
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
@@ -534,6 +535,14 @@ class NexentAgent:
                         # Add content to observer
                         if not isinstance(step_log, ActionStep):
                             continue
+
+                        # Real tool-call chunks are emitted by CoreAgent
+                        # (_emit_real_tool_chunks_from_code) right after the
+                        # PARSE chunk, so we deliberately skip re-emitting them
+                        # here to avoid duplicating the synthetic
+                        # ``python_interpreter`` ToolCall that smolagents
+                        # stamps on every action step.
+
                         # Emit token stats after each action step
                         step_duration = getattr(step_log.timing, "duration", None)
                         step_input = None

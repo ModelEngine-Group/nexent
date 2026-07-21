@@ -41,6 +41,36 @@ from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
 
+MCP_HEALTH_CHECK_TIMEOUT_SECONDS = 10
+
+
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _format_mcp_connection_error(exc: BaseException) -> str:
+    for candidate in _iter_exception_chain(exc):
+        error_type = type(candidate).__name__.lower()
+        error_text = str(candidate).lower()
+        if "timeout" in error_type or any(keyword in error_text for keyword in ("timeout", "timed out", "etimedout")):
+            return "MCP connection timeout"
+        if any(keyword in error_text for keyword in ("connection refused", "econnrefused", "actively refused")):
+            return "MCP connection refused"
+        if any(keyword in error_text for keyword in ("unauthorized", "forbidden", "authentication", "authorization", "401", "403")):
+            return "MCP authentication failed"
+        if any(keyword in error_text for keyword in ("404", "not found", "endpoint")):
+            return "MCP endpoint not found"
+        if any(keyword in error_text for keyword in ("protocol", "invalid sse")):
+            return "MCP protocol or endpoint invalid"
+        if any(keyword in error_text for keyword in ("dns", "getaddrinfo", "enotfound", "eai_again", "network unreachable")):
+            return "MCP address unreachable"
+    return "MCP connection failed"
+
 
 # ---------------------------------------------------------------------------
 # Health Check
@@ -90,16 +120,22 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
                 httpx_client_factory=create_httpx_client
             )
 
-        client = Client(transport=transport)
-        async with client:
-            # Verify the server can actually serve tools.
-            # This exercises API key validation and end-to-end connectivity,
-            # unlike is_connected() which only checks the initialize handshake.
-            tools_result = await asyncio.wait_for(client.list_tools(), timeout=10)
-            return [t.name for t in tools_result] if tools_result else []
+        async def list_mcp_tools() -> list:
+            client = Client(transport=transport)
+            async with client:
+                # Verify the server can actually serve tools.
+                # This exercises API key validation and end-to-end connectivity,
+                # unlike is_connected() which only checks the initialize handshake.
+                return await client.list_tools()
+
+        tools_result = await asyncio.wait_for(
+            list_mcp_tools(),
+            timeout=MCP_HEALTH_CHECK_TIMEOUT_SECONDS,
+        )
+        return [t.name for t in tools_result] if tools_result else []
     except BaseException as e:
         logger.debug(f"MCP protocol health check failed: {e}")
-        return []
+        raise MCPConnectionError(_format_mcp_connection_error(e))
 
 
 async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:

@@ -65,8 +65,6 @@ class StoreMemoryTool(Tool):
         self.observer = observer
         self.store_count = 0
         self.max_stores_per_run = 3
-        self.running_prompt_en = "Saving to memory..."
-        self.running_prompt_zh = "保存到记忆中..."
 
     def _resolve_memory_levels(self) -> list[str]:
         """Determine which memory levels to write to based on user preferences.
@@ -85,9 +83,9 @@ class StoreMemoryTool(Tool):
 
     def forward(self, content: str) -> str:
         logger.info(f"[ACTIVE MEMORY] StoreMemoryTool invoked: content={content[:200]}, user_id={self.user_id}, agent_id={self.agent_id}, store_count={self.store_count}/{self.max_stores_per_run}")
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it appears for both direct and code_action
+        # invocations. This tool does not emit a card.
 
         if self.store_count >= self.max_stores_per_run:
             return "Memory storage limit reached for this conversation. Information will be saved automatically at the end."

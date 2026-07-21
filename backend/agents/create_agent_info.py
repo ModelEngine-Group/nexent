@@ -20,6 +20,7 @@ from nexent.core.models.capacity_budget import (
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.memory.memory_service import search_memory_in_levels
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
@@ -706,6 +707,19 @@ async def create_agent_config(
         version_no=version_no,
         tool_params=normalized_tool_params,
     )
+
+    # Append parallel_executor as a system-managed tool (always available,
+    # like store_memory / search_memory).  Description and inputs are read
+    # from the Tool class so they stay in sync with the SDK definition.
+    tool_list.append(ToolConfig(
+        class_name=ParallelExecutorTool.__name__,
+        name=ParallelExecutorTool.name,
+        description=ParallelExecutorTool.description,
+        inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
+        output_type=ParallelExecutorTool.output_type,
+        params={},
+        source="local",
+    ))
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")

@@ -829,6 +829,114 @@ class TestResolveMinioUploadFolder:
         assert resolve_minio_upload_folder("knowledge_base", "user123", "tenant_a") == "knowledge_base"
 
 
+class TestUploadQuotaEnforcement:
+    """Test pre-write enforcement and post-write race-condition cleanup."""
+
+    @staticmethod
+    def _quota_module(quota_service):
+        module = types.ModuleType("services.quota_service")
+        module.QuotaService = MagicMock(return_value=quota_service)
+        return module
+
+    @pytest.mark.asyncio
+    async def test_upload_runs_pre_and_post_write_checks(self):
+        upload = MagicMock(filename="quota.txt", size=128)
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"stage": "pre"}
+        quota_service.check_hard_limit_post_write.return_value = {"stage": "post"}
+
+        with patch.dict(
+            sys.modules,
+            {"services.quota_service": self._quota_module(quota_service)},
+        ), patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(
+                return_value=[
+                    {
+                        "success": True,
+                        "file_name": "quota.txt",
+                        "object_name": "knowledge_base/quota.txt",
+                    }
+                ]
+            ),
+        ):
+            result = await upload_files_impl(
+                destination="minio",
+                file=[upload],
+                folder="knowledge_base",
+                index_name=None,
+                user_id="user-id",
+                uploader_tenant_id="tenant-id",
+            )
+
+        quota_service.check_hard_limit.assert_called_once_with(
+            128, index_name=None
+        )
+        quota_service.check_hard_limit_post_write.assert_called_once_with(
+            0, index_name=None
+        )
+        assert result.quota_status == {"stage": "post"}
+
+    @pytest.mark.asyncio
+    async def test_upload_preserves_pre_write_quota_error(self):
+        upload = MagicMock(filename="quota.txt", size=128)
+        quota_service = MagicMock()
+        quota_error = file_management_service.QuotaExceededError("quota exceeded")
+        quota_service.check_hard_limit.side_effect = quota_error
+
+        with patch.dict(
+            sys.modules,
+            {"services.quota_service": self._quota_module(quota_service)},
+        ):
+            with pytest.raises(file_management_service.QuotaExceededError) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[upload],
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is quota_error
+
+    @pytest.mark.asyncio
+    async def test_post_write_quota_error_cleans_uploaded_files(self):
+        upload = MagicMock(filename="quota.txt", size=0)
+        quota_service = MagicMock()
+        quota_error = file_management_service.QuotaExceededError("quota exceeded")
+        quota_service.check_hard_limit_post_write.side_effect = quota_error
+        upload_results = [
+            {
+                "success": True,
+                "file_name": "quota.txt",
+                "object_name": "knowledge_base/quota.txt",
+            },
+            {
+                "success": True,
+                "file_name": "quota-2.txt",
+                "object_name": "knowledge_base/quota-2.txt",
+            },
+        ]
+
+        with patch.dict(
+            sys.modules,
+            {"services.quota_service": self._quota_module(quota_service)},
+        ), patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=upload_results),
+        ), patch(
+            "database.attachment_db.delete_file",
+            side_effect=[None, RuntimeError("cleanup failed")],
+        ) as delete_file:
+            with pytest.raises(file_management_service.QuotaExceededError) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[upload],
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is quota_error
+        assert delete_file.call_count == 2
+
+
 class TestCheckFileAccessBatch:
     """Test cases for check_file_access_batch function"""
 

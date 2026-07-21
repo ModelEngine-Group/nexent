@@ -29,7 +29,6 @@ import {
 } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import {
-  THINKING_STEPS_ZH,
   type SkillFormData,
   type ChatMessage,
   type SkillFileContent,
@@ -41,6 +40,7 @@ import {
   findSkillByName,
   createSkillStream,
   stopSkillCreation,
+  getThinkingSteps,
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
@@ -117,7 +117,7 @@ export default function SkillBuildModal({
   editingSkill,
   onBeforeEditSave,
 }: SkillBuildModalProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
   const [activeTab, setActiveTab] = useState<string>("interactive");
@@ -593,7 +593,7 @@ export default function SkillBuildModal({
               }
             : undefined,
           complexity: "complicated",
-          language: "zh",
+          language: i18n.language?.startsWith("en") ? "en" : "zh",
         },
         {
           onTaskId: (taskId) => {
@@ -607,7 +607,7 @@ export default function SkillBuildModal({
           },
           onStepCount: (step) => {
             setThinkingDescription(
-              THINKING_STEPS_ZH.find((s) => s.step === step)?.description ||
+              getThinkingSteps(i18n.language).find((s) => s.step === step)?.description ||
                 t("skillManagement.generatingSkill")
             );
           },
