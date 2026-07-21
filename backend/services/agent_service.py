@@ -128,6 +128,7 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+_channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -1319,12 +1320,14 @@ async def _stream_agent_chunks(
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
-            asyncio.create_task(
+            cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
                     user_id=user_id
                 )
             )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
