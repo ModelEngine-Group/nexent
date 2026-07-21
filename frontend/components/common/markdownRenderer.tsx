@@ -25,7 +25,11 @@ import type {
   Nl2AgentCardRegistrationHandler,
   ValidatedNl2AgentCard,
 } from "@/components/nl2agent/cardValidation";
-import { isNl2AgentCardExplicitlyInteractive } from "@/components/nl2agent/finalMessageCardDelivery";
+import {
+  EMPTY_NL2AGENT_ONLINE_CARD_IDENTITY_SIGNATURE,
+  isNl2AgentCardExplicitlyInteractive,
+  parseNl2AgentOnlineCardIdentitySignature,
+} from "@/components/nl2agent/finalMessageCardDelivery";
 import {
   extractParsedMarkdownHeadings,
   flattenTextContent,
@@ -63,8 +67,8 @@ interface MarkdownRendererProps {
   nl2AgentCardRegistrationEnabled?: boolean;
   /** Parsed once by the final-message boundary and reused during rendering. */
   nl2AgentCards?: readonly ValidatedNl2AgentCard[];
-  /** Historical online cards that remain actionable in the current workflow. */
-  nl2AgentInteractiveCardIdentities?: ReadonlySet<string>;
+  /** Stable signature for historical online cards that remain actionable. */
+  nl2AgentInteractiveCardIdentitySignature?: string;
 }
 
 class MarkdownErrorBoundary extends React.Component<
@@ -972,9 +976,16 @@ const MarkdownRendererComponent: React.FC<MarkdownRendererProps> = ({
   onNl2AgentCardRegistered,
   nl2AgentCardRegistrationEnabled = false,
   nl2AgentCards,
-  nl2AgentInteractiveCardIdentities,
+  nl2AgentInteractiveCardIdentitySignature = EMPTY_NL2AGENT_ONLINE_CARD_IDENTITY_SIGNATURE,
 }) => {
   const { t } = useTranslation("common");
+  const nl2AgentInteractiveCardIdentities = React.useMemo(
+    () =>
+      parseNl2AgentOnlineCardIdentitySignature(
+        nl2AgentInteractiveCardIdentitySignature
+      ),
+    [nl2AgentInteractiveCardIdentitySignature]
+  );
 
   // Preprocess content: convert LaTeX delimiters and custom code tags
   const processedContent = convertCustomCodeTags(

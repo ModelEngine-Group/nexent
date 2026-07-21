@@ -5,7 +5,8 @@ import type { Nl2AgentSessionState } from "@/services/nl2agentService";
 import { validateNl2AgentCards } from "../cardValidation";
 import {
   isNl2AgentCardExplicitlyInteractive,
-  resolveActionableNl2AgentOnlineCardIdentities,
+  parseNl2AgentOnlineCardIdentitySignature,
+  resolveActionableNl2AgentOnlineCardIdentitySignature,
   resolveLatestNl2AgentOnlineCardKeys,
   resolveNl2AgentCardPresentation,
 } from "../finalMessageCardDelivery";
@@ -153,12 +154,13 @@ describe("NL2AGENT final-message card delivery presentation", () => {
       },
     } as unknown as Nl2AgentSessionState;
 
-    const interactive = resolveActionableNl2AgentOnlineCardIdentities(
+    const signature = resolveActionableNl2AgentOnlineCardIdentitySignature(
       [oldCard, latestCard, skillCard],
       { web_mcp: "mcp_2", web_skill: "skill_1" },
       sessionState,
       true
     );
+    const interactive = parseNl2AgentOnlineCardIdentitySignature(signature);
 
     expect(isNl2AgentCardExplicitlyInteractive(oldCard, interactive)).toBe(
       false
@@ -187,26 +189,65 @@ describe("NL2AGENT final-message card delivery presentation", () => {
     } as unknown as Nl2AgentSessionState;
 
     expect(
-      resolveActionableNl2AgentOnlineCardIdentities(
-        [card],
-        { web_skill: "skill_1" },
-        sessionState,
-        true
+      parseNl2AgentOnlineCardIdentitySignature(
+        resolveActionableNl2AgentOnlineCardIdentitySignature(
+          [card],
+          { web_skill: "skill_1" },
+          sessionState,
+          true
+        )
       ).size
     ).toBe(0);
     expect(
-      resolveActionableNl2AgentOnlineCardIdentities(
-        [card],
-        { web_skill: "skill_1" },
-        {
-          ...sessionState,
-          resource_review: {
-            ...sessionState.resource_review,
-            online_configuration_confirmed: false,
+      parseNl2AgentOnlineCardIdentitySignature(
+        resolveActionableNl2AgentOnlineCardIdentitySignature(
+          [card],
+          { web_skill: "skill_1" },
+          {
+            ...sessionState,
+            resource_review: {
+              ...sessionState.resource_review,
+              online_configuration_confirmed: false,
+            },
           },
-        },
-        false
+          false
+        )
       ).size
     ).toBe(0);
+  });
+
+  it("returns the same primitive signature for equivalent session states", () => {
+    const card = validateNl2AgentCards(
+      onlineCardMessage("mcp", "mcp_1").content,
+      202
+    ).cards[0];
+    const state = {
+      agent_id: 202,
+      resource_review: {
+        online_configuration_confirmed: false,
+        online_recommendation_batches: {
+          mcp_1: {
+            resource_type: "mcp",
+            status: "recommendations_ready",
+          },
+        },
+      },
+    } as unknown as Nl2AgentSessionState;
+
+    const first = resolveActionableNl2AgentOnlineCardIdentitySignature(
+      [card],
+      { web_mcp: "mcp_1" },
+      state,
+      true
+    );
+    const second = resolveActionableNl2AgentOnlineCardIdentitySignature(
+      [card],
+      { web_mcp: "mcp_1" },
+      structuredClone(state),
+      true
+    );
+
+    expect(first).toBe('["web_mcp:mcp_1"]');
+    expect(second).toBe(first);
   });
 });

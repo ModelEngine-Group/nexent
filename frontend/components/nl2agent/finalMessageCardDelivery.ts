@@ -56,19 +56,21 @@ export const resolveLatestNl2AgentOnlineCardKeys = (
   return latest;
 };
 
-export const resolveActionableNl2AgentOnlineCardIdentities = (
+export const EMPTY_NL2AGENT_ONLINE_CARD_IDENTITY_SIGNATURE = "[]";
+
+export const resolveActionableNl2AgentOnlineCardIdentitySignature = (
   cards: readonly ValidatedNl2AgentCard[],
   latestCardKeys: LatestNl2AgentOnlineCardKeys,
   sessionState: Nl2AgentSessionState | undefined,
   interactionEnabled: boolean
-): ReadonlySet<string> => {
-  const actionable = new Set<string>();
+): string => {
+  const actionable: string[] = [];
   if (
     !interactionEnabled ||
     !sessionState ||
     sessionState.resource_review.online_configuration_confirmed
   ) {
-    return actionable;
+    return EMPTY_NL2AGENT_ONLINE_CARD_IDENTITY_SIGNATURE;
   }
 
   const batches =
@@ -88,11 +90,28 @@ export const resolveActionableNl2AgentOnlineCardIdentities = (
       batch?.resource_type === resourceType &&
       batch.status === "recommendations_ready"
     ) {
-      actionable.add(nl2AgentOnlineCardIdentity(card.cardType, card.cardKey));
+      actionable.push(nl2AgentOnlineCardIdentity(card.cardType, card.cardKey));
     }
   }
 
-  return actionable;
+  return actionable.length
+    ? JSON.stringify(actionable.sort())
+    : EMPTY_NL2AGENT_ONLINE_CARD_IDENTITY_SIGNATURE;
+};
+
+export const parseNl2AgentOnlineCardIdentitySignature = (
+  signature: string
+): ReadonlySet<string> => {
+  try {
+    const parsed: unknown = JSON.parse(signature);
+    return new Set(
+      Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === "string")
+        : []
+    );
+  } catch {
+    return new Set();
+  }
 };
 
 export const isNl2AgentCardExplicitlyInteractive = (

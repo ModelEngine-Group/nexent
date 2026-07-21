@@ -57,7 +57,7 @@ import {
 } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
-  resolveActionableNl2AgentOnlineCardIdentities,
+  resolveActionableNl2AgentOnlineCardIdentitySignature,
   resolveNl2AgentCardPresentation,
   type LatestNl2AgentOnlineCardKeys,
 } from "@/components/nl2agent/finalMessageCardDelivery";
@@ -142,9 +142,9 @@ function ChatStreamFinalMessageInner({
     isLatestMessage,
     readOnly,
   });
-  const actionableNl2AgentOnlineCardIdentities = useMemo(
+  const actionableNl2AgentOnlineCardIdentitySignature = useMemo(
     () =>
-      resolveActionableNl2AgentOnlineCardIdentities(
+      resolveActionableNl2AgentOnlineCardIdentitySignature(
         finalCardValidation.cards,
         latestNl2AgentOnlineCardKeys,
         workflowSessionState,
@@ -578,8 +578,8 @@ function ChatStreamFinalMessageInner({
                 nl2AgentCardRegistrationEnabled={
                   nl2AgentCardPresentation.registrationEnabled
                 }
-                nl2AgentInteractiveCardIdentities={
-                  actionableNl2AgentOnlineCardIdentities
+                nl2AgentInteractiveCardIdentitySignature={
+                  actionableNl2AgentOnlineCardIdentitySignature
                 }
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.

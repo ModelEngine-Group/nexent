@@ -9,7 +9,7 @@ const testState = vi.hoisted(() => ({
     | {
         nl2AgentCardRenderMode?: string;
         nl2AgentCardRegistrationEnabled?: boolean;
-        nl2AgentInteractiveCardIdentities?: ReadonlySet<string>;
+        nl2AgentInteractiveCardIdentitySignature?: string;
         onNl2AgentCardRegistered?: (receipt: {
           cardType: "local_resources";
           cardKey?: string;
@@ -222,9 +222,9 @@ describe("ChatStreamFinalMessage NL2AGENT delivery gate", () => {
     );
 
     expect(testState.markdownProps?.nl2AgentCardRenderMode).toBe("readonly");
-    expect(testState.markdownProps?.nl2AgentInteractiveCardIdentities).toEqual(
-      new Set(["web_mcp:mcp_2"])
-    );
+    expect(
+      testState.markdownProps?.nl2AgentInteractiveCardIdentitySignature
+    ).toBe('["web_mcp:mcp_2"]');
     expect(testState.markdownProps?.nl2AgentCardRegistrationEnabled).toBe(
       false
     );
