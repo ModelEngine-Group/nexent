@@ -227,6 +227,37 @@ def test_final_answer_validator_accepts_exact_trusted_local_card():
     )
 
 
+def test_final_answer_validator_accepts_name_keyed_web_skill_card():
+    payload = {
+        "agent_id": 80,
+        "recommendation_batch_id": "skill_names",
+        "items": [
+            {
+                "skill_name": "document-builder",
+                "name": "Document Builder",
+                "status": "installable",
+            }
+        ],
+    }
+    trusted = {
+        "skill_names": {
+            "resource_type": "skill",
+            "tool_ids": [],
+            "skill_ids": [],
+            "item_keys": ["skill-name:document-builder"],
+        }
+    }
+
+    assert (
+        validate_nl2agent_final_answer(
+            _fence("nl2agent-web-skills", payload),
+            80,
+            trusted_search_batch_provider=lambda: trusted,
+        )
+        is None
+    )
+
+
 @pytest.mark.parametrize(
     ("language", "payload", "trusted"),
     [

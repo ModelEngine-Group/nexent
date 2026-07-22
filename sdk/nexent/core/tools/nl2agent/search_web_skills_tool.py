@@ -28,13 +28,19 @@ def _rank_web_skills(candidates: List[Dict[str, Any]], query: str) -> List[Dict[
         skill_name = str(candidate.get("skill_name") or candidate.get("name") or "").strip()
         if not skill_name:
             continue
-        eligible.append(
-            {
-                **candidate,
-                "skill_name": skill_name,
-                "name": str(candidate.get("name") or skill_name),
-            }
-        )
+        normalized = {
+            **candidate,
+            "skill_name": skill_name,
+            "name": str(candidate.get("name") or skill_name),
+        }
+        skill_id = candidate.get("skill_id")
+        if not (
+            isinstance(skill_id, int)
+            and not isinstance(skill_id, bool)
+            and skill_id > 0
+        ):
+            normalized.pop("skill_id", None)
+        eligible.append(normalized)
 
     scored = _score_candidates(eligible, query, "skill_name")
     result: List[Dict[str, Any]] = []
@@ -103,9 +109,10 @@ class NL2AgentSearchWebSkillsTool(Tool):
     """Search the official/web skills marketplace for skills matching the user's intent.
 
     Returns a frontend card JSON string with ``agent_id`` and ``items``. The
-    ``agent_id`` is the draft agent being built. Each item has ``skill_id``,
-    ``name``, ``description``, ``tags``, ``score`` (0-1), and ``reason``. The
-    frontend renders each as an individual card with an "Install" button.
+    ``agent_id`` is the draft agent being built. Each item has ``skill_name``,
+    ``name``, ``description``, ``tags``, ``score`` (0-1), and ``reason``. A
+    positive ``skill_id`` is included when the Skill has a persisted record.
+    The frontend renders each as an individual card with an "Install" button.
 
     Args:
         query: 1-3 short English keywords matching skill names or tags
@@ -145,7 +152,12 @@ class NL2AgentSearchWebSkillsTool(Tool):
         item_keys = [
             f"skill:{item.get('skill_id')}"
             if item.get("skill_id")
-            else f"skill-name:{canonical_search_query(str(item.get('skill_name') or item.get('name') or ''))}"
+            else (
+                "skill-name:"
+                + str(item.get("skill_name") or item.get("name") or "")
+                .strip()
+                .casefold()
+            )
             for item in scored
         ]
         batch_id = online_recommendation_batch_id(

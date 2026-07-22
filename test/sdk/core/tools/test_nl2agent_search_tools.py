@@ -584,6 +584,41 @@ def test_nl2agent_search_web_skills_scores_skill_name_candidates():
     assert len(payload["items"]) == 1
 
 
+def test_web_skill_search_uses_names_for_non_positive_ids():
+    recorded = []
+    tool = get_search_web_skills_tool(
+        draft_agent_id=202,
+        tenant_id="tenant_1",
+        record_search_result=lambda **result: recorded.append(result),
+        official_skills=[
+            {
+                "skill_id": 0,
+                "name": "document-builder",
+                "description": "Build documents.",
+                "status": "installable",
+            },
+            {
+                "skill_id": 0,
+                "name": "document-reader",
+                "description": "Read documents.",
+                "status": "installable",
+            },
+        ],
+    )
+
+    payload = _loads(tool(query="document"))
+
+    assert [item["name"] for item in payload["items"]] == [
+        "document-builder",
+        "document-reader",
+    ]
+    assert all("skill_id" not in item for item in payload["items"])
+    assert recorded[0]["item_keys"] == [
+        "skill-name:document-builder",
+        "skill-name:document-reader",
+    ]
+
+
 def test_web_skill_search_accepts_backend_name_field_and_searches_metadata():
     tool = get_search_web_skills_tool(
         draft_agent_id=202,

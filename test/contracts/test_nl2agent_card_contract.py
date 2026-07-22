@@ -138,6 +138,26 @@ def test_contract_rejects_unstable_resource_payloads() -> None:
     assert list(_validator("web_mcp").iter_errors(invalid_mcp))
 
 
+def test_web_skill_contract_uses_name_when_no_positive_id_exists() -> None:
+    name_keyed_payload = {
+        "agent_id": 54,
+        "recommendation_batch_id": "online_skill",
+        "items": [
+            {
+                "skill_name": "document-builder",
+                "name": "Document Builder",
+            }
+        ],
+    }
+    invalid_zero_id_payload = {
+        **name_keyed_payload,
+        "items": [{**name_keyed_payload["items"][0], "skill_id": 0}],
+    }
+
+    assert list(_validator("web_skill").iter_errors(name_keyed_payload)) == []
+    assert list(_validator("web_skill").iter_errors(invalid_zero_id_payload))
+
+
 def test_final_review_verification_config_matches_runtime_contract() -> None:
     valid_payload = {
         "business_description": "Build an agent.",
