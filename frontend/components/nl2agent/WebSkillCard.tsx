@@ -188,7 +188,7 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
           className="mt-2"
           type="error"
           showIcon
-          message={configurationError}
+          title={configurationError}
           action={
             <Button size="small" onClick={() => void loadConfiguration()}>
               Retry

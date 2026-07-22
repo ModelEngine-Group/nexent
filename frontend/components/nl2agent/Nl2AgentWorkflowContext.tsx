@@ -95,9 +95,14 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   >({});
   const continuingRef = useRef(false);
   const sessionRequestRef = useRef(0);
+  const onContinueRef = useRef(onContinue);
+  const onStateChangedRef = useRef(onStateChanged);
   const cardDeliveriesRef = useRef<
     Map<string, "pending" | "succeeded" | "failed">
   >(new Map());
+
+  onContinueRef.current = onContinue;
+  onStateChangedRef.current = onStateChanged;
 
   useEffect(() => {
     setInputBlockers(new Set());
@@ -167,8 +172,8 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   );
   const notifyStateChanged = useCallback(() => {
     setStateVersion((version) => version + 1);
-    onStateChanged?.();
-  }, [onStateChanged]);
+    onStateChangedRef.current?.();
+  }, []);
   const resumeSession = useCallback(async () => {
     if (!enabled || !agentId || resuming) return;
     setResuming(true);
@@ -182,6 +187,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   }, [agentId, enabled, onSessionResumed, resuming]);
   const setInputBlocked = useCallback((key: string, blocked: boolean) => {
     setInputBlockers((current) => {
+      if (current.has(key) === blocked) return current;
       const next = new Set(current);
       if (blocked) next.add(key);
       else next.delete(key);
@@ -200,7 +206,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
         return next;
       });
       try {
-        await onContinue(text);
+        await onContinueRef.current(text);
       } catch (error) {
         setRetries((current) => ({
           ...current,
@@ -217,7 +223,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
         setContinuing(false);
       }
     },
-    [editable, onContinue, scopeKey]
+    [editable, scopeKey]
   );
 
   const retryContinuation = useCallback(async () => {

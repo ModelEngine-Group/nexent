@@ -327,7 +327,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
             <Alert
               type="error"
               showIcon
-              message="MCP action failed"
+              title="MCP action failed"
               description={installError}
             />
           ) : null}

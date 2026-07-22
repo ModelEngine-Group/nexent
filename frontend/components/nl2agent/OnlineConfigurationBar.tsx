@@ -60,7 +60,7 @@ export const OnlineConfigurationBar: React.FC<{
       <Alert
         className="mx-auto mb-2 max-w-3xl"
         type="error"
-        message="Unable to load online configuration state."
+        title="Unable to load online configuration state."
         description={loadError}
         action={
           <Button onClick={() => void workflow.refreshSessionState()}>
@@ -141,7 +141,7 @@ export const Nl2AgentContinuationError: React.FC = () => {
     <Alert
       className="mx-auto mb-2 max-w-3xl"
       type="error"
-      message="NL2AGENT could not continue automatically."
+      title="NL2AGENT could not continue automatically."
       description={workflow.continuationError}
       action={
         <Button

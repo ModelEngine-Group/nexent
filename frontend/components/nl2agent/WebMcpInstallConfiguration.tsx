@@ -44,7 +44,7 @@ export const WebMcpInstallConfiguration: React.FC<
       <Alert
         type="warning"
         showIcon
-        message={selectedOption.unsupported_reason || "Unsupported option"}
+        title={selectedOption.unsupported_reason || "Unsupported option"}
       />
     ) : null}
     {selectedOption?.description ? (
@@ -108,7 +108,7 @@ export const WebMcpInstallConfiguration: React.FC<
       <Alert
         type="error"
         showIcon
-        message="Installation failed"
+        title="Installation failed"
         description={installError}
       />
     ) : null}

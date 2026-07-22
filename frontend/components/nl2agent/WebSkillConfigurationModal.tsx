@@ -187,7 +187,7 @@ export const WebSkillConfigurationModal: React.FC<
             </div>
           );
         })}
-        {error ? <Alert type="error" showIcon message={error} /> : null}
+        {error ? <Alert type="error" showIcon title={error} /> : null}
       </div>
     </Modal>
   );

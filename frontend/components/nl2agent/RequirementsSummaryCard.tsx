@@ -73,15 +73,38 @@ export const RequirementsSummaryCard: React.FC<
     "nl2agent.requirements.registrationFailed",
     "Failed to register the requirements summary."
   );
+  const {
+    audience_or_scenario,
+    expected_output,
+    goal,
+    key_constraints,
+    primary_input,
+  } = summary;
   const summaryPayload = useMemo(
-    () => toRequirementsSummaryRequest(summary),
-    [summary]
+    () =>
+      toRequirementsSummaryRequest({
+        audience_or_scenario,
+        expected_output,
+        goal,
+        key_constraints,
+        primary_input,
+      }),
+    [
+      audience_or_scenario,
+      expected_output,
+      goal,
+      key_constraints,
+      primary_input,
+    ]
   );
   const blockerKey = `requirements-summary:${agentId}`;
   const { active, setInputBlocked, stateVersion } = workflow;
   const { execute, pending } = lifecycle;
   const lastStateVersionRef = useRef(stateVersion);
   const ignoreNextStateVersionRef = useRef(false);
+  const onRegisteredRef = useRef(onRegistered);
+
+  onRegisteredRef.current = onRegistered;
 
   const register = useCallback(
     async (notify = true) => {
@@ -103,7 +126,9 @@ export const RequirementsSummaryCard: React.FC<
               });
               ignoreNextStateVersionRef.current = notify;
               setInputBlocked(blockerKey, false);
-              await onRegistered?.({ cardType: "requirements_summary" });
+              await onRegisteredRef.current?.({
+                cardType: "requirements_summary",
+              });
             },
             notifyStateChanged: notify,
           }
@@ -125,7 +150,6 @@ export const RequirementsSummaryCard: React.FC<
       agentId,
       blockerKey,
       execute,
-      onRegistered,
       registrationEnabled,
       registrationFailedMessage,
       setInputBlocked,
@@ -170,8 +194,12 @@ export const RequirementsSummaryCard: React.FC<
 
   useEffect(() => {
     void register(true);
-    return () => setInputBlocked(blockerKey, false);
-  }, [blockerKey, register, setInputBlocked]);
+  }, [register]);
+
+  useEffect(
+    () => () => setInputBlocked(blockerKey, false),
+    [blockerKey, setInputBlocked]
+  );
 
   useEffect(() => {
     if (stateVersion === lastStateVersionRef.current) return;
@@ -215,7 +243,7 @@ export const RequirementsSummaryCard: React.FC<
         <Alert
           className="mt-3"
           type="error"
-          message={t(
+          title={t(
             "nl2agent.requirements.notRegistered",
             "Requirements summary was not registered."
           )}
@@ -230,7 +258,7 @@ export const RequirementsSummaryCard: React.FC<
         <Alert
           className="mt-3"
           type="warning"
-          message={t(
+          title={t(
             "nl2agent.requirements.superseded",
             "This summary has been replaced by a newer version."
           )}
@@ -240,16 +268,13 @@ export const RequirementsSummaryCard: React.FC<
           className="mt-3"
           type="success"
           showIcon
-          message={t(
-            "nl2agent.requirements.confirmed",
-            "Requirements confirmed"
-          )}
+          title={t("nl2agent.requirements.confirmed", "Requirements confirmed")}
         />
       ) : cardState === "awaiting" ? (
         <div className="mt-3 space-y-2">
           <Alert
             type="info"
-            message={t(
+            title={t(
               "nl2agent.requirements.confirmInstruction",
               "Confirm this summary, or describe required changes in chat."
             )}
@@ -257,7 +282,7 @@ export const RequirementsSummaryCard: React.FC<
           {confirmationError ? (
             <Alert
               type="error"
-              message={t(
+              title={t(
                 "nl2agent.requirements.confirmationFailed",
                 "Failed to confirm the requirements summary."
               )}

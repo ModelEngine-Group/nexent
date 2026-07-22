@@ -354,7 +354,7 @@ export function QuotaSettingsModal({
           {t("common.save", "Save Settings")}
         </Button>,
       ]}
-      destroyOnClose
+      destroyOnHidden
     >
       {/* Tenant Hard Limit — controlled input, outside Form */}
       <div style={{ marginBottom: 24 }}>

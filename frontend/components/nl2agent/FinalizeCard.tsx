@@ -278,7 +278,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
         <Alert
           type="warning"
           showIcon
-          message={t(
+          title={t(
             "nl2agent.finalize.historyExpired",
             "The editable NL2AGENT session has expired"
           )}
@@ -311,7 +311,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
         <Alert
           type="error"
           showIcon
-          message="Persisted agent state could not be loaded"
+          title="Persisted agent state could not be loaded"
           description={stateError || "No persisted state was returned."}
           action={
             <Button size="small" onClick={() => void loadState()}>
@@ -352,7 +352,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             <Alert
               type="info"
               showIcon
-              message={t(
+              title={t(
                 "nl2agent.finalize.completedSession",
                 "This NL2AGENT session is complete"
               )}
@@ -366,7 +366,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             <Alert
               type="info"
               showIcon
-              message={t(
+              title={t(
                 "nl2agent.finalize.editingSession",
                 "Editing is in progress"
               )}
@@ -380,7 +380,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             <Alert
               type="warning"
               showIcon
-              message="Agent identity has not been saved"
+              title="Agent identity has not been saved"
               description="Return to the identity card and save the display name before publishing."
               className="mb-3"
             />
@@ -388,7 +388,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             <Alert
               type="error"
               showIcon
-              message={t(
+              title={t(
                 "nl2agent.finalize.invalidReferences",
                 "Selected models or resources are no longer valid"
               )}
@@ -403,7 +403,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
             <Alert
               type="warning"
               showIcon
-              message="The generated proposal is incomplete"
+              title="The generated proposal is incomplete"
               description="Business description, duty prompt, and greeting message are required."
               className="mb-3"
             />

@@ -39,6 +39,33 @@ const renderGroup = (onRegistered: () => Promise<void>) =>
     </Nl2AgentWorkflowProvider>
   );
 
+const RequirementsRegistrationHarness = () => {
+  const [refreshCount, setRefreshCount] = React.useState(0);
+
+  return (
+    <Nl2AgentWorkflowProvider
+      enabled
+      scopeKey="conversation:1:draft:202"
+      onContinue={vi.fn(async () => undefined)}
+      onStateChanged={() => setRefreshCount((count) => count + 1)}
+    >
+      <span>Refresh count: {refreshCount}</span>
+      <RequirementsSummaryCard
+        agentId={202}
+        summary={{
+          agent_id: 202,
+          goal: "Build presentations",
+          audience_or_scenario: "Office users",
+          primary_input: "DOCX files",
+          expected_output: "PPT files",
+          key_constraints: "Preserve source facts",
+        }}
+        onRegistered={async () => undefined}
+      />
+    </Nl2AgentWorkflowProvider>
+  );
+};
+
 describe("online recommendation registration lifecycle", () => {
   beforeEach(() => {
     vi.mocked(registerOnlineResourceRecommendations).mockReset();
@@ -96,6 +123,16 @@ describe("online recommendation registration lifecycle", () => {
     expect(onRegistered).toHaveBeenCalledWith({
       cardType: "requirements_summary",
     });
+  });
+
+  it("registers once when workflow notifications rerender the parent", async () => {
+    const view = render(<RequirementsRegistrationHarness />);
+
+    await screen.findByText("Refresh count: 1");
+    await waitFor(() =>
+      expect(registerRequirementsSummary).toHaveBeenCalledOnce()
+    );
+    expect(view.container.querySelector("button")).toBeEnabled();
   });
 
   it("does not automatically retry a failed requirements registration", async () => {

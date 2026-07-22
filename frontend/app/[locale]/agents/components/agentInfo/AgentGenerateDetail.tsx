@@ -436,7 +436,7 @@ export default function AgentGenerateDetail({}) {
             type="warning"
             showIcon
             className="mb-3 shrink-0"
-            message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+            title={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
           />
         )}
         {renderPromptToolbar(type, title)}
@@ -850,7 +850,7 @@ export default function AgentGenerateDetail({}) {
                     <Alert
                       type="warning"
                       showIcon
-                      message={t(
+                      title={t(
                         userCanManageModels
                           ? "agent.modelSelector.bareCapacity.formNotice"
                           : "agent.modelSelector.bareCapacity.formNoticeNoPermission",
@@ -1148,7 +1148,7 @@ export default function AgentGenerateDetail({}) {
         title={t("agent.advancedSettings.title")}
         open={advancedSettingsOpen}
         centered
-        destroyOnClose={false}
+        destroyOnHidden={false}
         onCancel={() => setAdvancedSettingsOpen(false)}
         onOk={handleSaveAdvancedSettings}
         okText={t("common.confirm")}

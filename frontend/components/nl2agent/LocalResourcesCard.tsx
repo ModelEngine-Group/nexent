@@ -528,7 +528,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         <Alert
           className="m-3"
           type="error"
-          message={registrationError}
+          title={registrationError}
           action={
             registrationRetryable ? (
               <Button
@@ -546,7 +546,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         <Alert
           className="m-3"
           type="error"
-          message="Failed to restore saved resource selection."
+          title="Failed to restore saved resource selection."
           action={
             <Button onClick={() => void workflow.refreshSessionState()}>
               Retry

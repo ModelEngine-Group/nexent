@@ -173,7 +173,7 @@ export function SuQuotaModal({
       okText={t("common.save", "Save")}
       cancelText={t("common.cancel", "Cancel")}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="space-y-4">
         {/* Current status card */}

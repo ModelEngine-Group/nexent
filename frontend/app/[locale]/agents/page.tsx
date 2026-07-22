@@ -283,7 +283,7 @@ export default function AgentSetupOrchestrator() {
                           className="mb-3"
                           type="info"
                           showIcon
-                          message="配置由智能体生成助手实时维护，完成应用后可手动编辑。"
+                          title="配置由智能体生成助手实时维护，完成应用后可手动编辑。"
                         />
                       )}
                       <div

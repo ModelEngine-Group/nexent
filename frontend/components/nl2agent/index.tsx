@@ -127,7 +127,7 @@ export const OnlineRecommendationGroup: React.FC<{
         <Alert
           className="my-2"
           type="error"
-          message={error}
+          title={error}
           action={
             registrationRetryable ? (
               <Button size="small" onClick={() => void register()}>
@@ -141,7 +141,7 @@ export const OnlineRecommendationGroup: React.FC<{
         <Alert
           className="my-2"
           type="error"
-          message="Failed to restore online resource state."
+          title="Failed to restore online resource state."
           action={
             <Button
               size="small"

@@ -100,7 +100,7 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
         <Alert
           className="mb-2"
           type="error"
-          message={loadError}
+          title={loadError}
           action={
             <Button size="small" onClick={() => setReloadKey((key) => key + 1)}>
               Retry
@@ -112,7 +112,7 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
         <Alert
           className="mb-2"
           type="error"
-          message="Failed to restore saved model selection."
+          title="Failed to restore saved model selection."
           action={
             <Button
               size="small"
@@ -127,7 +127,7 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
         <Alert
           className="mb-2"
           type="warning"
-          message="No available LLMs are configured in the platform."
+          title="No available LLMs are configured in the platform."
         />
       )}
       <Select
