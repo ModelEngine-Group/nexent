@@ -316,6 +316,10 @@ class AgentRequest(BaseModel):
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
+    enable_plan: Optional[bool] = Field(
+        default=False,
+        description="Whether to enable the planning phase before execution"
+    )
 
 
 class MessageUnit(BaseModel):

@@ -51,6 +51,7 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
+from utils.redis_utils import get_redis_client
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.model import AgentToolParamsRequest, ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -657,6 +658,42 @@ async def create_model_config_list(tenant_id):
     return model_list
 
 
+def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
+    """Inject plan tool configs into the given tools list if enable_planning is True."""
+    if not enable_planning:
+        return
+
+    plan_names = {"create_plan", "update_plan_step"}
+    if any(t.name in plan_names for t in tools):
+        return
+
+    # description_zh/zh pairs match the bilingual descriptions in plan_tools.py
+    tools.extend([
+        ToolConfig(
+            class_name="CreatePlanTool",
+            name="create_plan",
+            description="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。"
+            "每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。"
+            "返回创建的计划 id 和步骤数量。",
+            inputs='{"plan_id": "string", "title": "string", "steps": "array"}',
+            output_type="object",
+            params={},
+            source="builtin",
+        ),
+        ToolConfig(
+            class_name="UpdatePlanStepTool",
+            name="update_plan_step",
+            description="更新单个计划步骤的状态。完成后调用 status='completed'，不再需要时调用"
+            " status='skipped'，开始执行时调用 status='in_progress'。"
+            "返回被更新的步骤 id 和状态。",
+            inputs='{"step_id": "string", "status": "string"}',
+            output_type="object",
+            params={},
+            source="builtin",
+        ),
+    ])
+
+
 async def create_agent_config(
     agent_id,
     tenant_id,
@@ -668,6 +705,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    enable_planning: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -879,6 +917,8 @@ async def create_agent_config(
     builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
     available_tools = tool_list + builtin_tools
 
+    _inject_plan_tools(available_tools, enable_planning)
+
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
@@ -954,6 +994,7 @@ async def create_agent_config(
             user_id=user_id,
             language=language,
             is_manager=is_manager,
+            enable_planning=enable_planning,
             tools=render_kwargs["tools"],
             skills=skills,
             managed_agents=render_kwargs["managed_agents"],
@@ -976,6 +1017,8 @@ async def create_agent_config(
         hard_input_budget_tokens=hard_input_budget_tokens,
         strategy="full",
     )
+
+
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
@@ -997,6 +1040,17 @@ async def create_agent_config(
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
+        enable_planning=enable_planning,
+    )
+    logger.info(
+        "Agent metadata | name=%s | tool_list=%s | managed_agents=%s | model_name=%s | max_steps=%s | enable_planning=%s | has_plan_tools=%s",
+        agent_config.name,
+        [t.name for t in agent_config.tools],
+        [a.name for a in agent_config.managed_agents],
+        agent_config.model_name,
+        agent_config.max_steps,
+        agent_config.enable_planning,
+        any(t.name in {"create_plan", "update_plan_step"} for t in agent_config.tools),
     )
     return agent_config
 
@@ -1410,6 +1464,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    enable_planning: bool = False,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1438,6 +1493,7 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
+        "enable_planning": enable_planning,
     }
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
@@ -1505,5 +1561,6 @@ async def create_agent_run_info(
             "safe_input_budget_snapshot",
             None,
         ),
+        redis_client=get_redis_client(),
     )
     return agent_run_info
