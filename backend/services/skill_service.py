@@ -931,62 +931,10 @@ class SkillService:
             List of skill info dicts
         """
         effective_tenant_id = tenant_id or self.tenant_id
-        # #region Debug logging for skill visibility issue
-        logger.warning(
-            "[DEBUG_SKILL_ISSUE] list_skills - self.tenant_id=%s, param_tenant_id=%s, effective_tenant_id=%s",
-            self.tenant_id, tenant_id, effective_tenant_id
-        )
-        import json, time as _time
-        _log_file = "/mnt/debug-092e68.log"
-        _log_entry = {
-            "sessionId": "092e68",
-            "id": f"log_{int(_time.time() * 1000)}",
-            "timestamp": int(_time.time() * 1000),
-            "location": "skill_service.py:list_skills",
-            "message": "List skills query",
-            "data": {
-                "self_tenant_id": self.tenant_id,
-                "param_tenant_id": tenant_id,
-                "effective_tenant_id": effective_tenant_id
-            },
-            "runId": "debug",
-            "hypothesisId": "B"
-        }
-        try:
-            with open(_log_file, "a", encoding="utf-8") as _f:
-                _f.write(json.dumps(_log_entry) + "\n")
-        except Exception:
-            pass
-        # #endregion
         if not effective_tenant_id:
             raise SkillException("tenant_id is required")
         try:
             skills = skill_db.list_skills(effective_tenant_id)
-            # #region Debug logging for skill visibility issue
-            logger.warning(
-                "[DEBUG_SKILL_ISSUE] list_skills result - effective_tenant_id=%s, skills_count=%d",
-                effective_tenant_id, len(skills)
-            )
-            _log_entry = {
-                "sessionId": "092e68",
-                "id": f"log_{int(_time.time() * 1000)}",
-                "timestamp": int(_time.time() * 1000),
-                "location": "skill_service.py:list_skills_result",
-                "message": "List skills result",
-                "data": {
-                    "effective_tenant_id": effective_tenant_id,
-                    "skills_count": len(skills),
-                    "skills": [s.get("name") for s in skills]
-                },
-                "runId": "debug",
-                "hypothesisId": "B"
-            }
-            try:
-                with open(_log_file, "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps(_log_entry) + "\n")
-            except Exception:
-                pass
-            # #endregion
             enriched = [self._enrich_configs_from_yaml(s) for s in skills]
             return enriched
         except Exception as e:
@@ -1138,35 +1086,6 @@ class SkillService:
             Created skill dict
         """
         effective_tenant_id = tenant_id or self.tenant_id
-        # #region Debug logging for skill visibility issue
-        logger.warning(
-            "[DEBUG_SKILL_ISSUE] create_skill_from_file - self.tenant_id=%s, param_tenant_id=%s, effective_tenant_id=%s, user_id=%s",
-            self.tenant_id, tenant_id, effective_tenant_id, user_id
-        )
-        import os, json, time as _time
-        _log_file = "/mnt/debug-092e68.log"
-        _log_entry = {
-            "sessionId": "092e68",
-            "id": f"log_{int(_time.time() * 1000)}",
-            "timestamp": int(_time.time() * 1000),
-            "location": "skill_service.py:create_skill_from_file",
-            "message": "Skill create from file",
-            "data": {
-                "self_tenant_id": self.tenant_id,
-                "param_tenant_id": tenant_id,
-                "effective_tenant_id": effective_tenant_id,
-                "user_id": user_id,
-                "skill_manager_local_dir": getattr(self.skill_manager, 'local_skills_dir', None)
-            },
-            "runId": "debug",
-            "hypothesisId": "A"
-        }
-        try:
-            with open(_log_file, "a", encoding="utf-8") as _f:
-                _f.write(json.dumps(_log_entry) + "\n")
-        except Exception:
-            pass
-        # #endregion
 
         content_bytes: bytes
         if isinstance(file_content, str):
