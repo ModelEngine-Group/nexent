@@ -224,6 +224,7 @@ def _make_step_agent(rule, messages, model_output="ok"):
     agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
     agent.context_runtime.truncate_observation = MagicMock()
     agent.context_manager = None
+    agent.enable_planning = False
     agent.model = MagicMock()
     response = MagicMock()
     response.content = model_output

@@ -805,6 +805,59 @@ class TestAgentRunInfo:
         assert run_info.mcp_host is None
 
 
+class TestAgentRunInfoPlanning:
+    """Tests for the v1.4 planing fields on AgentRunInfo."""
+
+    @staticmethod
+    def _make_run_info(**overrides):
+        observer = MessageObserver()
+        stop_event = Event()
+        model_config = agent_model_module.ModelConfig(
+            cite_name="gpt-4",
+            model_name="gpt-4",
+            url="https://api.openai.com/v1",
+        )
+        defaults = dict(
+            query="q",
+            model_config_list=[model_config],
+            observer=observer,
+            agent_config=agent_model_module.AgentConfig(
+                name="test_agent",
+                description="A test agent",
+                tools=[],
+                model_name="gpt-4",
+            ),
+            stop_event=stop_event,
+        )
+        defaults.update(overrides)
+        return agent_model_module.AgentRunInfo(**defaults)
+
+    def test_enable_planning_defaults_to_false(self):
+        run_info = self._make_run_info()
+        assert run_info.enable_planning is False
+
+    def test_enable_planning_can_be_true(self):
+        run_info = self._make_run_info(enable_planning=True)
+        assert run_info.enable_planning is True
+
+    def test_redis_client_defaults_to_none(self):
+        run_info = self._make_run_info()
+        assert run_info.redis_client is None
+
+    def test_redis_client_can_be_set(self):
+        fake_redis = object()
+        run_info = self._make_run_info(redis_client=fake_redis)
+        assert run_info.redis_client is fake_redis
+
+    def test_planning_fields_serialize_round_trip(self):
+        """Both planning fields must survive model_dump / model_validate round trips."""
+        run_info = self._make_run_info(enable_planning=True, redis_client="redis-conn")
+        round_tripped = agent_model_module.AgentRunInfo.model_validate(run_info.model_dump())
+        assert round_tripped.enable_planning is True
+        # redis_client is typed as Any; the round-trip preserves it as-is.
+        assert round_tripped.redis_client == "redis-conn"
+
+
 # ----------------------------------------------------------------------------
 # Tests for ExternalA2AAgentConfig
 # ----------------------------------------------------------------------------

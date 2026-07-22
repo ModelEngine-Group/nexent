@@ -620,6 +620,7 @@ def build_skeleton_execution_flow_component(
     memory_list: Optional[List[Any]] = None,
     language: str = "zh",
     is_manager: bool = True,
+    enable_planning: bool = False,
     priority: int = 60,
 ) -> "SystemPromptComponent":
     """Build SystemPromptComponent for the execution flow section.
@@ -645,6 +646,16 @@ def build_skeleton_execution_flow_component(
             lines.append("   - 合理参考之前交互中的上下文记忆信息")
         if is_manager:
             lines.append("   - 确定下一步最佳行动（使用工具或分配给助手）")
+        if enable_planning:
+            lines.append(
+                "   - 评估当前任务的复杂程度：如果任务预计需要超过三个步骤才能完成"
+                "（含工具调用、助手调用或中间判断），请在第一次行动前调用 create_plan"
+                " 工具创建执行计划；简单任务可直接执行，无需创建计划"
+            )
+            lines.append(
+                "   - create_plan 的 steps 列表至少包含 3 个步骤（推荐不超过 8 个），"
+                "每个步骤需要提供稳定的 id（step-1、step-2、...）、简短标题和详细描述"
+            )
         lines.append("   - 解释你的决策逻辑和预期结果")
         lines.append("")
         lines.append("2. 代码：")
@@ -701,6 +712,18 @@ def build_skeleton_execution_flow_component(
             lines.append("   - Reference relevant contextual memories from previous interactions when applicable")
         if is_manager:
             lines.append("   - Determine the best next action (use tools or delegate to agents)")
+        if enable_planning:
+            lines.append(
+                "   - Assess task complexity: if the task is expected to take more than three"
+                " steps to complete (including tool calls, agent handoffs, or intermediate"
+                " decisions), call create_plan before the first action; simple tasks can"
+                " proceed directly without a plan"
+            )
+            lines.append(
+                "   - The steps list passed to create_plan must contain at least 3 steps"
+                " (recommended max 8); each step needs a stable id (step-1, step-2, ...),"
+                " a short title, and a detailed description"
+            )
         lines.append("   - Explain your decision logic and expected results")
         lines.append("")
         lines.append("2. Code:")
@@ -1226,6 +1249,7 @@ def build_context_components(
     user_id: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
+    enable_planning: bool = False,
     # Piecewise data sources
     tools: Optional[Dict[str, Any]] = None,
     skills: Optional[List[Dict[str, str]]] = None,
@@ -1345,6 +1369,7 @@ def build_context_components(
             memory_list=None,
             language=language,
             is_manager=is_manager,
+            enable_planning=enable_planning,
         )
     )
 
