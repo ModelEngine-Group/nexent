@@ -75,6 +75,9 @@ _RAW_TOOL_ROWS = [
         "category": "retrieval",
         "usage": "local_search",
         "params": [{"name": "query", "type": "string"}],
+        "inputs": {
+            "query": {"type": "string", "description": "Runtime query"}
+        },
     },
     {
         "tool_id": 2,

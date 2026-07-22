@@ -7,6 +7,7 @@ import io
 import json
 import base64
 import types
+import zipfile
 
 # Add backend path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -362,6 +363,107 @@ def create_test_service(tenant_id="test-tenant"):
     service = SkillService(tenant_id=tenant_id)
     service._overlay_params_from_local_config_yaml = lambda x: x
     return service
+
+
+class TestOfficialSkillStaticConfiguration:
+    """NL2AGENT must not treat script arguments as install-time settings."""
+
+    def test_script_only_skill_has_no_editable_configuration(self, mocker, tmp_path):
+        skill_name = "runtime-only"
+        zip_path = tmp_path / f"{skill_name}.zip"
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr(
+                f"{skill_name}/scripts/run.py",
+                """import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--query", required=True)
+""",
+            )
+
+        mocker.patch(
+            "backend.services.skill_service._get_official_skills_zip_dir",
+            return_value=str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            side_effect=[
+                {
+                    "skill_id": 9,
+                    "config_schemas": [
+                        {"name": "query", "type": "string", "required": True}
+                    ],
+                    "config_values": {"internal": "kept"},
+                },
+                None,
+            ],
+        )
+
+        result = skill_service.get_official_skill_configuration(
+            skill_name, "tenant-1"
+        )
+
+        assert result == {
+            "skill_id": 9,
+            "skill_name": skill_name,
+            "config_schemas": [],
+            "config_values": {"internal": "kept"},
+        }
+
+    def test_packaged_schema_and_defaults_override_runtime_metadata(
+        self, mocker, tmp_path
+    ):
+        skill_name = "configured"
+        zip_path = tmp_path / f"{skill_name}.zip"
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr(
+                f"{skill_name}/config/schema.yaml",
+                "top_k:\n  type: integer\n  required: false\n",
+            )
+            archive.writestr(
+                f"{skill_name}/config/config.yaml",
+                "top_k: 3\n",
+            )
+            archive.writestr(
+                f"{skill_name}/scripts/run.py",
+                """import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--query", required=True)
+""",
+            )
+
+        mocker.patch(
+            "backend.services.skill_service._get_official_skills_zip_dir",
+            return_value=str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            side_effect=[
+                {
+                    "skill_id": 10,
+                    "config_schemas": [
+                        {"name": "query", "type": "string", "required": True}
+                    ],
+                    "config_values": {"top_k": 99},
+                },
+                None,
+            ],
+        )
+
+        result = skill_service.get_official_skill_configuration(
+            skill_name, "tenant-1"
+        )
+
+        assert result["config_schemas"] == [
+            {
+                "name": "top_k",
+                "type": "integer",
+                "required": False,
+                "description_en": "",
+                "description_zh": "",
+                "depends_on": None,
+            }
+        ]
+        assert result["config_values"] == {"top_k": 3}
 
 
 # ===== Helper Functions Tests =====

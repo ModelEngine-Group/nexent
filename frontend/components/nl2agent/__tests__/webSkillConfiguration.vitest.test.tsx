@@ -98,4 +98,42 @@ describe("online Skill configuration", () => {
       await screen.findByRole("button", { name: "Installed" })
     ).toBeDisabled();
   });
+
+  it("installs a runtime-only Skill without opening a configuration dialog", async () => {
+    vi.mocked(getWebSkillConfiguration).mockResolvedValueOnce({
+      skill_id: 13,
+      skill_name: "create-docx",
+      config_schemas: [],
+      config_values: {},
+    });
+
+    render(
+      <Nl2AgentWorkflowProvider
+        enabled
+        agentId={202}
+        scopeKey="conversation:1:draft:202"
+        onContinue={vi.fn(async () => undefined)}
+      >
+        <WebSkillCard
+          agentId={202}
+          item={{
+            skill_id: 13,
+            skill_name: "create-docx",
+            name: "create-docx",
+          }}
+        />
+      </Nl2AgentWorkflowProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() =>
+      expect(installWebSkill).toHaveBeenCalledWith(202, {
+        skill_id: 13,
+        skill_name: "create-docx",
+        config_values: {},
+      })
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });

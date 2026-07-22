@@ -2868,34 +2868,38 @@ def _read_official_skill_zip_metadata(zip_path: str) -> Dict[str, Any]:
 def get_official_skill_configuration(
     skill_name: str, tenant_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Load authoritative configuration metadata for an official Skill."""
+    """Load NL2AGENT-editable static configuration for an official Skill.
+
+    ``config/schema.yaml`` describes install-time configuration. Script
+    arguments are invocation-time inputs and must never be presented as
+    configuration that a user has to fill while installing the Skill.
+    """
     tenant_skill = skill_db.get_skill_by_name(skill_name, tenant_id) if tenant_id else None
     global_skill = skill_db.get_skill_by_name(skill_name, None)
     record = tenant_skill or global_skill or {}
-    schemas = record.get("config_schemas")
+    schemas: List[Dict[str, Any]] = []
     values = record.get("config_values")
 
     zip_dir = _get_official_skills_zip_dir()
     zip_path = os.path.join(zip_dir, f"{skill_name}.zip") if zip_dir else None
-    if zip_path and os.path.isfile(zip_path) and (schemas is None or values is None):
+    if zip_path and os.path.isfile(zip_path):
         try:
             with open(zip_path, "rb") as file:
                 zip_bytes = file.read()
-            if schemas is None:
-                schemas = _read_schema_yaml_from_zip(
+            schemas = (
+                _read_schema_yaml_from_zip(
                     zip_bytes, preferred_skill_root=skill_name
                 )
-                if schemas is None:
-                    schemas = _get_skill_inputs_from_zip(
-                        zip_bytes, preferred_skill_root=skill_name
-                    )
-            if values is None:
-                values = _read_params_from_zip_config_yaml(
-                    zip_bytes, preferred_skill_root=skill_name
-                )
+                or []
+            )
+            packaged_values = _read_params_from_zip_config_yaml(
+                zip_bytes, preferred_skill_root=skill_name
+            )
+            if packaged_values is not None:
+                values = packaged_values
         except Exception as exc:
             logger.warning(
-                "Failed to load official Skill configuration for %s: %s",
+                "Failed to load official Skill static configuration for %s: %s",
                 skill_name,
                 exc,
             )
@@ -2903,7 +2907,7 @@ def get_official_skill_configuration(
     return {
         "skill_id": record.get("skill_id"),
         "skill_name": skill_name,
-        "config_schemas": schemas or [],
+        "config_schemas": schemas,
         "config_values": values if isinstance(values, dict) else {},
     }
 

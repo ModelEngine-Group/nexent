@@ -559,6 +559,9 @@ async def install_web_skill(
         )
         if reservation.get("status") == "completed":
             return _public_skill_install_result(reservation.get("result") or {})
+        static_configuration = dependencies.get_official_configuration(
+            canonical_name, tenant_id
+        )
         if skill_name:
             installer = partial(
                 _install_skill_by_name,
@@ -599,10 +602,17 @@ async def install_web_skill(
             raise Nl2AgentOperationError(
                 f"Installed skill {canonical_name} could not be resolved for binding."
             )
+        static_defaults = static_configuration.get("config_values")
+        resolved_defaults = (
+            deepcopy(static_defaults) if isinstance(static_defaults, dict) else {}
+        )
+        installed_defaults = installed_skill.get("config_values")
+        if isinstance(installed_defaults, dict):
+            resolved_defaults.update(deepcopy(installed_defaults))
         resolved_config = _resolve_skill_config_values(
             installed_skill_id,
-            installed_skill.get("config_schemas"),
-            installed_skill.get("config_values"),
+            static_configuration.get("config_schemas"),
+            resolved_defaults,
             config_values or {},
         )
         _bind_installed_skill(

@@ -113,6 +113,12 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
                         {"name": "api_key", "default": "secret-value"},
                         {"name": "limit", "type": "integer", "default": 5},
                     ],
+                    "inputs": {
+                        "query": {
+                            "type": "string",
+                            "description": "Runtime-only tool input",
+                        }
+                    },
                 }
             ]
         ),

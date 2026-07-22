@@ -4,6 +4,23 @@
 from test.backend.services.nl2agent_test_support import *  # noqa: F403
 
 
+@pytest.fixture(autouse=True)
+def _official_skill_static_configuration(monkeypatch):
+    """Keep focused install tests independent from official ZIP and database I/O."""
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_official_skill_configuration",
+        MagicMock(
+            side_effect=lambda skill_name, _tenant_id=None: {
+                "skill_id": None,
+                "skill_name": skill_name,
+                "config_schemas": [],
+                "config_values": {},
+            }
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
     db_session, _ = _mock_database_transaction(monkeypatch)
@@ -903,13 +920,33 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     )
     monkeypatch.setattr(
         nl2agent_service,
+        "get_official_skill_configuration",
+        MagicMock(
+            return_value={
+                "skill_id": 12,
+                "skill_name": "search-web-tavily",
+                "config_schemas": [
+                    {"name": "region", "type": "string", "required": True}
+                ],
+                "config_values": {"official_default": "preserved"},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
         "get_tenant_skill_by_name",
         MagicMock(
             return_value={
                 "skill_id": 112,
                 "skill_name": "search-web-tavily",
                 "config_schemas": [
-                    {"name": "region", "type": "string", "required": True}
+                    {"name": "region", "type": "string", "required": True},
+                    {
+                        "name": "query",
+                        "type": "string",
+                        "required": True,
+                        "description_en": "Runtime-only script argument",
+                    },
                 ],
                 "config_values": {"internal_default": "preserved"},
             }
@@ -968,6 +1005,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     assert skill_request.agent_id == 202
     assert skill_request.enabled is True
     assert skill_request.config_values == {
+        "official_default": "preserved",
         "internal_default": "preserved",
         "region": "eu",
     }
