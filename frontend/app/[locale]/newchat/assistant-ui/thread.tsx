@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FC } from "react";
-import type { CompleteAttachment } from "@assistant-ui/react";
+import type {
+  CompleteAttachment,
+  TextMessagePartComponent,
+} from "@assistant-ui/react";
 import { MarkdownText } from "../ui/markdown-text";
 import { VerificationStatus } from "../ui/verification-status";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
@@ -38,6 +41,7 @@ import {
   ArrowLeft,
   SparklesIcon,
   PencilIcon,
+  MousePointerClickIcon,
   XCircleIcon,
 } from "lucide-react";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
@@ -65,7 +69,10 @@ import {
   type VerificationPresentation,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
-import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
+import {
+  isNl2AgentAutoContinueText,
+  parseNl2AgentUserAction,
+} from "@/lib/chat/nl2agentContinuation";
 import { Nl2AgentMessageLifecycle } from "@/components/nl2agent/Nl2AgentFenceRenderer";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
@@ -352,6 +359,10 @@ const ThreadMessages: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
     <ThreadPrimitive.Messages>
       {({ message }) => {
         if (message.role === "user") {
+          const nl2agentUserAction = parseNl2AgentUserAction(
+            message.metadata?.custom?.nl2agentUserAction
+          );
+          if (nl2agentUserAction) return <Nl2AgentUserActionMessage />;
           const text = message.content
             .filter((part) => part.type === "text")
             .map((part) => (part.type === "text" ? part.text : ""))
@@ -670,6 +681,24 @@ const UserMessage: FC = () => {
     </MessagePrimitive.Root>
   );
 };
+
+const PlainText: TextMessagePartComponent = ({ text }) => <>{text}</>;
+
+const Nl2AgentUserActionMessage: FC = () => (
+  <MessagePrimitive.Root
+    data-slot="aui_nl2agent-action-message-root"
+    data-role="user"
+    className="fade-in slide-in-from-bottom-1 animate-in mx-auto flex w-full max-w-(--thread-max-width) justify-end px-2 duration-150"
+  >
+    <div className="flex max-w-[85%] items-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-3 py-2 text-sm text-foreground">
+      <MousePointerClickIcon
+        className="size-3.5 shrink-0 text-primary"
+        aria-hidden
+      />
+      <MessagePrimitive.Parts components={{ Text: PlainText }} />
+    </div>
+  </MessagePrimitive.Root>
+);
 
 const UserActionBar: FC = () => {
   return (

@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Annotated, Optional, Any, List, Dict, Literal
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -8,6 +9,7 @@ from pydantic import (
     EmailStr,
     Field,
     field_validator,
+    model_validator,
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
@@ -326,6 +328,24 @@ class ToolParamsRequest(BaseModel):
     )
 
 
+Nl2AgentUserActionType = Literal[
+    "confirm_requirements",
+    "save_model_selection",
+    "apply_local_resources",
+    "skip_local_resources",
+    "complete_online_configuration",
+    "save_identity",
+]
+
+
+class Nl2AgentUserAction(BaseModel):
+    """A persisted user-facing action that advances an NL2AGENT workflow."""
+
+    action_id: UUID
+    action: Nl2AgentUserActionType
+    display_text: str = Field(min_length=1, max_length=500)
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -336,6 +356,7 @@ class AgentRequest(BaseModel):
     # Target draft agent being built by NL2AGENT. When set, NL2AGENT builtin
     # tools operate on this draft instead of the running NL2AGENT agent.
     draft_agent_id: Optional[int] = None
+    nl2agent_user_action: Optional[Nl2AgentUserAction] = None
     model_id: Optional[int] = None
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
@@ -355,6 +376,24 @@ class AgentRequest(BaseModel):
         description="Whether to enable the planning phase before execution"
     )
 
+    @model_validator(mode="after")
+    def validate_nl2agent_user_action(self):
+        """Keep structured actions bound to one attachment-free NL2AGENT turn."""
+        action = self.nl2agent_user_action
+        if action is None:
+            return self
+        if (
+            not isinstance(self.draft_agent_id, int)
+            or isinstance(self.draft_agent_id, bool)
+            or self.draft_agent_id <= 0
+        ):
+            raise ValueError("nl2agent_user_action requires a valid draft_agent_id")
+        if self.minio_files:
+            raise ValueError("nl2agent_user_action does not accept attachments")
+        if self.query.strip() != action.display_text.strip():
+            raise ValueError("query must match nl2agent_user_action.display_text")
+        return self
+
 
 class MessageUnit(BaseModel):
     type: str
@@ -366,6 +405,8 @@ class MessageRequest(BaseModel):
     message_idx: int  # Modified to integer type
     role: str
     message: List[MessageUnit]
+    message_type: str = "chat"
+    message_metadata: Dict[str, Any] = Field(default_factory=dict)
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
 

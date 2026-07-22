@@ -104,6 +104,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'message_idx': message_data['message_idx'],
         'role': message_data['role'],
         'content': string_content or "",
+        'message_type': message_data.get('message_type', 'chat'),
+        'message_metadata': message_data.get('message_metadata') or {},
         'minio_files': message_data.get('minio_files'),
     }
     return create_conversation_message(message_data_copy, user_id, status=status)
@@ -232,11 +234,21 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
+    action = getattr(request, "nl2agent_user_action", None)
+    message_content = action.display_text if action else request.query
+    message_type = "nl2agent_action" if action else "chat"
+    message_metadata = (
+        {"action_id": str(action.action_id), "action": action.action}
+        if action
+        else {}
+    )
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
         message_idx=user_role_count * 2,
         role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=request.query)],
+        message=[MessageUnit(type="string", content=message_content)],
+        message_type=message_type,
+        message_metadata=message_metadata,
         minio_files=request.minio_files,
     )
     save_message(
@@ -576,6 +588,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': message_content,
                     'message_id': message_id,
+                    'message_type': msg.get('message_type') or 'chat',
+                    'message_metadata': msg.get('message_metadata') or {},
                     'opinion_flag': None
                 }
 

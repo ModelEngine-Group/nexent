@@ -3758,5 +3758,11 @@
   "nl2agent.cardDelivery.regenerate": "重新生成卡片",
   "nl2agent.builder.open": "智能体生成助手",
   "nl2agent.finalize.publish": "应用到配置",
-  "nl2agent.finalize.published": "配置已成功应用"
+  "nl2agent.finalize.published": "配置已成功应用",
+  "nl2agent.action.confirmRequirements": "已确认需求",
+  "nl2agent.action.saveModelSelection": "已选择模型：{{models}}",
+  "nl2agent.action.applyLocalResources": "已应用本地资源：{{toolCount}} 个工具、{{skillCount}} 个技能",
+  "nl2agent.action.skipLocalResources": "已跳过本地资源",
+  "nl2agent.action.completeOnlineConfiguration": "已完成在线资源配置：{{batchCount}} 组",
+  "nl2agent.action.saveIdentity": "已保存智能体名称：{{name}}"
 }

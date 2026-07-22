@@ -26,6 +26,12 @@ export interface ApiMessage {
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;
   message_id?: number;
+  message_type?: "chat" | "nl2agent_action" | string;
+  message_metadata?: {
+    action_id?: string;
+    action?: string;
+    [key: string]: unknown;
+  };
   picture?: string[];
   search?: any[];
   searchByUnitId?: Record<string, any[]>;

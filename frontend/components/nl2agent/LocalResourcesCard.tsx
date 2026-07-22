@@ -311,6 +311,15 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           },
           notifyStateChanged: true,
           continuationText: (result) => result.chat_injection_text,
+          userAction: (result) => ({
+            action: "apply_local_resources",
+            displayText: t("nl2agent.action.applyLocalResources", {
+              defaultValue:
+                "Local resources applied: {{toolCount}} tool(s), {{skillCount}} skill(s)",
+              toolCount: result.bound_tool_count,
+              skillCount: result.bound_skill_count,
+            }),
+          }),
         }
       );
     } catch (error) {
@@ -336,6 +345,13 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           },
           notifyStateChanged: true,
           continuationText: (result) => result.chat_injection_text,
+          userAction: () => ({
+            action: "skip_local_resources",
+            displayText: t(
+              "nl2agent.action.skipLocalResources",
+              "Local resources skipped"
+            ),
+          }),
         }
       );
     } catch (error) {

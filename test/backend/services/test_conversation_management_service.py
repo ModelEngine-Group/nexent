@@ -96,11 +96,14 @@ class MessageUnit:
         self.type = type
         self.content = content
 class MessageRequest:
-    def __init__(self, conversation_id=None, message_idx=None, role=None, message=None, minio_files=None):
+    def __init__(self, conversation_id=None, message_idx=None, role=None, message=None,
+                 message_type="chat", message_metadata=None, minio_files=None):
         self.conversation_id = conversation_id
         self.message_idx = message_idx
         self.role = role
         self.message = message
+        self.message_type = message_type
+        self.message_metadata = message_metadata or {}
         self.minio_files = minio_files
     def model_dump(self):
         return {
@@ -108,6 +111,8 @@ class MessageRequest:
             "message_idx": self.message_idx,
             "role": self.role,
             "message": [m.__dict__ if hasattr(m, "__dict__") else m for m in (self.message or [])],
+            "message_type": self.message_type,
+            "message_metadata": self.message_metadata,
             "minio_files": self.minio_files,
         }
 
@@ -374,6 +379,37 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.message[0].type, "string")
         self.assertEqual(
             request_arg.message[0].content, "What is machine learning?")
+        self.assertEqual(request_arg.message_type, "chat")
+        self.assertEqual(request_arg.message_metadata, {})
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_action(self, mock_save_message):
+        """Structured NL2AGENT actions persist their display text and identity."""
+        action = types.SimpleNamespace(
+            action_id="2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+            action="confirm_requirements",
+            display_text="Requirements confirmed",
+        )
+        agent_request = AgentRequest(
+            conversation_id=123,
+            query="internal directive",
+            nl2agent_user_action=action,
+            minio_files=[],
+            history=[],
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "Requirements confirmed")
+        self.assertEqual(request_arg.message_type, "nl2agent_action")
+        self.assertEqual(
+            request_arg.message_metadata,
+            {
+                "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+                "action": "confirm_requirements",
+            },
+        )
 
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
@@ -702,6 +738,37 @@ class TestConversationManagementService(unittest.TestCase):
             unit for unit in result[0]["message"][0]["message"]
             if unit["type"] == "history_summary"]
         self.assertEqual(summary_units, [])
+
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_restores_user_action(
+            self, mock_get_conversation_history):
+        """User action messages expose their persisted presentation metadata."""
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123,
+            "create_time": "2023-04-01",
+            "message_records": [{
+                "message_id": 1,
+                "role": "user",
+                "message_content": "Requirements confirmed",
+                "message_type": "nl2agent_action",
+                "message_metadata": {
+                    "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+                    "action": "confirm_requirements",
+                },
+                "units": [],
+                "opinion_flag": None,
+            }],
+            "search_records": [],
+            "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        message = result[0]["message"][0]
+        self.assertEqual(message["message_type"], "nl2agent_action")
+        self.assertEqual(
+            message["message_metadata"]["action"], "confirm_requirements"
+        )
 
     @patch('backend.services.conversation_management_service.get_conversation_history')
     def test_get_conversation_history_service_restores_tool_metadata(

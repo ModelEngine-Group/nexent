@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import {
+  createNl2AgentUserAction,
+  type Nl2AgentUserActionDraft,
+} from "@/lib/chat/nl2agentContinuation";
 
 interface LifecycleOptions<T> {
   onSuccess?: (result: T) => void | Promise<void>;
   continuationText?: (result: T) => string | undefined;
+  userAction?: (result: T) => Nl2AgentUserActionDraft;
   notifyStateChanged?: boolean;
   blockInput?: boolean;
   retainInputBlockOnError?: boolean | ((error: unknown) => boolean);
@@ -23,6 +28,7 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
     setInputBlocked,
     notifyStateChanged,
     continueWithText,
+    continueWithUserAction,
     claimCardDelivery,
     completeCardDelivery,
     failCardDelivery,
@@ -66,7 +72,15 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
         if (options.notifyStateChanged) notifyStateChanged();
         const continuationText = options.continuationText?.(result);
         if (continuationText) {
-          await continueWithText(continuationText);
+          const userAction = options.userAction?.(result);
+          if (userAction) {
+            await continueWithUserAction(
+              continuationText,
+              createNl2AgentUserAction(userAction)
+            );
+          } else {
+            await continueWithText(continuationText);
+          }
         }
         succeeded = true;
         return result;
@@ -97,6 +111,7 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
       active,
       beginAction,
       continueWithText,
+      continueWithUserAction,
       endAction,
       notifyStateChanged,
       scopeKey,

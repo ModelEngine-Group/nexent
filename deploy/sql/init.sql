@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS "conversation_message_t" (
   "message_index" int4,
   "message_role" varchar(30) COLLATE "pg_catalog"."default",
   "message_content" varchar COLLATE "pg_catalog"."default",
+  "message_type" varchar(30) COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'chat',
+  "message_metadata" jsonb NOT NULL DEFAULT '{}'::jsonb,
   "minio_files" varchar,
   "opinion_flag" varchar(1),
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
@@ -67,6 +69,8 @@ COMMENT ON COLUMN "conversation_message_t"."conversation_id" IS 'Formal foreign 
 COMMENT ON COLUMN "conversation_message_t"."message_index" IS 'Sequence number, used for frontend display sorting';
 COMMENT ON COLUMN "conversation_message_t"."message_role" IS 'Role sending the message, such as system, assistant, user';
 COMMENT ON COLUMN "conversation_message_t"."message_content" IS 'Complete content of the message';
+COMMENT ON COLUMN "conversation_message_t"."message_type" IS 'Message presentation type, such as chat or nl2agent_action';
+COMMENT ON COLUMN "conversation_message_t"."message_metadata" IS 'Structured metadata used to restore specialized message presentation';
 COMMENT ON COLUMN "conversation_message_t"."minio_files" IS 'Images or documents uploaded by users in the chat interface, stored as a list';
 COMMENT ON COLUMN "conversation_message_t"."opinion_flag" IS 'User feedback on the conversation, enum value Y represents positive, N represents negative';
 COMMENT ON COLUMN "conversation_message_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';

@@ -3758,5 +3758,11 @@
   "nl2agent.cardDelivery.regenerate": "Regenerate card",
   "nl2agent.builder.open": "Agent Builder",
   "nl2agent.finalize.publish": "Apply to configuration",
-  "nl2agent.finalize.published": "Configuration applied successfully!"
+  "nl2agent.finalize.published": "Configuration applied successfully!",
+  "nl2agent.action.confirmRequirements": "Requirements confirmed",
+  "nl2agent.action.saveModelSelection": "Models selected: {{models}}",
+  "nl2agent.action.applyLocalResources": "Local resources applied: {{toolCount}} tool(s), {{skillCount}} skill(s)",
+  "nl2agent.action.skipLocalResources": "Local resources skipped",
+  "nl2agent.action.completeOnlineConfiguration": "Online resource configuration completed: {{batchCount}} batch(es)",
+  "nl2agent.action.saveIdentity": "Agent name saved: {{name}}"
 }

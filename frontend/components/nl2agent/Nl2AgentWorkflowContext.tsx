@@ -10,6 +10,7 @@ import React, {
   useState,
 } from "react";
 import { NL2AGENT_AUTO_CONTINUE_PREFIX } from "@/lib/chat/nl2agentContinuation";
+import type { Nl2AgentUserAction } from "@/lib/chat/nl2agentContinuation";
 import {
   getNl2AgentSessionState,
   resumeNl2AgentSession,
@@ -19,11 +20,19 @@ import {
 
 export { NL2AGENT_AUTO_CONTINUE_PREFIX };
 
+export type Nl2AgentContinuationRequest =
+  | { kind: "automatic"; text: string }
+  | { kind: "user_action"; text: string; action: Nl2AgentUserAction };
+
 interface Nl2AgentWorkflowContextValue {
   active: boolean;
   editable: boolean;
   agentId?: number;
   continueWithText: (text?: string) => Promise<void>;
+  continueWithUserAction: (
+    text: string | undefined,
+    action: Nl2AgentUserAction
+  ) => Promise<void>;
   beginAction: () => void;
   endAction: () => void;
   setInputBlocked: (key: string, blocked: boolean) => void;
@@ -47,6 +56,7 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   active: false,
   editable: false,
   continueWithText: async () => {},
+  continueWithUserAction: async () => {},
   beginAction: () => {},
   endAction: () => {},
   setInputBlocked: () => {},
@@ -65,7 +75,7 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
 
 export const Nl2AgentWorkflowProvider: React.FC<{
   children: React.ReactNode;
-  onContinue: (text: string) => Promise<void>;
+  onContinue: (request: Nl2AgentContinuationRequest) => Promise<void>;
   enabled: boolean;
   editable?: boolean;
   scopeKey: string;
@@ -91,7 +101,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   const [sessionStateError, setSessionStateError] = useState<string>();
   const [resuming, setResuming] = useState(false);
   const [retries, setRetries] = useState<
-    Record<string, { text: string; error: string }>
+    Record<string, { request: Nl2AgentContinuationRequest; error: string }>
   >({});
   const continuingRef = useRef(false);
   const sessionRequestRef = useRef(0);
@@ -195,9 +205,9 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     });
   }, []);
 
-  const continueWithText = useCallback(
-    async (text?: string) => {
-      if (!editable || !text || continuingRef.current) return;
+  const continueRequest = useCallback(
+    async (request?: Nl2AgentContinuationRequest) => {
+      if (!editable || !request?.text || continuingRef.current) return;
       continuingRef.current = true;
       setContinuing(true);
       setRetries((current) => {
@@ -206,12 +216,12 @@ export const Nl2AgentWorkflowProvider: React.FC<{
         return next;
       });
       try {
-        await onContinueRef.current(text);
+        await onContinueRef.current(request);
       } catch (error) {
         setRetries((current) => ({
           ...current,
           [scopeKey]: {
-            text,
+            request,
             error:
               error instanceof Error
                 ? error.message
@@ -226,10 +236,24 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     [editable, scopeKey]
   );
 
+  const continueWithText = useCallback(
+    async (text?: string) => {
+      if (text) await continueRequest({ kind: "automatic", text });
+    },
+    [continueRequest]
+  );
+
+  const continueWithUserAction = useCallback(
+    async (text: string | undefined, action: Nl2AgentUserAction) => {
+      if (text) await continueRequest({ kind: "user_action", text, action });
+    },
+    [continueRequest]
+  );
+
   const retryContinuation = useCallback(async () => {
     const retry = retries[scopeKey];
-    if (retry) await continueWithText(retry.text);
-  }, [continueWithText, retries, scopeKey]);
+    if (retry) await continueRequest(retry.request);
+  }, [continueRequest, retries, scopeKey]);
 
   const continuationError = retries[scopeKey]?.error;
 
@@ -239,6 +263,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       editable,
       agentId: agentId ?? undefined,
       continueWithText,
+      continueWithUserAction,
       beginAction,
       endAction,
       setInputBlocked,
@@ -266,6 +291,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       agentId,
       beginAction,
       continueWithText,
+      continueWithUserAction,
       continuationError,
       continuing,
       endAction,

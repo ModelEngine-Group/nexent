@@ -3493,7 +3493,14 @@ async def run_agent_stream(
         conversation_id=agent_request.conversation_id,
     )
 
-    if is_nl2agent_run:
+    nl2agent_user_action = getattr(agent_request, "nl2agent_user_action", None)
+    if is_nl2agent_run and nl2agent_user_action is not None:
+        from services.nl2agent_service import NL2AGENT_CHAT_INJECTION_TEXT
+
+        # The persisted message remains human-readable while the model receives
+        # the server-owned control directive for the authoritative state check.
+        agent_request.query = NL2AGENT_CHAT_INJECTION_TEXT
+    elif is_nl2agent_run:
         from services.nl2agent_service import process_requirements_revision_text
 
         process_requirements_revision_text(

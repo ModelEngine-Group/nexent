@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Button, Input, message } from "antd";
 import { CheckCircle2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import {
   getNl2AgentSessionState,
@@ -19,6 +20,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
   agentId,
   suggestedDisplayName,
 }) => {
+  const { t } = useTranslation();
   const lifecycle = useNl2AgentCardLifecycle(`identity:${agentId}`);
   const normalizedSuggestion = (suggestedDisplayName || "").trim().slice(0, 50);
   const [displayName, setDisplayName] = useState(normalizedSuggestion);
@@ -58,6 +60,13 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
           message.success("Agent identity saved.");
         },
         continuationText: (result) => result.chat_injection_text ?? undefined,
+        userAction: (result) => ({
+          action: "save_identity",
+          displayText: t("nl2agent.action.saveIdentity", {
+            defaultValue: "Agent name saved: {{name}}",
+            name: result.display_name,
+          }),
+        }),
       });
     } catch (error) {
       message.error(

@@ -3,12 +3,15 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  type Nl2AgentContinuationRequest,
   Nl2AgentWorkflowProvider,
   useNl2AgentWorkflow,
 } from "../Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "../useNl2AgentCardLifecycle";
 
-const wrapperFor = (onContinue: (text: string) => Promise<void>) =>
+const wrapperFor = (
+  onContinue: (request: Nl2AgentContinuationRequest) => Promise<void>
+) =>
   function Wrapper({ children }: { children: React.ReactNode }) {
     return (
       <Nl2AgentWorkflowProvider
@@ -59,6 +62,67 @@ describe("useNl2AgentCardLifecycle", () => {
     expect(result.current.lifecycle.pending).toBe(false);
     expect(result.current.workflow.busy).toBe(false);
     expect(onContinue).toHaveBeenCalledOnce();
+    expect(onContinue).toHaveBeenCalledWith({
+      kind: "automatic",
+      text: "[[NL2AGENT_AUTO_CONTINUE]]",
+    });
+  });
+
+  it("records a successful card action as a structured user continuation", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "action-123" });
+    const onContinue = vi.fn(async () => undefined);
+    const action = vi.fn(async () => ({
+      chat_injection_text: "[[NL2AGENT_AUTO_CONTINUE]] models saved",
+      modelNames: ["GPT-5", "Embedding V3"],
+    }));
+    const { result } = renderHook(useLifecycleWithWorkflow, {
+      wrapper: wrapperFor(onContinue),
+    });
+
+    await act(async () => {
+      await result.current.lifecycle.execute(action, {
+        continuationText: (value) => value.chat_injection_text,
+        userAction: (value) => ({
+          action: "save_model_selection",
+          displayText: `Saved models: ${value.modelNames.join(", ")}`,
+        }),
+      });
+    });
+
+    expect(onContinue).toHaveBeenCalledWith({
+      kind: "user_action",
+      text: "[[NL2AGENT_AUTO_CONTINUE]] models saved",
+      action: {
+        actionId: "action-123",
+        action: "save_model_selection",
+        displayText: "Saved models: GPT-5, Embedding V3",
+      },
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("does not record a user action when the card operation fails", async () => {
+    const onContinue = vi.fn(async () => undefined);
+    const action = vi.fn(async () => {
+      throw new Error("save failed");
+    });
+    const { result } = renderHook(useLifecycleWithWorkflow, {
+      wrapper: wrapperFor(onContinue),
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.lifecycle.execute(action, {
+          continuationText: () => "[[NL2AGENT_AUTO_CONTINUE]]",
+          userAction: () => ({
+            action: "save_model_selection",
+            displayText: "Saved models",
+          }),
+        })
+      ).rejects.toThrow("save failed");
+    });
+
+    expect(onContinue).not.toHaveBeenCalled();
   });
 
   it("keeps a failed action retryable", async () => {

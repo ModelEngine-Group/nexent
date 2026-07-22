@@ -178,6 +178,13 @@ export const RequirementsSummaryCard: React.FC<
           },
           notifyStateChanged: true,
           continuationText: (result) => result.chat_injection_text ?? undefined,
+          userAction: () => ({
+            action: "confirm_requirements",
+            displayText: t(
+              "nl2agent.action.confirmRequirements",
+              "Requirements confirmed"
+            ),
+          }),
         }
       );
     } catch (confirmationFailure) {

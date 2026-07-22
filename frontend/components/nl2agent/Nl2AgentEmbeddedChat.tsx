@@ -16,6 +16,7 @@ import type { Agent } from "@/types/agentConfig";
 import type { Nl2AgentSessionSummary } from "@/services/nl2agentService";
 import { Nl2AgentWorkflowProvider } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import type { Nl2AgentContinuationRequest } from "./Nl2AgentWorkflowContext";
 import { Button } from "antd";
 
 interface Nl2AgentEmbeddedChatProps {
@@ -54,10 +55,21 @@ const EmbeddedRuntimeContent = ({
   }, [runtime, session]);
 
   const continueConversation = useCallback(
-    async (text: string) => {
-      runtime.thread.append({
+    async (request: Nl2AgentContinuationRequest) => {
+      const text =
+        request.kind === "user_action"
+          ? request.action.displayText
+          : request.text;
+      await runtime.thread.append({
         role: "user",
         content: [{ type: "text", text }],
+        ...(request.kind === "user_action"
+          ? {
+              metadata: {
+                custom: { nl2agentUserAction: request.action },
+              },
+            }
+          : {}),
         runConfig: runtime.thread.composer.getState().runConfig,
       });
     },

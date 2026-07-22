@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Select, Spin, message } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   getAvailablePlatformLlms,
   selectNl2AgentModels,
@@ -12,6 +13,7 @@ import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
   agentId,
 }) => {
+  const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(`models:${agentId}`);
   const [models, setModels] = useState<
@@ -83,6 +85,15 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
           },
           notifyStateChanged: true,
           continuationText: (result) => result.chat_injection_text ?? undefined,
+          userAction: (result) => ({
+            action: "save_model_selection",
+            displayText: t("nl2agent.action.saveModelSelection", {
+              defaultValue: "Models selected: {{models}}",
+              models: result.models
+                .map((model) => model.display_name)
+                .join(", "),
+            }),
+          }),
         }
       );
     } catch (error) {

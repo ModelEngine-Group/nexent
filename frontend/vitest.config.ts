@@ -12,6 +12,7 @@ export default defineConfig({
     include: [
       "components/nl2agent/__tests__/*.{test,vitest.test}.{ts,tsx}",
       "components/common/__tests__/*.vitest.test.ts",
+      "app/**/newchat/adapter/__tests__/*.vitest.test.ts",
     ],
     setupFiles: ["./vitest.setup.ts"],
   },

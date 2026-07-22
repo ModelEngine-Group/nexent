@@ -21,6 +21,8 @@ class MessageRecord(TypedDict):
     role: str
     type: Optional[str]
     content: Optional[str]
+    message_type: str
+    message_metadata: Dict[str, Any]
     opinion_flag: Optional[str]
 
 
@@ -182,7 +184,10 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
 
         # Prepare data dictionary
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_data['role'],
-                "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
+                "message_content": message_data['content'],
+                "message_type": message_data.get('message_type', 'chat'),
+                "message_metadata": message_data.get('message_metadata') or {},
+                "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N', "status": status}
         if user_id:
             data = add_creation_tracking(data, user_id)
@@ -832,6 +837,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.message_index,
             ConversationMessage.message_role.label('role'),
             ConversationMessage.message_content,
+            ConversationMessage.message_type,
+            ConversationMessage.message_metadata,
             ConversationMessage.status,
             ConversationMessage.minio_files,
             ConversationMessage.opinion_flag,

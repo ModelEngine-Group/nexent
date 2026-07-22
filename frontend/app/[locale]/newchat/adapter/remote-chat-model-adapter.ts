@@ -10,6 +10,7 @@ import type { ThreadMessage } from "@assistant-ui/react";
 
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
+import { parseNl2AgentUserAction } from "@/lib/chat/nl2agentContinuation";
 import log from "@/lib/logger";
 
 // Backend SSE chunk format
@@ -745,6 +746,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     const query =
       lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
+    const lastUserAction =
+      lastUserIndex >= 0
+        ? parseNl2AgentUserAction(
+            messages[lastUserIndex].metadata?.custom?.nl2agentUserAction
+          )
+        : undefined;
 
     if (!isResume && !query) {
       log.warn("[ChatModelAdapter] No user query found in messages");
@@ -781,6 +788,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: false,
     };
+    if (!isResume && lastUserAction) {
+      requestBody.nl2agent_user_action = {
+        action_id: lastUserAction.actionId,
+        action: lastUserAction.action,
+        display_text: lastUserAction.displayText,
+      };
+    }
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;

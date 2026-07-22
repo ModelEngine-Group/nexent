@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Alert, Button, Spin, message } from "antd";
+import { useTranslation } from "react-i18next";
 
 import {
   completeOnlineResourceConfiguration,
@@ -44,6 +45,7 @@ export const getOnlineConfigurationBlockers = (
 export const OnlineConfigurationBar: React.FC<{
   agentId?: number | null;
 }> = ({ agentId }) => {
+  const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(
     `online-configuration:${agentId ?? "none"}`
@@ -93,6 +95,14 @@ export const OnlineConfigurationBar: React.FC<{
           },
           notifyStateChanged: true,
           continuationText: (result) => result.chat_injection_text ?? undefined,
+          userAction: (result) => ({
+            action: "complete_online_configuration",
+            displayText: t("nl2agent.action.completeOnlineConfiguration", {
+              defaultValue:
+                "Online resource configuration completed: {{batchCount}} batch(es)",
+              batchCount: result.completed_batch_ids.length,
+            }),
+          }),
         }
       );
     } catch (error) {

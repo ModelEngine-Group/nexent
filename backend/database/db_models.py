@@ -65,6 +65,14 @@ class ConversationMessage(TableBase):
     message_role = Column(
         String(30), doc="The role sending the message, such as system, assistant, user")
     message_content = Column(String, doc="The complete content of the message")
+    message_type = Column(
+        String(30), nullable=False, default="chat", server_default="chat",
+        doc="Message presentation type, such as chat or nl2agent_action",
+    )
+    message_metadata = Column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"),
+        doc="Structured metadata used to restore specialized message presentation",
+    )
     minio_files = Column(
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
     opinion_flag = Column(String(

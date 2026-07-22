@@ -114,6 +114,8 @@ class ConversationMessage:
     message_index = MagicMock(name="ConversationMessage.message_index")
     message_role = MagicMock(name="ConversationMessage.message_role")
     message_content = MagicMock(name="ConversationMessage.message_content")
+    message_type = MagicMock(name="ConversationMessage.message_type")
+    message_metadata = MagicMock(name="ConversationMessage.message_metadata")
     unit_index = MagicMock(name="ConversationMessage.unit_index")
     conversation_id = MagicMock(name="ConversationMessage.conversation_id")
     delete_flag = MagicMock(name="ConversationMessage.delete_flag")

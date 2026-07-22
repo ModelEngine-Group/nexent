@@ -22,6 +22,10 @@ import { storageService } from "@/services/storageService";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
 import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
+import {
+  parseNl2AgentUserAction,
+  type Nl2AgentUserAction,
+} from "@/lib/chat/nl2agentContinuation";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
@@ -114,7 +118,7 @@ type BranchableHistoryMessage = Parameters<
   typeof ExportedMessageRepository.fromBranchableArray
 >[0][number];
 
-const buildBranchableHistory = (
+export const buildBranchableHistory = (
   messages: HistoryMessage[]
 ): BranchableHistoryMessage[] => {
   const branchableMessages: BranchableHistoryMessage[] = [];
@@ -144,9 +148,32 @@ const buildBranchableHistory = (
 const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
   left.role === "user" &&
   right.role === "user" &&
-  JSON.stringify(left.message) === JSON.stringify(right.message) &&
-  JSON.stringify(left.minio_files ?? []) ===
-    JSON.stringify(right.minio_files ?? []);
+  (left.message_type === "nl2agent_action" ||
+  right.message_type === "nl2agent_action"
+    ? left.message_type === "nl2agent_action" &&
+      right.message_type === "nl2agent_action" &&
+      typeof left.message_metadata?.action_id === "string" &&
+      left.message_metadata.action_id === right.message_metadata?.action_id
+    : JSON.stringify(left.message) === JSON.stringify(right.message) &&
+      JSON.stringify(left.minio_files ?? []) ===
+        JSON.stringify(right.minio_files ?? []));
+
+const restoreNl2AgentUserAction = (
+  message: ApiMessage
+): Nl2AgentUserAction | undefined => {
+  if (
+    message.role !== "user" ||
+    message.message_type !== "nl2agent_action" ||
+    typeof message.message !== "string"
+  ) {
+    return;
+  }
+  return parseNl2AgentUserAction({
+    actionId: message.message_metadata?.action_id,
+    action: message.message_metadata?.action,
+    displayText: message.message,
+  });
+};
 
 /**
  * Collapse refresh-generated duplicate user messages while preserving every
@@ -155,7 +182,9 @@ const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
  * Assistant messages do not reset the comparison. A different user message
  * does reset it, so identical questions from separate turns remain distinct.
  */
-const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
+export const collapseRefreshUserMessages = (
+  messages: ApiMessage[]
+): ApiMessage[] => {
   const collapsed: ApiMessage[] = [];
   let activeUserMessage: ApiMessage | undefined;
 
@@ -267,6 +296,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // (sources registry, metadata bucket) is keyed off this value so it
       // matches the id that assistant-ui later sets on the rendered message.
       const messageId = String(msg.message_id ?? `${remoteId}-${messageIndex}`);
+      const nl2agentUserAction = restoreNl2AgentUserAction(msg);
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
@@ -588,7 +618,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // always include the field and only set the token bucket when we have
       // historical step data.
       const metadata = {
-        custom: stepTokenCounts.length > 0 ? { stepTokenCounts } : {},
+        custom: {
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(nl2agentUserAction ? { nl2agentUserAction } : {}),
+        },
       };
 
       messages.push({
