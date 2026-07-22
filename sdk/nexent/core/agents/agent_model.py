@@ -125,11 +125,11 @@ class ModelConfig(BaseModel):
 class ToolConfig(BaseModel):
     class_name: str = Field(description="Tool class name")
     name: Optional[str] = Field(description="Tool name")
-    description: Optional[str] = Field(description="Tool description")
-    inputs: Optional[str] = Field(description="Tool inputs")
-    output_type: Optional[str] = Field(description="Tool output type")
-    params: Dict[str, Any] = Field(description="Initialization parameters")
-    source: str = Field(description="Tool source, can be local or mcp")
+    description: Optional[str] = Field(description="Tool description", default=None)
+    inputs: Optional[str] = Field(description="Tool inputs", default=None)
+    output_type: Optional[str] = Field(description="Tool output type", default=None)
+    params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
+    source: str = Field(description="Tool source, can be local or mcp", default="local")
     usage: Optional[str] = Field(description="MCP server name", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
     labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
@@ -145,6 +145,58 @@ VerificationEvent = Literal[
 ]
 VerificationStrictness = Literal["lenient", "balanced", "strict"]
 VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
+
+GuardrailSeverity = Literal["block", "mask", "pass"]
+
+
+class GuardrailRule(BaseModel):
+    """A single pattern-matching rule for the guardrail engine.
+
+    Each rule compiles to a regex and is matched at every guardrail checkpoint.
+
+    Attributes:
+        name: Human-readable rule identifier, e.g. "cn_id_number".
+        pattern: Regular expression string (Python ``re`` syntax).
+        severity: What to do when the pattern matches.
+        description: Optional free-text explanation shown in the UI.
+    """
+
+    name: str = Field(description="Human-readable rule identifier")
+    pattern: str = Field(description="Regular expression in Python re syntax")
+    severity: GuardrailSeverity = Field(
+        description="Action when pattern matches: block, mask, or pass",
+        default="block",
+    )
+    description: Optional[str] = Field(
+        description="Optional explanation shown in configuration UI",
+        default=None,
+    )
+
+
+class GuardrailConfig(BaseModel):
+    """Configuration container for the guardrail subsystem.
+
+    Stored as a nested object inside ``AgentVerificationConfig.guardrail_config``
+    and persisted to the database as part of the ``verification_config`` JSONB
+    column — no separate database migration is needed.
+
+    Attributes:
+        enabled: Master switch. When False, GuardrailEngine is not created.
+        rules: Ordered list of pattern rules. Evaluated in order; first
+               match wins (later rules for the same text are skipped).
+        default_action: Fallback action when a rule matches but has an
+                        unknown severity value (defensive, should not happen).
+    """
+
+    enabled: bool = Field(description="Whether guardrail screening is active", default=False)
+    rules: List[GuardrailRule] = Field(
+        description="Ordered pattern rules; first match wins",
+        default_factory=list,
+    )
+    default_action: GuardrailSeverity = Field(
+        description="Fallback severity when a rule matches but severity is unset",
+        default="pass",
+    )
 
 
 class AgentVerificationConfig(BaseModel):
@@ -194,6 +246,10 @@ class AgentVerificationConfig(BaseModel):
             "final_answer",
         ],
     )
+    guardrail_config: Optional[GuardrailConfig] = Field(
+        description="Guardrail screening configuration (blacklist/whitelist patterns)",
+        default=None,
+    )
 
 class AgentConfig(BaseModel):
     name: str = Field(description="Agent name")
@@ -240,15 +296,37 @@ class AgentConfig(BaseModel):
         description="Layered ReAct self-verification configuration",
         default_factory=AgentVerificationConfig,
     )
-    conversation_id: Optional[int] = Field(
-        description="Conversation ID for history projection in managed context runtime",
-        default=None,
+    enable_planning: bool = Field(
+        description="Whether to enable the planning phase before execution",
+        default=False,
     )
 
 
 class AgentHistory(BaseModel):
     role: str = Field(description="Role, can be user or assistant")
     content : str = Field(description="Conversation content")
+
+
+class PlanStep(BaseModel):
+    """Single step within an agent plan."""
+    id: str = Field(description="Unique step identifier, e.g. 'step-1'")
+    title: str = Field(description="Short step title")
+    description: str = Field(description="Detailed step description")
+    status: Literal["pending", "in_progress", "completed", "skipped"] = Field(
+        description="Current execution status of the step",
+        default="pending"
+    )
+
+
+class AgentPlan(BaseModel):
+    """Structured task plan generated before agent execution."""
+    plan_id: str = Field(description="Unique plan identifier")
+    title: str = Field(description="Plan title extracted from the task")
+    steps: List[PlanStep] = Field(description="Ordered list of plan steps")
+    current_step_index: int = Field(
+        description="Index of the currently executing step",
+        default=0
+    )
 
 
 class AgentRunInfo(BaseModel):
@@ -279,12 +357,22 @@ class AgentRunInfo(BaseModel):
         description="Resolved W2 safe input budget snapshot for request execution",
         default=None,
     )
+    enable_planning: bool = Field(
+        description="Whether to enable the planning phase before execution",
+        default=False
+    )
+    redis_client: Optional[Any] = Field(
+        description="Redis client for plan persistence. "
+                    "If provided, plan_repo will use Redis as primary storage with local fallback.",
+        default=None
+    )
 
     class Config:
         arbitrary_types_allowed = True
 
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
+    memory_config: Dict[str, Any] = Field(description="Memory llm/embedder/vectorstore configuration")
     tenant_id: str = Field(description="Tenant id")
     user_id: str = Field(description="User id")
     agent_id: str = Field(description="Agent id")
@@ -486,7 +574,7 @@ class SkillsComponent(ContextComponent):
 
 
 class MemoryComponent(ContextComponent):
-    """Memory context component - long-term memory search results."""
+    """Memory context component - long-term memory (mem0) search results."""
     component_type: ComponentType = Field(default="memory")
     memories: List[Dict[str, Any]] = Field(description="Memory search results", default_factory=list)
     formatted_content: str = Field(description="Pre-formatted memory context text", default="")

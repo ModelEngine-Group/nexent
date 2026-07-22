@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
+from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -89,7 +90,6 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
     get_latest_assistant_message,
     get_last_unit_for_message,
     save_conversation_user,
@@ -109,6 +109,7 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
+from utils.memory_utils import build_memory_config
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -220,14 +221,19 @@ def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> lis
 
 
 async def _process_skill_file_uploads(
-    content: str,
+    payloads: list[dict] | str,
     user_id: str,
     tenant_id: str,
 ) -> list[dict]:
     """Upload generated skill files to storage and return upload metadata."""
 
     upload_results: list[dict] = []
-    for payload in _extract_skill_file_upload_payloads(content):
+    structured_payloads = (
+        payloads
+        if isinstance(payloads, list)
+        else _extract_skill_file_upload_payloads(payloads)
+    )
+    for payload in structured_payloads:
         absolute_path = str(payload.get("absolute_path") or "").strip()
         file_name = str(
             payload.get("file_name")
@@ -923,9 +929,8 @@ async def _stream_agent_chunks(
     # so that units saved incrementally have a valid message_id to reference.
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
-        history_items = getattr(agent_request, "history", None) or []
         user_role_count = sum(
-            1 for item in history_items
+            1 for item in getattr(agent_request, "history", [])
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
@@ -945,12 +950,6 @@ async def _stream_agent_chunks(
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True)
-
-    # History projection tracking state
-    current_step_id: int = 0
-    pending_tool_content: Optional[str] = None  # Buffered tool content for merge
-    pending_tool_step: Optional[int] = None  # Step index of buffered tool
-    pending_tool_unit_index: Optional[int] = None  # Unit index assigned to buffered tool
 
     # Tracks the unit currently being accumulated in memory. Each entry is
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
@@ -992,9 +991,6 @@ async def _stream_agent_chunks(
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
 
-                if chunk_type == ProcessType.STEP_COUNT.value:
-                    current_step_id += 1
-
                 # Add unit_index to the chunk data for frontend resume skip logic.
                 # This allows frontend to accurately skip chunks that were already persisted.
                 # For mergeable types (continuing chunks), use the current unit's index.
@@ -1018,6 +1014,34 @@ async def _stream_agent_chunks(
 
             if chunk_type == "final_answer":
                 captured_final_answer = chunk_content
+
+            if chunk_type == ProcessType.SKILL_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    absolute_path = str(artifact.get("absolute_path") or "").strip()
+                    if not absolute_path or absolute_path in captured_skill_files:
+                        continue
+                    captured_skill_files[absolute_path] = artifact
+
+                logger.info(
+                    "[skill-file] received structured artifacts count=%s current_total=%s",
+                    len(artifacts),
+                    len(captured_skill_files),
+                )
+                continue
 
             should_parse_skill_file = (
                 chunk_type in {"execution_logs", "parse"}
@@ -1132,17 +1156,24 @@ async def _stream_agent_chunks(
                     # and inserts each search result as a source_search row
                     # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        placeholder_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type="search_content_placeholder",
-                            unit_content='{"placeholder": true}',
-                            user_id=user_id,
-                            unit_status="completed",
-                            step_index=current_step_id,
-                        ).result()
+                        try:
+                            placeholder_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type="search_content_placeholder",
+                                unit_content='{"placeholder": true}',
+                                user_id=user_id,
+                                unit_status="completed",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist search_content placeholder: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                            placeholder_unit_id = None
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
@@ -1187,89 +1218,40 @@ async def _stream_agent_chunks(
                         yield f"data: {chunk}\n\n"
                         continue
 
-                    # Handle tool call merging: buffer TOOL, merge with EXECUTION_LOGS
-                    if chunk_type == ProcessType.TOOL.value:
-                        pending_tool_content = chunk_content
-                        pending_tool_step = current_step_id
-                        pending_tool_unit_index = next_unit_index
-                        next_unit_index += 1
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
-                    if chunk_type == ProcessType.EXECUTION_LOGS.value and pending_tool_content is not None:
-                        merged_content = json.dumps({
-                            "tool_call": pending_tool_content,
-                            "execution_result": chunk_content,
-                        })
-                        if streaming_message_id is not None:
-                            new_unit_id = submit(
-                                save_message_unit,
-                                message_id=streaming_message_id,
-                                conversation_id=agent_request.conversation_id,
-                                unit_index=pending_tool_unit_index,
-                                unit_type="tool_call",
-                                unit_content=merged_content,
-                                user_id=user_id,
-                                unit_status="completed",
-                                step_index=pending_tool_step,
-                            ).result()
-                            current_unit = {
-                                "type": "tool_call",
-                                "content": merged_content,
-                                "unit_id": new_unit_id,
-                                "unit_index": pending_tool_unit_index,
-                                "mergeable": False,
-                            }
-                        pending_tool_content = None
-                        pending_tool_step = None
-                        pending_tool_unit_index = None
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
                     # Default path: insert a new unit row with unit_status='streaming'.
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
-                        new_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type=chunk_type,
-                            unit_content=chunk_content,
-                            user_id=user_id,
-                            unit_status="streaming",
-                            step_index=current_step_id,
-                        ).result()
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": chunk_content,
-                            "unit_id": new_unit_id,
-                            "unit_index": next_unit_index,
-                            "mergeable": mergeable,
-                        }
-                        next_unit_index += 1
+                        try:
+                            new_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type=chunk_type,
+                                unit_content=chunk_content,
+                                user_id=user_id,
+                                unit_status="streaming",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist streaming message unit: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                        else:
+                            current_unit = {
+                                "type": chunk_type,
+                                "content": chunk_content,
+                                "unit_id": new_unit_id,
+                                "unit_index": next_unit_index,
+                                "mergeable": mergeable,
+                            }
+                            next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
-
-        # Flush any buffered tool content that didn't receive execution_logs
-        if pending_tool_content is not None and streaming_message_id is not None:
-            submit(
-                save_message_unit,
-                message_id=streaming_message_id,
-                conversation_id=agent_request.conversation_id,
-                unit_index=pending_tool_unit_index,
-                unit_type="tool",
-                unit_content=pending_tool_content,
-                user_id=user_id,
-                unit_status="completed",
-                step_index=pending_tool_step,
-            ).result()
-            pending_tool_content = None
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
         await channel.publish(_safe_agent_stream_error_chunk())
@@ -1335,13 +1317,10 @@ async def _stream_agent_chunks(
             )
 
         try:
-            skill_file_content_local = "\n".join(
-                json.dumps(payload, ensure_ascii=False)
-                for payload in captured_skill_files.values()
-            )
-            if skill_file_content_local:
+            skill_file_payloads = list(captured_skill_files.values())
+            if skill_file_payloads:
                 skill_file_uploads = await _process_skill_file_uploads(
-                    content=skill_file_content_local,
+                    payloads=skill_file_payloads,
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
@@ -1379,12 +1358,57 @@ async def _stream_agent_chunks(
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
-        # Memory recording is now handled by the agent-side ``StoreMemoryTool``
-        # (which delegates to the new ``MemoryService`` facade). The legacy
-        # background ``add_memory_in_levels`` call has been removed because
-        # its dual-level ``agent``/``user_agent`` semantics no longer map to
-        # the new layered architecture (agents may only write to
-        # ``agent.short_term``).
+        async def _add_memory_background():
+            try:
+                # Skip if memory recording is disabled
+                if not getattr(memory_ctx.user_config, "memory_switch", False):
+                    return
+                # Use the captured final answer during streaming; observer queue was drained
+                final_answer_local = captured_final_answer
+                if not final_answer_local:
+                    return
+
+                # Determine allowed memory levels
+                levels_local = {"agent", "user_agent"}
+                if memory_ctx.user_config.agent_share_option == "never":
+                    levels_local.discard("agent")
+                if memory_ctx.agent_id in getattr(memory_ctx.user_config, "disable_agent_ids", []):
+                    levels_local.discard("agent")
+                if memory_ctx.agent_id in getattr(memory_ctx.user_config, "disable_user_agent_ids", []):
+                    levels_local.discard("user_agent")
+                if not levels_local:
+                    return
+
+                mem_messages_local = [
+                    {"role": MESSAGE_ROLE["USER"],
+                        "content": agent_run_info.query},
+                    {"role": MESSAGE_ROLE["ASSISTANT"],
+                        "content": final_answer_local},
+                ]
+
+                add_result_local = await add_memory_in_levels(
+                    messages=mem_messages_local,
+                    memory_config=memory_ctx.memory_config,
+                    tenant_id=memory_ctx.tenant_id,
+                    user_id=memory_ctx.user_id,
+                    agent_id=memory_ctx.agent_id,
+                    memory_levels=list(levels_local),
+                )
+                items_local = add_result_local.get("results", [])
+                logger.info(f"Memory addition completed: {items_local}")
+            except Exception as bg_e:
+                logger.error(
+                    f"Unexpected error during background memory addition: {bg_e}")
+
+        try:
+            # Create and store the background task to avoid warnings
+            background_task = asyncio.create_task(_add_memory_background())
+            # Add done callback to handle any exceptions that might occur
+            background_task.add_done_callback(
+                lambda t: t.exception() if t.exception() else None)
+        except Exception as schedule_err:
+            logger.error(
+                f"Failed to schedule background memory addition: {schedule_err}")
 
 
 def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):
@@ -1477,7 +1501,29 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             tenant_id=tenant_id,
             version_no=version_no
         )
-        agent_info["skills"] = instances
+        # Keep disabled instances for their saved configuration, but do not
+        # return them as selected skills in the agent configuration.
+        instances = [
+            instance for instance in instances if instance.get("enabled", True)
+        ]
+
+        # Fallback: verify each instance's skill_id still exists in ag_skill_info_t
+        valid_skill_ids = skill_db.get_valid_skill_ids(
+            tenant_id=tenant_id,
+            skill_ids=[inst.get("skill_id") for inst in instances if isinstance(inst, dict)]
+        )
+        filtered = []
+        for inst in instances:
+            skill_id = inst.get("skill_id")
+            if skill_id in valid_skill_ids:
+                filtered.append(inst)
+            else:
+                logger.warning(
+                    "Filtering out stale skill instance: agent_id=%s, skill_id=%s (not found in ag_skill_info_t)",
+                    agent_id, skill_id,
+                )
+        agent_info["skills"] = filtered
+
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
@@ -1661,6 +1707,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
                 "requested_output_tokens": request.requested_output_tokens,
+                "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
                 "duty_prompt": request.duty_prompt,
@@ -1880,13 +1927,61 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
-        # Memory cleanup for the deleted agent's short-term records will be
-        # performed by the new Memory system's ``forgetting`` flow once it
-        # lands; the previous dual-level ``clear_memory`` call has been
-        # removed alongside the legacy mem0 path.
+
+        # Clean up all memory data related to the agent
+        await clear_agent_memory(agent_id, tenant_id, user_id)
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
+
+
+async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Purge specified agent's memory data
+
+    Args:
+        agent_id: Agent ID
+        tenant_id: Tenant ID
+        user_id: User ID
+    """
+    try:
+        # Build memory configuration
+        memory_config = build_memory_config(tenant_id)
+
+        # Clean up agent-level memory
+        try:
+            agent_memory_result = await clear_memory(
+                memory_level="agent",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=str(agent_id)
+            )
+            logger.info(
+                f"Cleared agent memory for agent {agent_id}: {agent_memory_result}")
+        except Exception as e:
+            logger.error(
+                f"Failed to clear agent-level memory for agent {agent_id}: {str(e)}")
+
+        # Clean up user_agent-level memory
+        try:
+            user_agent_memory_result = await clear_memory(
+                memory_level="user_agent",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=str(agent_id)
+            )
+            logger.info(
+                f"Cleared user_agent memory for agent {agent_id}: {user_agent_memory_result}")
+        except Exception as e:
+            logger.error(
+                f"Failed to clear user_agent-level memory for agent {agent_id}: {str(e)}")
+
+    except Exception as e:
+        logger.error(
+            f"Failed to build memory config for agent {agent_id}: {str(e)}")
+        # Silently fail to maintain agent deletion process
 
 
 async def _export_agent_dict_core(
@@ -2144,6 +2239,7 @@ async def export_agent_by_agent_id(
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
+                                          is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
                                           duty_prompt=agent_info.get(
@@ -2306,6 +2402,7 @@ async def import_agent_by_agent_id(
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
+                                         "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
@@ -2484,6 +2581,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
@@ -2710,20 +2808,13 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
-        conversation_id=agent_request.conversation_id,
+        enable_planning=agent_request.enable_plan,
     )
 
     # Mount conversation-level reusable ContextManager if enabled
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
     if cm_config and cm_config.enabled:
-        from nexent.core.agents.context.history_projector import HistoryProjector
-        from services.conversation_management_service import get_message_units_by_message_id
-
-        cm_config.history_projector = HistoryProjector(
-            query_units_fn=get_message_units_by_message_id
-        )
-
         cm = agent_run_manager.get_or_create_context_manager(
             conversation_id=str(agent_request.conversation_id),
             config=cm_config,
@@ -2756,37 +2847,28 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     raise ValueError(f"Unsupported target for save_messages: {target!r}")
 
 
-# Helper function for run_agent_stream. ``enable_memory`` controls whether
-# memory preprocessing tokens (``MEMORY_SEARCH_START_MSG`` /
-# ``MEMORY_SEARCH_DONE_MSG`` / ``MEMORY_SEARCH_FAIL_MSG``) are emitted and
-# whether memory retrieval is performed at agent-build time. When memory is
-# disabled the call collapses to the simpler no-memory streaming path.
-async def generate_stream(
+# Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
+async def generate_stream_with_memory(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
-    enable_memory: bool = False,
-    channel: Optional[Any] = None,
 ):
-    """Unified streaming entry point.
+    # Prepare preprocess task tracking (simulate preprocess flow)
+    task_id = str(uuid.uuid4())
+    conversation_id = agent_request.conversation_id
+    current_task = asyncio.current_task()
+    if current_task:
+        preprocess_manager.register_preprocess_task(
+            task_id, conversation_id, current_task
+        )
+    cancel_poll_task = (
+        asyncio.create_task(_cancel_task_on_runtime_signal(conversation_id, user_id, current_task))
+        if current_task
+        else None
+    )
 
-    Args:
-        agent_request: The agent run payload.
-        user_id: The caller user id.
-        tenant_id: The caller tenant id.
-        language: UI/i18n language (``"zh"`` / ``"en"``).
-        enable_memory: When ``True`` the memory preprocess tokens are
-            emitted and ``prepare_agent_run`` is invoked with
-            ``allow_memory_search=True``. A ``MemoryPreparationException``
-            triggers a single fallback to the no-memory path so the run
-            still produces output instead of erroring out. When ``False``
-            the function behaves like the legacy
-            ``generate_stream_no_memory`` and skips all of the above.
-        channel: Optional streaming channel; when ``None`` a fresh channel
-            is created lazily when memory preprocessing is enabled.
-    """
-    # Helper to emit memory_search token.
+    # Helper to emit memory_search token
     def _memory_token(message_text: str) -> str:
         payload = {
             "type": "memory_search",
@@ -2794,75 +2876,48 @@ async def generate_stream(
         }
         return json.dumps(payload, ensure_ascii=False)
 
+    # Placeholder messages handled by frontend for i18n
     msg_start = MEMORY_SEARCH_START_MSG
     msg_done = MEMORY_SEARCH_DONE_MSG
     msg_fail = MEMORY_SEARCH_FAIL_MSG
 
-    # Prepare preprocess task tracking only when memory is enabled, mirroring
-    # the legacy ``generate_stream_with_memory`` behavior.
-    task_id: Optional[str] = None
-    if enable_memory:
-        task_id = str(uuid.uuid4())
-        current_task = asyncio.current_task()
-        if current_task:
-            preprocess_manager.register_preprocess_task(
-                task_id, agent_request.conversation_id, current_task
-            )
+    # ------------------------------------------------------------------
+    # Note: the actual streaming happens via `_stream_agent_chunks` helper
+    # ------------------------------------------------------------------
 
-    # Poll for cross-pod cancel signal so the outer generator task can be
-    # cancelled when another Pod writes the runtime cancel flag.
-    _outer_task = asyncio.current_task()
-    cancel_poll_task = (
-        asyncio.create_task(
-            _cancel_task_on_runtime_signal(
-                agent_request.conversation_id, user_id, _outer_task
-            )
-        )
-        if _outer_task
-        else None
+    # Create channel for multi-subscriber support
+    channel = await streaming_channel_manager.get_or_create_channel(
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id
     )
 
-    # Lazily open the streaming channel. Recursive fallback below needs to
-    # reuse the same channel so subscribers stay connected.
-    if channel is None and enable_memory:
-        channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id,
-            user_id=user_id,
-        )
-
-    memory_enabled_runtime = False
+    memory_enabled = False
     try:
-        if enable_memory:
-            # Peek the user-level memory switch before retrieving memories so
-            # the start / done / fail tokens are gated on the same flag the
-            # old ``generate_stream_with_memory`` honored.
-            memory_context_preview = build_memory_context(
-                user_id, tenant_id, agent_request.agent_id
-            )
-            memory_enabled_runtime = bool(
-                memory_context_preview.user_config.memory_switch
-            )
-            if memory_enabled_runtime:
-                await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
-                yield f"data: {_memory_token(msg_start)}\n\n"
+        memory_context_preview = build_memory_context(
+            user_id, tenant_id, agent_request.agent_id
+        )
+        memory_enabled = bool(memory_context_preview.user_config.memory_switch)
 
-        # Prepare run: with ``allow_memory_search=True`` this performs memory
-        # retrieval; with ``False`` it skips and just builds the agent.
+        if memory_enabled:
+            # Emit start token before memory retrieval
+            await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
+            yield f"data: {_memory_token(msg_start)}\n\n"
+
+        # Prepare run (will execute memory retrieval inside create_agent_run_info)
         try:
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
-                allow_memory_search=enable_memory,
+                allow_memory_search=True,
             )
         except Exception as prep_err:
-            # Normalize any preparation error to MemoryPreparationException so
-            # the memory-enabled path can decide between retry-without-memory
-            # and propagating the failure.
+            # Normalize any preparation error to MemoryPreparationException
             raise MemoryPreparationException(str(prep_err)) from prep_err
 
-        if enable_memory and memory_enabled_runtime:
+        if memory_enabled:
+            # Emit completion token once memory is ready
             await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
             yield f"data: {_memory_token(msg_done)}\n\n"
 
@@ -2877,28 +2932,17 @@ async def generate_stream(
             yield data_chunk
 
     except MemoryPreparationException:
-        if not enable_memory:
-            # No-memory path has no fallback; surface the failure cleanly.
-            logger.error(
-                "Agent run error without memory: %r", None, exc_info=True
-            )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
-            return
-
-        if memory_enabled_runtime:
+        # Memory retrieval failure: emit failure token when memory is enabled, and continue without blocking
+        if memory_enabled:
             await channel.publish(f"data: {_memory_token(msg_fail)}\n\n")
             yield f"data: {_memory_token(msg_fail)}\n\n"
 
         try:
-            # Single fallback: re-issue this generator with memory turned off
-            # so the actual ``_stream_agent_chunks`` still runs.
-            async for data_chunk in generate_stream(
+            # Fallback to the no-memory streaming path, which internally handles
+            async for data_chunk in generate_stream_no_memory(
                 agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
-                language=language,
-                enable_memory=False,
                 channel=channel,
             ):
                 yield data_chunk
@@ -2913,7 +2957,7 @@ async def generate_stream(
             return
     except Exception as stream_exc:
         logger.error(
-            "Generate stream error: %r",
+            "Generate stream with memory error: %r",
             stream_exc,
             exc_info=True,
         )
@@ -2923,8 +2967,38 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
-        if task_id is not None:
-            preprocess_manager.unregister_preprocess_task(task_id)
+        # Always unregister preprocess task
+        preprocess_manager.unregister_preprocess_task(task_id)
+
+
+# Helper function for run_agent_stream, used when user memory is disabled (no memory tokens)
+async def generate_stream_no_memory(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    channel: Optional[Any] = None,
+):
+    """Stream agent responses without any memory preprocessing tokens or fallback logic."""
+
+    # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
+    agent_run_info, memory_context = await prepare_agent_run(
+        agent_request=agent_request,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        language=language,
+        allow_memory_search=False,
+    )
+
+    async for data_chunk in _stream_agent_chunks(
+        agent_request=agent_request,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        agent_run_info=agent_run_info,
+        memory_ctx=memory_context,
+        channel=channel,
+    ):
+        yield data_chunk
 
 
 def _detect_resume_position(
@@ -3274,13 +3348,20 @@ async def run_agent_stream(
 
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    stream_gen = generate_stream(
-        agent_request,
-        user_id=resolved_user_id,
-        tenant_id=resolved_tenant_id,
-        language=language,
-        enable_memory=use_memory_stream,
-    )
+    if use_memory_stream:
+        stream_gen = generate_stream_with_memory(
+            agent_request,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+            language=language,
+        )
+    else:
+        stream_gen = generate_stream_no_memory(
+            agent_request,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+            language=language,
+        )
 
     async def stream_with_agent_context():
         try:
@@ -3298,29 +3379,96 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk()
-        finally:
-            # Auto-generate title for new conversations after stream completes
-            if is_new_conversation:
-                try:
-                    await generate_conversation_title_service(
-                        conversation_id=agent_request.conversation_id,
-                        question=agent_request.query,
-                        user_id=resolved_user_id,
-                        tenant_id=resolved_tenant_id,
-                        language=language,
-                    )
-                except Exception as title_exc:
-                    logger.warning(
-                        "Failed to auto-generate title for conversation_id=%s: %r",
-                        agent_request.conversation_id,
-                        title_exc,
-                    )
+
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    if agent_request.conversation_id is not None:
+        headers["conversation_id"] = str(agent_request.conversation_id)
 
     return StreamingResponse(
         stream_with_agent_context(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=headers,
     )
+
+
+async def run_agent_background(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    skip_user_save: bool = False,
+) -> Dict[str, Any]:
+    """
+    Run an agent without returning an SSE response.
+
+    This path is used by background automation tasks. It reuses the same
+    preparation, monitoring, memory and message persistence flow as
+    run_agent_stream, but consumes generated chunks internally.
+    """
+    if not agent_request.conversation_id:
+        raise ValueError("conversation_id is required for background agent runs")
+
+    if not agent_request.is_debug and not skip_user_save:
+        save_messages(
+            agent_request,
+            target=MESSAGE_ROLE["USER"],
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+
+    memory_ctx_preview = build_memory_context(
+        user_id, tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
+    )
+    memory_enabled = memory_ctx_preview.user_config.memory_switch
+
+    agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        query=agent_request.query,
+        is_debug=agent_request.is_debug,
+        language=language,
+        memory_enabled=memory_enabled,
+        history_count=len(agent_request.history) if agent_request.history else 0,
+        minio_files_count=len(agent_request.minio_files) if agent_request.minio_files else 0,
+        extra_metadata={
+            "background": True,
+            "skip_user_save": skip_user_save,
+            "agent_share_option": getattr(
+                memory_ctx_preview.user_config,
+                "agent_share_option",
+                "unknown",
+            ),
+        },
+    ))
+
+    if memory_enabled and not agent_request.is_debug:
+        stream_gen = generate_stream_with_memory(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+    else:
+        stream_gen = generate_stream_no_memory(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+
+    chunks = 0
+    with agent_monitoring_context(agent_metadata):
+        async for _ in stream_gen:
+            chunks += 1
+
+    latest_message = get_latest_assistant_message(agent_request.conversation_id, user_id)
+    return {
+        "conversation_id": agent_request.conversation_id,
+        "assistant_message_id": latest_message.get("message_id") if latest_message else None,
+        "chunks": chunks,
+    }
 
 
 def stop_agent_tasks(conversation_id: int, user_id: str):
@@ -3349,6 +3497,10 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message, "already_stopped": True}
+
+
+def is_agent_running(conversation_id: int, user_id: str) -> bool:
+    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:

@@ -20,6 +20,8 @@ from nexent.core.models.capacity_budget import (
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
+from nexent.memory.memory_service import search_memory_in_levels
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -49,6 +51,7 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
+from utils.redis_utils import get_redis_client
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.model import AgentToolParamsRequest, ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -527,7 +530,7 @@ def _get_skill_script_tools(
     version_no: int = 0
 ) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
-[]
+
     Args:
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
@@ -655,6 +658,42 @@ async def create_model_config_list(tenant_id):
     return model_list
 
 
+def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
+    """Inject plan tool configs into the given tools list if enable_planning is True."""
+    if not enable_planning:
+        return
+
+    plan_names = {"create_plan", "update_plan_step"}
+    if any(t.name in plan_names for t in tools):
+        return
+
+    # description_zh/zh pairs match the bilingual descriptions in plan_tools.py
+    tools.extend([
+        ToolConfig(
+            class_name="CreatePlanTool",
+            name="create_plan",
+            description="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。"
+            "每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。"
+            "返回创建的计划 id 和步骤数量。",
+            inputs='{"plan_id": "string", "title": "string", "steps": "array"}',
+            output_type="object",
+            params={},
+            source="builtin",
+        ),
+        ToolConfig(
+            class_name="UpdatePlanStepTool",
+            name="update_plan_step",
+            description="更新单个计划步骤的状态。完成后调用 status='completed'，不再需要时调用"
+            " status='skipped'，开始执行时调用 status='in_progress'。"
+            "返回被更新的步骤 id 和状态。",
+            inputs='{"step_id": "string", "status": "string"}',
+            output_type="object",
+            params={},
+            source="builtin",
+        ),
+    ])
+
+
 async def create_agent_config(
     agent_id,
     tenant_id,
@@ -666,7 +705,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
-    conversation_id: Optional[int] = None,
+    enable_planning: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -707,6 +746,19 @@ async def create_agent_config(
         tool_params=normalized_tool_params,
     )
 
+    # Append parallel_executor as a system-managed tool (always available,
+    # like store_memory / search_memory).  Description and inputs are read
+    # from the Tool class so they stay in sync with the SDK definition.
+    tool_list.append(ToolConfig(
+        class_name=ParallelExecutorTool.__name__,
+        name=ParallelExecutorTool.name,
+        description=ParallelExecutorTool.description,
+        inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
+        output_type=ParallelExecutorTool.output_type,
+        params={},
+        source="local",
+    ))
+
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
     constraint_prompt = agent_info.get("constraint_prompt", "")
@@ -723,69 +775,44 @@ async def create_agent_config(
     app_description = tenant_config_manager.get_app_config(
         'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
 
-    # Memory list population: in the new Memory system this is performed by
-    # the backend's ``memory_context_service`` via the
-    # ``MemoryService.search_memory`` facade. The legacy
-    # ``search_memory_in_levels`` multi-level fan-out has been removed; the
-    # streaming layer and tool wiring below remain in place.
-    memory_list: list = []
-    memory_context = build_memory_context(
-        user_id, tenant_id, agent_id, skip_query=not allow_memory_search
-    )
+    # Get memory list
+    memory_context = build_memory_context(user_id, tenant_id, agent_id, skip_query=not allow_memory_search)
+    memory_list = []
+    if allow_memory_search and memory_context.user_config.memory_switch:
+        logger.debug("Retrieving memory list...")
+        memory_levels = ["tenant", "agent", "user", "user_agent"]
+        if memory_context.user_config.agent_share_option == "never":
+            memory_levels.remove("agent")
+        if memory_context.agent_id in memory_context.user_config.disable_agent_ids:
+            memory_levels.remove("agent")
+        if memory_context.agent_id in memory_context.user_config.disable_user_agent_ids:
+            memory_levels.remove("user_agent")
+
+        try:
+            search_res = await search_memory_in_levels(
+                query_text=last_user_query,
+                memory_config=memory_context.memory_config,
+                tenant_id=memory_context.tenant_id,
+                user_id=memory_context.user_id,
+                agent_id=memory_context.agent_id,
+                memory_levels=memory_levels,
+            )
+            memory_list = search_res.get("results", [])
+            logger.debug(f"Retrieved memory list: {memory_list}")
+        except Exception as e:
+            # Bubble up to streaming layer so it can emit <MEM_FAILED> and fall back
+            raise Exception(f"Failed to retrieve memory list: {e}")
 
     # Append active memory tools if memory is enabled
-    if memory_context.user_config.memory_switch:
+    if memory_context.user_config.memory_switch and memory_context.memory_config:
         try:
             memory_metadata = {
+                "memory_config": memory_context.memory_config,
                 "memory_user_config": memory_context.user_config,
                 "tenant_id": memory_context.tenant_id,
                 "user_id": memory_context.user_id,
                 "agent_id": memory_context.agent_id,
             }
-
-            # Wire the SDK ``MemoryService`` facade to the
-            # backend services via the adapter. The facade handles policy
-            # enforcement, embedding lookup, and idempotency on its own
-            # and dispatches persistence/retrieval to
-            # ``services.memory_record_service`` /
-            # ``services.memory_retrieval_service``.
-            try:
-                from services.memory_backend_adapter import build_memory_service_for_agent
-                memory_metadata["memory_service"] = (
-                    build_memory_service_for_agent(
-                        tenant_id=memory_context.tenant_id,
-                        user_id=memory_context.user_id,
-                        agent_id=str(memory_context.agent_id or ""),
-                    )
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to build MemoryService for agent: %s. "
-                    "Memory tools will fall back to legacy path.", exc
-                )
-
-            # Hand the SearchMemoryTool a backend
-            # ``MemoryContextService`` so active search calls run
-            # through the retrieval pipeline (normalize / fusion /
-            # decay / MMR / token-budget selection) instead of
-            # bypassing it. The service is reused for prompt injection,
-            # so a single instance per agent is sufficient.
-            try:
-                from services.memory_context_service import get_memory_context_service
-
-                memory_metadata["memory_context_service"] = (
-                    get_memory_context_service()
-                )
-                logger.debug(
-                    "MemoryContextService attached to memory tools "
-                    "for agent_id=%s", memory_context.agent_id
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to attach MemoryContextService to memory "
-                    "tools: %s. Active search_memory will fall back to "
-                    "the legacy MemoryService path.", exc
-                )
 
             memory_tool_names = {"store_memory", "search_memory"}
             tool_list = [t for t in tool_list if t.name not in memory_tool_names]
@@ -794,9 +821,9 @@ async def create_agent_config(
                 class_name="StoreMemoryTool",
                 name="store_memory",
                 description=(
-                    "Save important information to the current agent's short-term memory. "
+                    "Save important information to long-term memory for future recall. "
                     "Use this when the user shares personal preferences, facts about themselves, "
-                    "project context, or instructions that should persist across the current conversation. "
+                    "project context, or instructions that should persist across conversations. "
                     "Do NOT store transient information like temporary calculations, information "
                     "already in the knowledge base, or data the user explicitly says to forget."
                 ),
@@ -819,7 +846,7 @@ async def create_agent_config(
                 class_name="SearchMemoryTool",
                 name="search_memory",
                 description=(
-                    "Search memory for relevant information from previous interactions. "
+                    "Search long-term memory for relevant information from previous interactions. "
                     "Use this when you need context about the user's preferences, past decisions, "
                     "or previously discussed topics that aren't in the current conversation. "
                     "The system already provides some memory context automatically -- use this tool "
@@ -889,6 +916,8 @@ async def create_agent_config(
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
     builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
     available_tools = tool_list + builtin_tools
+
+    _inject_plan_tools(available_tools, enable_planning)
 
     render_kwargs = {
         "duty": duty_prompt,
@@ -965,6 +994,7 @@ async def create_agent_config(
             user_id=user_id,
             language=language,
             is_manager=is_manager,
+            enable_planning=enable_planning,
             tools=render_kwargs["tools"],
             skills=skills,
             managed_agents=render_kwargs["managed_agents"],
@@ -987,6 +1017,8 @@ async def create_agent_config(
         hard_input_budget_tokens=hard_input_budget_tokens,
         strategy="full",
     )
+
+
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
@@ -1008,7 +1040,17 @@ async def create_agent_config(
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
-        conversation_id=conversation_id,
+        enable_planning=enable_planning,
+    )
+    logger.info(
+        "Agent metadata | name=%s | tool_list=%s | managed_agents=%s | model_name=%s | max_steps=%s | enable_planning=%s | has_plan_tools=%s",
+        agent_config.name,
+        [t.name for t in agent_config.tools],
+        [a.name for a in agent_config.managed_agents],
+        agent_config.model_name,
+        agent_config.max_steps,
+        agent_config.enable_planning,
+        any(t.name in {"create_plan", "update_plan_step"} for t in agent_config.tools),
     )
     return agent_config
 
@@ -1421,8 +1463,8 @@ async def create_agent_run_info(
     override_version_no: int | None = None,
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
-    conversation_id: Optional[int] = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    enable_planning: bool = False,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1451,7 +1493,7 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
-        "conversation_id": conversation_id,
+        "enable_planning": enable_planning,
     }
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
@@ -1519,5 +1561,6 @@ async def create_agent_run_info(
             "safe_input_budget_snapshot",
             None,
         ),
+        redis_client=get_redis_client(),
     )
     return agent_run_info
