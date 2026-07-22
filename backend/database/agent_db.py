@@ -11,9 +11,11 @@ from utils.str_utils import convert_list_to_string
 logger = logging.getLogger("agent_db")
 
 
-def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
+def find_agent_info_by_agent_id(
+    agent_id: int, tenant_id: str, version_no: int = 0
+) -> Optional[dict]:
     """
-    Search agent info by agent_id.
+    Find agent info by agent_id, returning ``None`` when it does not exist.
     Default version_no=0 queries the draft version.
 
     Args:
@@ -32,12 +34,29 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
             AgentInfo.delete_flag != 'Y',
         ).first()
 
-        if not agent:
-            raise ValueError("agent not found")
+        return as_dict(agent) if agent else None
 
-        agent_dict = as_dict(agent)
 
-        return agent_dict
+def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
+    """Search agent info by ID and raise when no matching record exists."""
+    agent = find_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+    if agent is None:
+        raise ValueError("agent not found")
+    return agent
+
+
+def find_agent_id_by_agent_name(
+    agent_name: str, tenant_id: str, version_no: int = 0
+) -> Optional[int]:
+    """Return an agent ID by name, or ``None`` when the name is available."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.name == agent_name,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != 'Y',
+        ).first()
+        return agent.agent_id if agent else None
 
 
 def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: int = 0):
@@ -50,15 +69,10 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         tenant_id: Tenant ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
-    with get_db_session() as session:
-        agent = session.query(AgentInfo).filter(
-            AgentInfo.name == agent_name,
-            AgentInfo.tenant_id == tenant_id,
-            AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y').first()
-        if not agent:
-            raise ValueError("agent not found")
-        return agent.agent_id
+    agent_id = find_agent_id_by_agent_name(agent_name, tenant_id, version_no)
+    if agent_id is None:
+        raise ValueError("agent not found")
+    return agent_id
 
 
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):
@@ -188,7 +202,7 @@ def mark_agents_as_new(agent_ids: list[int], tenant_id: str, user_id: str, versi
         )
 
 
-def create_agent(agent_info, tenant_id: str, user_id: str):
+def create_agent(agent_info, tenant_id: str, user_id: str, db_session=None):
     """
     Create a new agent in the database (draft version, version_no=0).
     :param agent_info: Dictionary containing agent information
@@ -208,7 +222,8 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "updated_by": user_id,
         "is_new": True,  # Mark new agents as new
     })
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)
@@ -252,7 +267,13 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         return result
 
 
-def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
+def update_agent(
+    agent_id,
+    agent_info,
+    user_id,
+    version_no: int = 0,
+    db_session=None,
+):
     """
     Update an existing agent in the database.
     Default version_no=0 updates the draft version.
@@ -263,10 +284,14 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         tenant_id: Tenant ID
         user_id: Optional user ID
         version_no: Version number to filter. Default 0 = draft/editing state
+        db_session: Optional caller-owned transaction session
     Returns:
         Updated agent object
     """
-    with (get_db_session() as session):
+    session_context = (
+        get_db_session(db_session) if db_session is not None else get_db_session()
+    )
+    with session_context as session:
         # update ag_tenant_agent_t
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,

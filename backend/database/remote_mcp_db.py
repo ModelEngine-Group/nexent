@@ -31,9 +31,12 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
         "updated_by": user_id,
         "delete_flag": "N"
     })
+    filtered_data = filter_property(filtered_data, McpRecord)
     with get_db_session() as session:
         new_mcp = McpRecord(**filtered_data)
         session.add(new_mcp)
+        session.flush()
+        return as_dict(new_mcp)
 
 
 def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str):
@@ -188,6 +191,41 @@ def clear_mcp_record_market_id(
             McpRecord.market_id == market_id,
             McpRecord.delete_flag != 'Y'
         ).update({"market_id": None, "updated_by": user_id})
+
+
+def update_mcp_record_installation_config_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    name: str,
+    description: str | None,
+    tags: List[str] | None,
+    source: str,
+    authorization_token: str | None,
+    registry_json: Dict[str, Any],
+    config_json: Dict[str, Any],
+    container_port: int,
+) -> None:
+    """Persist a corrected container installation before rebuilding it."""
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y',
+        ).update(
+            {
+                "mcp_name": name,
+                "description": description,
+                "tags": tags or [],
+                "source": source,
+                "authorization_token": authorization_token,
+                "registry_json": registry_json,
+                "config_json": config_json,
+                "container_port": container_port,
+                "updated_by": user_id,
+            }
+        )
 
 
 def update_mcp_record_enabled_by_id(

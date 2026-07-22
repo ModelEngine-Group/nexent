@@ -1,6 +1,6 @@
 import re
 import json
-from typing import List
+from typing import Dict, List, Optional
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
@@ -31,7 +31,13 @@ def create_tool(tool_info, version_no: int = 0):
         session.add(new_tool_instance)
 
 
-def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_tool_by_tool_info(
+        tool_info,
+        tenant_id: str,
+        user_id: str,
+        version_no: int = 0,
+        db_session=None,
+):
     """
     Create or update a ToolInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -41,6 +47,7 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
         tenant_id: Tenant ID for filtering, mandatory
         user_id: User ID for updating (will be set as the last updater)
         version_no: Version number to filter. Default 0 = draft/editing state
+        db_session: Optional caller-owned SQLAlchemy Session for a shared transaction
 
     Returns:
         Created or updated ToolInstance object
@@ -55,7 +62,8 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
             if v is not None
         }
 
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         # Query if there is an existing ToolInstance
         # Note: Do not filter by user_id to avoid creating duplicate instances
         # for the same agent_id and tool_id when different users save
@@ -82,7 +90,32 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
         return as_dict(tool_instance)
 
 
-def query_all_tools(tenant_id: str):
+def delete_tool_instances_by_ids(
+    agent_id: int,
+    tool_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    db_session=None,
+) -> None:
+    """Soft-delete selected ToolInstances within an optional shared transaction."""
+    if not tool_ids:
+        return
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
+        session.query(ToolInstance).filter(
+            ToolInstance.agent_id == agent_id,
+            ToolInstance.tool_id.in_(sorted(set(map(int, tool_ids)))),
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.version_no == version_no,
+            ToolInstance.delete_flag != 'Y',
+        ).update(
+            {"delete_flag": "Y", "updated_by": user_id},
+            synchronize_session=False,
+        )
+
+
+def query_all_tools(tenant_id: str, limit: Optional[int] = None):
     """
     Query ToolInfo in the database based on tenant_id and agent_id, optional user_id.
     Filter tools that belong to the specific tenant_id or have tenant_id as "tenant_id"
@@ -93,6 +126,8 @@ def query_all_tools(tenant_id: str):
             ToolInfo.delete_flag != 'Y',
             ToolInfo.author == tenant_id)
 
+        if limit is not None:
+            query = query.limit(max(1, min(10_000, int(limit))))
         tools = query.all()
         return [as_dict(tool) for tool in tools]
 
@@ -134,6 +169,17 @@ def query_tools_by_ids(tool_id_list: List[int]):
     with get_db_session() as session:
         tools = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(
             tool_id_list)).filter(ToolInfo.delete_flag != 'Y').all()
+        return [as_dict(tool) for tool in tools]
+
+
+def query_tools_by_ids_for_tenant(tool_id_list: List[int], tenant_id: str):
+    """Query active ToolInfo records by ID within one tenant boundary."""
+    with get_db_session() as session:
+        tools = session.query(ToolInfo).filter(
+            ToolInfo.tool_id.in_(tool_id_list),
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y',
+        ).all()
         return [as_dict(tool) for tool in tools]
 
 
@@ -310,6 +356,40 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
     logger.info("Updated tool table in PG database")
 
 
+def upsert_discovered_mcp_tools(
+    tenant_id: str, user_id: str, tool_list: List[ToolInfo]
+) -> List[Dict]:
+    """Upsert tools discovered from one MCP without changing other tools."""
+    result = []
+    with get_db_session() as session:
+        for tool in tool_list:
+            row = session.query(ToolInfo).filter(
+                ToolInfo.name == tool.name,
+                ToolInfo.source == ToolSourceEnum.MCP.value,
+                ToolInfo.usage == tool.usage,
+                ToolInfo.author == tenant_id,
+                ToolInfo.delete_flag != 'Y',
+            ).first()
+            data = filter_property(tool.__dict__, ToolInfo)
+            if row is None:
+                data.update({
+                    "author": tenant_id,
+                    "created_by": user_id,
+                    "updated_by": user_id,
+                    "is_available": True,
+                })
+                row = ToolInfo(**data)
+                session.add(row)
+            else:
+                for key, value in data.items():
+                    setattr(row, key, value)
+                row.updated_by = user_id
+                row.is_available = True
+            session.flush()
+            result.append(as_dict(row))
+    return result
+
+
 def add_tool_field(tool_info):
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
@@ -450,3 +530,105 @@ def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: 
         ).order_by(ToolInstance.update_time.desc())
         tool_instance = query.first()
         return as_dict(tool_instance) if tool_instance else None
+
+
+# ---------------------------------------------------------------------------
+# NL2AGENT builtin tool catalog seeding
+# ---------------------------------------------------------------------------
+
+# Catalog definitions for the 6 NL2AGENT builtin tools. These are inserted
+# idempotently into ag_tool_info_t so the NL2AGENT default agent can reference
+# them via enabled_tool_ids. The `class_name` is the stable key used by
+# NexentAgent.create_builtin_tool to dispatch the tool.
+NL2AGENT_BUILTIN_TOOL_DEFINITIONS = [
+    {
+        "name": "nl2agent_search_local_resources",
+        "origin_name": "search_local_resources",
+        "class_name": "NL2AgentSearchLocalResourcesTool",
+        "description": "Search local tools (SDK + locally-installed MCP + LangChain) and local skills matching the user's intent. Returns a JSON object with `tools` and `skills` arrays, each containing up to 5 items with score (0-1) and reason.",
+        "source": getattr(getattr(ToolSourceEnum, "BUILTIN", None), "value", "builtin"),
+        "category": "nl2agent",
+        "usage": "",
+        "params": [],
+        "inputs": '{"query": "string"}',
+        "output_type": "string",
+        "labels": ["nl2agent"],
+    },
+    {
+        "name": "nl2agent_search_web_mcps",
+        "origin_name": "search_web_mcps",
+        "class_name": "NL2AgentSearchWebMcpsTool",
+        "description": "Search web MCP marketplaces (official registry + community) for servers matching the user's intent. Returns a JSON array of up to 5 MCP server cards with score (0-1) and reason. Each card is rendered individually with an Install button.",
+        "source": getattr(getattr(ToolSourceEnum, "BUILTIN", None), "value", "builtin"),
+        "category": "nl2agent",
+        "usage": "",
+        "params": [],
+        "inputs": '{"query": "string"}',
+        "output_type": "string",
+        "labels": ["nl2agent"],
+    },
+    {
+        "name": "nl2agent_search_web_skills",
+        "origin_name": "search_web_skills",
+        "class_name": "NL2AgentSearchWebSkillsTool",
+        "description": "Search the official/web skills marketplace for skills matching the user's intent. Returns a JSON array of up to 5 skill cards with score (0-1) and reason. Each card is rendered individually with an Install button.",
+        "source": getattr(getattr(ToolSourceEnum, "BUILTIN", None), "value", "builtin"),
+        "category": "nl2agent",
+        "usage": "",
+        "params": [],
+        "inputs": '{"query": "string"}',
+        "output_type": "string",
+        "labels": ["nl2agent"],
+    },
+]
+
+
+def seed_nl2agent_builtin_tools(tenant_id: str, user_id: str) -> List[int]:
+    """Idempotently insert the 3 NL2AGENT builtin tool catalog rows for a tenant.
+
+    Matches existing rows by (name, source). If a row exists, it is updated in
+    place (preserving tool_id). If not, a new row is inserted. Returns the
+    list of tool_ids for the 3 NL2AGENT builtin tools in definition order.
+
+    Args:
+        tenant_id: Tenant ID to scope the catalog rows.
+        user_id: User ID for created_by/updated_by audit fields.
+
+    Returns:
+        List of 3 tool_ids corresponding to NL2AGENT_BUILTIN_TOOL_DEFINITIONS.
+    """
+    tool_ids: List[int] = []
+    with get_db_session() as session:
+        existing = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id,
+            ToolInfo.source == NL2AGENT_BUILTIN_TOOL_DEFINITIONS[0]["source"],
+            ToolInfo.category == "nl2agent",
+        ).all()
+        existing_by_name = {t.name: t for t in existing}
+
+        for defn in NL2AGENT_BUILTIN_TOOL_DEFINITIONS:
+            row = existing_by_name.get(defn["name"])
+            if row is None:
+                data = dict(defn)
+                data.update({
+                    "created_by": user_id,
+                    "updated_by": user_id,
+                    "author": tenant_id,
+                    "is_available": True,
+                })
+                row = ToolInfo(**filter_property(data, ToolInfo))
+                session.add(row)
+                session.flush()
+            else:
+                for key, value in defn.items():
+                    if hasattr(row, key):
+                        setattr(row, key, value)
+                row.updated_by = user_id
+                row.is_available = True
+            tool_ids.append(row.tool_id)
+
+        logger.info(
+            f"Seeded {len(tool_ids)} NL2AGENT builtin tools for tenant {tenant_id}"
+        )
+    return tool_ids

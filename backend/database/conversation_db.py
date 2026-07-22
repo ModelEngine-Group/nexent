@@ -101,8 +101,12 @@ def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
     return DEFAULT_TENANT_ID
 
 
-def create_conversation(conversation_title: str, user_id: Optional[str] = None,
-                        agent_id: Optional[int] = None) -> Dict[str, Any]:
+def create_conversation(
+    conversation_title: str,
+    user_id: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    db_session=None,
+) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -114,7 +118,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
     """
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": 'N'}
         if agent_id is not None:
@@ -504,11 +509,22 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
              * 1000).label('update_time')
-        ).where(
-            ConversationRecord.delete_flag == 'N'
-        ).order_by(
-            desc(ConversationRecord.create_time)
-        )
+        ).where(ConversationRecord.delete_flag == 'N')
+
+        # Keep NL2AGENT runner conversations out of the global chat history.
+        # The lazy import preserves compatibility with isolated DB-model stubs.
+        try:
+            from .db_models import AgentInfo
+        except ImportError:
+            AgentInfo = None
+        if AgentInfo is not None:
+            stmt = stmt.where(~select(AgentInfo.agent_id).where(
+                AgentInfo.agent_id == ConversationRecord.agent_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.name == "nl2agent",
+            ).exists())
+
+        stmt = stmt.order_by(desc(ConversationRecord.create_time))
 
         # If user_id is provided, additional filter conditions can be added here
         if user_id:
