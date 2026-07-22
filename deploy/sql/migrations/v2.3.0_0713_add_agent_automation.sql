@@ -134,6 +134,4 @@ VALUES
     (1513, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL)
 ON CONFLICT (role_permission_id) DO NOTHING;
 
-FROM nexent.role_permission_t;
-
 COMMIT;
