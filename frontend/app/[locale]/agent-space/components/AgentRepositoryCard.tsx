@@ -2,7 +2,14 @@
 
 import type { MenuProps } from "antd";
 import { Button, Card, Dropdown } from "antd";
-import { Bot, Copy, Download, Eye, MoreHorizontal, PackageX } from "lucide-react";
+import {
+  Bot,
+  Copy,
+  Download,
+  Eye,
+  MoreHorizontal,
+  PackageX,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
@@ -26,7 +33,9 @@ export function AgentRepositoryCard({
   const { t } = useTranslation("common");
 
   const title =
-    listing.display_name?.trim() || listing.name?.trim() || t("agentRepository.card.untitled");
+    listing.display_name?.trim() ||
+    listing.name?.trim() ||
+    t("agentRepository.card.untitled");
   const author = listing.author?.trim();
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
   const toolCount = listing.tool_count ?? 0;
@@ -130,7 +139,7 @@ export function AgentRepositoryCard({
             <span
               className="inline-flex items-center gap-1"
               aria-label={t("agentRepository.detail.downloads", {
-                count: downloads.toLocaleString(),
+                count: downloads,
               })}
             >
               <Download className="size-3.5" aria-hidden />

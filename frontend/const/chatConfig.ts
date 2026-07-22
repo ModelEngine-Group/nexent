@@ -136,6 +136,7 @@ export const chatConfig = {
     PARSE: "parse" as const,
     TOOL: "tool" as const,
     EXECUTION_LOGS: "execution_logs" as const,
+    TOOL_CALL: "tool_call" as const,
     ERROR: "error" as const,
     STEP_COUNT: "step_count" as const,
     TOKEN_COUNT: "token_count" as const,

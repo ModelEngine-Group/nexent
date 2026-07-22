@@ -258,7 +258,7 @@ export default function AgentTasksPage() {
     }
     if (trigger.rule_type === "INTERVAL") {
       return t("agentAutomation.page.everySeconds", {
-        count: trigger.interval_seconds,
+        count: trigger.interval_seconds ?? 0,
       });
     }
     return t("agentAutomation.page.cronSchedule", {

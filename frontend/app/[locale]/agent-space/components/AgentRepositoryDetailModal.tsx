@@ -152,7 +152,7 @@ function AgentRepositoryDetailMeta({
         <span className="inline-flex items-center gap-1">
           <Download className="size-3.5" aria-hidden />
           {t("agentRepository.detail.downloads", {
-            count: downloads.toLocaleString(),
+            count: downloads,
           })}
         </span>
         {createdAtText ? (
@@ -174,7 +174,11 @@ function AgentRepositoryDetailMeta({
   );
 }
 
-function AgentRepositoryDetailHeader({ detail }: { detail: AgentDetailModalData }) {
+function AgentRepositoryDetailHeader({
+  detail,
+}: {
+  detail: AgentDetailModalData;
+}) {
   const { t } = useTranslation("common");
   const title = resolveDetailTitle(detail, t("agentRepository.card.untitled"));
   const downloads = detail.downloads ?? 0;
@@ -252,7 +256,11 @@ function AgentRepositoryDetailDutyPrompt({
   );
 }
 
-function AgentRepositoryDetailContent({ detail }: { detail: AgentDetailModalData }) {
+function AgentRepositoryDetailContent({
+  detail,
+}: {
+  detail: AgentDetailModalData;
+}) {
   const { t } = useTranslation("common");
   const tools = detail.tools?.filter((tool) => tool.trim()) ?? [];
 
