@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { App, ConfigProvider, Input, Modal } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -31,7 +32,10 @@ import { SkillRepositoryDetailModal } from "./components/SkillRepositoryDetailMo
 import { MineSkillsView } from "./components/MineSkillsView";
 import { RepositoryView } from "./components/RepositoryView";
 import { ReviewSkillList } from "./components/ReviewSkillList";
-import { STATUS_LABELS } from "./components/skillRepositoryShared";
+import {
+  getSkillRepositoryStatusLabel,
+  STATUS_LABEL_KEYS,
+} from "./components/skillRepositoryShared";
 import SkillBuildModal from "../agents/components/agentConfig/SkillBuildModal";
 
 enum SkillRepositoryTab {
@@ -48,7 +52,16 @@ const skillRepositoryTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
 };
 
+const STATUS_ACTION_LABEL_KEYS: Partial<
+  Record<SkillRepositoryListingStatus, string>
+> = {
+  not_shared: "skillRepository.action.status.notShared",
+  shared: "skillRepository.action.status.shared",
+  rejected: "skillRepository.action.status.rejected",
+};
+
 export default function SkillRepositoryPage() {
+  const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const { user } = useAuthorizationContext();
   const { message, modal } = App.useApp();
@@ -161,6 +174,20 @@ export default function SkillRepositoryPage() {
     detailRepositoryId != null
   );
 
+  useEffect(() => {
+    const refreshActiveTab = async () => {
+      if (tab === SkillRepositoryTab.REPOSITORY) {
+        await refetchRepository();
+      } else if (tab === SkillRepositoryTab.MINE) {
+        await refetchMine();
+      } else if (tab === SkillRepositoryTab.REVIEW) {
+        await refetchReview();
+      }
+    };
+
+    refreshActiveTab().catch(() => {});
+  }, [tab, refetchRepository, refetchMine, refetchReview]);
+
   const repositoryItems = repositoryData?.items ?? [];
   const repositoryTotal = repositoryData?.pagination?.total ?? 0;
   const mineItems = mineData?.items ?? [];
@@ -205,7 +232,7 @@ export default function SkillRepositoryPage() {
   const handleInstall = (listing: SkillRepositoryListingItem) => {
     const baseName = listing.name?.trim() || "Skill";
     setCopyListing(listing);
-    setCopyTargetName(`${baseName} 副本`);
+    setCopyTargetName(t("skillRepository.copy.defaultName", { name: baseName }));
     setCopyNameError(null);
   };
 
@@ -215,7 +242,7 @@ export default function SkillRepositoryPage() {
     }
     const targetName = copyTargetName.trim();
     if (!targetName) {
-      setCopyNameError("请输入 Skill 名称");
+      setCopyNameError(t("skillRepository.copy.nameRequired"));
       return;
     }
     try {
@@ -225,7 +252,9 @@ export default function SkillRepositoryPage() {
         targetName,
       });
       message.success(
-        result.name ? `Skill 已复制为：${result.name}` : "Skill 复制成功"
+        result.name
+          ? t("skillRepository.copy.successWithName", { name: result.name })
+          : t("skillRepository.copy.success")
       );
       setCopyListing(null);
       setCopyTargetName("");
@@ -234,12 +263,16 @@ export default function SkillRepositoryPage() {
       if (duplicateNames) {
         setCopyNameError(
           duplicateNames.length > 0
-            ? `当前租户已存在同名 Skill：${duplicateNames.join("、")}`
-            : "当前租户已存在同名 Skill，请修改名称后再复制"
+            ? t("skillRepository.copy.duplicateWithNames", {
+                names: duplicateNames.join("、"),
+              })
+            : t("skillRepository.copy.duplicate")
         );
         return;
       }
-      message.error(error instanceof Error ? error.message : "Skill 复制失败");
+      message.error(
+        error instanceof Error ? error.message : t("skillRepository.copy.failed")
+      );
     }
   };
 
@@ -252,9 +285,19 @@ export default function SkillRepositoryPage() {
         skillRepositoryId: listing.skill_repository_id,
         status,
       });
-      message.success(`已${STATUS_LABELS[status]}`);
+      message.success(
+        t("skillRepository.action.success", {
+          action: STATUS_ACTION_LABEL_KEYS[status]
+            ? t(STATUS_ACTION_LABEL_KEYS[status])
+            : getSkillRepositoryStatusLabel(t, status),
+        })
+      );
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "状态更新失败");
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("skillRepository.common.statusUpdateFailed")
+      );
     }
   };
 
@@ -266,7 +309,11 @@ export default function SkillRepositoryPage() {
       skillRepositoryId: repositoryInfo.skill_repository_id,
       status: "not_shared",
     });
-    message.success(wasShared ? "已下架" : "已撤回申请");
+    message.success(
+      wasShared
+        ? t("skillRepository.mine.takeDownSuccess")
+        : t("skillRepository.mine.withdrawSuccess")
+    );
   };
 
   const getActiveRepositoryInfo = (skill?: MyEditableSkillItem | null) =>
@@ -285,12 +332,14 @@ export default function SkillRepositoryPage() {
     const hasShared = activeInfo.some((info) => info.status === "shared");
     const confirmed = await new Promise<boolean>((resolve) => {
       modal.confirm({
-        title: hasShared ? "保存后将自动下架" : "保存后将撤回审核",
+        title: hasShared
+          ? t("skillRepository.edit.confirmTakeDownTitle")
+          : t("skillRepository.edit.confirmWithdrawTitle"),
         content: hasShared
-          ? "该 Skill 已上架，保存修改后将自动下架，需要重新提交审核。"
-          : "该 Skill 正在审核中，保存修改后将撤回审核，需要重新提交。",
-        okText: "继续保存",
-        cancelText: "取消",
+          ? t("skillRepository.edit.confirmTakeDownContent")
+          : t("skillRepository.edit.confirmWithdrawContent"),
+        okText: t("skillRepository.edit.continueSave"),
+        cancelText: t("common.cancel"),
         onOk: () => resolve(true),
         onCancel: () => resolve(false),
       });
@@ -313,7 +362,7 @@ export default function SkillRepositoryPage() {
       message.error(
         error instanceof Error
           ? error.message
-          : "Failed to update listing status"
+          : t("skillRepository.common.statusUpdateFailed")
       );
       return false;
     }
@@ -329,20 +378,24 @@ export default function SkillRepositoryPage() {
     status: SkillRepositoryListingStatus
   ) => {
     modal.confirm({
-      title: `确认${STATUS_LABELS[status]}？`,
+      title: t("skillRepository.action.confirmTitle", {
+        action: STATUS_ACTION_LABEL_KEYS[status]
+          ? t(STATUS_ACTION_LABEL_KEYS[status])
+          : getSkillRepositoryStatusLabel(t, status),
+      }),
       content: listing.name,
-      okText: "确认",
-      cancelText: "取消",
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
       onOk: () => handleUpdateStatus(listing, status),
     });
   };
 
   const confirmTakeDown = (listing: SkillRepositoryListingItem) => {
     modal.confirm({
-      title: "确认下架？",
+      title: t("skillRepository.action.confirmTakeDown"),
       content: listing.name,
-      okText: "下架",
-      cancelText: "取消",
+      okText: t("skillRepository.action.status.notShared"),
+      cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: () => handleUpdateStatus(listing, "not_shared"),
     });
@@ -368,10 +421,10 @@ export default function SkillRepositoryPage() {
                   </div>
                   <div>
                     <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
-                      Skill 仓库
+                      {t("skillRepository.page.title")}
                     </h1>
                     <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                      浏览同租户共享仓库、管理你有权限的 Skill，并发布与审核
+                      {t("skillRepository.page.subtitle")}
                     </p>
                   </div>
                 </div>
@@ -393,7 +446,7 @@ export default function SkillRepositoryPage() {
                     className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                   >
                     <Inbox className="size-4" aria-hidden />
-                    仓库
+                    {t("skillRepository.page.tab.repository")}
                     <CountBadge count={repositoryTabCount} />
                   </TabsTrigger>
                   <TabsTrigger
@@ -401,7 +454,7 @@ export default function SkillRepositoryPage() {
                     className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                   >
                     <User className="size-4" aria-hidden />
-                    我的 Skill
+                    {t("skillRepository.page.tab.mine")}
                     <CountBadge count={mineTabCount} />
                   </TabsTrigger>
                   {isAdmin ? (
@@ -410,7 +463,7 @@ export default function SkillRepositoryPage() {
                       className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                     >
                       <ShieldCheck className="size-4" aria-hidden />
-                      审核中心
+                      {t("skillRepository.page.tab.review")}
                       <CountBadge count={pendingReviewCount} strong />
                     </TabsTrigger>
                   ) : null}
@@ -468,15 +521,17 @@ export default function SkillRepositoryPage() {
                   onDeleteSkill={async (skill) => {
                     const name = skill.name?.trim();
                     if (!name) {
-                      message.error("Skill 名称为空，无法删除");
+                      message.error(t("skillRepository.delete.emptyName"));
                       return;
                     }
                     const result = await deleteSkillByName(name);
                     if (!result.success) {
-                      message.error(result.message || "删除失败");
+                      message.error(
+                        result.message || t("skillRepository.delete.failed")
+                      );
                       throw new Error(result.message || "Delete skill failed");
                     }
-                    message.success("删除成功");
+                    message.success(t("skillRepository.delete.success"));
                     await refetchMine();
                   }}
                   onApplyListing={async (skill, payload) => {
@@ -485,17 +540,19 @@ export default function SkillRepositoryPage() {
                         skillId: skill.skill_id,
                         payload,
                       });
-                      message.success("已提交上架申请");
+                      message.success(t("skillRepository.mine.applySuccess"));
                     } catch (error) {
                       if (
                         error instanceof ApiError &&
                         Number(error.code) === 403
                       ) {
-                        message.error("当前账号只能启用自己创建的 Skill");
+                        message.error(t("skillRepository.mine.applyForbidden"));
                         return;
                       }
                       message.error(
-                        error instanceof Error ? error.message : "提交审批失败"
+                        error instanceof Error
+                          ? error.message
+                          : t("skillRepository.mine.applyError")
                       );
                     }
                   }}
@@ -540,10 +597,10 @@ export default function SkillRepositoryPage() {
       <Modal
         centered
         destroyOnHidden
-        title="复制为我的 Skill"
+        title={t("skillRepository.copy.title")}
         open={copyListing != null}
-        okText="复制"
-        cancelText="取消"
+        okText={t("skillRepository.copy.confirm")}
+        cancelText={t("common.cancel")}
         confirmLoading={installMutation.isPending}
         onOk={handleConfirmInstall}
         onCancel={() => {
@@ -554,12 +611,12 @@ export default function SkillRepositoryPage() {
       >
         <div className="space-y-2 pt-2">
           <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            Skill 名称
+            {t("skillRepository.copy.nameLabel")}
           </label>
           <Input
             value={copyTargetName}
             status={copyNameError ? "error" : undefined}
-            placeholder="请输入 Skill 名称"
+            placeholder={t("skillRepository.copy.namePlaceholder")}
             maxLength={100}
             onChange={(event) => {
               setCopyTargetName(event.target.value);
@@ -573,7 +630,7 @@ export default function SkillRepositoryPage() {
             <p className="text-sm text-red-500">{copyNameError}</p>
           ) : (
             <p className="text-sm text-slate-500">
-              如果当前租户已存在同名 Skill，请修改名称后再复制。
+              {t("skillRepository.copy.renameHint")}
             </p>
           )}
         </div>

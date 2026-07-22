@@ -32,7 +32,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
   const [lastUsedAgentId, setLastUsedAgentIdState] = useState<number | null>(null);
 
   const {
-    agents,
+    availableMainAgents,
     paginatedAgents,
     filteredAgents,
     totalPages,
@@ -49,12 +49,12 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
       return null;
     }
     return (
-      agents.find((agent) => {
+      availableMainAgents.find((agent) => {
         const id = (agent as unknown as { agent_id?: number }).agent_id;
         return id === lastUsedAgentId;
       }) ?? null
     );
-  }, [agents, lastUsedAgentId]);
+  }, [availableMainAgents, lastUsedAgentId]);
 
   useEffect(() => {
     setLastUsedAgentIdState(getLastUsedAgentId());

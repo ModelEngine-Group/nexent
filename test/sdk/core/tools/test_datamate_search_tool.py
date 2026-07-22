@@ -167,8 +167,6 @@ class TestForward:
 
         assert len(results) == 2
         datamate_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, datamate_tool.running_prompt_en)
-        datamate_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "search", "text": "test query"}], ensure_ascii=False)
         )
@@ -199,9 +197,6 @@ class TestForward:
         mock_build_url.return_value = "http://dl/kb1/file-1"
 
         datamate_tool.forward("测试查询")
-
-        datamate_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, datamate_tool.running_prompt_zh)
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(

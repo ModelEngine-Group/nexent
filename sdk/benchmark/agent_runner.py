@@ -3,45 +3,45 @@
 Shared utilities for building and running nexent agents in benchmarks.
 
 Provides:
-1. Prompt construction (system prompt, prompt templates)
+1. Fine-grained context-item and prompt-template construction
 2. AgentRunInfo construction (standard and custom-prompt variants)
 3. Message-stream processing and statistics
 """
-import sys
 import io
 import json
+import logging
 import os
-import re
-from datetime import datetime
-from typing import AsyncIterator, Callable, Optional
+import sys
+from typing import Callable, Optional
+
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-from jinja2 import Template, StrictUndefined
-from smolagents.utils import BASE_BUILTIN_MODULES
-from dotenv import load_dotenv
-import string
+from dotenv import load_dotenv  # noqa: E402
+
 
 # ============ Environment Setup ============
 # Add parent directory to sys.path so paths.py can be found, then import it.
 # paths.py resolves PROJECT_ROOT/SDK_DIR/BACKEND_DIR via .git discovery and
 # injects them into sys.path automatically — no manual path manipulation needed.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import paths  # noqa: F401 — side-effect: adds sdk/, backend/ to sys.path
+import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
+from utils.context_utils import build_context_inputs  # noqa: E402
+from utils.prompt_template_utils import get_agent_prompt_template  # noqa: E402
 
-from utils.prompt_template_utils import get_agent_prompt_template
-from nexent.core.agents.agent_model import (
-    AgentRunInfo, AgentConfig, ModelConfig, AgentHistory, ToolConfig
+from nexent.core.agents.context import ContextManagerConfig  # noqa: E402
+from nexent.core.agents.agent_model import (  # noqa: E402
+    AgentConfig,
+    AgentHistory,
+    AgentRunInfo,
+    ModelConfig,
 )
+from nexent.core.agents.context import ContextItemInput  # noqa: E402
+from nexent.core.agents.run_agent import agent_run  # noqa: E402
+from nexent.core.utils.observer import MessageObserver  # noqa: E402
 
 
-
-from nexent.core.agents.run_agent import agent_run
-from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_context import ContextManagerConfig
-import logging
 logging.getLogger("smolagents").setLevel(logging.WARNING)
-import random
 load_dotenv()
 
 # ============ Global Configuration ============
@@ -74,8 +74,6 @@ DEFAULT_CONSTRAINT_PROMPT = """1. Do not generate harmful content
 
 DEFAULT_FEW_SHOTS_PROMPT = ""
 
-DEFAULT_FALLBACK_PROMPT = """You are a helpful AI assistant that can help users solve various problems. Please remember important information from the conversation."""
-
 # ============ Message Type Constants ============
 TRACKED_MESSAGE_TYPES = {
     "agent_new_run",          # task start
@@ -89,85 +87,13 @@ TRACKED_MESSAGE_TYPES = {
 }
 
 
-# ============ Prompt Construction Functions ============
-
-def build_system_prompt(
-    duty: str = "",
-    constraint: str = "",
-    few_shots: str = "",
-    tools: list = None,
-    managed_agents: list = None,
-    memory_list: list = None,
-    knowledge_base_summary: str = "",
-    language: str = "zh",
-    is_manager: bool = False,
-    user_id: str = "",
-    skills: list = None
-) -> str:
-    """
-    Build System Prompt
-
-    Args:
-        duty: Duty description
-        constraint: Constraints
-        few_shots: Few-shot examples
-        tools: Tool list
-        managed_agents: Managed sub-agent list
-        memory_list: Memory list
-        knowledge_base_summary: Knowledge base summary
-        language: Language (zh/en)
-        is_manager: Whether this is a manager agent
-
-    Returns:
-        Rendered system prompt string
-    """
-    tools = tools or []
-    managed_agents = managed_agents or []
-    memory_list = memory_list or []
-
-    prompt_template = get_agent_prompt_template(is_manager=is_manager, language=language)
-    template_content = prompt_template.get("system_prompt", "")
-
-    tools_dict = {tool.name: tool for tool in tools}
-    managed_agents_dict = {agent.name: agent for agent in managed_agents}
-
-    system_prompt = Template(template_content, undefined=StrictUndefined).render({
-        "duty": duty,
-        "constraint": constraint,
-        "few_shots": few_shots,
-        "tools": tools_dict,
-        "managed_agents": managed_agents_dict,
-        "authorized_imports": str(BASE_BUILTIN_MODULES),
-        "APP_NAME": APP_NAME,
-        "APP_DESCRIPTION": APP_DESCRIPTION,
-        "memory_list": memory_list,
-        "knowledge_base_summary": knowledge_base_summary,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "user_id": user_id,
-        "skills": skills or []
-    })
-
-    return system_prompt
-
-
 def build_prompt_templates(
-    system_prompt: str,
     language: str = "zh",
     is_manager: bool = False
 ) -> dict:
-    """
-    Build complete prompt_templates dict
-
-    Args:
-        system_prompt: System prompt string
-        language: Language
-        is_manager: Whether this is a manager agent
-
-    Returns:
-        prompt_templates dict
-    """
+    """Build non-context templates required by CoreAgent."""
     prompt_templates = get_agent_prompt_template(is_manager=is_manager, language=language)
-    prompt_templates["system_prompt"] = system_prompt
+    prompt_templates["system_prompt"] = ""
     return prompt_templates
 
 
@@ -194,7 +120,7 @@ def build_agent_run_info(
     max_tokens: Optional[int] = None,
 ) -> AgentRunInfo:
     """
-    Construct AgentRunInfo with template-based system prompt.
+    Construct AgentRunInfo with ContextManager-based stable context.
 
     Args:
         query: User query
@@ -202,7 +128,8 @@ def build_agent_run_info(
         duty_prompt: Duty prompt (empty uses default)
         constraint_prompt: Constraint prompt (empty uses default)
         few_shots_prompt: Few-shot prompt
-        fallback_prompt: Fallback prompt (empty uses default)
+        fallback_prompt: Optional single custom system component used when no
+                         segmented prompt fields are supplied
         tools: Tool list
         managed_agents: Managed sub-agent list
         max_steps: Max execution steps
@@ -227,7 +154,6 @@ def build_agent_run_info(
     duty = duty_prompt or DEFAULT_DUTY_PROMPT
     constraint = constraint_prompt or DEFAULT_CONSTRAINT_PROMPT
     few_shots = few_shots_prompt or DEFAULT_FEW_SHOTS_PROMPT
-    fallback = fallback_prompt or DEFAULT_FALLBACK_PROMPT
     tools = tools or []
     managed_agents = managed_agents or []
 
@@ -242,31 +168,31 @@ def build_agent_run_info(
         max_tokens=max_tokens,
     )
 
-    if duty or constraint or few_shots:
-        system_prompt = build_system_prompt(
-            duty=duty,
-            constraint=constraint,
-            few_shots=few_shots,
-            tools=tools,
-            managed_agents=managed_agents,
-            memory_list=[],
-            knowledge_base_summary="",
-            language=language,
-            is_manager=is_manager,
-            user_id=user_id,
-            skills=skills
-        )
-    else:
-        system_prompt = fallback
-
-    prompt_templates = build_prompt_templates(
-        system_prompt,
+    context_items = build_context_inputs(
+        duty=duty,
+        constraint=constraint,
+        few_shots=few_shots,
+        app_name=APP_NAME,
+        app_description=APP_DESCRIPTION,
+        user_id=user_id,
         language=language,
-        is_manager=is_manager
+        is_manager=is_manager,
+        tools={tool.name: tool for tool in tools},
+        skills=skills or [],
+        managed_agents={agent.name: agent for agent in managed_agents},
+        external_a2a_agents={},
+        memory_list=[],
+        knowledge_base_summary="",
     )
+    if fallback_prompt and not any((duty_prompt, constraint_prompt, few_shots_prompt)):
+        context_items = [ContextItemInput(
+            id="system:fallback", type="system_prompt", content={"text": fallback_prompt}, required=True
+        )]
+
+    prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
 
     # Set context manager config
-    cm_config = context_manager_config
+    cm_config = context_manager_config or ContextManagerConfig()
 
 
     agent_config = AgentConfig(
@@ -277,7 +203,8 @@ def build_agent_run_info(
         model_name="main_model",
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
-        context_manager_config=cm_config
+        context_manager_config=cm_config,
+        context_items=context_items,
     )
 
 
@@ -308,12 +235,7 @@ def build_agent_run_info_with_custom_prompt(
     context_manager_config: Optional[ContextManagerConfig] = None,
 ) -> AgentRunInfo:
     """
-    Build AgentRunInfo with a pre-rendered system prompt string.
-
-    Unlike build_agent_run_info which renders the system prompt via Jinja2 template,
-    this function accepts the final system prompt directly, bypassing the template
-    engine entirely. Use this for benchmark scenarios that need a specialized prompt
-    without the standard platform scaffolding.
+    Build AgentRunInfo with a custom system context item.
 
     Args:
         query: User query
@@ -345,11 +267,7 @@ def build_agent_run_info_with_custom_prompt(
         extra_body=THINKING_OFF_EXTRA_BODY,
         )
 
-    prompt_templates = build_prompt_templates(
-        system_prompt,
-        language=language,
-        is_manager=is_manager,
-    )
+    prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
 
     agent_config = AgentConfig(
         name=agent_name,
@@ -359,7 +277,10 @@ def build_agent_run_info_with_custom_prompt(
         model_name="main_model",
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
-        context_manager_config=context_manager_config,
+        context_manager_config=context_manager_config or ContextManagerConfig(),
+        context_items=[ContextItemInput(
+            id="system:custom", type="system_prompt", content={"text": system_prompt}, required=True
+        )],
     )
 
     import threading

@@ -3,11 +3,13 @@ import type {
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
 
-export const STATUS_LABELS: Record<SkillRepositoryListingStatus, string> = {
-  not_shared: "未上架",
-  pending_review: "待审核",
-  rejected: "已驳回",
-  shared: "已上架",
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export const STATUS_LABEL_KEYS: Record<SkillRepositoryListingStatus, string> = {
+  not_shared: "skillRepository.status.notShared",
+  pending_review: "skillRepository.status.pendingReview",
+  rejected: "skillRepository.status.rejected",
+  shared: "skillRepository.status.shared",
 };
 
 export const STATUS_COLORS: Record<SkillRepositoryListingStatus, string> = {
@@ -16,6 +18,13 @@ export const STATUS_COLORS: Record<SkillRepositoryListingStatus, string> = {
   rejected: "error",
   shared: "success",
 };
+
+export function getSkillRepositoryStatusLabel(
+  t: Translate,
+  status: SkillRepositoryListingStatus
+): string {
+  return t(STATUS_LABEL_KEYS[status]);
+}
 
 export function parseRepositoryTime(value?: string | null): number {
   if (!value) return 0;
@@ -29,12 +38,15 @@ export function formatRepositoryDate(value?: string | null): string | null {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
-export function getSkillSourceLabel(source?: string | null): string {
+export function getSkillSourceLabel(
+  source: string | null | undefined,
+  t: Translate
+): string {
   if (source === "custom") {
-    return "自定义";
+    return t("skillRepository.source.custom");
   }
   if (source === "repository") {
-    return "仓库";
+    return t("skillRepository.source.repository");
   }
   return source || "-";
 }

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
 import { Button, Tooltip } from "antd";
-import { Share2, X } from "lucide-react";
+import { CalendarClock, Share2, X } from "lucide-react";
 import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
 import { useConfig } from "@/hooks/useConfig";
 import log from "@/lib/logger";
@@ -19,6 +19,7 @@ interface ChatHeaderProps {
   onRename?: (newTitle: string) => void;
   onShareClick?: () => void;
   isShareMode?: boolean;
+  hasAutomation?: boolean;
 }
 
 export function ChatHeader({
@@ -26,6 +27,7 @@ export function ChatHeader({
   onRename,
   onShareClick,
   isShareMode = false,
+  hasAutomation = false,
 }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
@@ -141,13 +143,20 @@ export function ChatHeader({
               autoFocus
             />
           ) : (
-            <h1
-              className="text-xl font-bold cursor-pointer px-2 py-1 rounded border border-transparent hover:border-slate-200"
-              onDoubleClick={handleDoubleClick}
-              title={t("chatHeader.doubleClickToEdit")}
-            >
-              {title}
-            </h1>
+            <div className="flex items-center justify-center gap-2 min-w-0">
+              <h1
+                className="text-xl font-bold cursor-pointer px-2 py-1 rounded border border-transparent hover:border-slate-200 truncate"
+                onDoubleClick={handleDoubleClick}
+                title={t("chatHeader.doubleClickToEdit")}
+              >
+                {title}
+              </h1>
+              {hasAutomation && (
+                <Tooltip title={t("agentAutomation.boundTask")}>
+                  <CalendarClock className="h-4 w-4 shrink-0 text-blue-600" />
+                </Tooltip>
+              )}
+            </div>
           )}
           <div className="flex justify-end">
             {onShareClick && (

@@ -142,7 +142,7 @@ class RAGFlowSearchTool(Tool):
         if not dataset_ids:
             raise ValueError("dataset_ids is required and must be a non-empty JSON string array or list")
         logger.info(f"Validating RAGFlowSearchTool with dataset_ids: {dataset_ids}")
-        
+
         try:
             if isinstance(dataset_ids, str):
                 parsed_ids = json.loads(dataset_ids)
@@ -170,8 +170,6 @@ class RAGFlowSearchTool(Tool):
         )
 
         self.record_ops = 1
-        self.running_prompt_zh = "RAGFlow知识库检索中..."
-        self.running_prompt_en = "Searching RAGFlow knowledge base..."
 
     def _resolve_effective_dataset_ids(self, dataset_ids: Union[str, List[str]]) -> List[str]:
         """Resolve effective dataset IDs, preferring runtime override over configured value.
@@ -260,8 +258,8 @@ class RAGFlowSearchTool(Tool):
 
     def forward(self, query: str, doc_id: Union[str, List[str]] = "", dataset_ids: Union[str, List[str]] = "") -> str:
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the search card from inside the tool.
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

@@ -46,6 +46,29 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Agent automation runtime configuration
+AGENT_AUTOMATION_ENABLED = os.getenv(
+    "AGENT_AUTOMATION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
+AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_POLL_INTERVAL_SECONDS", "5")
+)
+AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
+    os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
+)
+AGENT_AUTOMATION_LEASE_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
+)
+AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS", "1800")
+)
+AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS", "30")
+)
+AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_MIN_INTERVAL_SECONDS", "5")
+)
+
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
@@ -88,6 +111,11 @@ SUPABASE_JWT_SECRET = os.getenv(
 OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
+# OAuth login mode:
+# - disabled: hide OAuth login entries and disable automatic OAuth redirects.
+# - button: show configured OAuth providers as optional login entries.
+# - force: automatically redirect when exactly one OAuth provider is configured.
+OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 
 
 # CAS SSO Configuration

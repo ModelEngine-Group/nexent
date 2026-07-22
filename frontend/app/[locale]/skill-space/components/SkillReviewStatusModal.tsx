@@ -2,6 +2,7 @@
 
 import { Button, Modal } from "antd";
 import { CheckCircle2, Clock, PackageX, Store, XCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import {
   formatRepositoryDate,
@@ -28,6 +29,7 @@ export function SkillReviewStatusModal({
   onClose: () => void;
   onSetNotShared: () => Promise<void>;
 }) {
+  const { t } = useTranslation("common");
   if (!skill || !repositoryInfo) return null;
 
   const title = skill.name?.trim() || `Skill #${skill.skill_id}`;
@@ -40,23 +42,23 @@ export function SkillReviewStatusModal({
   const statusConfig = isPending
     ? {
         icon: Clock,
-        label: "待审核",
-        description: "上架申请已提交，等待管理员审核。",
+        label: t("skillRepository.reviewStatus.pendingLabel"),
+        description: t("skillRepository.reviewStatus.pendingDescription"),
         tone: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
         iconClass: "text-amber-600 dark:text-amber-300",
       }
     : isRejected
       ? {
           icon: XCircle,
-          label: "已驳回",
-          description: "申请被驳回后，可以撤回记录或重新提交。",
+          label: t("skillRepository.reviewStatus.rejectedLabel"),
+          description: t("skillRepository.reviewStatus.rejectedDescription"),
           tone: "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
           iconClass: "text-red-600 dark:text-red-300",
         }
       : {
           icon: CheckCircle2,
-          label: "已上架",
-          description: "该 Skill 当前在仓库中可见，可按需下架。",
+          label: t("skillRepository.reviewStatus.sharedLabel"),
+          description: t("skillRepository.reviewStatus.sharedDescription"),
           tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
           iconClass: "text-emerald-600 dark:text-emerald-300",
         };
@@ -65,10 +67,14 @@ export function SkillReviewStatusModal({
 
   const confirmSetNotShared = () => {
     Modal.confirm({
-      title: canTakeDown ? "确认下架？" : "确认撤回申请？",
+      title: canTakeDown
+        ? t("skillRepository.reviewStatus.confirmTakeDown")
+        : t("skillRepository.reviewStatus.confirmWithdraw"),
       content: title,
-      okText: canTakeDown ? "下架" : "撤回",
-      cancelText: "取消",
+      okText: canTakeDown
+        ? t("skillRepository.action.status.notShared")
+        : t("skillRepository.reviewStatus.withdraw"),
+      cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: onSetNotShared,
     });
@@ -83,13 +89,13 @@ export function SkillReviewStatusModal({
       title={
         <span className="inline-flex items-center gap-2">
           <Store className="size-5 text-primary" aria-hidden />
-          仓库状态
+          {t("skillRepository.reviewStatus.title")}
         </span>
       }
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={onClose} disabled={isUpdatingStatus}>
-            关闭
+            {t("common.close")}
           </Button>
           {canCancelApply || canTakeDown ? (
             <Button
@@ -104,7 +110,9 @@ export function SkillReviewStatusModal({
               }
               onClick={confirmSetNotShared}
             >
-              {canTakeDown ? "下架" : "撤回申请"}
+              {canTakeDown
+                ? t("skillRepository.action.status.notShared")
+                : t("skillRepository.reviewStatus.withdrawApply")}
             </Button>
           ) : null}
         </div>
@@ -129,14 +137,14 @@ export function SkillReviewStatusModal({
 
       <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
         <div className="flex justify-between gap-4">
-          <span>仓库记录</span>
+          <span>{t("skillRepository.reviewStatus.repositoryRecord")}</span>
           <span className="font-medium text-slate-700 dark:text-slate-200">
             #{repositoryInfo.skill_repository_id}
           </span>
         </div>
         {submittedAt ? (
           <div className="flex justify-between gap-4">
-            <span>提交时间</span>
+            <span>{t("skillRepository.reviewStatus.submittedAt")}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
               {submittedAt}
             </span>
