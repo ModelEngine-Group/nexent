@@ -94,6 +94,7 @@ export interface PublishedAgent {
   current_version_no?: number;
   greeting_message?: string;
   example_questions?: string[];
+  generation_status?: "active";
 }
 
 export interface Agent {
@@ -139,6 +140,7 @@ export interface Agent {
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];
+  generation_status?: "active";
 }
 
 export interface Tool {

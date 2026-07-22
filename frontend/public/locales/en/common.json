@@ -1,4 +1,4 @@
-﻿{
+{
   "assistant.name": "Nexent",
   "mainPage.layout.title": "Nexent | AI Agents",
   "mainPage.layout.titleTemplate": "%s | Nexent AI Agents",
@@ -124,7 +124,6 @@
   "chatInput.remove": "Remove",
   "chatInput.wsConnectionEstablished": "WebSocket connection established",
   "chatInput.selectModel": "Select Model",
-
   "chatLeftSidebar.rename": "Rename",
   "chatLeftSidebar.delete": "Delete",
   "chatLeftSidebar.newConversation": "New Conversation",
@@ -596,7 +595,6 @@
   "toolPool.selectedToolsLabel": "Selected Tools",
   "toolPool.noSearchResults": "No tools match your search",
   "toolPool.mcpModelUnavailableTooltip": "Selected model is unavailable",
-
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",
   "tool.error.noMainAgentId": "Main Agent ID is not set, cannot update tool status",
   "tool.error.configFetchFailed": "Failed to get tool configuration",
@@ -899,7 +897,6 @@
   "model.list.capacityWarning.tag": "Missing capacity",
   "model.list.capacityWarning.badgeTooltip": "Output token cap is not enforced for this model. Click to fill capacity values now.",
   "model.list.capacityWarning.tooltipAction": "Open capacity panel",
-
   "agent.modelSelector.bareCapacity.tooltip": "Model capacity limits not configured — please configure in Model Management",
   "agent.modelSelector.bareCapacity.formNotice": "The selected model \"{{modelName}}\" has no capacity configured. The agent will run, but output-token enforcement and budget consistency checks are off until capacity is set in Model Management.",
   "agent.modelSelector.bareCapacity.formNoticeNoPermission": "The selected model \"{{modelName}}\" has no capacity configured. The agent will run, but output-token enforcement is off. Ask a model administrator to configure capacity for this model.",
@@ -1744,7 +1741,6 @@
   "sidebar.knowledgeBaseConfig": "Knowledge Base Configuration",
   "sidebar.modelConfig": "Model Configuration",
   "sidebar.memoryConfig": "Memory Configuration",
-
   "agentRepository.page.title": "Agent Repository",
   "agentRepository.page.subtitle": "Browse the tenant-shared repository, manage agents you can access, and publish or review listings.",
   "agentRepository.page.tab.repository": "Repository",
@@ -1752,7 +1748,6 @@
   "agentRepository.page.tab.review": "Review Center",
   "agentRepository.page.searchPlaceholder": "Search by name, description, or tags",
   "agentRepository.page.categoryAll": "All",
-
   "agentRepository.page.repositoryHint": "Agents in the shared repository must be copied to your workspace before you can edit them.",
   "agentRepository.page.resultCount": "{{count}} agents",
   "agentRepository.page.empty": "No matching agents found",
@@ -1843,7 +1838,6 @@
   "agentRepository.card.copy": "Copy",
   "agentRepository.card.detail": "Details",
   "agentRepository.card.toolCount": "{{count}} tools",
-
   "agentRepository.copy.title": "Copy \"{{name}}\"",
   "agentRepository.copy.configList": "Configuration checklist",
   "agentRepository.copy.percent": "{{percent}}% ready to copy",
@@ -1871,7 +1865,6 @@
   "agentRepository.copy.reason.mcp_not_found": "MCP service not activated",
   "agentRepository.copy.reason.skill_duplicate": "Skill name conflict",
   "agentRepository.copy.reason.tool_unavailable": "Tool unavailable",
-
   "agentRepository.detail.intro": "Introduction",
   "agentRepository.detail.author": "{{author}}",
   "agentRepository.detail.tools": "Built-in Tools",
@@ -1883,7 +1876,6 @@
   "agentRepository.detail.status.pending_review": "Pending Review",
   "agentRepository.detail.status.rejected": "Rejected",
   "agentRepository.detail.status.not_shared": "Not Shared",
-
   "agentRepository.review.column.agent": "Agent",
   "agentRepository.review.column.version": "Version",
   "agentRepository.review.column.submitter": "Submitter",
@@ -1912,7 +1904,6 @@
   "agentRepository.review.rejectSuccess": "\"{{name}}\" has been rejected",
   "agentRepository.review.approveError": "Failed to approve. Please try again later.",
   "agentRepository.review.rejectError": "Failed to reject. Please try again later.",
-
   "agentRepository.category.writingAssistant": "Writing Assistant",
   "agentRepository.category.programming": "Programming",
   "agentRepository.category.dataAnalysis": "Data Analysis",
@@ -1920,7 +1911,6 @@
   "agentRepository.category.productivity": "Productivity",
   "agentRepository.category.creativeDesign": "Creative Design",
   "agentRepository.category.other": "Other",
-
   "agentRepository.tag.marketing": "Marketing",
   "agentRepository.tag.copywriting": "Copywriting",
   "agentRepository.tag.contentCreation": "Content Creation",
@@ -1941,7 +1931,6 @@
   "agentRepository.tag.inspiration": "Inspiration",
   "agentRepository.tag.spreadsheet": "Spreadsheet",
   "agentRepository.tag.office": "Office",
-
   "tenantResources.create": "Create",
   "tenantResources.subtitle": "Manage tenants, users, groups and resources",
   "tenantResources.title": "Tenant Resource Management",
@@ -2165,7 +2154,6 @@
   "users.comingSoon.feature2": "Configure fine-grained permissions",
   "users.comingSoon.feature3": "Monitor user activity and usage",
   "users.comingSoon.badge": "Coming Soon",
-
   "skillRepository.page.title": "Skill Repository",
   "skillRepository.page.subtitle": "Browse the tenant-shared repository, manage Skills you can access, and publish or review listings",
   "skillRepository.page.tab.repository": "Repository",
@@ -2268,7 +2256,6 @@
   "skillRepository.reviewStatus.withdrawApply": "Withdraw request",
   "skillRepository.reviewStatus.repositoryRecord": "Repository record",
   "skillRepository.reviewStatus.submittedAt": "Submitted at",
-
   "mcpTools.comingSoon.title": "MCP Tools Management Coming Soon",
   "mcpTools.comingSoon.description": "Centralized management for MCP servers and tools. Configure connectivity, synchronize tools, and monitor MCP health in one place.",
   "mcpTools.comingSoon.feature1": "Register and manage multiple MCP servers",
@@ -2532,7 +2519,6 @@
   "mcpTools.community.descriptionPreview": "Markdown Preview",
   "mcpTools.tools.loadFailed": "Failed to load tools",
   "mcpTools.tools.refreshing": "Refreshing tools…",
-
   "mcpTools.review.status.all": "All Statuses",
   "mcpTools.review.status.pending": "Pending",
   "mcpTools.review.status.approved": "Approved",
@@ -2603,7 +2589,6 @@
   "mcpTools.detail.noDescription": "No description provided",
   "mcpTools.detail.editBasic": "Edit",
   "mcpTools.detail.saving": "Saving...",
-
   "mcpTools.repository.downloadCount": "Downloads",
   "mcpTools.repository.empty": "No matching repository MCP tools found.",
   "mcpTools.repository.install": "Install",
@@ -2613,7 +2598,6 @@
   "mcpTools.repository.toolCount": "{{count}} tools",
   "mcpTools.repository.authorFallback": "Community contributor",
   "mcpTools.repository.details": "View Details",
-
   "mcpTools.mine.empty": "No matching MCP services found.",
   "mcpTools.mine.edit": "Edit",
   "mcpTools.mine.enable": "Enable",
@@ -2667,7 +2651,6 @@
   "mcpTools.mine.unpublishOnlineVersionDescription": "After taking it down, {{name}} will no longer appear in the Repository tab.",
   "mcpTools.mine.unpublishOnlineVersionSuccess": "Online version has been taken down",
   "mcpTools.mine.unpublishOnlineVersionFailed": "Failed to take down online version",
-
   "monitoring.topbar.openDashboard": "Open monitoring dashboard",
 
   "notifications.bell.label": "Notifications",
@@ -2692,7 +2675,6 @@
   "monitoring.table.tokenGenerationRate": "Token Gen Rate",
   "monitoring.time.ms": "ms",
   "monitoring.unit.tokensPerSec": "tokens/sec",
-
   "market.title": "Agent Market",
   "market.description": "Discover and download pre-built intelligent Agents",
   "market.searchPlaceholder": "Search Agents by name or description...",
@@ -2901,7 +2883,6 @@
   "common.created": "Created",
   "common.updated": "Last Updated Date",
   "common.email": "Email",
-
   "agentAutomation.proposal.preparingTitle": "Preparing automation task",
   "agentAutomation.proposal.preparingDescription": "Understanding the schedule, task details, and required capabilities. Please wait…",
   "agentAutomation.proposal.editorTitle": "Edit automation task",
@@ -3140,7 +3121,6 @@
   "agentEvaluation.message.deleteSetFailed": "Failed to delete evaluation set",
   "agentEvaluation.message.deleteRunFailed": "Failed to delete evaluation record",
   "agentEvaluation.message.exportFailed": "Failed to export report",
-
   "user.role.superAdmin": "Super Admin",
   "user.role.admin": "Admin",
   "user.role.dev": "Developer",
@@ -3332,7 +3312,6 @@
   "errorCode.130510": "RAGFlow authentication failed. Please check your API key.",
   "errorCode.130511": "RAGFlow API rate limit exceeded. Please try again later.",
   "errorCode.130512": "Failed to parse RAGFlow response. Please check API URL.",
-
   "errorCode.000101": "Validation failed.",
   "errorCode.000102": "Invalid parameter.",
   "errorCode.000103": "Required field is missing.",
@@ -3732,5 +3711,52 @@
   "setup.navigation.button.saving": "Saving...",
   "space.new": "New Space",
   "toolConfig.validation.array.invalid": "Please enter valid array JSON",
-  "toolConfig.validation.object.invalid": "Please enter valid object JSON"
+  "toolConfig.validation.object.invalid": "Please enter valid object JSON",
+  "subAgentPool.button.agentBuilder": "Agent Builder",
+  "subAgentPool.description.agentBuilder": "Build an agent through conversation",
+  "subAgentPool.tooltip.agentBuilder": "Start a conversational session that builds a custom agent for you",
+  "subAgentPool.message.agentBuilderStartFailed": "Failed to start agent builder session",
+  "nl2agent.requirements.title": "Requirements Summary",
+  "nl2agent.requirements.goal": "Agent Goal",
+  "nl2agent.requirements.audienceOrScenario": "Audience / Scenario",
+  "nl2agent.requirements.primaryInput": "Primary Input",
+  "nl2agent.requirements.expectedOutput": "Expected Output",
+  "nl2agent.requirements.keyConstraints": "Key Constraints",
+  "nl2agent.requirements.registering": "Registering summary…",
+  "nl2agent.requirements.notRegistered": "Requirements summary was not registered.",
+  "nl2agent.requirements.registrationFailed": "Failed to register the requirements summary.",
+  "nl2agent.requirements.retry": "Retry",
+  "nl2agent.requirements.superseded": "This summary has been replaced by a newer version.",
+  "nl2agent.requirements.confirmed": "Requirements confirmed",
+  "nl2agent.requirements.confirmInstruction": "Confirm this summary, or describe required changes in chat.",
+  "nl2agent.requirements.confirmationFailed": "Failed to confirm the requirements summary.",
+  "nl2agent.requirements.confirming": "Confirming…",
+  "nl2agent.requirements.confirm": "Confirm Requirements",
+  "nl2agent.finalize.primaryModel": "Primary Model",
+  "nl2agent.finalize.fallbackModels": "Fallback Models",
+  "nl2agent.finalize.localResources": "Local Resources",
+  "nl2agent.finalize.onlineResources": "Online Resources",
+  "nl2agent.finalize.tool": "Tool",
+  "nl2agent.finalize.skill": "Skill",
+  "nl2agent.finalize.mcpTool": "MCP Tool",
+  "nl2agent.finalize.officialSkill": "Official Skill",
+  "nl2agent.finalize.none": "None",
+  "nl2agent.finalize.invalidReferences": "Selected models or resources are no longer valid",
+  "nl2agent.finalize.invalidReferencesDescription": "Reconfigure the draft before applying it. Invalid references: {{references}}",
+  "nl2agent.finalize.completedSession": "This NL2AGENT session is complete",
+  "nl2agent.finalize.completedSessionDescription": "Continue editing to reopen the workflow from final review.",
+  "nl2agent.finalize.continueEditing": "Continue Editing",
+  "nl2agent.finalize.viewAgent": "View Agent",
+  "nl2agent.finalize.resumed": "You can continue editing this agent.",
+  "nl2agent.finalize.resumeError": "Failed to resume this agent session.",
+  "nl2agent.finalize.editingSession": "Editing is in progress",
+  "nl2agent.finalize.editingSessionDescription": "Describe one change in the conversation to reopen its corresponding review card.",
+  "nl2agent.finalize.historyExpired": "The editable NL2AGENT session has expired",
+  "nl2agent.finalize.historyExpiredDescription": "The proposal saved in this conversation remains available, but its persisted workflow can no longer be resumed.",
+  "nl2agent.cardDelivery.generating": "Generating card…",
+  "nl2agent.cardDelivery.retryRequired": "The card could not be generated.",
+  "nl2agent.cardDelivery.regenerate": "Regenerate card",
+  "nl2agent.builder.open": "Agent Builder",
+  "nl2agent.finalize.publish": "Apply to configuration",
+  "nl2agent.finalize.published": "Configuration applied successfully!"
 }

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type FC,
-} from "react";
+import { useCallback, useEffect, useMemo, useState, type FC } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
@@ -69,6 +63,13 @@ import {
   skillFileUploadsRegistry,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
+import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
+import { Nl2AgentMessageLifecycle } from "@/components/nl2agent/Nl2AgentFenceRenderer";
+import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
+import {
+  Nl2AgentContinuationError,
+  OnlineConfigurationBar,
+} from "@/components/nl2agent/OnlineConfigurationBar";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -76,18 +77,26 @@ export interface ThreadProps {
   onBack: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  embedded?: boolean;
 }
 
 /**
  * Derives ModelOption[] from agent.model_ids and agent.model_names.
  * Falls back to model_name for single model scenarios.
  */
-const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] => {
+const useAgentModels = (
+  agent: Agent | PublishedAgent
+): readonly ModelOption[] => {
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
 
-    if (model_ids && model_ids.length > 0 && model_names && model_names.length > 0) {
+    if (
+      model_ids &&
+      model_ids.length > 0 &&
+      model_names &&
+      model_names.length > 0
+    ) {
       return model_ids.map((id, i) => ({
         id: String(id),
         name: model_names[i] ?? `Model ${id}`,
@@ -95,7 +104,8 @@ const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] =
     }
 
     // Fallback for single model: check model_name on typedAgent
-    const modelName = (typedAgent as unknown as { model_name?: string }).model_name;
+    const modelName = (typedAgent as unknown as { model_name?: string })
+      .model_name;
     if (modelName) {
       return [{ id: modelName, name: modelName }];
     }
@@ -110,25 +120,29 @@ export const Thread: FC<ThreadProps> = ({
   onBack,
   selectedModelId,
   onModelChange,
+  embedded = false,
 }) => {
   const models = useAgentModels(agent);
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
-      (item) => item.id === s.threads.mainThreadId,
+      (item) => item.id === s.threads.mainThreadId
     );
     return currentThread?.title;
   });
   const hasMessages = messages.length > 0;
   const displayName = agent.display_name || agent.name;
-  const conversationTitle = generatedTitle?.trim() || currentThreadTitle?.trim() || "New Chat";
+  const conversationTitle =
+    generatedTitle?.trim() || currentThreadTitle?.trim() || "New Chat";
 
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
   // letting the panel render even if the original message parts change.
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(null);
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
+    null
+  );
 
   const open = useCallback((payload: SourcesPanelSelection) => {
     setSelection(payload);
@@ -153,7 +167,7 @@ export const Thread: FC<ThreadProps> = ({
 
   const panelContextValue = useMemo(
     () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close],
+    [selection, open, toggle, close]
   );
 
   return (
@@ -169,6 +183,7 @@ export const Thread: FC<ThreadProps> = ({
         conversationTitle={conversationTitle}
         selection={selection}
         onPanelClose={close}
+        embedded={embedded}
       />
     </SourcesPanelProvider>
   );
@@ -185,6 +200,7 @@ interface ThreadViewProps {
   conversationTitle: string;
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
+  embedded: boolean;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -198,25 +214,40 @@ const ThreadView: FC<ThreadViewProps> = ({
   conversationTitle,
   selection,
   onPanelClose,
+  embedded,
 }) => {
+  const workflow = useNl2AgentWorkflow();
   return (
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
+          {!embedded && (
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
           <div className="flex flex-col">
             <span className="text-sm font-medium text-foreground">
-              {hasMessages ? conversationTitle : displayName}
+              {embedded
+                ? "智能体生成助手"
+                : hasMessages
+                  ? conversationTitle
+                  : displayName}
             </span>
-            {hasMessages && (
-              <span className="text-xs text-muted-foreground">Conversation</span>
+            {hasMessages && !embedded && (
+              <span className="text-xs text-muted-foreground">
+                Conversation
+              </span>
             )}
           </div>
         </header>
 
-        <ThreadPrimitive.Viewport className="flex flex-1 flex-col overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
+        <ThreadPrimitive.Viewport
+          className={cn(
+            "flex flex-1 flex-col overflow-y-auto max-w-4xl mx-auto w-full",
+            embedded ? "px-3 py-3" : "px-8 py-6"
+          )}
+        >
           {hasMessages ? (
             <ThreadMessages agent={agent} />
           ) : (
@@ -224,9 +255,22 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
         </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col gap-4 pb-8 px-8">
+        <ThreadPrimitive.ViewportFooter
+          className={cn(
+            "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col gap-4",
+            embedded ? "px-3 pb-3" : "px-8 pb-8"
+          )}
+        >
           <ThreadScrollToBottom />
-          <Composer models={models} selectedModelId={selectedModelId} onModelChange={onModelChange} />
+          {embedded && <Nl2AgentContinuationError />}
+          {embedded && <OnlineConfigurationBar agentId={workflow.agentId} />}
+          <Composer
+            models={models}
+            selectedModelId={selectedModelId}
+            onModelChange={onModelChange}
+            disabled={embedded && workflow.busy}
+            compact={embedded}
+          />
         </ThreadPrimitive.ViewportFooter>
       </div>
 
@@ -255,7 +299,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
     (question: string) => {
       aui.composer().setText(question);
     },
-    [aui],
+    [aui]
   );
 
   return (
@@ -305,7 +349,14 @@ const ThreadMessages: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
   return (
     <ThreadPrimitive.Messages>
       {({ message }) => {
-        if (message.role === "user") return <UserMessage />;
+        if (message.role === "user") {
+          const text = message.content
+            .filter((part) => part.type === "text")
+            .map((part) => (part.type === "text" ? part.text : ""))
+            .join("");
+          if (isNl2AgentAutoContinueText(text)) return null;
+          return <UserMessage />;
+        }
         return <AssistantMessage agent={agent} />;
       }}
     </ThreadPrimitive.Messages>
@@ -360,9 +411,7 @@ const AssistantWorkingIndicator: FC = () => {
 };
 
 const AssistantCompletionIndicator: FC = () => {
-  const isComplete = useAuiState(
-    (s) => s.message.status?.type === "complete",
-  );
+  const isComplete = useAuiState((s) => s.message.status?.type === "complete");
 
   if (!isComplete) return null;
 
@@ -467,7 +516,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "group-reasoning": {
                 const running = part.status.type === "running";
                 return (
-                  <Reasoning.Root defaultOpen={running} >
+                  <Reasoning.Root defaultOpen={running}>
                     <GroupReasoningTrigger active={running} />
                     <Reasoning.Content aria-busy={running}>
                       <Reasoning.Text>{children}</Reasoning.Text>
@@ -490,7 +539,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return <MarkdownText />;
               }
               case "reasoning":
-                return <Reasoning {...part} /> ;
+                return <Reasoning {...part} />;
               case "tool-call":
                 return part.toolUI ?? <ToolFallback {...part} />;
               case "indicator":
@@ -511,6 +560,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
         <MessageError />
+        <Nl2AgentMessageLifecycle />
       </div>
 
       <div
@@ -575,7 +625,6 @@ const AssistantActionBar: FC = () => {
         <MessageTiming />
         <SingleTurnTokenUsage />
       </div>
-
     </ActionBarPrimitive.Root>
   );
 };
@@ -745,7 +794,10 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
         aria-pressed={isActive}
         className="aui-source-group-button inline-flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent/50"
       >
-        <span aria-hidden className="inline-flex items-center gap-1 text-muted-foreground">
+        <span
+          aria-hidden
+          className="inline-flex items-center gap-1 text-muted-foreground"
+        >
           <FileTextIcon className="size-3.5" />
           检索结果
         </span>

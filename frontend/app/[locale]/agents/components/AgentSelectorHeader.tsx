@@ -1,9 +1,36 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Spin, Tag, theme } from "antd";
+import {
+  App,
+  Flex,
+  Button,
+  Badge,
+  Dropdown,
+  Tooltip,
+  Col,
+  Row,
+  Modal,
+  Spin,
+  Tag,
+  theme,
+} from "antd";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, FileInput, Settings, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
+import {
+  Plus,
+  FileInput,
+  Settings,
+  ChevronDown,
+  ChevronLeft,
+  Bot,
+  Copy,
+  Network,
+  FileOutput,
+  Trash2,
+  Globe,
+  GitBranch,
+  History,
+} from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -39,12 +66,16 @@ interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
   isShowVersionManagePanel?: boolean;
   onCloseVersionManagePanel?: () => void;
+  onStartAgentBuilder: () => void;
+  agentBuilderActive?: boolean;
 }
 
 export default function AgentSelectorHeader({
   onOpenVersionManage,
   isShowVersionManagePanel = false,
   onCloseVersionManagePanel,
+  onStartAgentBuilder,
+  agentBuilderActive = false,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -60,7 +91,9 @@ export default function AgentSelectorHeader({
   const { user } = useAuthorizationContext();
 
   // Fetch agent list internally
-  const { agents } = useAgentList(user?.tenantId ?? null);
+  const { agents } = useAgentList(user?.tenantId ?? null, {
+    includeOwnedNl2AgentDrafts: true,
+  });
 
   // Store state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
@@ -68,19 +101,28 @@ export default function AgentSelectorHeader({
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
   const reset = useAgentConfigStore((state) => state.reset);
-  const hasUnsavedChanges = useAgentConfigStore((state) => state.hasUnsavedChanges);
+  const hasUnsavedChanges = useAgentConfigStore(
+    (state) => state.hasUnsavedChanges
+  );
 
   const { agentInfo } = useAgentInfo(currentAgentId);
   const { agentVersionList, total } = useAgentVersionList(currentAgentId);
-  const { agentVersionDetail } = useAgentVersionDetail(currentAgentId, agentInfo?.current_version_no);
+  const { agentVersionDetail } = useAgentVersionDetail(
+    currentAgentId,
+    agentInfo?.current_version_no
+  );
 
   // Call relationship modal state
-  const [callRelationshipModalVisible, setCallRelationshipModalVisible] = useState(false);
-  const [selectedAgentForRelationship, setSelectedAgentForRelationship] = useState<Agent | null>(null);
+  const [callRelationshipModalVisible, setCallRelationshipModalVisible] =
+    useState(false);
+  const [selectedAgentForRelationship, setSelectedAgentForRelationship] =
+    useState<Agent | null>(null);
 
   // A2A settings modal state
   const [showA2ASettings, setShowA2ASettings] = useState(false);
-  const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(null);
+  const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(
+    null
+  );
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -97,7 +139,8 @@ export default function AgentSelectorHeader({
   // Fetch A2A Server Settings when modal opens
   const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
     queryKey: ["a2aServerSettings", selectedAgentForA2A?.id],
-    queryFn: () => a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
+    queryFn: () =>
+      a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
     enabled: showA2ASettings && !!selectedAgentForA2A,
   });
 
@@ -109,7 +152,9 @@ export default function AgentSelectorHeader({
     const interfaces = data.supported_interfaces;
     const endpointId = data.endpoint_id;
     const restEndpoints = interfaces.filter(
-      (iface: any) => iface.protocolBinding.toLowerCase() === "http+json" || iface.protocolBinding.toLowerCase() === "httprest"
+      (iface: any) =>
+        iface.protocolBinding.toLowerCase() === "http+json" ||
+        iface.protocolBinding.toLowerCase() === "httprest"
     );
     const jsonrpcEndpoints = interfaces.filter(
       (iface: any) =>
@@ -137,11 +182,13 @@ export default function AgentSelectorHeader({
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);
-  const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
+  const [importWizardData, setImportWizardData] =
+    useState<ImportAgentData | null>(null);
 
   // Get current selected agent
   const currentAgent = agents.find(
-    (agent: Agent) => currentAgentId !== null && String(agent.id) === String(currentAgentId)
+    (agent: Agent) =>
+      currentAgentId !== null && String(agent.id) === String(currentAgentId)
   );
 
   // Handle import agent
@@ -272,7 +319,8 @@ export default function AgentSelectorHeader({
       // using the agent's first available legacy model_id (single-select) when
       // model_ids is empty in the response.
       const modelIdsForCopy = (() => {
-        if (detail.model_ids && detail.model_ids.length > 0) return detail.model_ids;
+        if (detail.model_ids && detail.model_ids.length > 0)
+          return detail.model_ids;
         // Legacy payload may only carry model_id (single-select); preserve it
         const legacySingleId = (detail as { model_id?: number }).model_id;
         if (legacySingleId) return [legacySingleId];
@@ -295,7 +343,8 @@ export default function AgentSelectorHeader({
         duty_prompt: detail.duty_prompt,
         constraint_prompt: detail.constraint_prompt,
         few_shots_prompt: detail.few_shots_prompt,
-        business_logic_model_name: detail.business_logic_model_name ?? undefined,
+        business_logic_model_name:
+          detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
@@ -432,7 +481,9 @@ export default function AgentSelectorHeader({
       if (result.success && result.data) {
         setCurrentAgent(result.data);
       } else {
-        message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
+        message.error(
+          result.message || t("agentConfig.agents.detailsLoadFailed")
+        );
       }
     } catch (error) {
       log.error("Failed to load agent detail:", error);
@@ -452,136 +503,141 @@ export default function AgentSelectorHeader({
         <div className="py-2">
           <Flex vertical gap={8}>
             {/* Row 1: Name + Status */}
-          <div className={`font-medium text-base truncate min-w-0 ${!isAvailable ? "text-gray-500" : ""}`}>
-            <div className="flex justify-between" style={{ gap: 6 }}>
-              <Flex gap={4} align="center">
-                {!isAvailable && (
+            <div
+              className={`font-medium text-base truncate min-w-0 ${!isAvailable ? "text-gray-500" : ""}`}
+            >
+              <div className="flex justify-between" style={{ gap: 6 }}>
+                <Flex gap={4} align="center">
+                  {!isAvailable && (
+                    <Tooltip
+                      title={(() => {
+                        const reasons = agent.unavailable_reasons || [];
+                        if (reasons.includes("agent_not_found")) {
+                          return t("subAgentPool.tooltip.unavailableAgent");
+                        } else if (reasons.includes("tool_unavailable")) {
+                          return t("toolPool.tooltip.unavailableTool");
+                        } else if (reasons.includes("duplicate_name")) {
+                          return t("agent.error.nameExists", { name });
+                        } else if (reasons.includes("duplicate_display_name")) {
+                          return t("agent.error.displayNameExists", {
+                            displayName,
+                          });
+                        } else if (reasons.includes("model_unavailable")) {
+                          return t("agent.error.modelUnavailable");
+                        }
+                        return t("subAgentPool.tooltip.unavailableAgent");
+                      })()}
+                    >
+                      <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />
+                    </Tooltip>
+                  )}
+                  {agent.is_new && (
+                    <Tooltip title={t("space.new", "New imported agent")}>
+                      <span className="inline-flex items-center px-1 h-5 bg-amber-50 text-amber-700 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none">
+                        <span className="px-0.5">{t("space.new", "NEW")}</span>
+                      </span>
+                    </Tooltip>
+                  )}
+                  {displayName && (
+                    <span className="truncate text-sm">{displayName}</span>
+                  )}
+                </Flex>
+                <div>
+                  {agent.is_a2a_server && (
+                    <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+                      <span>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<Globe className="w-4 h-4" />}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleViewA2AAgentSettings(agent);
+                          }}
+                          className="agent-action-button agent-action-button-blue"
+                        />
+                      </span>
+                    </Tooltip>
+                  )}
+                  <Tooltip title={t("agent.contextMenu.copy")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Copy className="w-4 h-4" />}
+                      disabled={!isAvailable}
+                      className="agent-action-button agent-action-button-blue"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyAgentWithConfirm(agent);
+                      }}
+                    />
+                  </Tooltip>
+                  <Tooltip title={t("agent.action.viewCallRelationship")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Network className="w-4 h-4" />}
+                      disabled={!isAvailable}
+                      className="agent-action-button agent-action-button-blue"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleViewCallRelationship(agent);
+                      }}
+                    />
+                  </Tooltip>
+                  <Tooltip title={t("agent.contextMenu.export")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<FileOutput className="w-4 h-4" />}
+                      disabled={!isAvailable}
+                      className="agent-action-button agent-action-button-green"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleExportAgent(agent);
+                      }}
+                    />
+                  </Tooltip>
                   <Tooltip
-                    title={(() => {
-                      const reasons = agent.unavailable_reasons || [];
-                      if (reasons.includes('agent_not_found')) {
-                        return t('subAgentPool.tooltip.unavailableAgent');
-                      } else if (reasons.includes('tool_unavailable')) {
-                        return t('toolPool.tooltip.unavailableTool');
-                      } else if (reasons.includes('duplicate_name')) {
-                        return t('agent.error.nameExists', { name });
-                      } else if (reasons.includes('duplicate_display_name')) {
-                        return t('agent.error.displayNameExists', { displayName });
-                      } else if (reasons.includes('model_unavailable')) {
-                        return t('agent.error.modelUnavailable');
-                      }
-                      return t('subAgentPool.tooltip.unavailableAgent');
-                    })()}
+                    title={
+                      agent.permission === "READ_ONLY"
+                        ? t("agent.noEditPermission")
+                        : t("agent.contextMenu.delete")
+                    }
                   >
-                    <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Trash2 className="w-4 h-4" />}
+                      disabled={agent.permission === "READ_ONLY"}
+                      className="agent-action-button agent-action-button-red"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteAgentWithConfirm(agent);
+                      }}
+                    />
                   </Tooltip>
-                )}
-                {agent.is_new && (
-                  <Tooltip title={t("space.new", "New imported agent")}>
-                    <span className="inline-flex items-center px-1 h-5 bg-amber-50 text-amber-700 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none">
-                      <span className="px-0.5">{t("space.new", "NEW")}</span>
-                    </span>
-                  </Tooltip>
-                )}
-                {displayName && (
-                  <span className="truncate text-sm">{displayName}</span>
-                )}
-              </Flex>
-              <div>
-              {agent.is_a2a_server && (
-                  <Tooltip title={t("a2a.agent.viewA2ASettings")}>
-                    <span>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<Globe className="w-4 h-4"/>}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleViewA2AAgentSettings(agent);
-                        }}
-                        className="agent-action-button agent-action-button-blue"
-                      />
-                    </span>
-                  </Tooltip>
-                )}
-                <Tooltip title={t("agent.contextMenu.copy")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Copy className="w-4 h-4" />}
-                    disabled={!isAvailable}
-                    className="agent-action-button agent-action-button-blue"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCopyAgentWithConfirm(agent);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title={t("agent.action.viewCallRelationship")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Network className="w-4 h-4" />}
-                    disabled={!isAvailable}
-                    className="agent-action-button agent-action-button-blue"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleViewCallRelationship(agent);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title={t("agent.contextMenu.export")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<FileOutput className="w-4 h-4" />}
-                    disabled={!isAvailable}
-                    className="agent-action-button agent-action-button-green"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleExportAgent(agent);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip
-                  title={
-                    agent.permission === "READ_ONLY"
-                      ? t("agent.noEditPermission")
-                      : t("agent.contextMenu.delete")
-                  }
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Trash2 className="w-4 h-4" />}
-                    disabled={agent.permission === "READ_ONLY"}
-                    className="agent-action-button agent-action-button-red"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteAgentWithConfirm(agent);
-                    }}
-                  />
-                </Tooltip>
+                </div>
               </div>
             </div>
-          </div>
-          {/* Row 2: Description */}
-          <div
-            className={`text-xs truncate min-w-0 ${!isAvailable ? "text-gray-400" : "text-gray-500"}`}
-          >
-            {agent.description}
-          </div>
-        </Flex>
+            {/* Row 2: Description */}
+            <div
+              className={`text-xs truncate min-w-0 ${!isAvailable ? "text-gray-400" : "text-gray-500"}`}
+            >
+              {agent.description}
+            </div>
+          </Flex>
         </div>
       ),
       onClick: () => handleSelectAgent(Number(agent.id)),
     };
 
     // Add divider after each item except the last one
-    const divider = index < agents.length - 1
-      ? { key: `divider-${agent.id}`, type: 'divider' as const }
-      : null;
+    const divider =
+      index < agents.length - 1
+        ? { key: `divider-${agent.id}`, type: "divider" as const }
+        : null;
 
     return divider ? [agentItem, divider] : [agentItem];
   });
@@ -596,20 +652,17 @@ export default function AgentSelectorHeader({
 
   return (
     <>
-      <div className="w-full h-full px-6" style={{ borderBottom: "1px solid #f0f0f0" }}>
+      <div
+        className="w-full h-full px-6"
+        style={{ borderBottom: "1px solid #f0f0f0" }}
+      >
         <Row
           gutter={{ lg: 32, md: 32, sm: 16 }}
           className="h-full px-4"
           align="middle"
         >
           {/* Left column: Agent Config */}
-          <Col
-            xs={24}
-            sm={24}
-            md={24}
-            lg={12}
-            className="flex min-w-0"
-          >
+          <Col xs={24} sm={24} md={24} lg={12} className="flex min-w-0">
             <Flex vertical className="min-w-0 w-full">
               {showBackFromRepository ? (
                 <Button
@@ -622,103 +675,128 @@ export default function AgentSelectorHeader({
                 </Button>
               ) : null}
               <Dropdown
-              trigger={["click"]}
-              placement="bottomLeft"
-              open={dropdownOpen}
-              onOpenChange={setDropdownOpen}
-              menu={{ 
-                items: agentMenuItems,
-                style: { maxHeight: 500, overflowY: 'auto' }
-              }}
-              getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
-              styles={{
-                root: {
-                  width: 'calc(100% - 32px)',
+                trigger={["click"]}
+                placement="bottomLeft"
+                open={dropdownOpen}
+                onOpenChange={setDropdownOpen}
+                menu={{
+                  items: agentMenuItems,
+                  style: { maxHeight: 500, overflowY: "auto" },
+                }}
+                getPopupContainer={(triggerNode) =>
+                  triggerNode.parentNode as HTMLElement
                 }
-              }}
-            >
-              <div
-                className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-gray-50 rounded-md transition-colors w-full overflow-hidden"
+                styles={{
+                  root: {
+                    width: "calc(100% - 32px)",
+                  },
+                }}
               >
-                <div className="relative w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mx-2">
-                  {hasUnsavedChanges && (
-                    <Badge dot color="blue" style={{ position: "absolute", top: -8, right: -8 }} >
+                <div className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-gray-50 rounded-md transition-colors w-full overflow-hidden">
+                  <div className="relative w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mx-2">
+                    {hasUnsavedChanges && (
+                      <Badge
+                        dot
+                        color="blue"
+                        style={{ position: "absolute", top: -8, right: -8 }}
+                      >
+                        <Bot className="w-8 h-8 text-blue-600" />
+                      </Badge>
+                    )}
+                    {!hasUnsavedChanges && (
                       <Bot className="w-8 h-8 text-blue-600" />
-                    </Badge>
-                  )}
-                  {!hasUnsavedChanges && <Bot className="w-8 h-8 text-blue-600" />}
-                </div>
-                <div className="flex-1 min-w-0 mx-2">
-                  <div className="text-lg font-medium text-gray-900 leading-tight mb-2">
-                    {isCreatingMode
-                      ? t("agent.action.create")
-                      : currentAgent?.display_name || currentAgent?.name || t("agentConfig.agents.selectAgent")}
+                    )}
                   </div>
-                  <div className="text-sm text-gray-500 leading-tight truncate">
-                    {isCreatingMode
-                    ? t("agent.action.createOrSelect")
-                    : currentAgent?.description || t("agentConfig.agents.noAgentSelected")}
+                  <div className="flex-1 min-w-0 mx-2">
+                    <div className="text-lg font-medium text-gray-900 leading-tight mb-2">
+                      {isCreatingMode
+                        ? t("agent.action.create")
+                        : currentAgent?.display_name ||
+                          currentAgent?.name ||
+                          t("agentConfig.agents.selectAgent")}
+                    </div>
+                    <div className="text-sm text-gray-500 leading-tight truncate">
+                      {isCreatingMode
+                        ? t("agent.action.createOrSelect")
+                        : currentAgent?.description ||
+                          t("agentConfig.agents.noAgentSelected")}
+                    </div>
                   </div>
+                  <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
                 </div>
-                <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              </div>
-            </Dropdown>
+              </Dropdown>
             </Flex>
-
-
           </Col>
           {/* Right column: Agent Info */}
-          <Col
-            xs={24}
-            sm={24}
-            md={24}
-            lg={12}
-            className="flex justify-end"
-          >
-          <Flex align="center" gap={12} wrap="nowrap" justify="flex-end" className="w-full mr-6">
-            {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
-              <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
-                <History size={16} />
-                <Tag color="cyan" variant="outlined" className="rounded-md font-mono text-sm">
-                  {agentVersionDetail?.version.version_name}
-                </Tag>
-                <span className="text-xs text-gray-500">
-                  / {t("agent.version.totalVersions", { count: total ?? 0 })}
-                </span>
-              </div>
-            )}
-            <Flex align="center" gap={12} wrap="nowrap">
-              <Flex align="center" gap={8} className="ml-4">
+          <Col xs={24} sm={24} md={24} lg={12} className="flex justify-end">
+            <Flex
+              align="center"
+              gap={12}
+              wrap="nowrap"
+              justify="flex-end"
+              className="w-full mr-6"
+            >
+              {currentAgentId != null &&
+                agentInfo?.current_version_no !== 0 &&
+                total > 0 && (
+                  <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
+                    <History size={16} />
+                    <Tag
+                      color="cyan"
+                      variant="outlined"
+                      className="rounded-md font-mono text-sm"
+                    >
+                      {agentVersionDetail?.version.version_name}
+                    </Tag>
+                    <span className="text-xs text-gray-500">
+                      /{" "}
+                      {t("agent.version.totalVersions", { count: total ?? 0 })}
+                    </span>
+                  </div>
+                )}
+              <Flex align="center" gap={12} wrap="nowrap">
                 <Button
-                  size="middle"
-                  onClick={enterCreateMode}
-                  className="flex items-center gap-1"
+                  type={agentBuilderActive ? "primary" : "default"}
+                  icon={<Bot className="h-4 w-4" />}
+                  onClick={onStartAgentBuilder}
+                  disabled={agentBuilderActive}
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>{t("agentConfig.button.new")}</span>
+                  {t("nl2agent.builder.open", "智能体生成助手")}
                 </Button>
+                <Flex align="center" gap={8} className="ml-4">
+                  <Button
+                    size="middle"
+                    onClick={enterCreateMode}
+                    className="flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>{t("agentConfig.button.new")}</span>
+                  </Button>
+                  <Button
+                    size="middle"
+                    onClick={handleImportAgent}
+                    className="flex items-center gap-1"
+                  >
+                    <FileInput className="w-4 h-4" />
+                    <span>{t("agentConfig.button.import")}</span>
+                  </Button>
+                </Flex>
+
                 <Button
-                  size="middle"
-                  onClick={handleImportAgent}
-                  className="flex items-center gap-1"
+                  icon={<GitBranch size={16} />}
+                  onClick={
+                    isShowVersionManagePanel
+                      ? onCloseVersionManagePanel
+                      : onOpenVersionManage
+                  }
+                  type={isShowVersionManagePanel ? "primary" : "default"}
                 >
-                  <FileInput className="w-4 h-4" />
-                  <span>{t("agentConfig.button.import")}</span>
+                  {t("agent.version.manage")}
                 </Button>
               </Flex>
-
-              <Button
-                icon={<GitBranch size={16} />}
-                onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
-                type={isShowVersionManagePanel ? "primary" : "default"}
-              >
-                {t("agent.version.manage")}
-              </Button>
             </Flex>
-          </Flex>
           </Col>
         </Row>
-
       </div>
 
       {/* Import Wizard Modal */}
@@ -746,7 +824,6 @@ export default function AgentSelectorHeader({
             selectedAgentForRelationship.display_name ||
             selectedAgentForRelationship.name
           }
-          
         />
       )}
 
@@ -767,13 +844,20 @@ export default function AgentSelectorHeader({
         {selectedAgentForA2A && constructedA2AAgentCard ? (
           <A2AServerSettingsPanel
             agentId={Number(selectedAgentForA2A.id)}
-            agentName={selectedAgentForA2A.display_name || selectedAgentForA2A.name}
+            agentName={
+              selectedAgentForA2A.display_name || selectedAgentForA2A.name
+            }
             endpointId={constructedA2AAgentCard.endpoint_id}
             a2aAgentCard={constructedA2AAgentCard}
           />
         ) : (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
-            {t("a2a.service.getServerSettingsFailed", "Failed to load A2A settings")}
+          <div
+            style={{ textAlign: "center", padding: "40px 0", color: "#999" }}
+          >
+            {t(
+              "a2a.service.getServerSettingsFailed",
+              "Failed to load A2A settings"
+            )}
           </div>
         )}
       </Modal>

@@ -21,6 +21,7 @@ import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
+import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
@@ -66,7 +67,7 @@ const toAttachmentType = (rawType: string): AttachmentType => {
 };
 
 const toToolSearchItem = (
-  value: unknown,
+  value: unknown
 ): { url: string; title: string } | null => {
   if (typeof value !== "object" || value === null) return null;
 
@@ -96,7 +97,7 @@ const parseSearchImageUrls = (content: string): string[] => {
     return Array.isArray(value.images_url)
       ? value.images_url.filter(
           (imageUrl): imageUrl is string =>
-            typeof imageUrl === "string" && imageUrl.length > 0,
+            typeof imageUrl === "string" && imageUrl.length > 0
         )
       : [];
   } catch {
@@ -113,12 +114,12 @@ type BranchableHistoryMessage = Parameters<
 >[0][number];
 
 const buildBranchableHistory = (
-  messages: HistoryMessage[],
+  messages: HistoryMessage[]
 ): BranchableHistoryMessage[] => {
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length; ) {
+  for (let groupStart = 0; groupStart < messages.length;) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -143,7 +144,8 @@ const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
   left.role === "user" &&
   right.role === "user" &&
   JSON.stringify(left.message) === JSON.stringify(right.message) &&
-  JSON.stringify(left.minio_files ?? []) === JSON.stringify(right.minio_files ?? []);
+  JSON.stringify(left.minio_files ?? []) ===
+    JSON.stringify(right.minio_files ?? []);
 
 /**
  * Collapse refresh-generated duplicate user messages while preserving every
@@ -157,6 +159,14 @@ const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
   let activeUserMessage: ApiMessage | undefined;
 
   for (const message of messages) {
+    if (
+      message.role === "user" &&
+      isNl2AgentAutoContinueText(
+        typeof message.message === "string" ? message.message : ""
+      )
+    ) {
+      continue;
+    }
     if (message.role !== "user") {
       collapsed.push(message);
       continue;
@@ -175,7 +185,7 @@ const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
 
 const restoreAttachments = (
   message: ApiMessage,
-  messageId: string,
+  messageId: string
 ): CompleteAttachment[] => {
   if (!message.minio_files) return [];
 
@@ -225,13 +235,12 @@ const restoreAttachments = (
   });
 };
 
-class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
-  constructor(
-    private readonly getRemoteId: () => string | undefined,
-    private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
-  ) {}
+export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
+  constructor(private readonly getRemoteId: () => string | undefined) {}
 
-  async load(): Promise<ExportedMessageRepository & { unstable_resume?: boolean }> {
+  async load(): Promise<
+    ExportedMessageRepository & { unstable_resume?: boolean }
+  > {
     const remoteId = this.getRemoteId();
     if (!remoteId) {
       log.log(`[history-adapter] no remoteId, returning empty`);
@@ -256,9 +265,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // Resolve a stable messageId first — every per-message side store
       // (sources registry, metadata bucket) is keyed off this value so it
       // matches the id that assistant-ui later sets on the rendered message.
-      const messageId = String(
-        msg.message_id ?? `${remoteId}-${messageIndex}`,
-      );
+      const messageId = String(msg.message_id ?? `${remoteId}-${messageIndex}`);
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
@@ -286,8 +293,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const item = searchItem as Record<string, unknown>;
             const url = (item.url as string | undefined) ?? "";
             const filename = (item.filename as string | undefined) ?? "";
-            const title =
-              (item.title as string | undefined) || filename || url;
+            const title = (item.title as string | undefined) || filename || url;
             if (url || filename || title) {
               sources.push({
                 citeIndex: (item.cite_index as number | undefined) ?? 0,
@@ -362,11 +368,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               for (const searchResult of searchResults) {
                 const item = toToolSearchItem(searchResult);
                 if (item) {
-                  attachSearchContentToTool(
-                    content,
-                    part.unit_index,
-                    item,
-                  );
+                  attachSearchContentToTool(content, part.unit_index, item);
                 }
               }
             }
@@ -382,17 +384,13 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               for (const searchResult of searchResults) {
                 const item = toToolSearchItem(searchResult);
                 if (item) {
-                  attachSearchContentToTool(
-                    content,
-                    part.unit_index,
-                    item,
-                  );
+                  attachSearchContentToTool(content, part.unit_index, item);
                 }
               }
             } catch (error) {
               log.warn(
                 "[history-adapter] Failed to parse search_content:",
-                error,
+                error
               );
             }
             continue;
@@ -419,10 +417,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
-          if (
-            part.type === "tool" ||
-            part.type === "tool-call"
-          ) {
+          if (part.type === "tool" || part.type === "tool-call") {
             flushReasoning();
             const toolCallPart = buildToolCallPart({
               type: part.type,
@@ -480,7 +475,8 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "final_answer") {
             flushReasoning();
-            if (part.content) content.push({ type: "text", text: part.content });
+            if (part.content)
+              content.push({ type: "text", text: part.content });
           }
         }
 
@@ -494,7 +490,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             (item) =>
               item?.type === "tool-call" &&
               Array.isArray(item.searchImages) &&
-              item.searchImages.length > 0,
+              item.searchImages.length > 0
           );
           if (!toolHasImages) {
             for (const imageUrl of msg.picture) {
@@ -520,22 +516,17 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         // the raw SSE chunks.
         if (Array.isArray(msg.search) && msg.search.length > 0) {
           for (const searchItem of msg.search) {
-            if (
-              typeof searchItem === "object" &&
-              searchItem !== null
-            ) {
+            if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const url = (item.url as string | undefined) ?? "";
               const filename = (item.filename as string | undefined) ?? "";
               const title =
                 (item.title as string | undefined) || filename || url;
               if (!url && !filename && !title) continue;
-              const citeIndex =
-                (item.cite_index as number | undefined) ?? 0;
+              const citeIndex = (item.cite_index as number | undefined) ?? 0;
               content.push({
                 type: "source",
-                sourceType:
-                  item.source_type === "file" ? "document" : "url",
+                sourceType: item.source_type === "file" ? "document" : "url",
                 url,
                 title,
                 text: item.text as string | undefined,
@@ -609,7 +600,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     const branchableMessages = buildBranchableHistory(messages);
     const repository = ExportedMessageRepository.fromBranchableArray(
       branchableMessages,
-      { headId: messages.at(-1)?.id ?? null },
+      { headId: messages.at(-1)?.id ?? null }
     );
     return {
       ...repository,
@@ -618,11 +609,13 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   }
 
   async *resume(
-    options: ChatModelRunOptions,
+    options: ChatModelRunOptions
   ): AsyncGenerator<ChatModelRunResult, void> {
     const remoteId = this.getRemoteId();
     if (!remoteId) {
-      log.warn("[history-adapter] Cannot resume without a remote conversation ID");
+      log.warn(
+        "[history-adapter] Cannot resume without a remote conversation ID"
+      );
       return;
     }
 
@@ -658,14 +651,14 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   }
 
   withFormat<TMessage, TStorageFormat extends Record<string, unknown>>(
-    _formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>,
+    _formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>
   ): GenericThreadHistoryAdapter<TMessage> {
     return this as unknown as GenericThreadHistoryAdapter<TMessage>;
   }
 }
 
 const toRemoteThreadMetadata = (
-  item: ConversationListItem,
+  item: ConversationListItem
 ): RemoteThreadMetadata => {
   // Prefer the most recent activity timestamp; fall back to the creation time
   // so the thread list can always group by recency. The timestamp is passed
@@ -679,7 +672,9 @@ const toRemoteThreadMetadata = (
     ...(timestamp || item.agent_id
       ? {
           custom: {
-            ...(timestamp ? { lastMessageAt: new Date(timestamp).toISOString() } : {}),
+            ...(timestamp
+              ? { lastMessageAt: new Date(timestamp).toISOString() }
+              : {}),
             ...(item.agent_id ? { agentId: item.agent_id } : {}),
           },
         }
@@ -694,10 +689,9 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize(),
+          () => aui.threadListItem().getState().remoteId
         ),
-      [aui],
+      [aui]
     );
 
     const adapters = useMemo(() => ({ history }), [history]);
@@ -735,7 +729,7 @@ const titleRequests = new Map<string, Promise<string>>();
 
 export const generateConversationTitle = (
   conversationId: string,
-  question: string,
+  question: string
 ): Promise<string> => {
   const existingRequest = titleRequests.get(conversationId);
   if (existingRequest) return existingRequest;
@@ -749,7 +743,7 @@ export const generateConversationTitle = (
       const title = typeof result === "string" ? result.trim() : "";
       if (!title) {
         throw new Error(
-          `Title generation returned an empty title for conversation ${conversationId}.`,
+          `Title generation returned an empty title for conversation ${conversationId}.`
         );
       }
       return title;
@@ -764,7 +758,7 @@ export const generateConversationTitle = (
 };
 
 export const setServerConversationIdState = (
-  state: ServerConversationIdState | null,
+  state: ServerConversationIdState | null
 ) => {
   serverConversationIdState = state;
 };
@@ -773,7 +767,7 @@ const MAX_TITLE_WAIT_MS = 5_000;
 const TITLE_POLL_INTERVAL_MS = 50;
 
 const waitForServerConversationId = async (
-  fallbackRemoteId: string,
+  fallbackRemoteId: string
 ): Promise<string | null> => {
   const state = serverConversationIdState;
   if (!state) return fallbackRemoteId || null;
@@ -801,9 +795,7 @@ const waitForServerConversationId = async (
   // server id in the ref, or we time out.
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, TITLE_POLL_INTERVAL_MS),
-    );
+    await new Promise((resolve) => setTimeout(resolve, TITLE_POLL_INTERVAL_MS));
     const next = readNow();
     if (next) return next;
     if (Date.now() - startedAt > MAX_TITLE_WAIT_MS) return null;
@@ -858,8 +850,14 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   async rename(remoteId: string, newTitle: string): Promise<void> {
     const candidateId = await waitForServerConversationId(remoteId);
     const conversationId = Number(candidateId);
-    if (!candidateId || !Number.isInteger(conversationId) || conversationId <= 0) {
-      throw new Error("Cannot rename a conversation without a backend conversation ID.");
+    if (
+      !candidateId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      throw new Error(
+        "Cannot rename a conversation without a backend conversation ID."
+      );
     }
     await conversationService.rename(conversationId, newTitle);
   },
@@ -869,13 +867,13 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   // them safely (e.g. from sidebar actions) without crashing the page.
   async archive(_remoteId: string): Promise<void> {
     log.warn(
-      "[adapter] archive is not supported by the backend yet; ignoring.",
+      "[adapter] archive is not supported by the backend yet; ignoring."
     );
   },
 
   async unarchive(_remoteId: string): Promise<void> {
     log.warn(
-      "[adapter] unarchive is not supported by the backend yet; ignoring.",
+      "[adapter] unarchive is not supported by the backend yet; ignoring."
     );
   },
 
@@ -889,7 +887,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       conversationService.getList(),
     ]);
     const conversation = conversations.find(
-      (item) => item.conversation_id === detail.conversation_id,
+      (item) => item.conversation_id === detail.conversation_id
     );
 
     return toRemoteThreadMetadata(
@@ -899,7 +897,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
         agent_id: detail.agent_id,
         create_time: detail.create_time,
         update_time: detail.create_time,
-      },
+      }
     );
   },
 

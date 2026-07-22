@@ -480,6 +480,7 @@ app.prepare().then(() => {
           pathname.startsWith("/api/agent/run") ||
           pathname.startsWith("/api/agent/stop") ||
           pathname.startsWith("/api/agent/automations") ||
+          pathname.startsWith("/api/nl2agent/") ||
           pathname.startsWith("/api/conversation/") ||
           pathname.startsWith("/api/share/") ||
           pathname.startsWith("/api/memory/") ||

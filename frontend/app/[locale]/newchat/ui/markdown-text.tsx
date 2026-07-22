@@ -26,6 +26,7 @@ import {
   conversationSourcesRegistry,
   type SearchSource,
 } from "../adapter/remote-chat-model-adapter";
+import { nl2AgentComponentsByLanguage } from "@/components/nl2agent/Nl2AgentFenceRenderer";
 
 /**
  * Looks up a SearchSource from either registry by citekey (e.g. "b1" or "1").
@@ -52,7 +53,7 @@ function normalizeCiteIndex(value: unknown): number | undefined {
 
 function resolveCiteSources(
   messageId: string | undefined,
-  content: readonly MessageSourcePart[],
+  content: readonly MessageSourcePart[]
 ): SearchSource[] {
   const contentSources = content.flatMap((part) => {
     const citeIndex = normalizeCiteIndex(part.citeIndex);
@@ -60,16 +61,18 @@ function resolveCiteSources(
       return [];
     }
 
-    return [{
-      citeIndex,
-      url: part.url ?? "",
-      title: part.title || part.filename || part.url || `Source ${citeIndex}`,
-      text: part.text,
-      sourceType: part.sourceType,
-      filename: part.filename,
-      downloadUrl: part.downloadUrl,
-      objectName: part.objectName,
-    }];
+    return [
+      {
+        citeIndex,
+        url: part.url ?? "",
+        title: part.title || part.filename || part.url || `Source ${citeIndex}`,
+        text: part.text,
+        sourceType: part.sourceType,
+        filename: part.filename,
+        downloadUrl: part.downloadUrl,
+        objectName: part.objectName,
+      },
+    ];
   });
 
   if (contentSources.length > 0) return contentSources;
@@ -108,12 +111,12 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
  * Custom cite component rendered for [[citekey]] markers in markdown.
  * Looks up the source from the registry and renders a CiteMarker with hover.
  */
-const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = ({
-  citekey,
-}) => {
+const CiteComponent: FC<
+  React.ComponentProps<"cite"> & { citekey?: string }
+> = ({ citekey }) => {
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[],
+    (s) => s.message.content as readonly MessageSourcePart[]
   );
   const { open } = useSourcesPanel();
 
@@ -172,6 +175,7 @@ const MarkdownTextImpl = () => {
       remarkPlugins={[remarkGfm, remarkCite]}
       className="aui-md"
       components={defaultComponents}
+      componentsByLanguage={nl2AgentComponentsByLanguage}
     />
   );
 };
@@ -224,16 +228,16 @@ const useCopyToClipboard = ({
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), copiedDuration);
       },
-      () => {},
+      () => {}
     );
   };
 
   return { isCopied, copyToClipboard };
 };
 
-const MarkdownSyntaxHighlighter: FC<
-  Omit<SyntaxHighlighterProps, "node">
-> = (props) => <SyntaxHighlighter {...props} />;
+const MarkdownSyntaxHighlighter: FC<Omit<SyntaxHighlighterProps, "node">> = (
+  props
+) => <SyntaxHighlighter {...props} />;
 
 const defaultComponents = memoizeMarkdownComponents({
   SyntaxHighlighter: MarkdownSyntaxHighlighter,
@@ -241,7 +245,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h1
       className={cn(
         "aui-md-h1 mt-5 mb-2 scroll-m-20 text-xl font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -250,7 +254,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h2
       className={cn(
         "aui-md-h2 mt-5 mb-2 scroll-m-20 text-lg font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -259,7 +263,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h3
       className={cn(
         "aui-md-h3 mt-4 mb-1.5 scroll-m-20 text-base font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -268,7 +272,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h4
       className={cn(
         "aui-md-h4 mt-3.5 mb-1 scroll-m-20 text-base font-medium first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -277,7 +281,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h5
       className={cn(
         "aui-md-h5 mt-3 mb-1 text-sm font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -286,7 +290,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h6
       className={cn(
         "aui-md-h6 mt-3 mb-1 text-sm font-medium first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -295,7 +299,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <p
       className={cn(
         "aui-md-p my-3 leading-relaxed first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -304,7 +308,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <a
       className={cn(
         "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className,
+        className
       )}
       {...props}
     />
@@ -313,7 +317,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <blockquote
       className={cn(
         "aui-md-blockquote border-muted-foreground/30 text-muted-foreground my-3 border-s-2 ps-4",
-        className,
+        className
       )}
       {...props}
     />
@@ -322,7 +326,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <ul
       className={cn(
         "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc [&>li]:mt-1",
-        className,
+        className
       )}
       {...props}
     />
@@ -331,7 +335,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <ol
       className={cn(
         "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal [&>li]:mt-1",
-        className,
+        className
       )}
       {...props}
     />
@@ -346,7 +350,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <table
       className={cn(
         "aui-md-table my-3 w-full border-separate border-spacing-0 overflow-y-auto",
-        className,
+        className
       )}
       {...props}
     />
@@ -355,7 +359,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <th
       className={cn(
         "aui-md-th bg-muted px-3 py-1.5 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right",
-        className,
+        className
       )}
       {...props}
     />
@@ -364,7 +368,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <td
       className={cn(
         "aui-md-td border-muted-foreground/20 border-s border-b px-3 py-1.5 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right",
-        className,
+        className
       )}
       {...props}
     />
@@ -373,7 +377,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <tr
       className={cn(
         "aui-md-tr m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg",
-        className,
+        className
       )}
       {...props}
     />
@@ -397,7 +401,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <pre
       className={cn(
         "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 text-[13px] leading-relaxed",
-        className,
+        className
       )}
       {...props}
     />
@@ -411,7 +415,7 @@ const defaultComponents = memoizeMarkdownComponents({
     if (isCiteSequence) {
       const citekeys = Array.from(
         inlineValue.matchAll(/\[\[([^\]]+)\]\]/g),
-        (match) => match[1],
+        (match) => match[1]
       );
       return (
         <>
@@ -427,7 +431,7 @@ const defaultComponents = memoizeMarkdownComponents({
         className={cn(
           !isCodeBlock &&
             "aui-md-inline-code bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em]",
-          className,
+          className
         )}
         {...props}
       >

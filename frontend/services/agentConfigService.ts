@@ -133,11 +133,20 @@ export const fetchTools = async () => {
  * @param tenantId optional tenant ID for filtering
  * @returns list of agents with basic info (id, name, description, is_available)
  */
-export const fetchAgentList = async (tenantId?: string) => {
+export const fetchAgentList = async (
+  tenantId?: string,
+  includeOwnedNl2AgentDrafts = false
+) => {
   try {
     const trimmedTenantId = tenantId?.trim();
-    const url = trimmedTenantId
-      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(trimmedTenantId)}`
+    const params = new URLSearchParams();
+    if (trimmedTenantId) params.set("tenant_id", trimmedTenantId);
+    if (includeOwnedNl2AgentDrafts) {
+      params.set("include_owned_nl2agent_drafts", "true");
+    }
+    const query = params.toString();
+    const url = query
+      ? `${API_ENDPOINTS.agent.list}?${query}`
       : API_ENDPOINTS.agent.list;
     const response = await fetch(url, {
       headers: getAuthHeaders(),
@@ -165,6 +174,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      generation_status: agent.generation_status,
     }));
 
     return {

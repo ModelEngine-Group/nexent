@@ -251,6 +251,7 @@ export interface ChatStreamMainProps {
     modelNames?: string[]
   ) => void;
   onCitationHover?: () => void;
+  nl2AgentDraftAgentId?: number | null;
   onScroll?: () => void;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
@@ -279,6 +280,7 @@ export interface CardItem {
 // Context passed from the component to module-level message handlers
 export interface MessageHandlerContext {
   appConfig?: import("@/types/modelConfig").AppConfig;
+  nl2AgentDraftAgentId?: number | null;
 }
 
 // Message handler interface for task window extensibility

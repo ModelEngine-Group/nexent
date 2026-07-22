@@ -6,7 +6,7 @@ import type {
   CompleteAttachment,
   PendingAttachment,
   ThreadUserMessagePart,
-} from "@assistant-ui/core";
+} from "@assistant-ui/react";
 import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
 import { getAttachmentType } from "../utils/attachment-type";

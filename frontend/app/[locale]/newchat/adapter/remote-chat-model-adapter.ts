@@ -6,7 +6,7 @@ import type {
   ChatModelRunResult,
   CompleteAttachment,
 } from "@assistant-ui/react";
-import type { ThreadMessage } from "@assistant-ui/core";
+import type { ThreadMessage } from "@assistant-ui/react";
 
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
@@ -15,7 +15,7 @@ import log from "@/lib/logger";
 // Backend SSE chunk format
 interface SseChunk {
   type: string;
-  content: string;
+  content: any;
   unit_index?: number;
   role?: string;
   tool_name?: string;
@@ -151,7 +151,9 @@ function extractTextContent(messages: readonly ThreadMessage[]): string {
  * successful MinIO upload, so we can read it back here without an extra
  * upload round-trip.
  */
-function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload[] {
+function extractMinioFiles(
+  message: ThreadMessage | undefined
+): MinioFilePayload[] {
   if (!message) return [];
   // Attachments are attached by the AttachmentAdapter via the message content
   // pipeline; the public ThreadMessage type does not declare them but they are
@@ -176,7 +178,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
     if (!objectName || !url) {
       log.warn(
         "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-        att.name,
+        att.name
       );
       continue;
     }
@@ -194,7 +196,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
 
 function parseSkillFileAttachments(
   content: string,
-  messageId: string,
+  messageId: string
 ): CompleteAttachment[] {
   try {
     const payload = JSON.parse(content) as {
@@ -207,8 +209,7 @@ function parseSkillFileAttachments(
         const name = file.file_name || file.name || "Generated file";
         const contentType =
           file.mime_type || file.type || "application/octet-stream";
-        const url =
-          file.preview_url || file.presigned_url || file.url;
+        const url = file.preview_url || file.presigned_url || file.url;
 
         return {
           id: `${messageId}-skill-file-${index}`,
@@ -233,7 +234,7 @@ function parseSkillFileAttachments(
           presigned_url: file.presigned_url,
           size: file.file_size ?? file.size,
         } as unknown as CompleteAttachment;
-      },
+      }
     );
 
     return attachments;
@@ -333,7 +334,6 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "max_steps_reached":
     case "verification":
     case "error":
-    
       return "text";
     case "search_content":
     case "picture_web":
@@ -402,10 +402,7 @@ function formatToolArguments(raw: unknown): string {
  * shared `ToolGroupRoot` / `ToolGroupTrigger` / `ToolGroupContent`
  * rendering defined in `thread.tsx`.
  */
-function appendToolCallPart(
-  contentParts: any[],
-  toolCallPart: any
-): any {
+function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
   contentParts.push(toolCallPart);
   return toolCallPart;
 }
@@ -473,7 +470,7 @@ export function attachSearchContentToTool(
   if (
     item.url &&
     !targetToolCall.searchContent.some(
-      (source: { url: string }) => source.url === item.url,
+      (source: { url: string }) => source.url === item.url
     )
   ) {
     targetToolCall.searchContent.push(item);
@@ -584,7 +581,9 @@ export function clearStepTokenCounts(): void {
  * Parse and build timing metadata from backend token_count chunk.
  * Also stores step data in the global registry for SingleTurnTokenUsage.
  */
-function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimingResult> | null {
+function buildTimingFromTokenCount(
+  content: string
+): ReturnType<typeof buildTimingResult> | null {
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
     log.warn("[ChatModelAdapter] Failed to parse token_count:", content);
@@ -604,10 +603,10 @@ function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimi
 
   return buildTimingResult(
     Date.now(), // streamStartTime - approximate
-    undefined,  // firstTokenTime - not available
-    0,         // toolCallCount - tracked separately
+    undefined, // firstTokenTime - not available
+    0, // toolCallCount - tracked separately
     parsed.totalOutputTokens,
-    totalDuration,
+    totalDuration
   );
 }
 
@@ -643,14 +642,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const customThreadId = runConfig?.custom as
       | {
           threadId?: string;
+          draftAgentId?: number | string;
           onServerConversationId?: (
             serverId: string,
-            initialQuestion?: string,
+            initialQuestion?: string
           ) => void;
           resume?: boolean;
         }
       | undefined;
     const serverThreadId = customThreadId?.threadId;
+    const draftAgentId = customThreadId?.draftAgentId;
     const onServerConversationId = customThreadId?.onServerConversationId;
     const isResume = customThreadId?.resume === true;
 
@@ -664,9 +665,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     const query =
-      lastUserIndex >= 0
-        ? extractTextContent([messages[lastUserIndex]])
-        : "";
+      lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
 
     if (!isResume && !query) {
       log.warn("[ChatModelAdapter] No user query found in messages");
@@ -709,11 +708,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     if (hasServerConversationId) {
       requestBody.conversation_id = numericServerThreadId;
     }
+    const numericDraftAgentId = Number(draftAgentId);
+    if (Number.isInteger(numericDraftAgentId) && numericDraftAgentId > 0) {
+      requestBody.draft_agent_id = numericDraftAgentId;
+    }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     const custom = runConfig?.custom as
-      | { agentId?: number | string; resume?: boolean }
-      | undefined;
+      { agentId?: number | string; resume?: boolean } | undefined;
     if (custom?.agentId !== undefined && custom.agentId !== null) {
       const numericAgentId =
         typeof custom.agentId === "string"
@@ -774,23 +776,20 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const headerConversationId = response.headers.get("conversation_id");
     if (headerConversationId && onServerConversationId) {
       const numericHeaderId = Number(headerConversationId);
-      if (
-        !Number.isNaN(numericHeaderId) &&
-        numericHeaderId > 0
-      ) {
+      if (!Number.isNaN(numericHeaderId) && numericHeaderId > 0) {
         try {
           onServerConversationId(
             String(numericHeaderId),
-            !isResume && !hasServerConversationId ? query : undefined,
+            !isResume && !hasServerConversationId ? query : undefined
           );
           log.log(
-            `[ChatModelAdapter] Captured server conversation_id from response header: ${numericHeaderId}`,
+            `[ChatModelAdapter] Captured server conversation_id from response header: ${numericHeaderId}`
           );
         } catch (cbError) {
           // Callback failures must never break the stream — log and continue.
           log.error(
             "[ChatModelAdapter] onServerConversationId callback threw:",
-            cbError,
+            cbError
           );
         }
       }
@@ -830,7 +829,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null = null;
+    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null =
+      null;
 
     const contentParts: any[] = [];
 
@@ -845,7 +845,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let skillFileAttachments: CompleteAttachment[] = [];
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
       content,
     });
@@ -872,6 +872,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
+          if (chunk.type === "assistant_message_created") {
+            const persistedId = Number(chunk.content?.message_id);
+            if (Number.isInteger(persistedId) && persistedId > 0) {
+              messageId = String(persistedId);
+            }
+            continue;
+          }
 
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
@@ -898,9 +905,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // from the leading `**步骤 N**` token at render time.
             currentReasoningPart = makeReasoningPart(
               (currentReasoningPart?.text ?? "") + chunk.content,
-              true,
+              true
             );
-            yield buildStreamResult([...contentParts, currentReasoningPart] as any);
+            yield buildStreamResult([
+              ...contentParts,
+              currentReasoningPart,
+            ] as any);
             continue;
           }
 
@@ -945,7 +955,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 if (!searchImagesAccumulator.includes(imageUrl)) {
                   searchImagesAccumulator.push(imageUrl);
                 }
-                attachSearchImageToTool(contentParts, chunk.unit_index, imageUrl);
+                attachSearchImageToTool(
+                  contentParts,
+                  chunk.unit_index,
+                  imageUrl
+                );
               }
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
@@ -961,9 +975,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // Update the streaming reasoning part in-place
             currentReasoningPart = makeReasoningPart(
               (currentReasoningPart?.text ?? "") + chunk.content,
-              true,
+              true
             );
-            yield buildStreamResult([...contentParts, currentReasoningPart] as any);
+            yield buildStreamResult([
+              ...contentParts,
+              currentReasoningPart,
+            ] as any);
           } else if (partType === "tool-call") {
             // Finalize any ongoing reasoning
             if (currentReasoningPart) {
@@ -1001,7 +1018,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // the most recent tool call so the ToolFallback UI can render them.
             try {
               const searchResults = JSON.parse(chunk.content);
-              const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+              const results = Array.isArray(searchResults)
+                ? searchResults
+                : [searchResults];
               for (const result of results) {
                 const url = result.url || "";
                 const filename = result.filename || "";
@@ -1013,7 +1032,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   !searchSourcesAccumulator.some(
                     (source) =>
                       `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                      sourceKey,
+                      sourceKey
                   )
                 ) {
                   searchSourcesAccumulator.push({
@@ -1029,7 +1048,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     objectName: result.object_name,
                   });
                 }
-                attachSearchContentToTool(contentParts, chunk.unit_index, { url, title });
+                attachSearchContentToTool(contentParts, chunk.unit_index, {
+                  url,
+                  title,
+                });
               }
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse search_content:", e);
@@ -1044,7 +1066,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
-          if (chunk.type === "execution_logs") {
+          if (chunk.type === "assistant_message_created") {
+            const persistedId = Number(chunk.content?.message_id);
+            if (Number.isInteger(persistedId) && persistedId > 0) {
+              messageId = String(persistedId);
+            }
+          } else if (chunk.type === "execution_logs") {
             const attached = attachExecutionLogsToTool(contentParts, chunk);
             if (!attached) {
               contentParts.push({ type: "text", text: chunk.content });
@@ -1074,7 +1101,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 if (!searchImagesAccumulator.includes(imageUrl)) {
                   searchImagesAccumulator.push(imageUrl);
                 }
-                attachSearchImageToTool(contentParts, chunk.unit_index, imageUrl);
+                attachSearchImageToTool(
+                  contentParts,
+                  chunk.unit_index,
+                  imageUrl
+                );
               }
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
@@ -1084,9 +1115,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (partType === "reasoning") {
               currentReasoningPart = makeReasoningPart(
                 (currentReasoningPart?.text ?? "") + chunk.content,
-                true,
+                true
               );
-              yield buildStreamResult([...contentParts, currentReasoningPart] as any);
+              yield buildStreamResult([
+                ...contentParts,
+                currentReasoningPart,
+              ] as any);
             } else if (partType === "tool-call") {
               if (currentReasoningPart) {
                 currentReasoningPart.status = { type: "done" };
@@ -1123,7 +1157,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               try {
                 const searchResults = JSON.parse(chunk.content);
-                const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+                const results = Array.isArray(searchResults)
+                  ? searchResults
+                  : [searchResults];
                 for (const result of results) {
                   const url = result.url || "";
                   const filename = result.filename || "";
@@ -1135,7 +1171,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     !searchSourcesAccumulator.some(
                       (source) =>
                         `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                        sourceKey,
+                        sourceKey
                     )
                   ) {
                     searchSourcesAccumulator.push({
@@ -1151,10 +1187,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       objectName: result.object_name,
                     });
                   }
-                  attachSearchContentToTool(contentParts, chunk.unit_index, { url, title });
+                  attachSearchContentToTool(contentParts, chunk.unit_index, {
+                    url,
+                    title,
+                  });
                 }
               } catch (e) {
-                log.warn("[ChatModelAdapter] Failed to parse search_content:", e);
+                log.warn(
+                  "[ChatModelAdapter] Failed to parse search_content:",
+                  e
+                );
               }
             }
           }
@@ -1230,7 +1272,8 @@ function buildTimingResult(
   tokenCount: number = 0,
   duration: number = 0
 ) {
-  const totalStreamTime = duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
+  const totalStreamTime =
+    duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
 
   return {
     metadata: {
@@ -1239,7 +1282,8 @@ function buildTimingResult(
         firstTokenTime,
         totalStreamTime,
         tokenCount,
-        tokensPerSecond: duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
+        tokensPerSecond:
+          duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
         totalChunks: 1,
         toolCallCount,
       },

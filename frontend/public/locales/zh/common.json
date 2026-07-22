@@ -1,4 +1,4 @@
-﻿{
+{
   "assistant.name": "Nexent",
   "mainPage.layout.title": "Nexent | 智能问答",
   "mainPage.layout.titleTemplate": "%s | Nexent 智能问答",
@@ -124,7 +124,6 @@
   "chatInput.remove": "移除",
   "chatInput.wsConnectionEstablished": "WebSocket 连接已建立",
   "chatInput.selectModel": "选择模型",
-
   "chatLeftSidebar.rename": "重命名",
   "chatLeftSidebar.delete": "删除",
   "chatLeftSidebar.newConversation": "新对话",
@@ -569,7 +568,6 @@
   "toolPool.selectedToolsLabel": "已选择工具",
   "toolPool.noSearchResults": "没有搜索到匹配的工具",
   "toolPool.mcpModelUnavailableTooltip": "工具所选模型不可用",
-
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
   "tool.error.configFetchFailed": "获取工具配置失败",
@@ -870,7 +868,6 @@
   "model.list.capacityWarning.tag": "缺容量",
   "model.list.capacityWarning.badgeTooltip": "该模型未启用输出 Token 限额。点击此处补全容量配置。",
   "model.list.capacityWarning.tooltipAction": "打开容量面板",
-
   "agent.modelSelector.bareCapacity.tooltip": "模型容量配置缺少限额，请到模型管理中补全容量",
   "agent.modelSelector.bareCapacity.formNotice": "所选模型 \"{{modelName}}\" 尚未配置容量。Agent 可正常运行，但输出 Token 限额和预算一致性校验关闭，直到在「模型管理」中补全容量。",
   "agent.modelSelector.bareCapacity.formNoticeNoPermission": "所选模型 \"{{modelName}}\" 尚未配置容量。Agent 可正常运行，但输出 Token 限额关闭。请联系模型管理员补全该模型的容量配置。",
@@ -1642,7 +1639,6 @@
   "diagram.format.png": "PNG",
   "diagram.format.selectFormat": "选择格式",
   "diagram.error.renderFailed": "渲染失败",
-
   "space.title": "Agent 空间",
   "space.description": "管理和使用您的智能体",
   "space.createAgent": "创建智能体",
@@ -1713,7 +1709,6 @@
   "sidebar.assetOwnerResources": "资产管理员资源",
   "sidebar.mcpToolsManagement": "MCP 工具",
   "sidebar.monitoringManagement": "监控与运维",
-
   "agentRepository.page.title": "Agent 仓库",
   "agentRepository.page.subtitle": "浏览同租户共享仓库、管理你有权限的智能体，并发布与审核。",
   "agentRepository.page.tab.repository": "仓库",
@@ -1721,7 +1716,6 @@
   "agentRepository.page.tab.review": "审核中心",
   "agentRepository.page.searchPlaceholder": "搜索智能体名称、描述或标签",
   "agentRepository.page.categoryAll": "全部",
-
   "agentRepository.page.repositoryHint": "同租户内的智能体需先「复制为我的智能体」后才能编辑",
   "agentRepository.page.resultCount": "共 {{count}} 个智能体",
   "agentRepository.page.empty": "没有找到匹配的智能体",
@@ -1812,7 +1806,6 @@
   "agentRepository.card.copy": "复制",
   "agentRepository.card.detail": "详情",
   "agentRepository.card.toolCount": "{{count}} 个工具",
-
   "agentRepository.copy.title": "复制「{{name}}」",
   "agentRepository.copy.configList": "配置清单",
   "agentRepository.copy.percent": "可复制 {{percent}}%",
@@ -1840,7 +1833,6 @@
   "agentRepository.copy.reason.mcp_not_found": "MCP 服务未开通",
   "agentRepository.copy.reason.skill_duplicate": "Skill 名称冲突",
   "agentRepository.copy.reason.tool_unavailable": "工具不可用",
-
   "agentRepository.detail.intro": "智能体简介",
   "agentRepository.detail.author": "{{author}}",
   "agentRepository.detail.tools": "内置工具",
@@ -1852,7 +1844,6 @@
   "agentRepository.detail.status.pending_review": "待审核",
   "agentRepository.detail.status.rejected": "审核驳回",
   "agentRepository.detail.status.not_shared": "未共享",
-
   "agentRepository.review.column.agent": "智能体",
   "agentRepository.review.column.version": "版本",
   "agentRepository.review.column.submitter": "提交人",
@@ -1881,7 +1872,6 @@
   "agentRepository.review.rejectSuccess": "已驳回「{{name}}」",
   "agentRepository.review.approveError": "通过审核失败，请稍后重试",
   "agentRepository.review.rejectError": "驳回审核失败，请稍后重试",
-
   "agentRepository.category.writingAssistant": "写作助手",
   "agentRepository.category.programming": "编程开发",
   "agentRepository.category.dataAnalysis": "数据分析",
@@ -1889,7 +1879,6 @@
   "agentRepository.category.productivity": "效率工具",
   "agentRepository.category.creativeDesign": "创意设计",
   "agentRepository.category.other": "其它",
-
   "agentRepository.tag.marketing": "营销",
   "agentRepository.tag.copywriting": "文案",
   "agentRepository.tag.contentCreation": "内容创作",
@@ -1910,7 +1899,6 @@
   "agentRepository.tag.inspiration": "灵感",
   "agentRepository.tag.spreadsheet": "表格",
   "agentRepository.tag.office": "办公",
-
   "tenantResources.create": "创建",
   "tenantResources.subtitle": "管理租户、用户、用户组和资源",
   "tenantResources.title": "租户资源管理",
@@ -2291,7 +2279,6 @@
   "users.comingSoon.feature2": "配置精细化权限",
   "users.comingSoon.feature3": "监控用户活动和使用情况",
   "users.comingSoon.badge": "即将推出",
-
   "skillRepository.page.title": "Skill 仓库",
   "skillRepository.page.subtitle": "浏览同租户共享仓库、管理你有权限的 Skill，并发布与审核",
   "skillRepository.page.tab.repository": "仓库",
@@ -2394,7 +2381,6 @@
   "skillRepository.reviewStatus.withdrawApply": "撤回申请",
   "skillRepository.reviewStatus.repositoryRecord": "仓库记录",
   "skillRepository.reviewStatus.submittedAt": "提交时间",
-
   "mcpTools.comingSoon.title": "MCP 工具管理即将推出",
   "mcpTools.comingSoon.description": "集中管理 MCP 服务器与工具，在一个页面中完成连接配置、工具同步与健康状态监控。",
   "mcpTools.comingSoon.feature1": "注册并管理多个 MCP 服务器",
@@ -2696,7 +2682,6 @@
   "mcpTools.detail.links": "链接",
   "mcpTools.detail.noDescription": "暂无描述",
   "mcpTools.detail.editBasic": "编辑",
-
   "monitoring.topbar.openDashboard": "打开监控面板",
 
   "notifications.bell.label": "通知",
@@ -2721,14 +2706,12 @@
   "monitoring.table.tokenGenerationRate": "Token生成速率",
   "monitoring.time.ms": "毫秒",
   "monitoring.unit.tokensPerSec": "tokens/秒",
-
   "skillSpace.comingSoon.title": "技能空间即将推出",
   "skillSpace.comingSoon.description": "强大的技能市场，用于发现、安装和管理面向智能体的 AI 技能。使用预置技能包扩展能力。",
   "skillSpace.comingSoon.feature1": "浏览并安装社区创建的技能",
   "skillSpace.comingSoon.feature2": "创建并发布自己的技能包",
   "skillSpace.comingSoon.feature3": "版本控制与技能依赖管理",
   "skillSpace.comingSoon.badge": "即将推出",
-
   "common.loading": "加载中",
   "common.save": "保存",
   "common.cancel": "取消",
@@ -2780,7 +2763,6 @@
   "common.created": "创建时间",
   "common.updated": "最近更新时间",
   "common.email": "邮箱",
-
   "agentAutomation.proposal.preparingTitle": "正在生成自动任务",
   "agentAutomation.proposal.preparingDescription": "正在理解执行时间、任务内容和所需能力，请稍候…",
   "agentAutomation.proposal.editorTitle": "修改自动任务",
@@ -2968,7 +2950,7 @@
   "agentEvaluation.step1.agentVersionHint2": "选择要评估的智能体版本。",
   "agentEvaluation.step1.latest": "（最新）",
   "agentEvaluation.step1.ready": "用例已就绪，点击右侧按钮开始评估。",
-  "agentEvaluation.step1.runningHint": "评估进行中… 已完成 {{done}} / {{total}}",
+  "agentEvaluation.step1.runningHint": "评估进行中，请稍候…",
   "agentEvaluation.step1.runningProgress": "正在执行测试用例… 已测试 {{done}} / {{total}} 个，剩余 {{remaining}} 个",
   "agentEvaluation.step1.downloadTemplate": "下载测试用例模板",
   "agentEvaluation.step1.downloadTemplateBtn": "下载模板",
@@ -2978,7 +2960,6 @@
   "agentEvaluation.step1.useOther": "使用其他",
   "agentEvaluation.step1.running": "评估中…",
   "agentEvaluation.step1.selectFirst": "请先选择测试用例集（点击上方「测试用例库」按钮）",
-  "agentEvaluation.step1.runningHint": "评估进行中，请稍候…",
   "agentEvaluation.step1.start": "开始评估",
   "agentEvaluation.step1.testCaseSet": "测试用例集",
   "agentEvaluation.step1.selectTestCaseSet": "从用例库选择测试用例集",
@@ -3022,7 +3003,6 @@
   "agentEvaluation.message.deleteSetFailed": "删除评估集失败",
   "agentEvaluation.message.deleteRunFailed": "删除测评记录失败",
   "agentEvaluation.message.exportFailed": "导出报告失败",
-
   "user.role.superAdmin": "超级管理员",
   "user.role.admin": "管理员",
   "user.role.dev": "开发者",
@@ -3214,7 +3194,6 @@
   "errorCode.130510": "RAGFlow认证失败，请检查API Key",
   "errorCode.130511": "RAGFlow请求频率超限，请稍后重试",
   "errorCode.130512": "RAGFlow响应解析失败，请检查API URL",
-
   "errorCode.000101": "验证失败",
   "errorCode.000102": "参数无效",
   "errorCode.000103": "缺少必填字段",
@@ -3732,5 +3711,52 @@
   "systemPrompt.finetune.selectStartPlaceholder": "例如：10",
   "systemPrompt.finetune.selectTip": "在下方编辑器中选择文本以获取位置",
   "toolConfig.validation.array.invalid": "请输入有效的数组 JSON",
-  "toolConfig.validation.object.invalid": "请输入有效的对象 JSON"
+  "toolConfig.validation.object.invalid": "请输入有效的对象 JSON",
+  "subAgentPool.button.agentBuilder": "智能体构建助手",
+  "subAgentPool.description.agentBuilder": "通过对话构建智能体",
+  "subAgentPool.tooltip.agentBuilder": "启动对话式会话，为您构建自定义智能体",
+  "subAgentPool.message.agentBuilderStartFailed": "启动智能体构建助手会话失败",
+  "nl2agent.requirements.title": "需求摘要",
+  "nl2agent.requirements.goal": "智能体目标",
+  "nl2agent.requirements.audienceOrScenario": "使用者 / 场景",
+  "nl2agent.requirements.primaryInput": "主要输入",
+  "nl2agent.requirements.expectedOutput": "期望输出",
+  "nl2agent.requirements.keyConstraints": "关键约束",
+  "nl2agent.requirements.registering": "正在注册摘要…",
+  "nl2agent.requirements.notRegistered": "需求摘要注册失败。",
+  "nl2agent.requirements.registrationFailed": "无法注册需求摘要。",
+  "nl2agent.requirements.retry": "重试",
+  "nl2agent.requirements.superseded": "该摘要已被新版替代。",
+  "nl2agent.requirements.confirmed": "需求已确认",
+  "nl2agent.requirements.confirmInstruction": "请确认该摘要，或在聊天中说明需要修改的内容。",
+  "nl2agent.requirements.confirmationFailed": "无法确认需求摘要。",
+  "nl2agent.requirements.confirming": "正在确认…",
+  "nl2agent.requirements.confirm": "确认需求",
+  "nl2agent.finalize.primaryModel": "主模型",
+  "nl2agent.finalize.fallbackModels": "备用模型",
+  "nl2agent.finalize.localResources": "本地资源",
+  "nl2agent.finalize.onlineResources": "联网资源",
+  "nl2agent.finalize.tool": "工具",
+  "nl2agent.finalize.skill": "技能",
+  "nl2agent.finalize.mcpTool": "MCP 工具",
+  "nl2agent.finalize.officialSkill": "官方技能",
+  "nl2agent.finalize.none": "无",
+  "nl2agent.finalize.invalidReferences": "已选择的模型或资源不再有效",
+  "nl2agent.finalize.invalidReferencesDescription": "请在应用前重新配置草稿。失效引用：{{references}}",
+  "nl2agent.finalize.completedSession": "该 NL2AGENT 会话已完成",
+  "nl2agent.finalize.completedSessionDescription": "继续编辑可从最终审阅阶段重新打开工作流。",
+  "nl2agent.finalize.continueEditing": "继续编辑",
+  "nl2agent.finalize.viewAgent": "查看智能体",
+  "nl2agent.finalize.resumed": "现在可以继续编辑该智能体。",
+  "nl2agent.finalize.resumeError": "恢复智能体会话失败。",
+  "nl2agent.finalize.editingSession": "正在编辑智能体",
+  "nl2agent.finalize.editingSessionDescription": "请在对话中描述一项修改，系统将重新打开对应的确认卡片。",
+  "nl2agent.finalize.historyExpired": "可编辑的 NL2AGENT 会话已过期",
+  "nl2agent.finalize.historyExpiredDescription": "对话中保存的方案仍可查看，但其工作流状态已无法恢复。",
+  "nl2agent.cardDelivery.generating": "正在生成卡片…",
+  "nl2agent.cardDelivery.retryRequired": "卡片生成失败。",
+  "nl2agent.cardDelivery.regenerate": "重新生成卡片",
+  "nl2agent.builder.open": "智能体生成助手",
+  "nl2agent.finalize.publish": "应用到配置",
+  "nl2agent.finalize.published": "配置已成功应用"
 }

@@ -10,8 +10,11 @@
     "lint:fix": "next lint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "test": "vitest run",
+    "contracts:generate": "node scripts/sync-nl2agent-contracts.mjs",
+    "contracts:check": "node scripts/sync-nl2agent-contracts.mjs --check",
     "type-check": "tsc --noEmit",
-    "check-all": "npm run type-check && npm run lint && npm run format:check && npm run build"
+    "check-all": "npm run contracts:check && npm run test && npm run type-check && npm run lint && npm run format:check && npm run build"
   },
   "dependencies": {
     "@ant-design/icons": "6.2.5",
@@ -23,6 +26,7 @@
     "@tanstack/react-query": "^5.90.12",
     "@types/jszip": "^3.4.0",
     "ai": "^6.0.198",
+    "ajv": "^8.20.0",
     "antd": "^6.3.0",
     "antd-style": "^4.1.0",
     "assistant-stream": "^0.3.25",
@@ -77,19 +81,27 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/js-yaml": "^4.0.9",
+    "@types/mdast": "^4.0.4",
     "@types/node": "22.15.16",
     "@types/papaparse": "^5.3.16",
     "@types/react": "18.3.20",
     "@types/react-dom": "18.3.6",
+    "@types/unist": "^3.0.3",
+    "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^9.34.0",
     "eslint-config-next": "15.5.7",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
+    "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
     "postcss": "^8",
     "postcss-nested": "^7",
     "prettier": "^3.2.5",
     "tailwindcss": "^4",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "vitest": "^4.1.10"
   }
 }
