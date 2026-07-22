@@ -144,11 +144,6 @@ _REQUIREMENTS_SUMMARY = {
 }
 
 
-def clear_nl2agent_session_catalogs():
-    """Reset only the per-test fake Redis database."""
-    nl2agent_session_store.get_redis_service().client.flushdb()
-
-
 def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
     review = nl2agent_session_catalog.register_requirements_summary(
         tenant_id, draft_agent_id, _REQUIREMENTS_SUMMARY
@@ -277,11 +272,6 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=fake_redis)),
     )
-    monkeypatch.setattr(
-        nl2agent_session_store,
-        "get_redis_service",
-        MagicMock(return_value=MagicMock(client=fake_redis)),
-    )
     initial_state = nl2agent_session_catalog.initialize_nl2agent_session_state(
         "tenant_1", 202, conversation_id=902
     )
@@ -292,9 +282,8 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "conversation_id": 902,
         "status": "active",
         "workflow_revision": 0,
-        "catalog_snapshot_id": "test-catalog",
         "workflow_state": initial_state,
-        "catalog_snapshot": {
+        "session_catalogs": {
             "tool_catalog": [],
             "skill_catalog": [],
             "registry_results": [],
@@ -306,7 +295,7 @@ def mock_nl2agent_seed_defaults(monkeypatch):
 
     def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
         if tenant_id == "tenant_1" and draft_agent_id == 202:
-            durable_snapshot["catalog_snapshot"] = deepcopy(catalogs)
+            durable_snapshot["session_catalogs"] = deepcopy(catalogs)
         return cache_catalogs(tenant_id, draft_agent_id, catalogs)
 
     monkeypatch.setattr(
@@ -314,8 +303,13 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "set_nl2agent_session_catalogs",
         set_session_catalogs,
     )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "set_nl2agent_session_catalogs",
+        set_session_catalogs,
+    )
 
-    def load_durable_session(tenant_id, draft_agent_id):
+    def load_durable_session(tenant_id, draft_agent_id, **_kwargs):
         if tenant_id != "tenant_1" or draft_agent_id != 202:
             return None
         return deepcopy(durable_snapshot)
@@ -325,6 +319,7 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         draft_agent_id,
         expected_revision,
         workflow_state,
+        **_kwargs,
     ):
         if tenant_id != "tenant_1" or draft_agent_id != 202:
             return False
@@ -357,7 +352,6 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "update_nl2agent_session_status",
         MagicMock(return_value=True),
     )
-    clear_nl2agent_session_catalogs()
     monkeypatch.setattr(
         nl2agent_service,
         "_require_workflow_action",
@@ -434,7 +428,6 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         MagicMock(return_value=_OFFICIAL_SKILLS),
     )
     yield
-    clear_nl2agent_session_catalogs()
 
 
 def _seeded_nl2agent_info(agent_id: int = 101):

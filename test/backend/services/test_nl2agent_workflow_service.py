@@ -459,7 +459,6 @@ async def test_dual_online_cards_accept_registration_and_receipts_in_either_orde
 
 
 async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypatch):
-    clear_nl2agent_session_catalogs()
     db_session, _ = _mock_database_transaction(monkeypatch)
     search_builder = MagicMock(return_value=101)
     search_agent = MagicMock(return_value=_seeded_nl2agent_info())
@@ -523,7 +522,6 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
 async def test_start_session_keeps_installable_and_recoverable_official_skills(
     monkeypatch, caplog
 ):
-    clear_nl2agent_session_catalogs()
     _mock_database_transaction(monkeypatch)
     official_skills = [
         {"skill_id": 1, "name": "ready", "status": "installable"},
@@ -576,7 +574,6 @@ async def test_start_session_keeps_installable_and_recoverable_official_skills(
 async def test_start_session_degrades_when_registry_catalog_is_unavailable(
     monkeypatch,
 ):
-    clear_nl2agent_session_catalogs()
     _, transaction = _mock_database_transaction(monkeypatch)
     create_draft = MagicMock(return_value={"agent_id": 202})
     monkeypatch.setattr(
@@ -615,7 +612,6 @@ async def test_start_session_degrades_when_registry_catalog_is_unavailable(
 async def test_start_session_does_not_expose_state_when_database_commit_fails(
     monkeypatch,
 ):
-    clear_nl2agent_session_catalogs()
     _, transaction = _mock_database_transaction(monkeypatch)
     transaction.__exit__.side_effect = RuntimeError("commit failed")
     monkeypatch.setattr(
@@ -662,7 +658,6 @@ async def test_start_session_does_not_expose_state_when_database_commit_fails(
 async def test_start_session_provisions_builder_for_existing_tenant_when_missing(
     monkeypatch,
 ):
-    clear_nl2agent_session_catalogs()
     _mock_database_transaction(monkeypatch)
     search_builder = MagicMock(side_effect=ValueError("agent not found"))
     provision_builder = MagicMock(return_value=101)
@@ -767,7 +762,6 @@ async def test_start_session_fails_before_draft_creation_when_builder_is_incompl
 async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
     monkeypatch,
 ):
-    clear_nl2agent_session_catalogs()
     _mock_database_transaction(monkeypatch)
     search_builder = MagicMock(return_value=101)
     search_agent = MagicMock(

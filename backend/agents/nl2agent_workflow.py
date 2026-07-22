@@ -47,11 +47,15 @@ class RequirementsReview(BaseModel):
 
 
 class RecommendationBatch(BaseModel):
+    """One immutable search proof and its presentation/application lifecycle."""
+
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["recommendations_ready", "applying", "applied", "skipped"]
+    resource_type: Literal["local", "mcp", "skill"]
+    status: Literal["searched", "presented", "applying", "applied", "skipped", "completed"]
     tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
     skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
     applied_tool_ids: List[PositiveStrictInt] = Field(
         default_factory=list, max_length=100
     )
@@ -62,11 +66,22 @@ class RecommendationBatch(BaseModel):
 
 
 class OnlineRecommendationBatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Legacy public projection of an online recommendation aggregate."""
 
+    model_config = ConfigDict(extra="forbid")
     resource_type: Literal["mcp", "skill"]
     item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
     status: Literal["recommendations_ready", "completed"]
+
+
+class TrustedSearchBatch(BaseModel):
+    """Legacy public projection of immutable search proof fields."""
+
+    model_config = ConfigDict(extra="forbid")
+    resource_type: Literal["local", "mcp", "skill"]
+    tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
+    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
 
 
 class OnlineInstallation(BaseModel):
@@ -77,17 +92,6 @@ class OnlineInstallation(BaseModel):
     status: Literal["installing", "completed"]
     operation_id: str = Field(min_length=1, max_length=128)
     result: Dict[str, Any] = Field(default_factory=dict, max_length=100)
-
-
-class TrustedSearchBatch(BaseModel):
-    """Backend-recorded proof that an SDK search produced one result batch."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    resource_type: Literal["local", "mcp", "skill"]
-    tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
-    skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
-    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
 
 
 class McpWorkflow(BaseModel):
@@ -130,7 +134,7 @@ class CardDelivery(BaseModel):
 
 
 class Nl2AgentWorkflowState(BaseModel):
-    """Redis-persisted workflow state. Old schemas are intentionally rejected."""
+    """PostgreSQL-persisted workflow state. Old schemas are intentionally rejected."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -140,17 +144,11 @@ class Nl2AgentWorkflowState(BaseModel):
     conversation_id: PositiveStrictInt
     requirements_review: RequirementsReview = Field(default_factory=RequirementsReview)
     model_selection_confirmed: bool = False
-    trusted_search_batches: Dict[str, TrustedSearchBatch] = Field(
-        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
-    )
-    recommendation_batches: Dict[str, RecommendationBatch] = Field(
+    recommendations: Dict[str, RecommendationBatch] = Field(
         default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
     )
     identity_confirmed: bool = False
     mcp_workflows: Dict[str, McpWorkflow] = Field(
-        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
-    )
-    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
         default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
     )
     online_installations: Dict[str, OnlineInstallation] = Field(
@@ -212,18 +210,20 @@ class _StageDecision:
 
 
 def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
-    local_batches = list(state.recommendation_batches.values())
+    local_batches = [batch for batch in state.recommendations.values() if batch.resource_type == "local"]
     if not local_batches:
         local_status: Literal["missing", "pending", "complete"] = "missing"
     elif any(
-        batch.status in {"recommendations_ready", "applying"} for batch in local_batches
+        batch.status in {"searched", "presented", "applying"} for batch in local_batches
     ):
         local_status = "pending"
     else:
         local_status = "complete"
 
     online_types = {
-        batch.resource_type for batch in state.online_recommendation_batches.values()
+        batch.resource_type
+        for batch in state.recommendations.values()
+        if batch.resource_type in {"mcp", "skill"}
     }
     return _WorkflowFacts(
         local_status=local_status,
@@ -373,4 +373,36 @@ def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
 
 
 def state_to_dict(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-    return state.model_dump(mode="json")
+    payload = state.model_dump(mode="json")
+    # Keep the wire payload readable by older clients while the persisted model
+    # has one recommendation aggregate.
+    recommendations = payload["recommendations"]
+    payload["trusted_search_batches"] = {
+        key: {
+            field: value[field]
+            for field in ("resource_type", "tool_ids", "skill_ids", "item_keys")
+        }
+        for key, value in recommendations.items()
+    }
+    payload["recommendation_batches"] = {
+        key: {
+            field: item
+            for field, item in value.items()
+            if field not in {"resource_type", "item_keys"}
+        }
+        for key, value in recommendations.items()
+        if value["resource_type"] == "local"
+    }
+    for value in payload["recommendation_batches"].values():
+        if value["status"] in {"searched", "presented"}:
+            value["status"] = "recommendations_ready"
+    payload["online_recommendation_batches"] = {
+        key: {
+            "resource_type": value["resource_type"],
+            "item_keys": value["item_keys"],
+            "status": "completed" if value["status"] == "completed" else "recommendations_ready",
+        }
+        for key, value in recommendations.items()
+        if value["resource_type"] in {"mcp", "skill"}
+    }
+    return payload

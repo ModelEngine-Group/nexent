@@ -41,12 +41,14 @@ MutationResult = TypeVar("MutationResult")
 
 
 def load_durable_session(
-    tenant_id: str, draft_agent_id: int
+    tenant_id: str, draft_agent_id: int, *, db_session=None
 ) -> Optional[Dict[str, Any]]:
     """Load one authoritative database snapshot."""
     from database.nl2agent_session_db import get_nl2agent_session_snapshot
 
-    return get_nl2agent_session_snapshot(tenant_id, draft_agent_id)
+    if db_session is None:
+        return get_nl2agent_session_snapshot(tenant_id, draft_agent_id)
+    return get_nl2agent_session_snapshot(tenant_id, draft_agent_id, db_session=db_session)
 
 
 def persist_workflow_state(
@@ -54,6 +56,8 @@ def persist_workflow_state(
     draft_agent_id: int,
     expected_revision: int,
     workflow_state: Dict[str, Any],
+    *,
+    db_session=None,
 ) -> bool:
     """Advance the authoritative database workflow revision."""
     from database.nl2agent_session_db import update_nl2agent_workflow_state
@@ -64,6 +68,7 @@ def persist_workflow_state(
         expected_revision=expected_revision,
         workflow_schema_version=WORKFLOW_SCHEMA_VERSION,
         workflow_state=workflow_state,
+        db_session=db_session,
     )
 
 
@@ -114,6 +119,26 @@ def parse_session_state(
             raise ValueError(
                 f"unsupported schema_version={payload.get('schema_version')!r}"
             )
+        if "recommendations" not in payload:
+            merged = {}
+            for source in (
+                payload.get("trusted_search_batches", {}),
+                payload.get("recommendation_batches", {}),
+                payload.get("online_recommendation_batches", {}),
+            ):
+                for key, value in source.items():
+                    normalized = dict(value)
+                    normalized.setdefault("resource_type", "local")
+                    normalized["item_keys"] = list(normalized.get("item_keys") or [])
+                    status = normalized.get("status")
+                    normalized["status"] = {
+                        "recommendations_ready": "presented",
+                        "completed": "completed",
+                    }.get(status, status or "searched")
+                    merged[key] = normalized
+            payload["recommendations"] = merged
+        for key in ("trusted_search_batches", "recommendation_batches", "online_recommendation_batches"):
+            payload.pop(key, None)
         return Nl2AgentWorkflowState.model_validate(payload)
     except (
         json.JSONDecodeError,
@@ -170,10 +195,16 @@ def mutate_session_state(
     tenant_id: str,
     draft_agent_id: int,
     mutator: Callable[[Nl2AgentWorkflowState], MutationResult],
+    *,
+    db_session=None,
 ) -> MutationResult:
     """Atomically mutate durable workflow state with bounded database CAS retries."""
     for _attempt in range(CAS_MAX_RETRIES):
-        snapshot = load_durable_session(tenant_id, draft_agent_id)
+        snapshot = (
+            load_durable_session(tenant_id, draft_agent_id)
+            if db_session is None
+            else load_durable_session(tenant_id, draft_agent_id, db_session=db_session)
+        )
         if snapshot is None:
             raise Nl2AgentSessionCatalogError(
                 f"NL2AGENT session state is missing for tenant={tenant_id}, "
@@ -186,24 +217,25 @@ def mutate_session_state(
             tenant_id,
             draft_agent_id,
         )
-        original_state = state_to_dict(state)
+        original_state = state.model_dump(mode="json")
         result = mutator(state)
         try:
-            validated_state = Nl2AgentWorkflowState.model_validate(state_to_dict(state))
+            validated_state = Nl2AgentWorkflowState.model_validate(state.model_dump(mode="json"))
         except ValidationError as exc:
             raise Nl2AgentSessionCatalogError(
                 "NL2AGENT workflow state exceeds its schema or capacity limits."
             ) from exc
-        if state_to_dict(validated_state) == original_state:
+        if validated_state.model_dump(mode="json") == original_state:
             return deepcopy(result)
         validated_state.revision += 1
         persisted_state = state_to_dict(validated_state)
-        if not persist_workflow_state(
-            tenant_id,
-            draft_agent_id,
-            expected_revision=int(original_state["revision"]),
-            workflow_state=persisted_state,
-        ):
+        persist_kwargs = {
+            "expected_revision": int(original_state["revision"]),
+            "workflow_state": persisted_state,
+        }
+        if db_session is not None:
+            persist_kwargs["db_session"] = db_session
+        if not persist_workflow_state(tenant_id, draft_agent_id, **persist_kwargs):
             _recover_active_session_after_conflict(tenant_id, draft_agent_id)
             continue
         recover_committed_cache_best_effort(tenant_id, draft_agent_id)

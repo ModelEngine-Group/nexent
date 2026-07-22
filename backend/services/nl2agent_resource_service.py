@@ -241,17 +241,17 @@ async def apply_local_resources(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    dependencies.reserve_batch_apply(
-        tenant_id,
-        agent_id,
-        recommendation_batch_id,
-        operation_id,
-        selected_tool_ids,
-        selected_skill_ids,
-    )
-
     try:
         with dependencies.get_db_session() as db_session:
+            dependencies.reserve_batch_apply(
+                tenant_id,
+                agent_id,
+                recommendation_batch_id,
+                operation_id,
+                selected_tool_ids,
+                selected_skill_ids,
+                db_session=db_session,
+            )
             for tool_id in selected_tool_ids:
                 dependencies.bind_tool(
                     tool_info=ToolInstanceInfoRequest(
@@ -279,16 +279,14 @@ async def apply_local_resources(
                     version_no=0,
                     db_session=db_session,
                 )
-    except Exception as exc:
-        try:
-            dependencies.release_batch_apply(
+            dependencies.complete_batch_apply(
                 tenant_id,
                 agent_id,
                 recommendation_batch_id,
                 operation_id,
+                db_session=db_session,
             )
-        except Exception:
-            logger.exception("Failed to release local-resource apply reservation")
+    except Exception as exc:
         logger.exception(
             "Failed to atomically bind local resources: "
             "tenant_id=%s draft_agent_id=%s batch_id=%s",
@@ -298,26 +296,6 @@ async def apply_local_resources(
         )
         raise Nl2AgentOperationError(
             "Local resource binding failed; no resources were applied."
-        ) from exc
-
-    try:
-        dependencies.complete_batch_apply(
-            tenant_id,
-            agent_id,
-            recommendation_batch_id,
-            operation_id,
-        )
-    except Exception as exc:
-        logger.exception(
-            "Local resources were committed but workflow reconciliation failed: "
-            "tenant_id=%s draft_agent_id=%s batch_id=%s",
-            tenant_id,
-            agent_id,
-            recommendation_batch_id,
-        )
-        raise Nl2AgentOperationError(
-            "Local resources were saved, but workflow state could not be reconciled. "
-            "Retry Apply All."
         ) from exc
 
     return {

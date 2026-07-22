@@ -1,4 +1,4 @@
-"""Redis-backed NL2AGENT session catalog handoff."""
+"""NL2AGENT workflow transitions and recommendation proof handling."""
 
 import hashlib
 import json
@@ -17,10 +17,8 @@ from agents.nl2agent_workflow import (
     CardDelivery,
     McpWorkflow,
     OnlineInstallation,
-    OnlineRecommendationBatch,
     RecommendationBatch,
     RequirementsReview,
-    TrustedSearchBatch,
     Nl2AgentWorkflowState,
     evaluate_workflow,
     state_to_dict,
@@ -51,6 +49,18 @@ _CARD_DELIVERY_TYPES = {
     "agent_identity",
     "final_review",
 }
+
+
+def _ordered_unique(values, transform=lambda value: value):
+    result = []
+    seen = set()
+    for value in values:
+        normalized = transform(value)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 _CARD_DELIVERY_STATUSES = {"rendered", "failed"}
 _CARD_DELIVERY_FAILURE_REASONS = {
     "truncated_fence",
@@ -129,10 +139,11 @@ get_nl2agent_session_catalogs = _session_store.get_session_catalogs
 
 
 def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Evaluate a workflow snapshot without loading Redis again."""
-    return evaluate_workflow(Nl2AgentWorkflowState.model_validate(state)).model_dump(
-        mode="json"
+    """Evaluate a workflow snapshot without another database read."""
+    parsed = _session_store.parse_session_state(
+        json.dumps(state, ensure_ascii=False), "summary", int(state.get("conversation_id") or 1)
     )
+    return evaluate_workflow(parsed).model_dump(mode="json")
 
 
 def get_workflow_summary(
@@ -623,12 +634,12 @@ def register_online_recommendation_batch(
         raise Nl2AgentSessionCatalogError("Invalid online resource type.")
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    normalized_keys = sorted(
-        {str(key).strip() for key in item_keys if str(key).strip()}
+    normalized_keys = _ordered_unique(
+        (key for key in item_keys if str(key).strip()), lambda key: str(key).strip()
     )
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        trusted = state.trusted_search_batches.get(recommendation_batch_id)
+        trusted = state.recommendations.get(recommendation_batch_id)
         if (
             trusted is None
             or trusted.resource_type != resource_type
@@ -637,23 +648,18 @@ def register_online_recommendation_batch(
             raise Nl2AgentSessionCatalogError(
                 "Online recommendation batch does not match a trusted search result."
             )
-        batches = state.online_recommendation_batches
-        existing = batches.get(recommendation_batch_id)
-        if existing is None:
-            batches[recommendation_batch_id] = OnlineRecommendationBatch(
-                resource_type=resource_type,
-                item_keys=normalized_keys,
-                status="recommendations_ready",
-            )
-            state.online_configuration_confirmed = False
-        elif (
-            existing.resource_type != resource_type
-            or existing.item_keys != normalized_keys
-        ):
+        if trusted.resource_type != resource_type or trusted.item_keys != normalized_keys:
             raise Nl2AgentSessionCatalogError(
                 "Online recommendation batch contents do not match the registered card."
             )
-        return batches[recommendation_batch_id].model_dump(mode="json")
+        if trusted.status == "searched":
+            trusted.status = "presented"
+            state.online_configuration_confirmed = False
+        return {
+            "resource_type": trusted.resource_type,
+            "item_keys": list(trusted.item_keys),
+            "status": "completed" if trusted.status == "completed" else "recommendations_ready",
+        }
 
     return _mutate_session_state(tenant, draft_id, mutate)
 
@@ -665,7 +671,11 @@ def complete_online_configuration(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> List[str]:
-        batches = state.online_recommendation_batches
+        batches = {
+            key: batch
+            for key, batch in state.recommendations.items()
+            if batch.resource_type in {"mcp", "skill"}
+        }
         resource_types = {batch.resource_type for batch in batches.values()}
         if not {"mcp", "skill"}.issubset(resource_types):
             raise Nl2AgentSessionCatalogError(
@@ -773,7 +783,11 @@ def release_online_installation(
 def assert_online_configuration_complete(tenant_id: str, draft_agent_id: int) -> None:
     """Reject finalization when rendered online batches remain unfinished."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    batches = state["online_recommendation_batches"]
+    batches = {
+        key: batch
+        for key, batch in state["recommendations"].items()
+        if batch.get("resource_type") in {"mcp", "skill"}
+    }
     resource_types = {batch.get("resource_type") for batch in batches.values()}
     if not {"mcp", "skill"}.issubset(resource_types):
         raise Nl2AgentSessionCatalogError(
@@ -798,11 +812,11 @@ def register_recommendation_batch(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    normalized_tool_ids = sorted(set(map(int, tool_ids)))
-    normalized_skill_ids = sorted(set(map(int, skill_ids)))
+    normalized_tool_ids = _ordered_unique(tool_ids, int)
+    normalized_skill_ids = _ordered_unique(skill_ids, int)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        trusted = state.trusted_search_batches.get(recommendation_batch_id)
+        trusted = state.recommendations.get(recommendation_batch_id)
         if (
             trusted is None
             or trusted.resource_type != "local"
@@ -812,22 +826,13 @@ def register_recommendation_batch(
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch does not match a trusted search result."
             )
-        batches = state.recommendation_batches
-        existing = batches.get(recommendation_batch_id)
-        if existing is None:
-            batches[recommendation_batch_id] = RecommendationBatch(
-                status="recommendations_ready",
-                tool_ids=normalized_tool_ids,
-                skill_ids=normalized_skill_ids,
-            )
-        elif (
-            existing.tool_ids != normalized_tool_ids
-            or existing.skill_ids != normalized_skill_ids
-        ):
+        if trusted.tool_ids != normalized_tool_ids or trusted.skill_ids != normalized_skill_ids:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch contents do not match the registered card."
             )
-        return _recommendation_batch_response(batches[recommendation_batch_id])
+        if trusted.status == "searched":
+            trusted.status = "presented"
+        return _recommendation_batch_response(trusted)
 
     return _mutate_session_state(tenant, draft_id, mutate)
 
@@ -841,12 +846,12 @@ def assert_trusted_local_search_batch(
 ) -> None:
     """Validate a local card against the immutable server-recorded search result."""
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    trusted = state["trusted_search_batches"].get(recommendation_batch_id)
+    trusted = state["recommendations"].get(recommendation_batch_id)
     if (
         trusted is None
         or trusted.get("resource_type") != "local"
-        or trusted.get("tool_ids") != sorted(set(map(int, tool_ids)))
-        or trusted.get("skill_ids") != sorted(set(map(int, skill_ids)))
+        or trusted.get("tool_ids") != _ordered_unique(tool_ids, int)
+        or trusted.get("skill_ids") != _ordered_unique(skill_ids, int)
     ):
         raise Nl2AgentSessionCatalogError(
             "Recommendation batch does not match a trusted search result."
@@ -896,12 +901,14 @@ def _record_trusted_search_batch(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    batch = TrustedSearchBatch(
+    batch = RecommendationBatch(
         resource_type=resource_type,
-        tool_ids=sorted(set(map(int, tool_ids or []))),
-        skill_ids=sorted(set(map(int, skill_ids or []))),
-        item_keys=sorted(
-            {str(key).strip() for key in item_keys or [] if str(key).strip()}
+        status="searched",
+        tool_ids=_ordered_unique(tool_ids or [], int),
+        skill_ids=_ordered_unique(skill_ids or [], int),
+        item_keys=_ordered_unique(
+            (key for key in item_keys or [] if str(key).strip()),
+            lambda key: str(key).strip(),
         ),
     )
 
@@ -911,14 +918,19 @@ def _record_trusted_search_batch(
                 evaluate_workflow(state).model_dump(mode="json"),
                 workflow_action,
             )
-        existing = state.trusted_search_batches.get(recommendation_batch_id)
+        existing = state.recommendations.get(recommendation_batch_id)
         if existing is None:
-            state.trusted_search_batches[recommendation_batch_id] = batch
-        elif existing != batch:
+            state.recommendations[recommendation_batch_id] = batch
+        elif (
+            existing.resource_type != batch.resource_type
+            or existing.tool_ids != batch.tool_ids
+            or existing.skill_ids != batch.skill_ids
+            or existing.item_keys != batch.item_keys
+        ):
             raise Nl2AgentSessionCatalogError(
                 "Trusted search batch contents changed for the same identifier."
             )
-        return state.trusted_search_batches[recommendation_batch_id].model_dump(
+        return state.recommendations[recommendation_batch_id].model_dump(
             mode="json"
         )
 
@@ -926,8 +938,11 @@ def _record_trusted_search_batch(
 
 
 def _recommendation_batch_response(batch: RecommendationBatch) -> Dict[str, Any]:
-    """Hide internal reservation metadata from action responses."""
-    return batch.model_dump(mode="json", exclude={"operation_id"})
+    """Project the aggregate into the stable local-card response contract."""
+    payload = batch.model_dump(mode="json", exclude={"operation_id", "resource_type", "item_keys"})
+    if payload.get("status") == "presented":
+        payload["status"] = "recommendations_ready"
+    return payload
 
 
 def resolve_recommendation_batch(
@@ -946,14 +961,14 @@ def resolve_recommendation_batch(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        batch = state.recommendation_batches.get(recommendation_batch_id)
+        batch = state.recommendations.get(recommendation_batch_id)
         if batch is None:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch was not registered."
             )
         if batch.status == "skipped":
             return _recommendation_batch_response(batch)
-        if batch.status != "recommendations_ready":
+        if batch.status != "presented":
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch is already being applied or resolved."
             )
@@ -971,6 +986,7 @@ def reserve_recommendation_batch_apply(
     operation_id: str,
     tool_ids: List[int],
     skill_ids: List[int],
+    db_session=None,
 ) -> Dict[str, Any]:
     """Reserve one unresolved batch for an idempotent database apply."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
@@ -978,7 +994,7 @@ def reserve_recommendation_batch_apply(
     selected_skill_ids = sorted(set(map(int, skill_ids or [])))
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        batch = state.recommendation_batches.get(recommendation_batch_id)
+        batch = state.recommendations.get(recommendation_batch_id)
         if batch is None:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch was not registered."
@@ -1009,7 +1025,7 @@ def reserve_recommendation_batch_apply(
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch is already resolved."
             )
-        if batch.status != "recommendations_ready":
+        if batch.status != "presented":
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch is already resolved."
             )
@@ -1019,7 +1035,7 @@ def reserve_recommendation_batch_apply(
         batch.applied_skill_ids = selected_skill_ids
         return _recommendation_batch_response(batch)
 
-    return _mutate_session_state(tenant, draft_id, mutate)
+    return _mutate_session_state(tenant, draft_id, mutate, db_session=db_session)
 
 
 def complete_recommendation_batch_apply(
@@ -1027,12 +1043,13 @@ def complete_recommendation_batch_apply(
     draft_agent_id: Optional[int],
     recommendation_batch_id: str,
     operation_id: str,
+    db_session=None,
 ) -> Dict[str, Any]:
     """Complete only the operation that owns an apply reservation."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        batch = state.recommendation_batches.get(recommendation_batch_id)
+        batch = state.recommendations.get(recommendation_batch_id)
         if batch is None:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch was not registered."
@@ -1047,7 +1064,7 @@ def complete_recommendation_batch_apply(
         _finish_revision(state)
         return _recommendation_batch_response(batch)
 
-    return _mutate_session_state(tenant, draft_id, mutate)
+    return _mutate_session_state(tenant, draft_id, mutate, db_session=db_session)
 
 
 def release_recommendation_batch_apply(
@@ -1060,13 +1077,13 @@ def release_recommendation_batch_apply(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        batch = state.recommendation_batches.get(recommendation_batch_id)
+        batch = state.recommendations.get(recommendation_batch_id)
         if batch is None:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch was not registered."
             )
         if batch.status == "applying" and batch.operation_id == operation_id:
-            batch.status = "recommendations_ready"
+            batch.status = "presented"
             batch.operation_id = None
             batch.applied_tool_ids = []
             batch.applied_skill_ids = []
@@ -1077,13 +1094,17 @@ def release_recommendation_batch_apply(
 
 def assert_resource_review_complete(tenant_id: str, draft_agent_id: int) -> None:
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    batches = state["recommendation_batches"]
+    batches = {
+        key: batch
+        for key, batch in state["recommendations"].items()
+        if batch.get("resource_type") == "local"
+    }
     if not batches:
         raise Nl2AgentSessionCatalogError(
             "Show the local resource recommendation card before finalizing."
         )
     if any(
-        batch.get("status") in {"recommendations_ready", "applying"}
+        batch.get("status") in {"searched", "presented", "applying"}
         for batch in batches.values()
     ):
         raise Nl2AgentSessionCatalogError(

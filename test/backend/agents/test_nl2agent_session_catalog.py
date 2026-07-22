@@ -218,7 +218,7 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
     fake_redis,
 ):
     first = _register_local_batch("batch_1", [3, 1], [7])
-    second = _register_local_batch("batch_1", [1, 3], [7])
+    second = _register_local_batch("batch_1", [3, 1], [7])
     assert first == second
     assert first["status"] == "recommendations_ready"
 
@@ -329,7 +329,7 @@ def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
         202,
         recommendation_batch_id="mcp_1",
         resource_type="mcp",
-        item_keys=["registry:a", "registry:b"],
+        item_keys=["registry:b", "registry:a"],
     )
     assert first == second
 
@@ -384,7 +384,7 @@ def test_stage_validated_search_batch_is_atomic_with_workflow_stage(fake_redis):
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
-        match="local_resource_search",
+        match="local_resource_review",
     ):
         catalog_module.record_stage_validated_search_batch(
             "tenant_1",
@@ -534,12 +534,12 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
         "online_mcp", "mcp", ["registry:b", "registry:a"]
     )
     second = _register_online_batch(
-        "online_mcp", "mcp", ["registry:a", "registry:b"]
+        "online_mcp", "mcp", ["registry:b", "registry:a"]
     )
     assert first == second
     assert first == {
         "resource_type": "mcp",
-        "item_keys": ["registry:a", "registry:b"],
+            "item_keys": ["registry:b", "registry:a"],
         "status": "recommendations_ready",
     }
 

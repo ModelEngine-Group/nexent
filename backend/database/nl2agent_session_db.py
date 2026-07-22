@@ -104,10 +104,11 @@ def get_nl2agent_session_snapshot_by_identity(
 
 
 def get_nl2agent_session_snapshot(
-    tenant_id: str, draft_agent_id: int
+    tenant_id: str, draft_agent_id: int, *, db_session=None
 ) -> Optional[Dict[str, Any]]:
     """Compatibility lookup used while callers migrate to complete identities."""
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         record = (
             session.query(Nl2AgentSession)
             .filter(
@@ -251,12 +252,14 @@ def update_nl2agent_workflow_state(
     workflow_schema_version: int,
     workflow_state: Dict[str, Any],
     user_id: Optional[str] = None,
+    db_session=None,
 ) -> bool:
     """Replace workflow state iff the active row still has the expected revision."""
     next_revision = int(workflow_state.get("revision", -1))
     if next_revision != expected_revision + 1:
         raise ValueError("workflow_state revision must advance exactly once")
-    with get_db_session() as session:
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
         values = {
             "workflow_schema_version": workflow_schema_version,
             "workflow_revision": next_revision,
