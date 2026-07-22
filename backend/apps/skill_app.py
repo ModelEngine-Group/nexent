@@ -315,7 +315,10 @@ async def get_skill_file_content(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{skill_name}/upload")
+@router.put(
+    "/{skill_name}/upload",
+    responses={403: {"description": "Not authorized to update this skill"}},
+)
 async def update_skill_from_file(
     skill_name: str,
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
@@ -610,7 +613,10 @@ async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{skill_name}")
+@router.put(
+    "/{skill_name}",
+    responses={403: {"description": "Not authorized to update this skill"}},
+)
 async def update_skill(
     skill_name: str,
     request: SkillUpdateRequest,

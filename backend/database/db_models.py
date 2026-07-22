@@ -16,6 +16,7 @@ _TENANT_ID_DOC = "Tenant ID for multi-tenancy isolation"
 _PUBLISHER_TENANT_ID_DOC = "Publisher tenant ID"
 _PUBLISHER_USER_ID_DOC = "Publisher user ID"
 _MCP_NAME_DOC = "MCP name"
+_INGROUP_PERMISSION_DOC = "In-group permission: EDIT, READ_ONLY, PRIVATE"
 
 # Base class for tables without audit fields
 
@@ -611,7 +612,7 @@ class AgentInfo(TableBase):
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
-    ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    ingroup_permission = Column(String(30), doc=_INGROUP_PERMISSION_DOC)
     requested_output_tokens = Column(
         Integer,
         doc=(
@@ -707,7 +708,7 @@ class KnowledgeRecord(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
-        String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+        String(30), doc=_INGROUP_PERMISSION_DOC)
     summary_frequency = Column(String(10), nullable=True,
                                doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
     last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
@@ -1201,7 +1202,7 @@ class SkillInfo(TableBase):
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
     group_ids = Column(String, doc="Skill group IDs list")
-    ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    ingroup_permission = Column(String(30), doc=_INGROUP_PERMISSION_DOC)
 
 
 class SkillToolRelation(TableBase):

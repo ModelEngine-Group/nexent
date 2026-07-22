@@ -276,6 +276,58 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
     "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
 };
 
+function getApplyButtonLabel(
+  isPendingReview: boolean,
+  hasSharedRepository: boolean,
+  repositoryStatus: SkillRepositoryListingStatus,
+  t: (key: string) => string
+) {
+  if (isPendingReview) {
+    return getSkillRepositoryStatusLabel(t, repositoryStatus);
+  }
+  return hasSharedRepository
+    ? t("skillRepository.mine.button.reapply")
+    : t("skillRepository.mine.button.apply");
+}
+
+function getMineSkillMenuItems({
+  canPublish,
+  hasRepositoryInfo,
+  isPendingReview,
+  t,
+  onViewReview,
+  onDelete,
+}: {
+  canPublish: boolean;
+  hasRepositoryInfo: boolean;
+  isPendingReview: boolean;
+  t: (key: string) => string;
+  onViewReview: () => void;
+  onDelete: () => void;
+}): MenuProps["items"] {
+  const items: MenuProps["items"] = [];
+  if (canPublish && hasRepositoryInfo) {
+    items.push({
+      key: "review",
+      label: t(
+        isPendingReview
+          ? "skillRepository.mine.viewReviewProgress"
+          : "skillRepository.mine.viewRepositoryStatus"
+      ),
+      icon: <ClipboardCheck className="size-3.5" aria-hidden />,
+      onClick: onViewReview,
+    });
+  }
+  items.push({
+    key: "delete",
+    label: t("common.delete"),
+    icon: <Trash2 className="size-3.5" aria-hidden />,
+    danger: true,
+    onClick: onDelete,
+  });
+  return items;
+}
+
 function MineSkillCard({
   skill,
   onEdit,
@@ -309,34 +361,20 @@ function MineSkillCard({
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const isPendingReview = repositoryStatus === "pending_review";
   const canApplyListing = canPublish && !isPendingReview;
-  const applyButtonLabel = isPendingReview
-    ? getSkillRepositoryStatusLabel(t, repositoryStatus)
-    : hasSharedRepository
-      ? t("skillRepository.mine.button.reapply")
-      : t("skillRepository.mine.button.apply");
-  const menuItems: MenuProps["items"] = [
-    ...(canPublish && hasRepositoryInfo
-      ? [
-          {
-            key: "review",
-            label: t(
-              isPendingReview
-                ? "skillRepository.mine.viewReviewProgress"
-                : "skillRepository.mine.viewRepositoryStatus"
-            ),
-            icon: <ClipboardCheck className="size-3.5" aria-hidden />,
-            onClick: onViewReview,
-          },
-        ]
-      : []),
-    {
-      key: "delete",
-      label: t("common.delete"),
-      icon: <Trash2 className="size-3.5" aria-hidden />,
-      danger: true,
-      onClick: onDelete,
-    },
-  ];
+  const applyButtonLabel = getApplyButtonLabel(
+    isPendingReview,
+    hasSharedRepository,
+    repositoryStatus,
+    t
+  );
+  const menuItems = getMineSkillMenuItems({
+    canPublish,
+    hasRepositoryInfo,
+    isPendingReview,
+    t,
+    onViewReview,
+    onDelete,
+  });
 
   return (
     <article className="flex min-h-[200px] flex-col rounded-xl border border-border bg-background p-4 shadow-sm">

@@ -40,6 +40,7 @@ from utils.content_classifier_utils import ContentClassifier
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger(__name__)
+_SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
 
 _skill_manager: Optional[SkillManager] = None
 
@@ -1583,7 +1584,7 @@ class SkillService:
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
         if user_id is not None and not _can_edit_skill(existing, user_id):
-            raise ForbiddenError("Not authorized to update this skill")
+            raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
 
         content_bytes: bytes
         if isinstance(file_content, str):
@@ -1755,7 +1756,7 @@ class SkillService:
             if not existing:
                 raise SkillException(f"Skill not found: {skill_name}")
             if user_id is not None and not _can_edit_skill(existing, user_id):
-                raise ForbiddenError("Not authorized to update this skill")
+                raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
 
             result = skill_db.update_skill(
                 skill_name, skill_data, effective_tenant_id, updated_by=user_id or None
@@ -1830,7 +1831,7 @@ class SkillService:
             if not existing:
                 raise SkillException(f"Skill not found: {skill_id}")
             if not _can_edit_skill(existing, user_id):
-                raise ForbiddenError("Not authorized to update this skill")
+                raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
 
             local_dir = self._resolve_local_skills_dir_for_overlay()
             if local_dir and "name" in skill_data:

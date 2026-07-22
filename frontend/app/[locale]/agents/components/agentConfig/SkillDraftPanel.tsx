@@ -325,7 +325,9 @@ export default function SkillDraftPanel({
               mode="tags"
               maxCount={MAX_SKILL_TAGS}
               suffixIcon={null}
-              placeholder={t("skillManagement.form.tagsPlaceholder")}
+              placeholder={
+                readOnly ? "-" : t("skillManagement.form.tagsPlaceholder")
+              }
               open={false}
               onInputKeyDown={handleTagInputKeyDown}
               onChange={() => {
@@ -491,7 +493,8 @@ export default function SkillDraftPanel({
           setExpandedEditorContent("");
         }}
         centered
-        width={640}
+        width="min(960px, calc(100vw - 48px))"
+        className="expanded-file-editor"
         styles={{ body: { padding: 0 } }}
         footer={
           readOnly
@@ -535,7 +538,7 @@ export default function SkillDraftPanel({
             if (readOnly) return;
             setExpandedEditorContent(e.target.value);
           }}
-          autoSize={{ minRows: 10, maxRows: 28 }}
+          autoSize={{ minRows: 16, maxRows: 32 }}
           className="rounded-none border-0 font-mono text-sm shadow-none focus:border-0 focus:shadow-none"
           style={{ resize: "none" }}
         />
