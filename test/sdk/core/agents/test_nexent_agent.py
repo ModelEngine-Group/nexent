@@ -4202,15 +4202,15 @@ class TestLogStepMetricsContextManager:
             }
         ]
 
-        mock_context_manager = MagicMock()
-        mock_context_manager.get_all_compression_stats.return_value = {"total_saved": "25%"}
-        mock_core_agent.context_manager = mock_context_manager
+        mock_context_runtime = MagicMock()
+        mock_context_runtime.global_compression_stats.return_value = {"total_saved": "25%"}
+        mock_core_agent.context_runtime = mock_context_runtime
 
         # This should log without error
         nexent_agent_instance._log_step_metrics()
 
-        # Verify context manager was called
-        mock_context_manager.get_all_compression_stats.assert_called_once()
+        # Verify context runtime was called
+        mock_context_runtime.global_compression_stats.assert_called_once()
 
 
 # ----------------------------------------------------------------------------
