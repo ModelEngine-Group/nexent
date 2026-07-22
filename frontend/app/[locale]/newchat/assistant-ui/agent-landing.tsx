@@ -35,7 +35,6 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
     agents,
     paginatedAgents,
     filteredAgents,
-    excludedAgent,
     totalPages,
     isLoading,
     search,
@@ -43,8 +42,19 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
   } = usePublishedAgentList({
     page,
     pageSize: PAGE_SIZE,
-    excludeAgentId: lastUsedAgentId,
   });
+
+  const lastUsedAgent = useMemo(() => {
+    if (lastUsedAgentId === null) {
+      return null;
+    }
+    return (
+      agents.find((agent) => {
+        const id = (agent as unknown as { agent_id?: number }).agent_id;
+        return id === lastUsedAgentId;
+      }) ?? null
+    );
+  }, [agents, lastUsedAgentId]);
 
   useEffect(() => {
     setLastUsedAgentIdState(getLastUsedAgentId());
@@ -102,8 +112,8 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
             </div>
           </div>
 
-          {excludedAgent && (
-            <LastUsedAgentCard agent={excludedAgent as unknown as PublishedAgent} onSelect={handleSelectAgent} />
+          {lastUsedAgent && (
+            <LastUsedAgentCard agent={lastUsedAgent as unknown as PublishedAgent} onSelect={handleSelectAgent} />
           )}
 
           
