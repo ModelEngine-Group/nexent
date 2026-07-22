@@ -16,7 +16,6 @@ import {
   Building2,
   Zap,
   CalendarClock,
-  Sparkles,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -317,13 +316,13 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
           type="button"
           aria-label={t("sidebar.openNewChat")}
           title={t("sidebar.openNewChat")}
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-current/70 transition-colors hover:bg-black/10 hover:text-current"
+          className="flex h-5 w-8 shrink-0 items-center justify-center rounded-sm text-current/70 transition-colors hover:bg-black/10 hover:text-current"
           onClick={(event) => {
             event.stopPropagation();
             navigateToNewChat();
           }}
         >
-          <Sparkles className="h-3.5 w-3.5" />
+          <span className="text-[10px] font-semibold uppercase leading-none tracking-wide">new</span>
         </button>
       </div>
     );
