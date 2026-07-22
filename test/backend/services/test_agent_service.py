@@ -394,8 +394,26 @@ from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MC
 # =============================================================================
 
 @pytest.fixture(autouse=True)
-def reset_mocks():
+def reset_mocks(monkeypatch):
     """Reset all mocks before each test to ensure a clean test environment."""
+    async def default_agent_run(*args, **kwargs):
+        if False:
+            yield None
+
+    monkeypatch.setattr(agent_service, "agent_run", default_agent_run, raising=False)
+
+    class ServiceRuntime:
+        async def run(self, execution):
+            async for chunk in agent_service.agent_run(execution.agent_run_info):
+                yield chunk
+
+        def request_stop(self, run_id):
+            return True
+
+        async def shutdown(self):
+            return None
+
+    monkeypatch.setattr(agent_service, "get_agent_runtime", lambda framework: ServiceRuntime())
     yield
 
 
@@ -403,6 +421,7 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
     """Populate default request fields needed by prompt template aware service logic."""
     request.prompt_template_id = prompt_template_id
     request.prompt_template_name = None
+    request.runtime_framework = None
     request.enabled_skill_ids = None
     if not hasattr(request, "related_agent_ids"):
         request.related_agent_ids = None
@@ -413,6 +432,155 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
     if not hasattr(request, "greeting_message"):
         request.greeting_message = None
     return request
+
+
+def test_runtime_framework_defaults_for_new_legacy_request():
+    request = agent_service.AgentInfoRequest(name="legacy_agent")
+
+    resolved = agent_service._resolve_runtime_framework_for_save(request, "tenant-1")
+
+    assert resolved == "smolagents"
+
+
+def test_blank_agent_accepts_exactly_one_runtime_framework_assignment():
+    request = agent_service.AgentInfoRequest(
+        agent_id=10,
+        runtime_framework="openjiuwen",
+    )
+
+    with patch(
+        "backend.services.agent_service.search_agent_info_by_agent_id",
+        return_value={"agent_id": 10, "runtime_framework": None},
+    ):
+        resolved = agent_service._resolve_runtime_framework_for_save(request, "tenant-1")
+
+    assert resolved == "openjiuwen"
+
+
+def test_runtime_framework_same_value_is_idempotent_but_change_is_rejected():
+    existing = {"agent_id": 10, "runtime_framework": "openjiuwen"}
+    same_request = agent_service.AgentInfoRequest(
+        agent_id=10,
+        runtime_framework="openjiuwen",
+    )
+    changed_request = agent_service.AgentInfoRequest(
+        agent_id=10,
+        runtime_framework="smolagents",
+    )
+
+    with patch(
+        "backend.services.agent_service.search_agent_info_by_agent_id",
+        return_value=existing,
+    ):
+        assert (
+            agent_service._resolve_runtime_framework_for_save(same_request, "tenant-1")
+            == "openjiuwen"
+        )
+        with pytest.raises(agent_service.AppException) as exc_info:
+            agent_service._resolve_runtime_framework_for_save(changed_request, "tenant-1")
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.AGENT_RUNTIME_FRAMEWORK_IMMUTABLE
+    assert exc_info.value.http_status == 409
+
+
+def test_legacy_update_without_framework_preserves_existing_openjiuwen():
+    request = agent_service.AgentInfoRequest(agent_id=10)
+
+    with patch(
+        "backend.services.agent_service.search_agent_info_by_agent_id",
+        return_value={"agent_id": 10, "runtime_framework": "openjiuwen"},
+    ):
+        resolved = agent_service._resolve_runtime_framework_for_save(request, "tenant-1")
+
+    assert resolved == "openjiuwen"
+
+
+def test_internal_parent_child_framework_mismatch_returns_conflict():
+    records = {
+        1: {"agent_id": 1, "runtime_framework": "openjiuwen"},
+        2: {"agent_id": 2, "runtime_framework": "smolagents"},
+    }
+
+    with patch(
+        "backend.services.agent_service.search_agent_info_by_agent_id",
+        side_effect=lambda agent_id, tenant_id, version_no=0: records[agent_id],
+    ):
+        with pytest.raises(agent_service.AppException) as exc_info:
+            agent_service._validate_related_agent_frameworks(
+                parent_agent_id=1,
+                child_agent_ids=[2],
+                tenant_id="tenant-1",
+            )
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH
+    assert exc_info.value.http_status == 409
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_blank_agent_before_opening_stream():
+    request = agent_service.AgentRequest(
+        query="hello",
+        agent_id=10,
+        is_debug=True,
+    )
+
+    with patch(
+        "backend.services.agent_service.search_agent_info_by_agent_id",
+        return_value={"agent_id": 10, "runtime_framework": None},
+    ):
+        with pytest.raises(agent_service.AppException) as exc_info:
+            await agent_service.run_agent_stream(
+                request,
+                MagicMock(),
+                authorization="Bearer token",
+                user_id="user-1",
+                tenant_id="tenant-1",
+            )
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED
+    assert exc_info.value.http_status == 409
+
+
+def test_run_framework_validation_reads_requested_agent_version():
+    with patch(
+        "backend.services.agent_service.search_agent_info_by_agent_id",
+        return_value={"agent_id": 10, "runtime_framework": "openjiuwen"},
+    ) as search_agent:
+        framework = agent_service._require_agent_runtime_framework_for_run(
+            agent_id=10,
+            tenant_id="tenant-1",
+            version_no=3,
+        )
+
+    assert framework == "openjiuwen"
+    search_agent.assert_called_once_with(
+        agent_id=10,
+        tenant_id="tenant-1",
+        version_no=3,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mixed_framework_import_fails_before_first_write():
+    root = types.SimpleNamespace(runtime_framework="openjiuwen", managed_agents=[2])
+    child = types.SimpleNamespace(runtime_framework="smolagents", managed_agents=[])
+    bundle = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={"1": root, "2": child},
+    )
+
+    with patch(
+        "backend.services.agent_service.get_current_user_info",
+        return_value=("user-1", "tenant-1", "en"),
+    ), patch(
+        "backend.services.agent_service.import_agent_by_agent_id",
+        new_callable=AsyncMock,
+    ) as import_agent:
+        with pytest.raises(agent_service.AppException) as exc_info:
+            await agent_service.import_agent_impl(bundle, authorization="Bearer token")
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH
+    import_agent.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -731,13 +899,14 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
         "duty_prompt": "Sub duty prompt",
         "constraint_prompt": "Sub constraint prompt",
         "few_shots_prompt": "Sub few shots prompt",
+        "runtime_framework": None,
         "sub_agent_id_list": [789]
     }
     assert result == expected_result
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
+@patch('backend.services.agent_service.query_tool_instances_by_id', create=True)
 @patch('backend.services.agent_service.query_all_tools')
 @patch('backend.services.agent_service.update_agent')
 @patch('backend.services.agent_service.get_current_user_info')
@@ -9148,7 +9317,7 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
 
 # Tests for ingroup_permission and group_ids functionality
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
+@patch('backend.services.agent_service.query_tool_instances_by_id', create=True)
 @patch('backend.services.agent_service.query_all_tools')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.get_current_user_info')
@@ -9204,7 +9373,7 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission(
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
+@patch('backend.services.agent_service.query_tool_instances_by_id', create=True)
 @patch('backend.services.agent_service.query_all_tools')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.get_current_user_info')

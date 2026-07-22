@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
-from consts.exceptions import SkillDuplicateError
+from consts.exceptions import AppException, SkillDuplicateError
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
@@ -70,6 +70,8 @@ async def agent_run_api(
             authorization=authorization,
             resume=resume,
         )
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -155,6 +157,8 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
     try:
         result = await update_agent_info_impl(request, authorization)
         return result or {}
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
@@ -234,6 +238,8 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
                 force_import=request.force_import
             )
         return {}
+    except AppException:
+        raise
     except SkillDuplicateError as exc:
         raise HTTPException(status_code=409, detail={
             "type": "skill_duplicate",
@@ -357,6 +363,8 @@ async def publish_version_api(
             publish_as_a2a=request.publish_as_a2a,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -489,6 +497,8 @@ async def rollback_version_api(
             target_version_no=version_no,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -627,5 +637,3 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-
-

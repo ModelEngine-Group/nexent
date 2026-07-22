@@ -68,7 +68,11 @@ export default function AgentGenerateDetail({}) {
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const forceRefreshKey = useAgentConfigStore((state) => state.forceRefreshKey);
   const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const isRuntimeFrameworkLocked = useAgentConfigStore(
+    (state) => state.isRuntimeFrameworkLocked
+  );
   const updateAgentConfig = useAgentConfigStore((state) => state.updateAgentConfig);
+  const updateSubAgentIds = useAgentConfigStore((state) => state.updateSubAgentIds);
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
   // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
@@ -238,6 +242,7 @@ export default function AgentGenerateDetail({}) {
       businessLogicModelId: editedAgent.business_logic_model_id,
       promptTemplateId: editedAgent.prompt_template_id,
       promptTemplateName: editedAgent.prompt_template_name || "system_default",
+      runtimeFramework: editedAgent.runtime_framework || "smolagents",
     };
     queueMicrotask(() => {
       form.setFieldsValue(initialAgentInfo);
@@ -962,6 +967,88 @@ export default function AgentGenerateDetail({}) {
                         />
                       </Form.Item>
 
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <Form.Item
+                            name="runtimeFramework"
+                            label={t("agent.runtimeFramework.label")}
+                            help={
+                              isRuntimeFrameworkLocked
+                                ? t("agent.runtimeFramework.immutableHint")
+                                : undefined
+                            }
+                          >
+                            <Select
+                              options={[
+                                {
+                                  value: "smolagents",
+                                  label: t("agent.runtimeFramework.smolagents"),
+                                },
+                                {
+                                  value: "openjiuwen",
+                                  label: t("agent.runtimeFramework.openjiuwen"),
+                                },
+                              ]}
+                              disabled={
+                                !editable || isGenerating || isRuntimeFrameworkLocked
+                              }
+                              onChange={(value: "smolagents" | "openjiuwen") => {
+                                updateAgentConfig({ runtime_framework: value });
+                                updateSubAgentIds([]);
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Can permission="group:read">
+                        <Row gutter={16}>
+                          <Col span={12}>
+                            <Form.Item
+                              name="group_ids"
+                              label={t("agent.userGroup")}
+                            >
+                              <Select
+                                mode="multiple"
+                                placeholder={t("agent.userGroup")}
+                                options={groupSelectOptions}
+                                allowClear
+                                onChange={(value) => {
+                                  const nextGroupIds = normalizeNumberArray(value || []);
+                                  const currentGroupIds = normalizeNumberArray(
+                                    editedAgent.group_ids || []
+                                  );
+                                  if (
+                                    JSON.stringify(nextGroupIds) ===
+                                    JSON.stringify(currentGroupIds)
+                                  ) {
+                                    return;
+                                  }
+                                  updateAgentConfig({ group_ids: nextGroupIds });
+                                }}
+                              />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item
+                              name="ingroup_permission"
+                              label={t("tenantResources.knowledgeBase.permission")}
+                            >
+                              <Select
+                                placeholder={t("tenantResources.knowledgeBase.permission")}
+                                options={[
+                                  { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
+                                  { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
+                                  { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+                                ]}
+                                onChange={(value) => {
+                                  updateAgentConfig({ ingroup_permission: value });
+                                }}
+                              />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      </Can>
                       <Row gutter={16}>
                         <Col span={24}>
                           <Form.Item

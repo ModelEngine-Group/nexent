@@ -32,8 +32,11 @@ export type AgentConfigUpdate = Partial<
     | "ingroup_permission"
     | "greeting_message"
     | "example_questions"
+    | "runtime_framework"
   >
 >;
+
+export type AgentRuntimeFramework = "smolagents" | "openjiuwen";
 
 export interface AgentVerificationConfig {
   enabled: boolean;
@@ -139,6 +142,7 @@ export interface Agent {
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];
+  runtime_framework?: AgentRuntimeFramework | null;
 }
 
 export interface Tool {

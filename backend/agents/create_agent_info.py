@@ -6,7 +6,15 @@ from urllib.parse import urljoin
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
+from nexent.core.agents.agent_model import (
+    AgentConfig,
+    AgentHistory,
+    AgentRunInfo,
+    AgentVerificationConfig,
+    ExternalA2AAgentConfig,
+    ModelConfig,
+    ToolConfig,
+)
 from nexent.core.agents.summary_config import ContextManagerConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
@@ -53,7 +61,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
 from utils.redis_utils import get_redis_client
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
-from consts.model import AgentToolParamsRequest, ToolParamsRequest
+from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
@@ -527,7 +535,8 @@ def _get_external_a2a_agents(
 def _get_skill_script_tools(
     agent_id: int,
     tenant_id: str,
-    version_no: int = 0
+    version_no: int = 0,
+    allowed_skills: Optional[List[dict]] = None,
 ) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
 
@@ -535,6 +544,7 @@ def _get_skill_script_tools(
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+        allowed_skills: Skill summaries already authorized during agent assembly.
 
     Returns:
         List of ToolConfig for skill execution and reading tools
@@ -546,6 +556,14 @@ def _get_skill_script_tools(
         "tenant_id": tenant_id,
         "version_no": version_no,
     }
+    if allowed_skills is not None:
+        skill_context["allowed_skills"] = sorted(
+            {
+                str(skill.get("name") or "").strip()
+                for skill in allowed_skills
+                if str(skill.get("name") or "").strip()
+            }
+        )
 
     try:
         return [
@@ -706,10 +724,43 @@ async def create_agent_config(
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     enable_planning: bool = False,
+    _ancestry: tuple[int, ...] = (),
+    _expected_runtime_framework: str | None = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    if agent_id in _ancestry:
+        raise ValidationError(
+            f"Circular dependency detected while assembling Agent {agent_id}."
+        )
+    if "runtime_framework" not in agent_info:
+        runtime_framework = "smolagents"
+    else:
+        runtime_framework = agent_info.get("runtime_framework")
+        if runtime_framework is None:
+            from consts.error_code import ErrorCode
+            from consts.exceptions import AppException
+
+            raise AppException(
+                ErrorCode.AGENT_RUNTIME_FRAMEWORK_REQUIRED,
+                f"Agent {agent_id} must select a runtime framework before it can run.",
+            )
+    if runtime_framework not in {"smolagents", "openjiuwen"}:
+        raise ValidationError(
+            f"Agent {agent_id} has unsupported runtime framework: {runtime_framework}."
+        )
+    if (
+        _expected_runtime_framework is not None
+        and runtime_framework != _expected_runtime_framework
+    ):
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        raise AppException(
+            ErrorCode.AGENT_RUNTIME_FRAMEWORK_MISMATCH,
+            "Internal parent and child Agents must use the same runtime framework.",
+        )
 
     # create sub agent
     sub_agent_relations = query_sub_agent_relations(
@@ -732,6 +783,8 @@ async def create_agent_config(
             version_no=sub_agent_version_no,
             override_model_id=None,
             tool_params=normalized_tool_params,
+            _ancestry=(*_ancestry, agent_id),
+            _expected_runtime_framework=runtime_framework,
         )
         managed_agents.append(sub_agent_config)
 
@@ -914,7 +967,12 @@ async def create_agent_config(
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
+    builtin_tools = _get_skill_script_tools(
+        agent_id,
+        tenant_id,
+        version_no,
+        allowed_skills=skills,
+    )
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
@@ -1052,6 +1110,8 @@ async def create_agent_config(
         agent_config.enable_planning,
         any(t.name in {"create_plan", "update_plan_step"} for t in agent_config.tools),
     )
+    agent_config.id = agent_id
+    agent_config.runtime_framework = runtime_framework
     return agent_config
 
 
@@ -1450,6 +1510,73 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
     return list(used_mcp_urls)
 
 
+def attach_mcp_bindings(
+    input_agent_config: AgentConfig,
+    mcp_info_dict: Dict[str, dict],
+) -> None:
+    """Attach per-node MCP bindings without re-querying MCP configuration."""
+    from nexent.core.agents.agent_model import MCPBinding
+
+    bindings: list[MCPBinding] = []
+    tools_by_server: Dict[str, list[ToolConfig]] = {}
+    for tool in input_agent_config.tools:
+        if tool.source == "mcp" and tool.usage:
+            tools_by_server.setdefault(tool.usage, []).append(tool)
+
+    for server_name, tools in tools_by_server.items():
+        record = mcp_info_dict.get(server_name) or {}
+        url = str(record.get("remote_mcp_server") or "").strip()
+        headers: Dict[str, str] = {}
+        auth_token = record.get("authorization_token")
+        if auth_token:
+            headers["Authorization"] = str(auth_token)
+        custom_headers = record.get("custom_headers")
+        if isinstance(custom_headers, dict):
+            headers.update({str(key): str(value) for key, value in custom_headers.items()})
+        tool_names = sorted(
+            {
+                str(tool.class_name or tool.name)
+                for tool in tools
+                if tool.class_name or tool.name
+            }
+        )
+        required_tool_names = sorted(
+            {
+                str(tool.class_name or tool.name)
+                for tool in tools
+                if (tool.class_name or tool.name)
+                and bool((tool.metadata or {}).get("mcp_required", True))
+            }
+        )
+        available = bool(record.get("status") and url)
+        if not record:
+            unavailable_reason = "server_not_configured"
+        elif not record.get("status"):
+            unavailable_reason = "server_disabled"
+        elif not url:
+            unavailable_reason = "server_url_missing"
+        else:
+            unavailable_reason = None
+        bindings.append(
+            MCPBinding(
+                server_id=str(record.get("mcp_id") or server_name),
+                server_name=server_name,
+                url=url,
+                transport="sse" if url.endswith("/sse") else "streamable-http",
+                headers=headers,
+                required=bool(required_tool_names),
+                tool_names=tool_names,
+                required_tool_names=required_tool_names,
+                available=available,
+                unavailable_reason=unavailable_reason,
+            )
+        )
+    input_agent_config.mcp_bindings = bindings
+
+    for sub_agent_config in input_agent_config.managed_agents:
+        attach_mcp_bindings(sub_agent_config, mcp_info_dict)
+
+
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -1510,10 +1637,18 @@ async def create_agent_run_info(
         "status": True,
         "authorization_token": None
     })
-    remote_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list if record["status"]}
+    all_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list}
+    enabled_mcp_dict = {
+        name: record
+        for name, record in all_mcp_dict.items()
+        if record.get("status")
+    }
+    is_agent_config = isinstance(AgentConfig, type) and isinstance(agent_config, AgentConfig)
+    if is_agent_config:
+        attach_mcp_bindings(agent_config, all_mcp_dict)
 
     # Filter MCP servers and tools, and build mcp_host with authorization
-    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, enabled_mcp_dict)
 
     # Build mcp_host list with authorization tokens and custom headers
     mcp_host = []
@@ -1563,4 +1698,7 @@ async def create_agent_run_info(
         ),
         redis_client=get_redis_client(),
     )
+    if is_agent_config:
+        agent_run_info.runtime_framework = agent_config.runtime_framework
+        agent_run_info.mcp_bindings = list(agent_config.mcp_bindings)
     return agent_run_info

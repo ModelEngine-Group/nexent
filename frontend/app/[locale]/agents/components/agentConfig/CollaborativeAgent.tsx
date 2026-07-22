@@ -39,14 +39,18 @@ export default function CollaborativeAgent() {
 
   // Related internal agent IDs
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list) ? editedAgent.sub_agent_id_list : [];
+  const runtimeFramework = editedAgent?.runtime_framework || "smolagents";
+  const sameFrameworkInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
+    (agent: Agent) => (agent.runtime_framework || "smolagents") === runtimeFramework
+  );
 
   // Related internal agents (from published list)
-  const relatedInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
+  const relatedInternalAgents = sameFrameworkInternalAgents.filter(
     (agent: Agent) => relatedAgentIds.includes(Number(agent.id))
   );
 
   // Available internal agents (exclude already related ones and current agent)
-  const availableInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
+  const availableInternalAgents = sameFrameworkInternalAgents.filter(
     (agent: Agent) => !relatedAgentIds.includes(Number(agent.id)) && Number(agent.id) !== currentAgentId
   );
 

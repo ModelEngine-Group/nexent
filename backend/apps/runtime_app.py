@@ -31,6 +31,14 @@ app.include_router(voice_router)
 app.include_router(skill_creator_router)
 
 
+@app.on_event("shutdown")
+async def shutdown_agent_runtimes() -> None:
+    """Drain initialized in-process runtimes without importing unused providers."""
+    from services.agent_runtime.registry import shutdown_initialized_runtimes
+
+    await shutdown_initialized_runtimes()
+
+
 @app.on_event("startup")
 async def start_agent_automation_scheduler():
     from services.agent_automation.scheduler import agent_automation_scheduler

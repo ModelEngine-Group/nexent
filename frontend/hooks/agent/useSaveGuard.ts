@@ -215,6 +215,7 @@ export const useSaveGuard = () => {
         ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
         greeting_message: currentEditedAgent.greeting_message,
         example_questions: currentEditedAgent.example_questions,
+        runtime_framework: currentEditedAgent.runtime_framework || "smolagents",
       });
 
       if (result.success) {
@@ -284,7 +285,13 @@ export const useSaveGuard = () => {
         useAgentConfigStore.getState().markAsSaved();
         return true;
       } else {
-        message.error(result.message || t("businessLogic.config.error.saveFailed") );
+        message.error(
+          result.code === "030106"
+            ? t("agent.runtimeFramework.immutableHint")
+            : result.code === "030107"
+              ? t("agent.runtimeFramework.mismatch")
+              : result.message || t("businessLogic.config.error.saveFailed")
+        );
         return false;
       }
     } catch (error) {

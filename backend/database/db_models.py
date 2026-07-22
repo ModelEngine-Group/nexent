@@ -623,6 +623,11 @@ class AgentInfo(TableBase):
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
+    runtime_framework = Column(
+        String(20),
+        nullable=True,
+        doc="Immutable execution framework: smolagents or openjiuwen",
+    )
 
 
 class PromptTemplate(TableBase):

@@ -2,15 +2,14 @@ import asyncio
 import io
 import json
 import logging
+import re
 from statistics import mean
 from typing import Any, Dict, List, Optional, Tuple
 
-from adapters.exception import JiuwenSDKError, JiuwenSDKUnavailableError
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 
-try:
-    from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
-except ModuleNotFoundError:
-    JiuwenSDKAdapter = None  # type: ignore[assignment, misc]
+from adapters.exception import JiuwenSDKUnavailableError
 from consts.model import AgentRequest
 from database.agent_evaluation_db import (
     create_agent_evaluation,
@@ -26,11 +25,23 @@ from database.evaluation_set_db import get_evaluation_set_cases_all
 from services.evaluation_set_service import resolve_latest_published_version_no
 from services.agent_service import prepare_agent_run
 from utils.thread_utils import pool
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-import re
+
+JiuwenSDKAdapter = None
 
 logger = logging.getLogger(__name__)
+
+
+def _get_jiuwen_adapter_class():
+    """Resolve the optional evaluation adapter without importing OpenJiuwen at startup."""
+    global JiuwenSDKAdapter
+    if JiuwenSDKAdapter is not None:
+        return JiuwenSDKAdapter
+    try:
+        from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter as adapter_class
+    except ModuleNotFoundError:
+        return None
+    JiuwenSDKAdapter = adapter_class
+    return adapter_class
 
 
 # Log records emitted during SDK invocations may bleed into the ``reason``
@@ -47,6 +58,7 @@ _LOG_PREFIX_RE = re.compile(
     r")\s*"
 )
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _extract_clean_reason(raw: Any) -> str:
@@ -572,10 +584,11 @@ def execute_agent_evaluation_run(
             raise ValueError("judge_model_id is required but neither passed in nor persisted on the run")
         judge_model_id = int(judge_model_id)
 
-        if JiuwenSDKAdapter is None:
+        adapter_class = _get_jiuwen_adapter_class()
+        if adapter_class is None:
             raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable. Please install optional dependencies for openjiuwen.")
 
-        adapter = JiuwenSDKAdapter(model_id=judge_model_id, tenant_id=tenant_id)
+        adapter = adapter_class(model_id=judge_model_id, tenant_id=tenant_id)
 
         cases = list_agent_evaluation_cases(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id, limit=100000, offset=0)
         scores: List[float] = []

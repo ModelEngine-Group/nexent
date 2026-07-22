@@ -136,6 +136,7 @@ class MockAgent:
         self.verification_config = None
         self.greeting_message = None
         self.example_questions = None
+        self.runtime_framework = "smolagents"
         self.current_version_no = None
         self.version_no = 0
         self.created_by = None

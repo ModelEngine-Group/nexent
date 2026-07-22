@@ -241,6 +241,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "verification_config": new_agent.verification_config,
             "greeting_message": new_agent.greeting_message,
             "example_questions": new_agent.example_questions,
+            "runtime_framework": new_agent.runtime_framework,
             "current_version_no": new_agent.current_version_no,
             "version_no": new_agent.version_no,
             "created_by": new_agent.created_by,

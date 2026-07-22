@@ -387,6 +387,9 @@ assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web:" "web deployment should not keep component-named env checksum annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh:" "openssh deployment should not keep component-named env checksum annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/Chart.yaml")" "openjiuwen-runtime" "Helm should not install a second OpenJiuwen runtime"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "AGENT_RUNTIME_PROVIDER" "runtime framework selection should come from Agent data"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/secrets.yaml")" "CAPABILITY_GRANT_SIGNING_KEY" "single-process integration should not create Gateway signing secrets"
 
 ENV_CHECKSUM_A="$TMP_DIR/env-checksum-a.env"
 cat > "$ENV_CHECKSUM_A" <<'ENV'
@@ -571,7 +574,12 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-northbound:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-northbound:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
+  assert_not_contains "$(cat "$compose_file")" "openjiuwen-runtime:" "Compose should not start a second OpenJiuwen runtime"
 done
+assert_not_contains "$(cat "$SCRIPT_DIR/../env/image-source.general.env")" "OPENJIUWEN_RUNTIME_IMAGE" "deployment should not define a second OpenJiuwen image"
+assert_not_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "AGENT_RUNTIME_PROVIDER" "Agent runtime selection should not be deployment-configurable"
+assert_contains "$(cat "$SCRIPT_DIR/../images/dockerfiles/main/Dockerfile")" "OpenJiuwenInProcessRuntime" "main image build should verify the in-process runtime"
+assert_contains "$(cat "$SCRIPT_DIR/../../backend/pyproject.toml")" 'openjiuwen==0.1.16' "backend should pin the validated OpenJiuwen release"
 assert_not_contains "$(cat "$DOCKER_DEV_COMPOSE_FILE")" "monitoring.env" "docker dev data-process compose should not receive monitoring.env"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}' "docker monitoring compose should pass Langfuse OTLP auth header to the collector"
 assert_not_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" "LANGFUSE_OLTP_AUTH_HEADER" "docker monitoring compose should not pass the misspelled Langfuse auth header alias"

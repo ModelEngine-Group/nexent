@@ -135,6 +135,42 @@ class ToolConfig(BaseModel):
     labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
 
 
+class MCPBinding(BaseModel):
+    """Request-scoped MCP server identity and selected-tool allowlist."""
+
+    server_id: str = Field(description="Stable MCP server identity")
+    server_name: str = Field(description="MCP server display name")
+    url: str = Field(description="Existing MCP endpoint URL")
+    transport: Literal["sse", "streamable-http"] = Field(description="MCP client transport")
+    headers: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Request-scoped authentication headers",
+        exclude=True,
+        repr=False,
+    )
+    required: bool = Field(default=True, description="Whether server/tool setup blocks the run")
+    tool_names: List[str] = Field(default_factory=list, description="Selected MCP tool allowlist")
+    required_tool_names: List[str] = Field(
+        default_factory=list,
+        description="Selected tools whose absence must block the run",
+    )
+    available: bool = Field(
+        default=True,
+        description="Whether the configured endpoint is enabled and addressable",
+    )
+    unavailable_reason: Optional[str] = Field(
+        default=None,
+        description="Non-secret diagnostic for an unavailable configured endpoint",
+    )
+
+    @model_validator(mode="after")
+    def default_required_tools(self) -> "MCPBinding":
+        """Treat legacy required bindings as requiring every selected tool."""
+        if self.required and not self.required_tool_names:
+            self.required_tool_names = list(self.tool_names)
+        return self
+
+
 VerificationEvent = Literal[
     "tool_precheck",
     "tool_result",
@@ -252,6 +288,7 @@ class AgentVerificationConfig(BaseModel):
     )
 
 class AgentConfig(BaseModel):
+    id: Optional[int] = Field(description="Persisted Agent ID", default=None)
     name: str = Field(description="Agent name")
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
@@ -295,6 +332,14 @@ class AgentConfig(BaseModel):
     verification_config: AgentVerificationConfig = Field(
         description="Layered ReAct self-verification configuration",
         default_factory=AgentVerificationConfig,
+    )
+    runtime_framework: Literal["smolagents", "openjiuwen"] = Field(
+        description="Immutable execution framework",
+        default="smolagents",
+    )
+    mcp_bindings: List[MCPBinding] = Field(
+        description="Request-scoped MCP bindings owned by this Agent node",
+        default_factory=list,
     )
     enable_planning: bool = Field(
         description="Whether to enable the planning phase before execution",
@@ -356,6 +401,14 @@ class AgentRunInfo(BaseModel):
     safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved W2 safe input budget snapshot for request execution",
         default=None,
+    )
+    runtime_framework: Literal["smolagents", "openjiuwen"] = Field(
+        description="Runtime framework selected from persisted Agent data",
+        default="smolagents",
+    )
+    mcp_bindings: List[MCPBinding] = Field(
+        description="Root Agent request-scoped MCP bindings",
+        default_factory=list,
     )
     enable_planning: bool = Field(
         description="Whether to enable the planning phase before execution",

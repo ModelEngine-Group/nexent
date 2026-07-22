@@ -165,6 +165,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      runtime_framework: agent.runtime_framework || "smolagents",
     }));
 
     return {
@@ -218,6 +219,7 @@ export const fetchPublishedAgentList = async () => {
       current_version_no: agent.current_version_no,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
+      runtime_framework: agent.runtime_framework || "smolagents",
     }));
 
     return {
@@ -270,6 +272,7 @@ export const getCreatingSubAgentId = async () => {
         constraintPrompt: data.constraint_prompt,
         fewShotsPrompt: data.few_shots_prompt,
         sub_agent_id_list: data.sub_agent_id_list || [],
+        runtimeFramework: data.runtime_framework || "smolagents",
       },
       message: "",
     };
@@ -441,6 +444,7 @@ export interface UpdateAgentInfoPayload {
   ingroup_permission?: string;
   greeting_message?: string;
   example_questions?: string[];
+  runtime_framework?: "smolagents" | "openjiuwen";
 }
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
@@ -451,15 +455,20 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
       body: JSON.stringify(payload),
     });
 
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
     const data = await response.json();
+    if (!response.ok) {
+      return {
+        success: false,
+        data: null,
+        code: data?.code,
+        message: data?.message || `Request failed: ${response.status}`,
+      };
+    }
     return {
       success: true,
       data: data,
       message: "Agent updated successfully",
+      code: undefined,
     };
   } catch (error) {
     log.error("Failed to update Agent:", error);
@@ -467,6 +476,7 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
       success: false,
       data: null,
       message: "Failed to update Agent, please try again later",
+      code: undefined,
     };
   }
 };
@@ -863,6 +873,7 @@ export const searchAgentInfo = async (
       greeting_message: data.greeting_message || "",
       example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
+      runtime_framework: data.runtime_framework ?? null,
     };
 
     return {
