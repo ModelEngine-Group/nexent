@@ -92,7 +92,7 @@ async def test_register_local_resources_rejects_ids_outside_session_catalog(
             user_id="user_1",
         )
     state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
-    assert "forged_batch" not in state["recommendation_batches"]
+    assert "forged_batch" not in state["recommendations"]
 
 
 @pytest.mark.asyncio

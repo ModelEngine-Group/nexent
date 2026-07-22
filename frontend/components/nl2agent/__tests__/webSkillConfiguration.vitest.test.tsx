@@ -37,8 +37,7 @@ describe("online Skill configuration", () => {
       local_tool_parameter_schemas: {},
       invalid_references: [],
       resource_review: {
-        recommendation_batches: {},
-        online_recommendation_batches: {},
+        recommendations: {},
         mcp_workflows: {},
       },
     } as never);

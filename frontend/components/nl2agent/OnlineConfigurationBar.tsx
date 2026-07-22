@@ -14,12 +14,12 @@ import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 export const getOnlineConfigurationBlockers = (
   review?: Pick<
     Nl2AgentSessionState["resource_review"],
-    | "online_recommendation_batches"
-    | "online_configuration_confirmed"
-    | "mcp_workflows"
+    "recommendations" | "online_configuration_confirmed" | "mcp_workflows"
   >
 ) => {
-  const batches = Object.values(review?.online_recommendation_batches ?? {});
+  const batches = Object.values(review?.recommendations ?? {}).filter(
+    (batch) => batch.resource_type === "mcp" || batch.resource_type === "skill"
+  );
   const mcpBatchCount = batches.filter(
     (batch) => batch.resource_type === "mcp"
   ).length;

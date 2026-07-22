@@ -22,7 +22,7 @@ def _matches_registered_online_card(
     """Allow either card from one dual-card message to acknowledge after registration."""
     if card_type not in {"web_mcp", "web_skill"} or not card_key:
         return False
-    batch = state.get("online_recommendation_batches", {}).get(card_key) or {}
+    batch = state.get("recommendations", {}).get(card_key) or {}
     expected_resource_type = "mcp" if card_type == "web_mcp" else "skill"
     return batch.get("resource_type") == expected_resource_type
 
@@ -376,14 +376,9 @@ async def get_session_state(
         )
     )
     workflow_summary = dependencies.summarize_workflow_state(workflow_state)
-    workflow_state.pop("recommendations", None)
     workflow_state.pop("online_installations", None)
-    for batch in workflow_state.get("recommendation_batches", {}).values():
+    for batch in workflow_state.get("recommendations", {}).values():
         batch.pop("operation_id", None)
-        if batch.get("status") == "applying":
-            batch["status"] = "recommendations_ready"
-            batch["applied_tool_ids"] = []
-            batch["applied_skill_ids"] = []
     for workflow in workflow_state.get("mcp_workflows", {}).values():
         workflow.pop("binding_operation_id", None)
         if workflow.get("status") == "binding":
@@ -407,10 +402,14 @@ async def get_session_state(
             }
             for tool_id in discovered_ids
         ]
-    recommendation_batches = workflow_state.get("recommendation_batches", {})
+    local_batches = {
+        batch_id: batch
+        for batch_id, batch in workflow_state.get("recommendations", {}).items()
+        if batch.get("resource_type") == "local"
+    }
     recommended_ids_by_batch = {
         batch_id: [int(tool_id) for tool_id in batch.get("tool_ids", [])]
-        for batch_id, batch in recommendation_batches.items()
+        for batch_id, batch in local_batches.items()
     }
     all_recommended_tool_ids = sorted(
         {

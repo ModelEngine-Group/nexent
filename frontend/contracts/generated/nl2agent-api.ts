@@ -698,27 +698,6 @@ export interface components {
        */
       reference_type: "model" | "tool" | "skill";
     };
-    /**
-     * Nl2AgentLocalRecommendationBatch
-     * @description Legacy local recommendation projection retained by the public API.
-     */
-    Nl2AgentLocalRecommendationBatch: {
-      /** Applied Skill Ids */
-      applied_skill_ids?: number[];
-      /** Applied Tool Ids */
-      applied_tool_ids?: number[];
-      /** Operation Id */
-      operation_id?: string | null;
-      /** Skill Ids */
-      skill_ids?: number[];
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "recommendations_ready" | "applying" | "applied" | "skipped";
-      /** Tool Ids */
-      tool_ids?: number[];
-    };
     /** Nl2AgentLocalRecommendationResponse */
     Nl2AgentLocalRecommendationResponse: {
       /** Applied Skill Ids */
@@ -1301,15 +1280,9 @@ export interface components {
        * @default false
        */
       online_configuration_confirmed?: boolean;
-      /** Online Recommendation Batches */
-      online_recommendation_batches?: {
-        [key: string]: components["schemas"]["OnlineRecommendationBatch"];
-      };
-      /** Recommendation Batches */
-      recommendation_batches?: {
-        [
-          key: string
-        ]: components["schemas"]["Nl2AgentLocalRecommendationBatch"];
+      /** Recommendations */
+      recommendations?: {
+        [key: string]: components["schemas"]["RecommendationBatch"];
       };
       requirements_review: components["schemas"]["Nl2AgentRequirementsReviewResponse"];
       /**
@@ -1328,36 +1301,20 @@ export interface components {
        * @constant
        */
       schema_version?: 2;
-      /** Trusted Search Batches */
-      trusted_search_batches?: {
-        [key: string]: components["schemas"]["TrustedSearchBatch"];
-      };
     };
     /**
-     * OnlineRecommendationBatch
-     * @description Legacy public projection of an online recommendation aggregate.
+     * RecommendationBatch
+     * @description One immutable search proof and its presentation/application lifecycle.
      */
-    OnlineRecommendationBatch: {
+    RecommendationBatch: {
+      /** Applied Skill Ids */
+      applied_skill_ids?: number[];
+      /** Applied Tool Ids */
+      applied_tool_ids?: number[];
       /** Item Keys */
       item_keys?: string[];
-      /**
-       * Resource Type
-       * @enum {string}
-       */
-      resource_type: "mcp" | "skill";
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "recommendations_ready" | "completed";
-    };
-    /**
-     * TrustedSearchBatch
-     * @description Legacy public projection of immutable search proof fields.
-     */
-    TrustedSearchBatch: {
-      /** Item Keys */
-      item_keys?: string[];
+      /** Operation Id */
+      operation_id?: string | null;
       /**
        * Resource Type
        * @enum {string}
@@ -1365,6 +1322,17 @@ export interface components {
       resource_type: "local" | "mcp" | "skill";
       /** Skill Ids */
       skill_ids?: number[];
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | "searched"
+        | "presented"
+        | "applying"
+        | "applied"
+        | "skipped"
+        | "completed";
       /** Tool Ids */
       tool_ids?: number[];
     };

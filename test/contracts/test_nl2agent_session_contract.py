@@ -35,3 +35,24 @@ def test_session_discovery_contract_requires_runner_identity() -> None:
         PROJECT_ROOT / "frontend/contracts/generated/nl2agent-api.ts"
     ).read_text(encoding="utf-8")
     assert "nl2agent_agent_id: number;" in generated_types
+
+
+def test_workflow_state_contract_uses_unified_recommendations() -> None:
+    openapi = json.loads(
+        (PROJECT_ROOT / "contracts/nl2agent-openapi.json").read_text(encoding="utf-8")
+    )
+    schema = openapi["components"]["schemas"]["Nl2AgentWorkflowStateResponse"]
+    properties = schema["properties"]
+
+    assert properties["recommendations"]["additionalProperties"] == {
+        "$ref": "#/components/schemas/RecommendationBatch"
+    }
+    assert "trusted_search_batches" not in properties
+    assert "recommendation_batches" not in properties
+    assert "online_recommendation_batches" not in properties
+
+    generated_types = (
+        PROJECT_ROOT / "frontend/contracts/generated/nl2agent-api.ts"
+    ).read_text(encoding="utf-8")
+    assert "recommendations?: {" in generated_types
+    assert "recommendation_batches" not in generated_types

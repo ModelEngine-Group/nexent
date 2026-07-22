@@ -1,10 +1,15 @@
+import json
 from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
 
 from agents import nl2agent_session_store as session_store
-from agents.nl2agent_workflow import Nl2AgentWorkflowState, state_to_dict
+from agents.nl2agent_workflow import (
+    Nl2AgentWorkflowState,
+    RecommendationBatch,
+    state_to_dict,
+)
 
 
 def _catalogs():
@@ -30,6 +35,38 @@ def _snapshot(*, revision=0, status="active"):
         "workflow_state": state_to_dict(state),
         "session_catalogs": _catalogs(),
     }
+
+
+def test_workflow_state_serializes_only_unified_recommendations():
+    state = Nl2AgentWorkflowState(
+        conversation_id=902,
+        recommendations={
+            "local": RecommendationBatch(resource_type="local", status="searched")
+        },
+    )
+
+    payload = state_to_dict(state)
+
+    assert payload["recommendations"]["local"]["resource_type"] == "local"
+    assert "trusted_search_batches" not in payload
+    assert "recommendation_batches" not in payload
+    assert "online_recommendation_batches" not in payload
+
+
+@pytest.mark.parametrize(
+    "legacy_field",
+    [
+        "trusted_search_batches",
+        "recommendation_batches",
+        "online_recommendation_batches",
+    ],
+)
+def test_legacy_recommendation_fields_are_rejected(legacy_field):
+    payload = state_to_dict(Nl2AgentWorkflowState(conversation_id=902))
+    payload[legacy_field] = {}
+
+    with pytest.raises(session_store.Nl2AgentSessionCatalogError, match="Malformed"):
+        session_store.parse_session_state(json.dumps(payload), "tenant_1", 202)
 
 
 def test_state_and_catalogs_are_read_only_from_postgresql(monkeypatch):

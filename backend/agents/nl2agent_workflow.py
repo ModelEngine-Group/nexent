@@ -65,25 +65,6 @@ class RecommendationBatch(BaseModel):
     operation_id: Optional[str] = Field(default=None, max_length=128)
 
 
-class OnlineRecommendationBatch(BaseModel):
-    """Legacy public projection of an online recommendation aggregate."""
-
-    model_config = ConfigDict(extra="forbid")
-    resource_type: Literal["mcp", "skill"]
-    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
-    status: Literal["recommendations_ready", "completed"]
-
-
-class TrustedSearchBatch(BaseModel):
-    """Legacy public projection of immutable search proof fields."""
-
-    model_config = ConfigDict(extra="forbid")
-    resource_type: Literal["local", "mcp", "skill"]
-    tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
-    skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
-    item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
-
-
 class OnlineInstallation(BaseModel):
     """Internal reservation for one online resource installation."""
 
@@ -373,36 +354,4 @@ def evaluate_workflow(state: Nl2AgentWorkflowState) -> WorkflowSummary:
 
 
 def state_to_dict(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-    payload = state.model_dump(mode="json")
-    # Keep the wire payload readable by older clients while the persisted model
-    # has one recommendation aggregate.
-    recommendations = payload["recommendations"]
-    payload["trusted_search_batches"] = {
-        key: {
-            field: value[field]
-            for field in ("resource_type", "tool_ids", "skill_ids", "item_keys")
-        }
-        for key, value in recommendations.items()
-    }
-    payload["recommendation_batches"] = {
-        key: {
-            field: item
-            for field, item in value.items()
-            if field not in {"resource_type", "item_keys"}
-        }
-        for key, value in recommendations.items()
-        if value["resource_type"] == "local"
-    }
-    for value in payload["recommendation_batches"].values():
-        if value["status"] in {"searched", "presented"}:
-            value["status"] = "recommendations_ready"
-    payload["online_recommendation_batches"] = {
-        key: {
-            "resource_type": value["resource_type"],
-            "item_keys": value["item_keys"],
-            "status": "completed" if value["status"] == "completed" else "recommendations_ready",
-        }
-        for key, value in recommendations.items()
-        if value["resource_type"] in {"mcp", "skill"}
-    }
-    return payload
+    return state.model_dump(mode="json")

@@ -78,6 +78,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   });
   const [applied, setApplied] = useState(false);
   const [skipped, setSkipped] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registrationError, setRegistrationError] = useState<string>();
   const [registrationRetryable, setRegistrationRetryable] = useState(true);
@@ -103,10 +104,11 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     const state = workflow.sessionState;
     if (state?.agent_id !== agentId) return;
     const batch =
-      state.resource_review.recommendation_batches?.[recommendationBatchId];
-    if (!batch) return;
+      state.resource_review.recommendations?.[recommendationBatchId];
+    if (!batch || batch.resource_type !== "local") return;
 
-    setRegistered(true);
+    setRegistered(batch.status !== "searched");
+    setApplying(batch.status === "applying");
     setToolParameterSchemas(
       state.local_tool_parameter_schemas?.[recommendationBatchId] ?? {}
     );
@@ -147,6 +149,9 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
       setSelected(new Set());
       setApplied(false);
       setSkipped(true);
+    } else {
+      setApplied(false);
+      setSkipped(false);
     }
   }, [agentId, recommendationBatchId, workflow.sessionState]);
 
@@ -165,6 +170,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
         {
           onSuccess: async (result) => {
             setToolParameterSchemas(result.tool_parameter_schemas ?? {});
+            setApplying(result.status === "applying");
             setApplied(result.status === "applied");
             setSkipped(result.status === "skipped");
             if (result.status === "applied") {
@@ -375,7 +381,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           <Checkbox
             checked={selected.has(key)}
             onChange={() => toggle(key)}
-            disabled={applied}
+            disabled={applied || applying}
             className="mt-1"
           />
           <div className="flex-1 min-w-0">
@@ -445,7 +451,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                           label: String(choice),
                         }))}
                         onChange={setValue}
-                        disabled={applied}
+                        disabled={applied || applying}
                       />
                     ) : field.type === "boolean" ? (
                       <Switch
@@ -453,7 +459,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                         size="small"
                         checked={Boolean(value)}
                         onChange={setValue}
-                        disabled={applied}
+                        disabled={applied || applying}
                       />
                     ) : field.type === "integer" || field.type === "number" ? (
                       <InputNumber
@@ -463,7 +469,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                         value={typeof value === "number" ? value : undefined}
                         precision={field.type === "integer" ? 0 : undefined}
                         onChange={setValue}
-                        disabled={applied}
+                        disabled={applied || applying}
                       />
                     ) : field.type === "array" || field.type === "object" ? (
                       <Input.TextArea
@@ -485,7 +491,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                             setValue(raw);
                           }
                         }}
-                        disabled={applied}
+                        disabled={applied || applying}
                       />
                     ) : (
                       <Input
@@ -580,6 +586,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             !recommendationBatchId ||
             !registered ||
             pending ||
+            applying ||
             workflow.sessionStateLoading ||
             Boolean(workflow.sessionStateError) ||
             applied ||
@@ -592,7 +599,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
               <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
               {t("nl2agent.localResources.appliedShort", "Applied")}
             </>
-          ) : pending ? (
+          ) : pending || applying ? (
             <>
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
               {t("nl2agent.localResources.applying", "Applying...")}
@@ -609,6 +616,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
             !recommendationBatchId ||
             !registered ||
             pending ||
+            applying ||
             workflow.sessionStateLoading ||
             Boolean(workflow.sessionStateError) ||
             applied ||

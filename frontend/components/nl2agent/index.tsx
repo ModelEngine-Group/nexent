@@ -52,10 +52,11 @@ export const OnlineRecommendationGroup: React.FC<{
 
   useEffect(() => {
     const batch =
-      workflow.sessionState?.resource_review.online_recommendation_batches?.[
+      workflow.sessionState?.resource_review.recommendations?.[
         recommendationBatchId
       ];
     if (!batch || batch.resource_type !== resourceType) return;
+    setRegistered(batch.status !== "searched");
     setCompleted(batch.status === "completed");
     if (!registrationEnabled) setRegistered(true);
   }, [

@@ -8,9 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents.nl2agent_workflow import (
     CardDelivery,
     CardType,
-    OnlineRecommendationBatch,
+    RecommendationBatch,
     RequirementsReview,
-    TrustedSearchBatch,
 )
 
 
@@ -172,17 +171,6 @@ class Nl2AgentRequirementsReviewResponse(RequirementsReview):
     summary: Optional[Nl2AgentRequirementsData] = None
 
 
-class Nl2AgentLocalRecommendationBatch(Nl2AgentResponse):
-    """Legacy local recommendation projection retained by the public API."""
-
-    status: Literal["recommendations_ready", "applying", "applied", "skipped"]
-    tool_ids: List[int] = Field(default_factory=list)
-    skill_ids: List[int] = Field(default_factory=list)
-    applied_tool_ids: List[int] = Field(default_factory=list)
-    applied_skill_ids: List[int] = Field(default_factory=list)
-    operation_id: Optional[str] = None
-
-
 class Nl2AgentMcpWorkflowResponse(Nl2AgentResponse):
     recommendation_id: str
     option_id: Optional[str] = None
@@ -211,17 +199,9 @@ class Nl2AgentWorkflowStateResponse(Nl2AgentResponse):
     conversation_id: int
     requirements_review: Nl2AgentRequirementsReviewResponse
     model_selection_confirmed: bool = False
-    trusted_search_batches: Dict[str, TrustedSearchBatch] = Field(
-        default_factory=dict
-    )
-    recommendation_batches: Dict[str, Nl2AgentLocalRecommendationBatch] = Field(
-        default_factory=dict
-    )
+    recommendations: Dict[str, RecommendationBatch] = Field(default_factory=dict)
     identity_confirmed: bool = False
     mcp_workflows: Dict[str, Nl2AgentMcpWorkflowResponse]
-    online_recommendation_batches: Dict[str, OnlineRecommendationBatch] = Field(
-        default_factory=dict
-    )
     online_configuration_confirmed: bool = False
     card_delivery: Dict[CardType, CardDelivery] = Field(default_factory=dict)
 

@@ -63,11 +63,12 @@ def test_workflow_identifiers_and_batch_maps_are_bounded() -> None:
             "tool_ids": [],
             "skill_ids": [],
             "item_keys": [],
+            "status": "searched",
         }
         for index in range(101)
     }
     with pytest.raises(ValidationError):
         Nl2AgentWorkflowState(
             conversation_id=1,
-            trusted_search_batches=batches,
+            recommendations=batches,
         )

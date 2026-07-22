@@ -245,8 +245,9 @@ describe("local Tool configuration", () => {
       },
       resource_review: {
         model_selection_confirmed: true,
-        recommendation_batches: {
+        recommendations: {
           local_tools: {
+            resource_type: "local",
             status: "applied",
             tool_ids: [42],
             skill_ids: [],
@@ -255,7 +256,6 @@ describe("local Tool configuration", () => {
           },
         },
         mcp_workflows: {},
-        online_recommendation_batches: {},
       },
       models: [],
       skills: [],

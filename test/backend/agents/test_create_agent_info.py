@@ -188,6 +188,8 @@ sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
 )
 sys.modules['nexent.core.agents.context'] = _create_stub_module(
     "nexent.core.agents.context",
+    ContextItemInput=MagicMock(),
+    ContextItemType=types.SimpleNamespace(SYSTEM="system"),
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
     ContextProcessingMode=types.SimpleNamespace(

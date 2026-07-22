@@ -27,11 +27,13 @@ def _workflow_state(*, revision_mode=False):
             "fingerprint": "fingerprint",
         },
         "model_selection_confirmed": True,
-        "recommendation_batches": {
-            "local": {"status": "skipped", "tool_ids": [], "skill_ids": []}
-        },
-        "identity_confirmed": True,
-        "online_recommendation_batches": {
+        "recommendations": {
+            "local": {
+                "resource_type": "local",
+                "status": "skipped",
+                "tool_ids": [],
+                "skill_ids": [],
+            },
             "mcp": {
                 "resource_type": "mcp",
                 "item_keys": [],
@@ -43,6 +45,7 @@ def _workflow_state(*, revision_mode=False):
                 "status": "completed",
             },
         },
+        "identity_confirmed": True,
         "online_configuration_confirmed": True,
         "card_delivery": {
             "final_review": {

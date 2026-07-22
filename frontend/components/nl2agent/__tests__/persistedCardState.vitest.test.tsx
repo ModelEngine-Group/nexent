@@ -68,8 +68,7 @@ describe("persisted NL2AGENT card state", () => {
       invalid_references: [],
       resource_review: {
         model_selection_confirmed: true,
-        recommendation_batches: {},
-        online_recommendation_batches: {
+        recommendations: {
           skill_batch: {
             resource_type: "skill",
             item_keys: ["skill:12"],

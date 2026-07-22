@@ -174,8 +174,8 @@ async def apply_local_resources(
     """Atomically bind every selected local resource to a draft."""
     dependencies.get_owned_draft(agent_id, tenant_id)
     state = dependencies.get_session_state(tenant_id, agent_id)
-    batch = state["recommendation_batches"].get(recommendation_batch_id)
-    if batch is None:
+    batch = state["recommendations"].get(recommendation_batch_id)
+    if batch is None or batch.get("resource_type") != "local":
         raise AgentRunException(
             "The local resource recommendation card was not registered."
         )

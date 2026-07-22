@@ -739,10 +739,10 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
     ]
     assert result["invalid_references"] == []
     session_state_reader.assert_called_once_with("tenant_1", 202)
-    public_batch = result["resource_review"]["recommendation_batches"][
+    public_batch = result["resource_review"]["recommendations"][
         "batch_in_progress"
     ]
-    assert public_batch["status"] == "recommendations_ready"
+    assert public_batch["status"] == "applying"
     assert "operation_id" not in public_batch
     public_workflow = result["resource_review"]["mcp_workflows"]["registry:github"]
     assert public_workflow["status"] == "connected"

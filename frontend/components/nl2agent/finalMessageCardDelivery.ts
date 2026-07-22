@@ -73,8 +73,7 @@ export const resolveActionableNl2AgentOnlineCardIdentitySignature = (
     return EMPTY_NL2AGENT_ONLINE_CARD_IDENTITY_SIGNATURE;
   }
 
-  const batches =
-    sessionState.resource_review.online_recommendation_batches ?? {};
+  const batches = sessionState.resource_review.recommendations ?? {};
   for (const card of cards) {
     if (
       !isOnlineCardType(card.cardType) ||
@@ -86,10 +85,7 @@ export const resolveActionableNl2AgentOnlineCardIdentitySignature = (
     }
     const batch = batches[card.cardKey];
     const resourceType = card.cardType === "web_mcp" ? "mcp" : "skill";
-    if (
-      batch?.resource_type === resourceType &&
-      batch.status === "recommendations_ready"
-    ) {
+    if (batch?.resource_type === resourceType && batch.status === "presented") {
       actionable.push(nl2AgentOnlineCardIdentity(card.cardType, card.cardKey));
     }
   }

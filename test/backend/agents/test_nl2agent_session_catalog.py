@@ -248,7 +248,7 @@ def test_local_apply_and_skip_cannot_both_reserve_the_same_batch(durable_session
     assert len(successes) == 1
     assert len(failures) == 1
     state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
-    assert state["recommendation_batches"]["race"]["status"] in {
+    assert state["recommendations"]["race"]["status"] in {
         "applying",
         "skipped",
     }
@@ -401,8 +401,8 @@ def test_stage_validated_search_batch_is_atomic_with_workflow_stage(durable_sess
     assert online["resource_type"] == "mcp"
 
     state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
-    assert "wrong_stage" not in state["trusted_search_batches"]
-    assert "online_too_early" not in state["trusted_search_batches"]
+    assert "wrong_stage" not in state["recommendations"]
+    assert "online_too_early" not in state["recommendations"]
 
 
 def test_identity_confirmation_round_trip(durable_session):
@@ -619,11 +619,12 @@ def test_malformed_online_state_is_rejected_with_context(
     durable_session, caplog, monkeypatch
 ):
     snapshot = session_store.load_durable_session("tenant_1", 202)
-    snapshot["workflow_state"] = {
-        "recommendation_batches": {},
-        "online_recommendation_batches": {
-            "online_bad": {"resource_type": "mcp", "item_keys": "not-a-list"}
-        },
+    snapshot["workflow_state"]["recommendations"] = {
+        "online_bad": {
+            "resource_type": "mcp",
+            "status": "searched",
+            "item_keys": "not-a-list",
+        }
     }
     monkeypatch.setattr(
         session_store, "load_durable_session", MagicMock(return_value=snapshot)
@@ -666,8 +667,8 @@ def test_session_state_is_isolated_by_tenant_and_draft(durable_session, monkeypa
             )
         ),
     )
-    assert not catalog_module.get_nl2agent_session_state("tenant_1", 303)["recommendation_batches"]
-    assert not catalog_module.get_nl2agent_session_state("tenant_2", 202)["recommendation_batches"]
+    assert not catalog_module.get_nl2agent_session_state("tenant_1", 303)["recommendations"]
+    assert not catalog_module.get_nl2agent_session_state("tenant_2", 202)["recommendations"]
 
 
 def test_failed_card_delivery_is_idempotent_and_retries_twice(durable_session):
@@ -720,8 +721,8 @@ def test_failed_delivery_never_rolls_back_business_state(durable_session):
         reason="truncated_fence",
     )
 
-    batches = catalog_module.get_nl2agent_session_state("tenant_1", 202)["recommendation_batches"]
-    assert batches["pending"]["status"] == "recommendations_ready"
+    batches = catalog_module.get_nl2agent_session_state("tenant_1", 202)["recommendations"]
+    assert batches["pending"]["status"] == "presented"
     assert batches["applied"]["status"] == "applied"
 
 
@@ -1005,7 +1006,11 @@ def test_concurrent_online_batch_registration_preserves_both_updates(durable_ses
             future.result()
 
     state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
-    assert set(state["online_recommendation_batches"]) == {
+    assert {
+        key
+        for key, batch in state["recommendations"].items()
+        if batch["resource_type"] in {"mcp", "skill"}
+    } == {
         "online_mcp",
         "online_skill",
     }

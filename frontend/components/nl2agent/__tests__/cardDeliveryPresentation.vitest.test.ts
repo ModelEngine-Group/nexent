@@ -137,18 +137,18 @@ describe("NL2AGENT final-message card delivery presentation", () => {
       agent_id: 202,
       resource_review: {
         online_configuration_confirmed: false,
-        online_recommendation_batches: {
+        recommendations: {
           mcp_1: {
             resource_type: "mcp",
-            status: "recommendations_ready",
+            status: "presented",
           },
           mcp_2: {
             resource_type: "mcp",
-            status: "recommendations_ready",
+            status: "presented",
           },
           skill_1: {
             resource_type: "skill",
-            status: "recommendations_ready",
+            status: "presented",
           },
         },
       },
@@ -182,7 +182,7 @@ describe("NL2AGENT final-message card delivery presentation", () => {
       agent_id: 202,
       resource_review: {
         online_configuration_confirmed: true,
-        online_recommendation_batches: {
+        recommendations: {
           skill_1: { resource_type: "skill", status: "completed" },
         },
       },
@@ -225,10 +225,10 @@ describe("NL2AGENT final-message card delivery presentation", () => {
       agent_id: 202,
       resource_review: {
         online_configuration_confirmed: false,
-        online_recommendation_batches: {
+        recommendations: {
           mcp_1: {
             resource_type: "mcp",
-            status: "recommendations_ready",
+            status: "presented",
           },
         },
       },

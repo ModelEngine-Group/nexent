@@ -119,26 +119,6 @@ def parse_session_state(
             raise ValueError(
                 f"unsupported schema_version={payload.get('schema_version')!r}"
             )
-        if "recommendations" not in payload:
-            merged = {}
-            for source in (
-                payload.get("trusted_search_batches", {}),
-                payload.get("recommendation_batches", {}),
-                payload.get("online_recommendation_batches", {}),
-            ):
-                for key, value in source.items():
-                    normalized = dict(value)
-                    normalized.setdefault("resource_type", "local")
-                    normalized["item_keys"] = list(normalized.get("item_keys") or [])
-                    status = normalized.get("status")
-                    normalized["status"] = {
-                        "recommendations_ready": "presented",
-                        "completed": "completed",
-                    }.get(status, status or "searched")
-                    merged[key] = normalized
-            payload["recommendations"] = merged
-        for key in ("trusted_search_batches", "recommendation_batches", "online_recommendation_batches"):
-            payload.pop(key, None)
         return Nl2AgentWorkflowState.model_validate(payload)
     except (
         json.JSONDecodeError,

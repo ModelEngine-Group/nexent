@@ -179,7 +179,7 @@ def _load_nl2agent_workflow_state(
     return get_nl2agent_session_state(tenant_id, draft_agent_id)
 
 
-def _load_nl2agent_trusted_search_batches(
+def _load_nl2agent_recommendations(
     tenant_id: str,
     draft_agent_id: int,
 ) -> Dict[str, Dict[str, Any]]:
@@ -187,7 +187,7 @@ def _load_nl2agent_trusted_search_batches(
     from .nl2agent_session_catalog import get_nl2agent_session_state
 
     state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    batches = state.get("trusted_search_batches")
+    batches = state.get("recommendations")
     if not isinstance(batches, dict):
         raise ValueError("NL2AGENT trusted search batches are malformed")
     return batches
@@ -1813,7 +1813,7 @@ async def create_agent_run_info(
             validate_nl2agent_final_answer,
             draft_agent_id=draft_agent_id,
             trusted_search_batch_provider=partial(
-                _load_nl2agent_trusted_search_batches,
+                _load_nl2agent_recommendations,
                 tenant_id,
                 draft_agent_id,
             ),
