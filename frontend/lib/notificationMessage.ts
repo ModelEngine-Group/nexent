@@ -25,15 +25,14 @@ export function formatNotificationMessage(
 ): string {
   const details = item.details ?? {};
   const name = asString(details.name) ?? "";
-  const reason = asString(details.reason);
-  const reasonSuffix = reason
-    ? t("notifications.events.reasonSuffix", { reason })
+  const content = asString(details.content);
+  const contentSuffix = content
+    ? t("notifications.events.contentSuffix", { content })
     : "";
-  const content = asString(details.content) ?? "";
 
   const messageKey = EVENT_MESSAGE_KEYS[item.event_type];
   if (messageKey) {
-    return t(messageKey, { name, reasonSuffix, content });
+    return t(messageKey, { name, contentSuffix, content: content ?? "" });
   }
 
   return name;

@@ -758,7 +758,7 @@ def _handle_review_status_notifications(
         }
         review_reason = content or notify_content
         if review_reason:
-            details["reason"] = review_reason
+            details["content"] = review_reason
         create_repository_review_notification(
             resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
             review_status=new_status,

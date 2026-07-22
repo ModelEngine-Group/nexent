@@ -16,7 +16,6 @@ export const NOTIFICATION_RESOURCE_TYPES = {
 
 export interface NotificationDetails {
   name?: string;
-  reason?: string;
   content?: string;
   agent_repository_id?: number;
   agent_id?: number;

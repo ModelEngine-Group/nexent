@@ -274,11 +274,19 @@ export function MineApplyListingModal({
               }
               maxLength={MAX_ICON_LENGTH}
               status={iconError ? "error" : undefined}
-              className="w-[5.25rem] shrink-0 text-2xl"
+              className="!h-[3.75rem] !w-[6.5rem] shrink-0 !text-4xl"
               styles={{
+                root: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  paddingBlock: 0,
+                },
                 input: {
                   paddingInline: 2,
+                  paddingBlock: 0,
                   textAlign: "center",
+                  fontSize: "2.25rem",
+                  lineHeight: 1,
                 },
               }}
               suffix={

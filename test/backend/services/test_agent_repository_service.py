@@ -1,6 +1,7 @@
 """Unit tests for agent marketplace repository service."""
 
 import sys
+import types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -10,8 +11,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# Mock DB layer before importing the service under test
-sys.modules.setdefault("sqlalchemy", MagicMock())
+# Mock DB layer before importing the service under test.
+# sqlalchemy must look like a package so submodule imports (e.g. sqlalchemy.orm) succeed.
+_sqlalchemy_mock = types.ModuleType("sqlalchemy")
+_sqlalchemy_mock.__path__ = []
+sys.modules.setdefault("sqlalchemy", _sqlalchemy_mock)
+sys.modules.setdefault("sqlalchemy.orm", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
@@ -104,6 +109,9 @@ sys.modules["services.agent_service"] = _agent_service_mock
 _precheck_mock = MagicMock()
 _precheck_mock.build_repository_import_precheck = MagicMock()
 sys.modules["services.repository_import_precheck"] = _precheck_mock
+
+_notification_service_mock = MagicMock()
+sys.modules["services.notification_service"] = _notification_service_mock
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import UnauthorizedError
@@ -946,6 +954,7 @@ def test_update_status_admin_not_shared_to_pending_review(mock_status_update_dep
         publisher_tenant_id="tenant_a",
         publisher_user_id="admin_user",
         submitted_by="admin@example.com",
+        content=None,
     )
     deps["reset_status"].assert_has_calls(_pending_review_reset_calls())
 
@@ -974,6 +983,7 @@ def test_update_status_admin_rejected_to_pending_review(mock_status_update_deps)
         publisher_tenant_id="tenant_a",
         publisher_user_id="admin_user",
         submitted_by="admin@example.com",
+        content=None,
     )
     deps["reset_status"].assert_has_calls(_pending_review_reset_calls())
 
@@ -1511,6 +1521,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
         user_id="user_a",
         updates={
             "status": "pending_review",
+            "content": "",
             "icon": "🤖",
             "tags": ["营销"],
             "tool_count": 3,
