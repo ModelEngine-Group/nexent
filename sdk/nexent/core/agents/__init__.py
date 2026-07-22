@@ -12,8 +12,10 @@ from typing import Any
 
 _AGENT_MODEL_MODULE = ".agent_model"
 
+
 _EXPORTS = {
     "CoreAgent": (".core_agent", "CoreAgent"),
+    "PlanRepo": (".plan_repo", "PlanRepo"),
     "ModelConfig": (_AGENT_MODEL_MODULE, "ModelConfig"),
     "ToolConfig": (_AGENT_MODEL_MODULE, "ToolConfig"),
     "AgentConfig": (_AGENT_MODEL_MODULE, "AgentConfig"),

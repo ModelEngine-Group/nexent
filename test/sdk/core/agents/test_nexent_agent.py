@@ -87,7 +87,7 @@ mock_openai_model_class = MagicMock(return_value=mock_openai_model)
 
 
 class _TestCoreAgent:
-    pass
+    enable_planning = False  # v1.4: CoreAgent.__init__ reads this attribute.
 
 
 mock_core_agent_class = _TestCoreAgent

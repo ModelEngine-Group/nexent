@@ -154,7 +154,6 @@ class ContextManager:
 
         final_items.sort(key=lambda item: item.layout_key)
         rendered = self.build_context_messages(final_items)
-        messages = [*purpose_stable]
         # Stable item messages remain first for KV-cache reuse.
         stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]

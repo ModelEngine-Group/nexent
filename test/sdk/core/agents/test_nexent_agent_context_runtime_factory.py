@@ -46,7 +46,7 @@ def test_create_single_agent_injects_managed_runtime_and_run_items():
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
             patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
-        factory.create_single_agent(config)
+        factory.create_single_agent(config)  # NOSONAR - trusted local test double.
 
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
@@ -123,7 +123,9 @@ def test_create_single_agent_preserves_explicit_empty_authorized_snapshot():
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
             patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
-        factory.create_single_agent(config, context_items_override=())
+        factory.create_single_agent(  # NOSONAR - trusted local test double.
+            config, context_items_override=()
+        )
 
     assert captured["context_runtime"].items == []
 
@@ -145,13 +147,16 @@ def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
         agent = types.SimpleNamespace(
             context_runtime=kwargs["context_runtime"],
             stop_event=None,
+            enable_planning=False,
         )
         created_agents.append(agent)
         return agent
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
             patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
-        main_agent = factory.create_single_agent(root)
+        main_agent = factory.create_single_agent(  # NOSONAR - trusted local test double.
+            root
+        )
 
     managers = [agent.context_runtime.context_manager for agent in created_agents]
     assert len(managers) == 3

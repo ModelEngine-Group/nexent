@@ -335,6 +335,10 @@ class AgentRequest(BaseModel):
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+    enable_plan: Optional[bool] = Field(
+        default=False,
+        description="Whether to enable the planning phase before execution"
+    )
 
 
 class MessageUnit(BaseModel):

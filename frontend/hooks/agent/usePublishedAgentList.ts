@@ -6,13 +6,11 @@ import { Agent } from "@/types/agentConfig";
 interface UsePublishedAgentListOptions {
 	page?: number;
 	pageSize?: number;
-	excludeAgentId?: number | null;
 }
 
 export function usePublishedAgentList({
 	page = 1,
 	pageSize = Number.MAX_SAFE_INTEGER,
-	excludeAgentId = null,
 }: UsePublishedAgentListOptions = {}) {
 	const queryClient = useQueryClient();
 	const [search, setSearch] = useState("");
@@ -53,27 +51,8 @@ export function usePublishedAgentList({
 				);
 			});
 		})();
-
-		if (excludeAgentId === null || excludeAgentId === undefined) {
-			return searchFiltered;
-		}
-		return searchFiltered.filter((agent) => {
-			const id = (agent as unknown as { agent_id?: number }).agent_id;
-			return id !== excludeAgentId;
-		});
-	}, [agents, search, excludeAgentId]);
-
-	const excludedAgent = useMemo(() => {
-		if (excludeAgentId === null || excludeAgentId === undefined) {
-			return null;
-		}
-		return (
-			agents.find((agent) => {
-				const id = (agent as unknown as { agent_id?: number }).agent_id;
-				return id === excludeAgentId;
-			}) ?? null
-		);
-	}, [agents, excludeAgentId]);
+		return searchFiltered;
+	}, [agents, search]);
 
 	const totalPages = useMemo(() => {
 		return Math.max(1, Math.ceil(filteredAgents.length / pageSize));
@@ -98,7 +77,6 @@ export function usePublishedAgentList({
 		availableAgents,
 		paginatedAgents,
 		filteredAgents,
-		excludedAgent,
 		page,
 		totalPages,
 		pageSize,

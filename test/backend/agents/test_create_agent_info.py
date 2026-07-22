@@ -388,6 +388,43 @@ smolagents_module.tools = smolagents_tools_module
 sys.modules['smolagents'] = smolagents_module
 sys.modules['smolagents.tools'] = smolagents_tools_module
 
+# Mock utils package (referenced by create_agent_info.py)
+_utils_pkg = types.ModuleType("utils")
+_utils_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "utils")]
+sys.modules["utils"] = _utils_pkg
+
+# Mock all utils submodules that create_agent_info.py imports
+_redis_utils_mod = _create_stub_module("utils.redis_utils")
+_redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
+sys.modules["utils.redis_utils"] = _redis_utils_mod
+setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
+
+_model_name_utils_mod = _create_stub_module("utils.model_name_utils")
+_model_name_utils_mod.add_repo_to_name = lambda name, repo=None, **kwargs: name
+sys.modules["utils.model_name_utils"] = _model_name_utils_mod
+setattr(_utils_pkg, "model_name_utils", _model_name_utils_mod)
+
+_prompt_template_utils_mod = _create_stub_module("utils.prompt_template_utils")
+_prompt_template_utils_mod.get_agent_prompt_template = MagicMock(return_value="")
+sys.modules["utils.prompt_template_utils"] = _prompt_template_utils_mod
+setattr(_utils_pkg, "prompt_template_utils", _prompt_template_utils_mod)
+
+_config_utils_mod = _create_stub_module("utils.config_utils")
+_config_utils_mod.tenant_config_manager = MagicMock()
+_config_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
+sys.modules["utils.config_utils"] = _config_utils_mod
+setattr(_utils_pkg, "config_utils", _config_utils_mod)
+
+_context_utils_mod = _create_stub_module("utils.context_utils")
+_context_utils_mod.build_context_inputs = MagicMock(return_value=[])
+sys.modules["utils.context_utils"] = _context_utils_mod
+setattr(_utils_pkg, "context_utils", _context_utils_mod)
+
+_langchain_utils_mod = _create_stub_module("utils.langchain_utils")
+_langchain_utils_mod.discover_langchain_modules = MagicMock(return_value=[])
+sys.modules["utils.langchain_utils"] = _langchain_utils_mod
+setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
+
 # Ensure real backend.agents.create_agent_info is available and uses our stubs
 backend_pkg = sys.modules.get("backend")
 if backend_pkg is None:
@@ -1954,7 +1991,8 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
-                verification_config=ANY
+                verification_config=ANY,
+                enable_planning=ANY
             )
             # Verify parallel_executor ToolConfig call was made
             pe_calls = [
@@ -2037,7 +2075,8 @@ class TestCreateAgentConfig:
                     context_items=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
-                    verification_config=ANY
+                    verification_config=ANY,
+                    enable_planning=ANY
                 )
 
     @pytest.mark.asyncio
@@ -2299,7 +2338,8 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
-                verification_config=ANY
+                verification_config=ANY,
+                enable_planning=ANY
             )
 
     @pytest.mark.asyncio
@@ -3478,7 +3518,8 @@ class TestCreateAgentRunInfo:
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None
+                safe_input_budget_snapshot=None,
+                redis_client=ANY
             )
 
             # Verify that other functions were called correctly
@@ -3494,6 +3535,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
+                enable_planning=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -4031,6 +4073,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=False,
                 version_no=1,
                 tool_params=None,
+                enable_planning=ANY,
             )
 
     @pytest.mark.asyncio
@@ -4078,6 +4121,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Debug mode uses draft version 0
                 tool_params=None,
+                enable_planning=ANY,
             )
 
     @pytest.mark.asyncio
@@ -4131,6 +4175,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
                 tool_params=None,
+                enable_planning=ANY,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)

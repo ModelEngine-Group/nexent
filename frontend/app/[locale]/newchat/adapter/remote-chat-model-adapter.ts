@@ -36,7 +36,7 @@ export interface StepTokenCount {
   stepOutputTokens: number;
   totalOutputTokens: number;
   estimatedContextTokens: number;
-  tokenThreshold: number;
+  tokenThreshold: number | null;
 }
 
 // Accumulated total duration across all steps
@@ -55,7 +55,7 @@ export function parseStepTokenCount(content: string): StepTokenCount | null {
       step_output_tokens?: number;
       total_output_tokens?: number;
       estimated_context_tokens?: number;
-      token_threshold?: number;
+      token_threshold?: number | null;
     };
     return {
       stepNumber: data.step_number ?? 0,
@@ -64,7 +64,7 @@ export function parseStepTokenCount(content: string): StepTokenCount | null {
       stepOutputTokens: data.step_output_tokens ?? 0,
       totalOutputTokens: data.total_output_tokens ?? 0,
       estimatedContextTokens: data.estimated_context_tokens ?? 0,
-      tokenThreshold: data.token_threshold ?? 0,
+      tokenThreshold: data.token_threshold ?? null,
     };
   } catch {
     return null;

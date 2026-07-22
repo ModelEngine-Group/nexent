@@ -121,11 +121,11 @@ class ModelConfig(BaseModel):
 class ToolConfig(BaseModel):
     class_name: str = Field(description="Tool class name")
     name: Optional[str] = Field(description="Tool name")
-    description: Optional[str] = Field(description="Tool description")
-    inputs: Optional[str] = Field(description="Tool inputs")
-    output_type: Optional[str] = Field(description="Tool output type")
-    params: Dict[str, Any] = Field(description="Initialization parameters")
-    source: str = Field(description="Tool source, can be local or mcp")
+    description: Optional[str] = Field(description="Tool description", default=None)
+    inputs: Optional[str] = Field(description="Tool inputs", default=None)
+    output_type: Optional[str] = Field(description="Tool output type", default=None)
+    params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
+    source: str = Field(description="Tool source, can be local or mcp", default="local")
     usage: Optional[str] = Field(description="MCP server name", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
     labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
@@ -292,11 +292,37 @@ class AgentConfig(BaseModel):
         description="Layered ReAct self-verification configuration",
         default_factory=AgentVerificationConfig,
     )
+    enable_planning: bool = Field(
+        description="Whether to enable the planning phase before execution",
+        default=False,
+    )
 
 
 class AgentHistory(BaseModel):
     role: str = Field(description="Role, can be user or assistant")
     content : str = Field(description="Conversation content")
+
+
+class PlanStep(BaseModel):
+    """Single step within an agent plan."""
+    id: str = Field(description="Unique step identifier, e.g. 'step-1'")
+    title: str = Field(description="Short step title")
+    description: str = Field(description="Detailed step description")
+    status: Literal["pending", "in_progress", "completed", "skipped"] = Field(
+        description="Current execution status of the step",
+        default="pending"
+    )
+
+
+class AgentPlan(BaseModel):
+    """Structured task plan generated before agent execution."""
+    plan_id: str = Field(description="Unique plan identifier")
+    title: str = Field(description="Plan title extracted from the task")
+    steps: List[PlanStep] = Field(description="Ordered list of plan steps")
+    current_step_index: int = Field(
+        description="Index of the currently executing step",
+        default=0
+    )
 
 
 class AgentRunInfo(BaseModel):
@@ -325,6 +351,15 @@ class AgentRunInfo(BaseModel):
     safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved W2 safe input budget snapshot for request execution",
         default=None,
+    )
+    enable_planning: bool = Field(
+        description="Whether to enable the planning phase before execution",
+        default=False
+    )
+    redis_client: Optional[Any] = Field(
+        description="Redis client for plan persistence. "
+                    "If provided, plan_repo will use Redis as primary storage with local fallback.",
+        default=None
     )
 
     class Config:
