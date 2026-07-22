@@ -699,6 +699,44 @@ class TestStartStreamingChat:
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == 99
 
+    async def test_start_streaming_chat_appends_conversation_id_sse(self):
+        """Test that streaming response appends a conversation_id SSE trailer."""
+        import json
+
+        ctx = MockNorthboundContext(token_id=0)
+
+        async def _body_iterator():
+            yield b"data: hello\n\n"
+
+        mock_response = MagicMock()
+        mock_response.headers = {"x-existing": "1"}
+        mock_response.media_type = "text/event-stream"
+        mock_response.body_iterator = _body_iterator()
+        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+                patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
+                patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as mock_history:
+            mock_history.return_value = {"data": {"history": []}}
+
+            wrapped = await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query",
+            )
+
+        chunks = []
+        async for chunk in wrapped.body_iterator:
+            chunks.append(chunk)
+
+        assert chunks[0] == b"data: hello\n\n"
+        assert chunks[-1] == (
+            f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': 123}, ensure_ascii=False)}\n\n"
+        )
+        assert wrapped.headers["conversation_id"] == "123"
+        assert wrapped.headers["X-Request-Id"] == ctx.request_id
+
 
 @pytest.mark.asyncio
 class TestStopChat:

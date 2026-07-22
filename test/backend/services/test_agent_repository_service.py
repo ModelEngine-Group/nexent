@@ -115,8 +115,17 @@ sys.modules["services.notification_service"] = _notification_service_mock
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import UnauthorizedError
+from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from backend.services import agent_repository_service as ars
+
+
+@pytest.fixture(autouse=True)
+def reset_notification_mocks():
+    ars.create_repository_review_notification.reset_mock()
+    ars.create_repository_pending_review_notification.reset_mock()
+    ars.deactivate_notifications.reset_mock()
+    yield
 
 
 def _repository_record(
@@ -863,6 +872,25 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
         status="shared",
         publisher_tenant_id="tenant_a",
     )
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="shared",
+        receiver_user_id="user_a",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="su_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="su_user",
+    )
 
 
 def test_update_status_su_pending_review_to_rejected(mock_status_update_deps):
@@ -877,9 +905,30 @@ def test_update_status_su_pending_review_to_rejected(mock_status_update_deps):
         status="rejected",
         user_id="su_user",
         tenant_id="tenant_a",
+        content="needs work",
     )
 
     assert result["status"] == "rejected"
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="rejected",
+        receiver_user_id="user_a",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+            "content": "needs work",
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="su_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="su_user",
+    )
 
 
 def test_update_status_su_shared_to_not_shared(mock_status_update_deps):
@@ -1016,6 +1065,25 @@ def test_update_status_admin_pending_review_to_shared(mock_status_update_deps):
         submitted_by=None,
         content=None,
     )
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="shared",
+        receiver_user_id="other_user",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="admin_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="admin_user",
+    )
 
 
 def test_update_status_admin_pending_review_to_rejected(mock_status_update_deps):
@@ -1036,6 +1104,25 @@ def test_update_status_admin_pending_review_to_rejected(mock_status_update_deps)
     )
 
     assert result["status"] == "rejected"
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="rejected",
+        receiver_user_id="other_user",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="admin_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="admin_user",
+    )
 
 
 def test_update_status_admin_review_tenant_mismatch(mock_status_update_deps):
@@ -1433,6 +1520,8 @@ async def test_create_agent_repository_listing_impl_success():
             "agent_repository_id": 42,
             "agent_id": 1,
             "name": "agent_one",
+            "display_name": "Agent One",
+            "content": "please review",
             "agent_info_json": agent_info_json,
             "version_no": 1,
             "status": "pending_review",
@@ -1457,6 +1546,18 @@ async def test_create_agent_repository_listing_impl_success():
     )
     mock_reset_status.assert_has_calls(
         _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
+    )
+    ars.create_repository_pending_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        tenant_id="tenant_a",
+        unique_id=42,
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 42,
+            "agent_id": 1,
+            "content": "please review",
+        },
+        created_by="user_a",
     )
 
 
