@@ -93,6 +93,9 @@ performance = [
 dev = [
     "nexent[quality, data_process, performance]"
 ]
+fuzzy = [
+    "rapidfuzz>=3.0.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["nexent*"]

@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
@@ -45,6 +45,32 @@ def _tool_name(tool_obj: Any) -> str:
         getattr(tool_obj, "name", None)
         or getattr(tool_obj, "__name__", None)
         or type(tool_obj).__name__
+    )
+
+
+# Matches fenced NL2AGENT card blocks such as ```nl2agent-local-resources ... ```
+_NL2AGENT_CARD_PATTERN = re.compile(
+    r"^```(nl2agent-[\w-]+)[ \t]*\r?\n(.*?)^```[ \t]*\r?$",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _extract_nl2agent_observations(content: str) -> Optional[str]:
+    """Extract NL2AGENT card blocks from assistant text as tool observations.
+
+    History assistant messages only carry the final answer text, so search
+    results from prior turns would otherwise never reappear as an
+    "Observation:" message and the LLM re-runs the same searches. Returns None
+    when the content has no nl2agent card blocks so that non-NL2AGENT agents
+    keep observations=None (unchanged behavior).
+    """
+    if not content:
+        return None
+    matches = _NL2AGENT_CARD_PATTERN.findall(content)
+    if not matches:
+        return None
+    return "\n\n".join(
+        f"Previous tool result ({tag}):\n{body.strip()}" for tag, body in matches
     )
 
 
@@ -381,6 +407,62 @@ class NexentAgent:
         elif class_name == "UpdatePlanStepTool":
             from nexent.core.tools.plan_tools import UpdatePlanStepTool
             return UpdatePlanStepTool()
+        elif class_name == "NL2AgentSearchLocalResourcesTool":
+            from ..tools.nl2agent.search_local_resources_tool import (
+                get_search_local_resources_tool,
+            )
+            metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
+            return get_search_local_resources_tool(
+                agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                language=metadata.get("language"),
+                tool_catalog=metadata.get("tool_catalog"),
+                skill_catalog=metadata.get("skill_catalog"),
+                requirements_confirmed=metadata.get(
+                    "requirements_confirmed", False
+                ),
+                record_search_result=metadata.get("record_search_result"),
+            )
+        elif class_name == "NL2AgentSearchWebMcpsTool":
+            from ..tools.nl2agent.search_web_mcps_tool import (
+                get_search_web_mcps_tool,
+            )
+            metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
+            return get_search_web_mcps_tool(
+                agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                language=metadata.get("language"),
+                registry_results=metadata.get("registry_results"),
+                community_results=metadata.get("community_results"),
+                requirements_confirmed=metadata.get(
+                    "requirements_confirmed", False
+                ),
+                record_search_result=metadata.get("record_search_result"),
+            )
+        elif class_name == "NL2AgentSearchWebSkillsTool":
+            from ..tools.nl2agent.search_web_skills_tool import (
+                get_search_web_skills_tool,
+            )
+            metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
+            return get_search_web_skills_tool(
+                agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                language=metadata.get("language"),
+                official_skills=metadata.get("official_skills"),
+                requirements_confirmed=metadata.get(
+                    "requirements_confirmed", False
+                ),
+                record_search_result=metadata.get("record_search_result"),
+            )
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -549,9 +631,16 @@ class NexentAgent:
                 # Create task step for user message
                 self.agent.memory.steps.append(TaskStep(task=msg.content))
             elif msg.role == 'assistant':
-                self.agent.memory.steps.append(ActionStep(step_number=len(self.agent.memory.steps) + 1,
-                                                          timing=Timing(start_time=time.time()),
-                                                          action_output=msg.content, model_output=msg.content))
+                action_step_kwargs = {
+                    "step_number": len(self.agent.memory.steps) + 1,
+                    "timing": Timing(start_time=time.time()),
+                    "action_output": msg.content,
+                    "model_output": msg.content,
+                }
+                observations = _extract_nl2agent_observations(msg.content)
+                if observations is not None:
+                    action_step_kwargs["observations"] = observations
+                self.agent.memory.steps.append(ActionStep(**action_step_kwargs))
 
         self.agent._history_step_count = len(self.agent.memory.steps)
     def agent_run_with_observer(self, query: str, reset=True):

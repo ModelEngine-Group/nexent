@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from threading import Event
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..utils.observer import MessageObserver
 from .context.models import ContextItemInput
@@ -198,6 +198,8 @@ class GuardrailConfig(BaseModel):
 class AgentVerificationConfig(BaseModel):
     """Configuration for layered ReAct self-verification."""
 
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = Field(description="Whether self-verification is enabled", default=False)
     step_verification_enabled: bool = Field(
         description="Whether to verify critical ReAct step events",
@@ -360,6 +362,11 @@ class AgentRunInfo(BaseModel):
         description="Redis client for plan persistence. "
                     "If provided, plan_repo will use Redis as primary storage with local fallback.",
         default=None
+    )
+    final_answer_validator: Optional[Callable[[Any], Optional[str]]] = Field(
+        description="Optional run-scoped final answer contract validator",
+        default=None,
+        exclude=True,
     )
 
     class Config:

@@ -451,6 +451,42 @@ class CoreAgent(CodeAgent):
         names.add("final_answer")
         return sorted(names)
 
+    def _verify_final_answer(
+        self,
+        task: str,
+        candidate: Any,
+        memory_summary: str,
+        round_number: int,
+    ) -> VerificationResult:
+        """Run the normal verifier, then an optional run-scoped contract validator."""
+        result = self.verification_controller.verify_final_answer(
+            task=task,
+            candidate=candidate,
+            memory_summary=memory_summary,
+            round_number=round_number,
+        )
+        if not result.passed:
+            return result
+
+        validator = getattr(self, "final_answer_validator", None)
+        if validator is None:
+            return result
+        repair_instruction = validator(candidate)
+        if not repair_instruction:
+            return result
+        return VerificationResult(
+            passed=False,
+            severity="blocking",
+            event="final_answer",
+            score=0.0,
+            phase="final_fail",
+            failed_criteria=["final_answer_contract"],
+            repair_instruction=str(repair_instruction),
+            user_visible_note=(
+                "The final answer does not match the required application contract."
+            ),
+        )
+
     def _known_tool_names(self) -> set:
         """Return the set of callable tool names exposed to ``code_action``.
 
@@ -1119,7 +1155,7 @@ You have been provided with these additional arguments, that you can access usin
 
                     if verification_config.enabled and verification_config.final_verification_enabled:
                         final_verification_round += 1
-                        verification_result = self.verification_controller.verify_final_answer(
+                        verification_result = self._verify_final_answer(
                             task=task,
                             candidate=candidate_answer,
                             memory_summary=self._build_verification_memory_summary(action_step),
@@ -1154,7 +1190,7 @@ You have been provided with these additional arguments, that you can access usin
 
                 if verification_config.enabled and verification_config.final_verification_enabled:
                     final_verification_round += 1
-                    verification_result = self.verification_controller.verify_final_answer(
+                    verification_result = self._verify_final_answer(
                         task=task,
                         candidate=candidate_answer,
                         memory_summary=self._build_verification_memory_summary(action_step),
@@ -1206,7 +1242,7 @@ You have been provided with these additional arguments, that you can access usin
             final_answer = self._handle_max_steps_reached(task)
             if verification_config.enabled and verification_config.final_verification_enabled:
                 final_verification_round += 1
-                verification_result = self.verification_controller.verify_final_answer(
+                verification_result = self._verify_final_answer(
                     task=task,
                     candidate=final_answer,
                     memory_summary=self._build_verification_memory_summary(),

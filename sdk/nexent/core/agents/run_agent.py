@@ -73,6 +73,41 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
         logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
 
 
+def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo) -> None:
+    """Mount the reusable conversation-level ContextManager into the active runtime.
+
+    W3 made ``agent.context_runtime`` the execution authority for context
+    assembly.  ``agent.context_manager`` is kept only as a compatibility and
+    observability alias, so mounting a conversation-level ContextManager must
+    update the managed runtime first and then mirror the alias.
+    """
+    context_manager = getattr(agent_run_info, "context_manager", None)
+    if context_manager is None:
+        return
+
+    context_runtime = getattr(agent, "context_runtime", None)
+    if getattr(context_runtime, "context_manager", None) is None:
+        raise RuntimeError(
+            "Conversation-level ContextManager requires an active managed context runtime"
+        )
+
+    context_runtime.context_manager = context_manager
+    context_components = getattr(agent_run_info.agent_config, "context_components", None)
+    replace_runtime_components = getattr(context_runtime, "replace_components", None)
+    if callable(replace_runtime_components):
+        replace_runtime_components(context_components or [])
+    else:
+        raise RuntimeError(
+            "Managed context runtime does not support run-local component replacement"
+        )
+    agent.context_manager = context_manager
+
+
+def _mount_final_answer_validator(agent: Any, agent_run_info: AgentRunInfo) -> None:
+    """Mount an optional application-owned final-answer contract validator."""
+    agent.final_answer_validator = getattr(agent_run_info, "final_answer_validator", None)
+
+
 def _detect_transport(url: str) -> str:
     """
     Auto-detect MCP transport type based on URL format.
@@ -129,6 +164,11 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
 
+        if "httpx_client_factory" in mcp_host_item:
+            result["httpx_client_factory"] = mcp_host_item[
+                "httpx_client_factory"
+            ]
+
         return result
     else:
         raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
@@ -157,6 +197,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             )
             nexent.set_agent(agent)
 
+            _mount_final_answer_validator(agent, agent_run_info)
+
+            _mount_conversation_context_manager(agent, agent_run_info)
+
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             nexent.agent_run_with_observer(
                 query=agent_run_info.query, reset=False)
@@ -178,6 +222,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     context_items_override=_get_authorized_context_items(agent_run_info),
                 )
                 nexent.set_agent(agent)
+
+                _mount_final_answer_validator(agent, agent_run_info)
+
+                _mount_conversation_context_manager(agent, agent_run_info)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 nexent.agent_run_with_observer(

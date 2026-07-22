@@ -30,6 +30,9 @@ from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
 from .plan_tools import CreatePlanTool, UpdatePlanStepTool
+from .nl2agent.search_local_resources_tool import NL2AgentSearchLocalResourcesTool
+from .nl2agent.search_web_mcps_tool import NL2AgentSearchWebMcpsTool
+from .nl2agent.search_web_skills_tool import NL2AgentSearchWebSkillsTool
 
 __all__ = [
     "MySqlTool",
@@ -67,4 +70,7 @@ __all__ = [
     "SearchMemoryTool",
     "CreatePlanTool",
     "UpdatePlanStepTool",
+    "NL2AgentSearchLocalResourcesTool",
+    "NL2AgentSearchWebMcpsTool",
+    "NL2AgentSearchWebSkillsTool",
 ]
