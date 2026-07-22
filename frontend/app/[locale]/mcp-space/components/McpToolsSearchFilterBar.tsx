@@ -61,14 +61,16 @@ export default function McpToolsSearchFilterBar({
       key={item.value}
       type="button"
       onClick={onClick}
-      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition ${
+      className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
         selected
-          ? "border-blue-500 bg-blue-500 font-medium text-white shadow-sm"
-          : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+          ? "bg-primary text-white"
+          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
       }`}
     >
       <span>{item.label}</span>
-      <span className={`rounded-full px-1.5 text-[11px] ${selected ? "bg-white/20 text-white" : "bg-white text-slate-500"}`}>
+      <span className={`ml-1.5 rounded-full px-1.5 text-xs ${
+        selected ? "bg-white/20 text-white" : "bg-white text-slate-500"
+      }`}>
         {item.count}
       </span>
     </button>

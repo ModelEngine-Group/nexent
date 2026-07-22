@@ -223,7 +223,7 @@ export default function McpToolsPage() {
       icon={<Plus className="size-4" />}
       onClick={openAddModal}
     >
-      添加 MCP
+      {t("mcpTools.addModal.title")}
     </Button>
   ) : null;
 
@@ -390,11 +390,6 @@ function RepositoryView({
   const [deploymentType, setDeploymentType] =
     useState<DeploymentFilter>(FILTER_ALL);
 
-  const categoryStats = useMemo(
-    () => getDeploymentCategoryStats(browser.services, t),
-    [browser.services, t]
-  );
-
   const filteredServices = useMemo(() => {
     return filterByDeploymentType(browser.services, deploymentType).filter(
       (item) => matchesNameOrTag(item, browser.filters.search)
@@ -417,12 +412,13 @@ function RepositoryView({
     <div className="space-y-4">
       <McpToolsSearchFilterBar
         search={browser.filters.search}
-        deploymentType={deploymentType}
-        categoryStats={categoryStats}
         actions={actions}
         onSearchChange={(value) => browser.updateFilter("search", value)}
-        onDeploymentTypeChange={setDeploymentType}
       />
+
+      <p className="text-sm text-slate-500">
+        {t("mcpTools.repository.installHint")}
+      </p>
 
       {browser.loading ? (
         <PlaceholderBox>
@@ -814,6 +810,10 @@ function MineView({
         onDeploymentTypeChange={setDeploymentType}
       />
 
+      <p className="text-sm text-slate-500">
+        {t("mcpTools.mine.publishHint")}
+      </p>
+
       {loading ? (
         <PlaceholderBox>
           <Spin />
@@ -1004,28 +1004,7 @@ function ReviewCenterView({
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const [statusFilter, setStatusFilter] = useState<string>(FILTER_ALL);
   const [reviewingId, setReviewingId] = useState<number | null>(null);
-
-  const statusTabs = useMemo(() => {
-    const items = browser.services;
-    const counts: Record<string, number> = {};
-    for (const s of items) {
-      const st = s.reviewStatus || "pending";
-      counts[st] = (counts[st] || 0) + 1;
-    }
-    return [
-      { value: FILTER_ALL, label: t("mcpTools.review.status.all"), count: items.length },
-      { value: "pending", label: t("mcpTools.review.status.pending"), count: counts.pending || 0 },
-      { value: "approved", label: t("mcpTools.review.status.approved"), count: counts.approved || 0 },
-      { value: "rejected", label: t("mcpTools.review.status.rejected"), count: counts.rejected || 0 },
-    ];
-  }, [browser.services, t]);
-
-  const filteredServices = useMemo(() => {
-    if (statusFilter === FILTER_ALL) return browser.services;
-    return browser.services.filter((s) => (s.reviewStatus || "pending") === statusFilter);
-  }, [browser.services, statusFilter]);
 
   const handleReview = async (
     service: CommunityMcpCard,
@@ -1051,20 +1030,11 @@ function ReviewCenterView({
 
   return (
     <div className="space-y-4">
-      <McpToolsSearchFilterBar
-        search={browser.filters.search}
-        actions={actions}
-        onSearchChange={(value) => browser.updateFilter("search", value)}
-        filterTabs={statusTabs}
-        activeFilterTab={statusFilter}
-        onFilterTabChange={(value) => setStatusFilter(value)}
-      />
-
       {browser.loading ? (
         <PlaceholderBox>
           <Spin />
         </PlaceholderBox>
-      ) : filteredServices.length === 0 ? (
+      ) : browser.services.length === 0 ? (
         <PlaceholderBox>
           <Empty description={t("mcpTools.review.emptyTitle")} />
         </PlaceholderBox>
@@ -1091,7 +1061,7 @@ function ReviewCenterView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredServices.map((service) => (
+              {browser.services.map((service) => (
                 <ReviewTableRow
                   key={service.reviewId || service.communityId || service.name}
                   service={service}
@@ -1109,7 +1079,7 @@ function ReviewCenterView({
       <McpToolsPagination
         mode="cursor"
         page={browser.page}
-        resultCount={filteredServices.length}
+        resultCount={browser.services.length}
         hasPrevPage={browser.hasPrevPage}
         hasNextPage={browser.hasNextPage}
         onPrevPage={browser.prevPage}
