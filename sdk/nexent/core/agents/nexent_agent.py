@@ -311,50 +311,47 @@ class NexentAgent:
         """
         class_name = tool_config.class_name
         params = tool_config.params or {}
+        metadata = tool_config.metadata or {}
 
         if class_name == "RunSkillScriptTool":
-            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
-            metadata = tool_config.metadata or {}
-            get_run_skill_script_tool(
+            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool, run_skill_script
+            tool_instance = get_run_skill_script_tool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.run_skill_script_tool import run_skill_script
+            run_skill_script._tool_instance = tool_instance
             return run_skill_script
         elif class_name == "ReadSkillMdTool":
-            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
-            metadata = tool_config.metadata or {}
-            get_read_skill_md_tool(
+            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool, read_skill_md
+            tool_instance = get_read_skill_md_tool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.read_skill_md_tool import read_skill_md
+            read_skill_md._tool_instance = tool_instance
             return read_skill_md
         elif class_name == "WriteSkillFileTool":
-            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
-            metadata = tool_config.metadata or {}
-            get_write_skill_file_tool(
+            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool, write_skill_file
+            tool_instance = get_write_skill_file_tool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.write_skill_file_tool import write_skill_file
+            write_skill_file._tool_instance = tool_instance
             return write_skill_file
         elif class_name == "ReadSkillConfigTool":
-            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
-            metadata = tool_config.metadata or {}
-            get_read_skill_config_tool(
+            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool, read_skill_config
+            tool_instance = get_read_skill_config_tool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.read_skill_config_tool import read_skill_config
+            read_skill_config._tool_instance = tool_instance
             return read_skill_config
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")

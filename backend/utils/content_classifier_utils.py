@@ -2,6 +2,9 @@
 
 import re
 from typing import Any, Dict, List, Optional
+import logging
+
+logger = logging.getLogger("content-classifier.utils")
 
 
 class ContentClassifier:
@@ -127,7 +130,13 @@ class ContentClassifier:
     def _process_non_tag_content(self) -> List[Dict[str, Any]]:
         """Process buffered content that doesn't start with '<'."""
         results = []
-        emit_len = min(len(self.buffer), 64)
+        next_tag_pos = self.buffer.find("<")
+        if next_tag_pos != -1:
+            if next_tag_pos == 0:
+                return results
+            emit_len = next_tag_pos
+        else:
+            emit_len = min(len(self.buffer), 64)
         event = self._create_event(self.buffer[:emit_len])
         if event:
             results.append(event)
@@ -146,11 +155,26 @@ class ContentClassifier:
                 r'<FILE\s+path="([^"]{1,' + str(self.MAX_PATH_LENGTH) + r'})">$',
                 buffer_content
             )
-            if match:
+            if match and self._is_valid_file_path(match.group(1)):
                 self._pending_file_path = match.group(1)
                 return "<FILE>"
 
         return None
+
+    def _is_valid_file_path(self, path: str) -> bool:
+        """Return whether a streamed FILE path is a real relative skill file path."""
+        normalized = str(path or "").strip()
+        if not normalized:
+            return False
+        if normalized in {"...", "…", "path", "file path", "相对于技能根目录的路径"}:
+            return False
+        if normalized.startswith("/") or "\\" in normalized or "\x00" in normalized:
+            return False
+
+        parts = normalized.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            return False
+        return True
 
     def _create_event(self, content: str) -> Dict[str, Any]:
         """Create event based on current state."""
@@ -190,8 +214,10 @@ class ContentClassifier:
             return {"type": "file_content", "content": "", "path": self.current_file_path, "is_new_file": True}
 
         elif tag == "</FILE>":
-            self.state = "skill_body"
+            if self.state == "file":
+                self.state = "skill_body"
             self.current_file_path = None
             return None
 
+        logger.warning(f"Unknown tag: {tag}")
         return None

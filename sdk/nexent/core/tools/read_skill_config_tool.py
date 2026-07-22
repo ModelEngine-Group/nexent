@@ -73,16 +73,13 @@ class ReadSkillConfigTool:
             return f"[Error] Failed to read config.yaml: {e}"
 
 
-_global_tool_instance: Optional[ReadSkillConfigTool] = None
-
-
 def get_read_skill_config_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
 ) -> ReadSkillConfigTool:
-    """Get or create the read skill config tool instance.
+    """Create a new read skill config tool instance.
 
     Args:
         local_skills_dir: Path to local skills storage.
@@ -90,15 +87,12 @@ def get_read_skill_config_tool(
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
     """
-    global _global_tool_instance
-    if _global_tool_instance is None:
-        _global_tool_instance = ReadSkillConfigTool(
-            local_skills_dir,
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no,
-        )
-    return _global_tool_instance
+    return ReadSkillConfigTool(
+        local_skills_dir=local_skills_dir,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
 
 
 @tool
@@ -119,5 +113,5 @@ def read_skill_config(skill_name: str) -> str:
         read_skill_config("skill-creator")
         # Returns: {"path": {"temp_skill": "/mnt/nexent/skills/tmp/"}}
     """
-    tool_instance = get_read_skill_config_tool()
+    tool_instance = read_skill_config._tool_instance
     return tool_instance.execute(skill_name)

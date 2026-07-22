@@ -59,6 +59,7 @@ class SkillManager:
             self.local_skills_dir = os.path.join(base_skills_dir, tenant_id)
         else:
             self.local_skills_dir = base_skills_dir
+        logger.info(f"Skill manager initialized with local skills dir: {self.local_skills_dir}, {base_skills_dir}, {tenant_id}")
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
@@ -112,6 +113,7 @@ class SkillManager:
             Skill dict with metadata and content, or None if not found
         """
         if self.local_skills_dir is None:
+            logger.warning(f"load_skill: local_skills_dir is None")
             return None
 
         local_path = os.path.join(self.local_skills_dir, name, SKILL_FILE_NAME)

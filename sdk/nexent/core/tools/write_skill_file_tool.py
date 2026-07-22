@@ -168,16 +168,13 @@ class WriteSkillFileTool:
             return f"[Error] Failed to write '{relative_path}': {e}"
 
 
-_global_tool_instance: Optional[WriteSkillFileTool] = None
-
-
 def get_write_skill_file_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
 ) -> WriteSkillFileTool:
-    """Get or create the write skill file tool instance.
+    """Create a new write skill file tool instance.
 
     Args:
         local_skills_dir: Path to local skills storage.
@@ -185,15 +182,12 @@ def get_write_skill_file_tool(
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
     """
-    global _global_tool_instance
-    if _global_tool_instance is None:
-        _global_tool_instance = WriteSkillFileTool(
-            local_skills_dir,
-            agent_id,
-            tenant_id,
-            version_no,
-        )
-    return _global_tool_instance
+    return WriteSkillFileTool(
+        local_skills_dir,
+        agent_id,
+        tenant_id,
+        version_no,
+    )
 
 
 @tool
@@ -230,5 +224,5 @@ def write_skill_file(skill_name: str, file_path: str, content: str) -> str:
         # Write directly to local_skills_dir (when skill_name is empty)
         write_skill_file("", "my-file.txt", "file content")
     """
-    tool_instance = get_write_skill_file_tool()
+    tool_instance = write_skill_file._tool_instance
     return tool_instance.execute(skill_name, file_path, content)

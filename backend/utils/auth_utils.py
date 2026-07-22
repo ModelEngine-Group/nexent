@@ -268,7 +268,11 @@ def _build_supabase_options() -> SyncClientOptions:
         timeout=httpx.Timeout(30.0, connect=10.0),
         follow_redirects=True,
     )
-    return SyncClientOptions(httpx_client=http_client)
+    return SyncClientOptions(
+            httpx_client=http_client,
+            auto_refresh_token=False,
+            persist_session=False,
+        )
 
 
 def get_supabase_client():
