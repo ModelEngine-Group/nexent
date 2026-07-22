@@ -478,10 +478,18 @@ def _extract_json_object(raw: str) -> Optional[dict]:
     except (ValueError, TypeError):
         pass
     # 容错:单引号 → 双引号、去尾随逗号
+    import re as _re
     try:
         fixed = snippet.replace("'", '"')
-        import re as _re
         fixed = _re.sub(r",\s*([}\]])", r"\1", fixed)
+        return json.loads(fixed)
+    except (ValueError, TypeError):
+        pass
+    # 容错:LLM 常把 regex 转义(\d \w \s \. 等)直接塞进 JSON 字符串,
+    # 单反斜杠在 JSON 里非法(只认 \" \\ \/ \b \f \n \r \t \uXXXX)。
+    # 把反斜杠后非合法转义字符的,补成双反斜杠。
+    try:
+        fixed = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', snippet)
         return json.loads(fixed)
     except (ValueError, TypeError):
         return None

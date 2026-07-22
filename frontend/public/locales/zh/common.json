@@ -437,6 +437,7 @@
   "agent.detailContent.title": "智能体详细内容",
   "agent.advancedSettings.button": "高级设置",
   "agent.advancedSettings.title": "高级设置",
+  "agent.advancedSettings.tab.basic": "基本设置",
   "agent.generating.title": "正在生成智能体",
   "agent.generating.subtitle": "请稍候，系统正在为您生成智能智能体...",
   "agent.error.loadTools": "加载工具列表失败:",

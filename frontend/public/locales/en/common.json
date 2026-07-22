@@ -435,6 +435,7 @@
   "agent.detailContent.title": "Agent Detail Content",
   "agent.advancedSettings.button": "Advanced Settings",
   "agent.advancedSettings.title": "Advanced Settings",
+  "agent.advancedSettings.tab.basic": "Basic settings",
   "agent.generating.title": "Generating Agent",
   "agent.generating.subtitle": "Please wait, the system is generating intelligent agent for you...",
   "agent.error.loadTools": "Failed to load tool list:",
