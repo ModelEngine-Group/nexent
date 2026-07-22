@@ -169,6 +169,16 @@ def _build_nl2agent_current_session(
     }
 
 
+def _load_nl2agent_workflow_state(
+    tenant_id: str,
+    draft_agent_id: int,
+) -> Dict[str, Any]:
+    """Load the persisted NL2AGENT workflow state from the session catalog."""
+    from .nl2agent_session_catalog import get_nl2agent_session_state
+
+    return get_nl2agent_session_state(tenant_id, draft_agent_id)
+
+
 def _load_nl2agent_trusted_search_batches(
     tenant_id: str,
     draft_agent_id: int,
@@ -885,9 +895,10 @@ async def create_agent_config(
     nl2agent_system_prompt = _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
     nl2agent_workflow_state: Dict[str, Any] = {}
     if nl2agent_system_prompt and draft_agent_id is not None:
-        from agents.nl2agent_workflow import get_nl2agent_session_state
-
-        nl2agent_workflow_state = get_nl2agent_session_state(tenant_id, draft_agent_id)
+        nl2agent_workflow_state = _load_nl2agent_workflow_state(
+            tenant_id,
+            draft_agent_id,
+        )
         draft_agent_info = search_agent_info_by_agent_id(
             agent_id=draft_agent_id,
             tenant_id=tenant_id,

@@ -472,6 +472,7 @@ from backend.agents.create_agent_info import (
     _merge_tool_params,
     _resolve_input_budget,
     _resolve_safe_input_budget,
+    _load_nl2agent_workflow_state,
 )
 
 # Import HistoryItem for testing (from mocked consts.model)
@@ -485,6 +486,23 @@ ToolParamsRequest = sys.modules["consts.model"].ToolParamsRequest
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
+
+
+def test_load_nl2agent_workflow_state_uses_session_catalog():
+    """Workflow state must come from the session catalog, not the state model module."""
+    expected_state = {"revision": 3}
+    get_session_state = Mock(return_value=expected_state)
+    module_name = f"{create_agent_info_module.__package__}.nl2agent_session_catalog"
+    session_catalog_stub = _create_stub_module(
+        module_name,
+        get_nl2agent_session_state=get_session_state,
+    )
+
+    with patch.dict(sys.modules, {module_name: session_catalog_stub}):
+        result = _load_nl2agent_workflow_state("tenant_1", 202)
+
+    assert result == expected_state
+    get_session_state.assert_called_once_with("tenant_1", 202)
 
 
 class TestResolveInputBudget:
