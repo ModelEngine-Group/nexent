@@ -42,6 +42,14 @@ uv pip install ../sdk
 `--all-extras` installs every optional dependency (data processing, testing, etc.). After syncing, install the local SDK package.
 ::::
 
+:::: warning Skill storage for host-run backends
+When the backend runs directly on Windows, macOS, or Linux instead of inside a
+container, set `SKILLS_PATH` to an absolute directory that the host process can
+access. Container-only paths such as `/mnt/nexent-data/skills` are not valid for
+a Windows host process. Tenant Skill resources are stored under
+`SKILLS_PATH/<tenant_id>/`.
+::::
+
 #### Optional: Accelerate with Mirror Sources
 
 If downloads are slow, use domestic mirrors:
@@ -77,7 +85,18 @@ pnpm install
 pnpm dev
 ```
 
-### 4. Service Startup
+### 4. Database Migrations
+
+Apply all pending database migrations before starting local backend services. Run this command after pulling any change that adds or updates files under `deploy/sql/migrations`.
+
+```bash
+# Run from the repository root with the backend virtual environment activated
+python deploy/common/run_local_sql_migrations.py
+```
+
+The command loads the repository `.env`, connects through the backend PostgreSQL driver, and is safe to run repeatedly. It uses the same checksum and advisory-lock migration policy as Docker and Kubernetes and does not require Bash or the `psql` command-line client.
+
+### 5. Service Startup
 
 Activate the backend virtual environment before starting services.
 
@@ -91,7 +110,7 @@ source .venv/bin/activate
 On Windows, activate the environment with `source .venv/Scripts/activate`.
 ::::
 
-Start the backend services from the project root, in order:
+After migrations succeed, start the backend services from the project root, in order:
 
 ```bash
 # Always run from project root with environment variables loaded

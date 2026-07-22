@@ -41,6 +41,13 @@ uv pip install ../sdk
 `--all-extras` 安装所有可选依赖（数据处理、测试等），随后安装本地 SDK 包。
 ::::
 
+:::: warning 宿主机运行时的 Skill 存储路径
+如果 backend 直接运行在 Windows、macOS 或 Linux 宿主机上，而不是运行在容器内，
+必须把 `SKILLS_PATH` 设置为宿主机进程可访问的绝对目录。
+`/mnt/nexent-data/skills` 等容器专用路径不能直接用于 Windows 宿主机进程。
+租户 Skill 资源位于 `SKILLS_PATH/<tenant_id>/`。
+::::
+
 #### 可选：镜像加速
 
 ```bash
@@ -73,6 +80,17 @@ pnpm install
 pnpm dev
 ```
 
+### 🗄️ 数据库迁移
+
+本地启动后端服务前，需要先应用所有待执行的数据库迁移。每次拉取包含 `deploy/sql/migrations` 变更的代码后，都应重新执行以下命令：
+
+```bash
+# 在项目根目录执行，并先激活后端虚拟环境
+python deploy/common/run_local_sql_migrations.py
+```
+
+该命令会自动加载仓库 `.env`，通过后端 PostgreSQL 驱动连接数据库，可重复安全执行，并与 Docker、Kubernetes 使用相同的 checksum 和 advisory lock 迁移策略；无需 Bash 或 `psql` 命令行客户端。
+
 ### 🏃 服务启动
 
 先激活后端虚拟环境：
@@ -86,7 +104,7 @@ source .venv/bin/activate
 Windows 请使用 `source .venv/Scripts/activate`。
 ::::
 
-在项目根依次启动核心服务：
+数据库迁移成功后，在项目根依次启动核心服务：
 
 ```bash
 source .env && python backend/mcp_service.py

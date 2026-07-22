@@ -412,6 +412,7 @@ render_k8s_runtime_config_values() {
     printf '      runtimeUrl: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_SERVICE_URL "http://nexent-runtime:5014")")"
     printf '      mcpServer: %s\n' "$(yaml_quote "$(env_or_default NEXENT_MCP_SERVER "http://nexent-mcp:5011")")"
     printf '      mcpManagementServer: %s\n' "$(yaml_quote "$(env_or_default MCP_MANAGEMENT_API "http://nexent-mcp:5015")")"
+    printf '      allowPrivateMcpNetworks: %s\n' "$(yaml_quote "$(env_or_default NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS "false")")"
     printf '      dataProcessService: %s\n' "$(yaml_quote "$(env_or_default DATA_PROCESS_SERVICE "http://nexent-data-process:5012/api")")"
     printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-northbound:5013/api")")"
     printf '      northboundExternalUrl: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_EXTERNAL_URL "")")"
