@@ -262,6 +262,7 @@ get_nexent_images() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_DOCKER_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && echo "$NEXENT_DATA_PROCESS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && echo "$OPENSSH_SERVER_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "sandbox" && echo "$NEXENT_SANDBOX_IMAGE"
   true
 }
 

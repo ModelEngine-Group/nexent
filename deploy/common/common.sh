@@ -1666,6 +1666,7 @@ deployment_apply_image_source() {
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
     export NEXENT_MCP_DOCKER_IMAGE="nexent/nexent-mcp:latest"
+    export NEXENT_SANDBOX_IMAGE="nexent/nexent-sandbox:latest"
     export OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest"
   fi
 
@@ -1673,6 +1674,7 @@ deployment_apply_image_source() {
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
+  export NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:$version}"
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
@@ -1700,6 +1702,7 @@ deployment_apply_image_source() {
       NEXENT_WEB_IMAGE \
       NEXENT_DATA_PROCESS_IMAGE \
       NEXENT_MCP_DOCKER_IMAGE \
+      NEXENT_SANDBOX_IMAGE \
       ELASTICSEARCH_IMAGE \
       POSTGRESQL_IMAGE \
       REDIS_IMAGE \
@@ -1786,6 +1789,7 @@ deployment_render_docker_env() {
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
+    printf 'NEXENT_SANDBOX_IMAGE="%s"\n' "$NEXENT_SANDBOX_IMAGE"
     printf 'ELASTICSEARCH_IMAGE="%s"\n' "$ELASTICSEARCH_IMAGE"
     printf 'POSTGRESQL_IMAGE="%s"\n' "$POSTGRESQL_IMAGE"
     printf 'REDIS_IMAGE="%s"\n' "$REDIS_IMAGE"
@@ -1853,6 +1857,7 @@ deployment_render_image_values() {
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_DB")" "$(deployment_image_tag "$SUPABASE_DB")"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
+  printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
 }
 
 deployment_render_k8s_port_values() {
@@ -1966,6 +1971,7 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30436\n' "$internal_type"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
+  printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
 }
 
 deployment_yaml_quote() {

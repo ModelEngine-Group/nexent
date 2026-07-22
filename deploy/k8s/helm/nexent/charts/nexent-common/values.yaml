@@ -8,6 +8,10 @@ images:
     repository: "nexent/nexent-mcp"
     tag: "latest"
     pullPolicy: IfNotPresent
+  sandbox:
+    repository: "nexent/nexent-sandbox"
+    tag: "latest"
+    pullPolicy: IfNotPresent
 
 # SQL content is rendered by deploy/k8s/deploy.sh from deploy/sql/
 # directory. Keep this empty in chart defaults to avoid maintaining a second SQL
@@ -193,8 +197,6 @@ config:
     # session = one container per agent_run, destroyed on run end (strictest isolation).
     # system  = persistent warm pool shared by all runs (lowest cold-start latency).
     defaultScope: "session"
-    # Docker image used when level is 'docker'.
-    dockerImage: "nexent/nexent-sandbox:latest"
     # Sandbox resource limits.
     memoryLimitMb: "512"
     cpuQuota: "1.0"
