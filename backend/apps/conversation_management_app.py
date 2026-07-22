@@ -113,7 +113,7 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        delete_conversation_service(conversation_id, user_id)
+        delete_conversation_service(conversation_id, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")

@@ -3,6 +3,7 @@ import logging
 from apps.app_factory import create_app
 from apps.agent_app import agent_runtime_router as agent_router
 from apps.agent_automation_app import conversation_automation_router, router as agent_automation_router
+from apps.nl2agent_app import router as nl2agent_router
 from apps.voice_app import voice_runtime_router as voice_router
 from apps.conversation_management_app import router as conversation_management_router
 from apps.conversation_share_app import router as conversation_share_router
@@ -23,6 +24,7 @@ app.add_middleware(ExceptionHandlerMiddleware)
 app.include_router(agent_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
+app.include_router(nl2agent_router)
 app.include_router(conversation_management_router)
 app.include_router(conversation_share_router)
 app.include_router(memory_config_router)

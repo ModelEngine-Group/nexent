@@ -1,0 +1,320 @@
+"""Publication orchestration for an NL2AGENT draft."""
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
+
+from consts.exceptions import (
+    AgentRunException,
+    AppException,
+    Nl2AgentOperationError,
+    Nl2AgentValidationError,
+)
+from consts.model import AgentInfoRequest
+
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_requested_output_tokens(
+    requested_output_tokens: Optional[int],
+    primary_model: Dict[str, Any],
+) -> None:
+    """Keep publication output-token validation aligned with normal Agent saves."""
+    if requested_output_tokens is None:
+        return
+    max_output_tokens = primary_model.get("max_output_tokens")
+    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+        raise Nl2AgentValidationError(
+            "requested_output_tokens cannot exceed the selected model "
+            f"max_output_tokens ({max_output_tokens})"
+        )
+
+
+@dataclass(frozen=True)
+class PublicationDraftDependencies:
+    validate_draft_agent_id: Callable[[int], None]
+    get_owned_draft: Callable[[int, str], Dict[str, Any]]
+    generate_internal_name: Callable[[str, int, str], str]
+
+
+@dataclass(frozen=True)
+class PublicationWorkflowDependencies:
+    assert_requirements_confirmed: Callable[[str, int], None]
+    assert_resource_review_complete: Callable[[str, int], None]
+    assert_mcp_workflows_resolved: Callable[[str, int], None]
+    assert_online_configuration_complete: Callable[[str, int], None]
+    assert_identity_confirmed: Callable[[str, int], None]
+
+
+@dataclass(frozen=True)
+class PublicationModelDependencies:
+    normalize_model_ids: Callable[[Any], List[int]]
+    validate_available_llm_ids: Callable[..., Dict[int, Dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class PublicationResourceDependencies:
+    query_enabled_tools: Callable[..., List[Dict[str, Any]]]
+    query_enabled_skills: Callable[..., List[Dict[str, Any]]]
+    resolve_resource_summaries: Callable[..., Any]
+    raise_for_invalid_references: Callable[[List[Dict[str, Any]]], None]
+
+
+@dataclass(frozen=True)
+class PublicationPersistenceDependencies:
+    get_db_session: Callable[..., Any]
+    update_agent: Callable[..., Any]
+    complete_session: Callable[..., bool]
+
+
+@dataclass(frozen=True)
+class PublicationDependencies:
+    """Responsibility-grouped operations required to publish a draft."""
+
+    draft: PublicationDraftDependencies
+    workflow: PublicationWorkflowDependencies
+    models: PublicationModelDependencies
+    resources: PublicationResourceDependencies
+    persistence: PublicationPersistenceDependencies
+
+
+@dataclass(frozen=True)
+class PublicationProposal:
+    """Validated user-facing fields proposed for the persisted draft."""
+
+    description: Optional[str]
+    business_description: Optional[str]
+    duty_prompt: Optional[str]
+    constraint_prompt: Optional[str]
+    few_shots_prompt: Optional[str]
+    greeting_message: Optional[str]
+    example_questions: Optional[List[str]]
+    max_steps: Optional[int]
+    requested_output_tokens: Optional[int]
+    provide_run_summary: bool
+    verification_config: Optional[Dict[str, Any]]
+    enable_context_manager: bool
+
+
+async def publish_agent(
+    dependencies: PublicationDependencies,
+    *,
+    agent_id: int,
+    user_id: str,
+    tenant_id: str,
+    proposal: PublicationProposal,
+) -> Dict[str, Any]:
+    """Publish a draft using proposal text and authoritative persisted state."""
+    dependencies.draft.validate_draft_agent_id(agent_id)
+    current_draft = dependencies.draft.get_owned_draft(agent_id, tenant_id)
+    primary_model_id, model_ids = _validate_publication_models(
+        dependencies,
+        current_draft=current_draft,
+        tenant_id=tenant_id,
+        requested_output_tokens=proposal.requested_output_tokens,
+    )
+    _assert_publication_workflow(dependencies, tenant_id, agent_id)
+    _validate_proposal(proposal)
+    persisted_tools, persisted_skills = _validate_persisted_resources(
+        dependencies,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+    )
+    agent_update = _build_agent_update(
+        dependencies,
+        current_draft=current_draft,
+        proposal=proposal,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        primary_model_id=primary_model_id,
+        model_ids=model_ids,
+    )
+    _persist_agent_update(
+        dependencies,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        agent_update=agent_update,
+    )
+    return {
+        "agent_id": agent_id,
+        "status": "draft_ready",
+        "name": agent_update["name"],
+        "display_name": agent_update["display_name"],
+        "tool_ids": [row["tool_id"] for row in persisted_tools],
+        "skill_ids": [row["skill_id"] for row in persisted_skills],
+    }
+
+
+def _validate_publication_models(
+    dependencies: PublicationDependencies,
+    *,
+    current_draft: Dict[str, Any],
+    tenant_id: str,
+    requested_output_tokens: Optional[int],
+) -> tuple[int, List[int]]:
+    primary_model_id = current_draft.get("business_logic_model_id")
+    model_ids = dependencies.models.normalize_model_ids(current_draft.get("model_ids"))
+    if not primary_model_id or primary_model_id not in model_ids:
+        raise Nl2AgentValidationError(
+            "Select a primary LLM before finalizing the agent."
+        )
+    validated_models = dependencies.models.validate_available_llm_ids(
+        tenant_id,
+        model_ids,
+        finalizing=True,
+    )
+    _validate_requested_output_tokens(
+        requested_output_tokens,
+        validated_models[int(primary_model_id)],
+    )
+    return int(primary_model_id), model_ids
+
+
+def _assert_publication_workflow(
+    dependencies: PublicationDependencies,
+    tenant_id: str,
+    agent_id: int,
+) -> None:
+    checks = (
+        dependencies.workflow.assert_requirements_confirmed,
+        dependencies.workflow.assert_resource_review_complete,
+        dependencies.workflow.assert_mcp_workflows_resolved,
+        dependencies.workflow.assert_online_configuration_complete,
+        dependencies.workflow.assert_identity_confirmed,
+    )
+    for check in checks:
+        try:
+            check(tenant_id, agent_id)
+        except AppException:
+            raise
+        except Exception as exc:
+            raise AgentRunException(str(exc)) from exc
+
+
+def _validate_proposal(proposal: PublicationProposal) -> None:
+    missing_fields = [
+        field_name
+        for field_name in (
+            "business_description",
+            "duty_prompt",
+            "greeting_message",
+        )
+        if not isinstance(getattr(proposal, field_name), str)
+        or not getattr(proposal, field_name).strip()
+    ]
+    if missing_fields:
+        raise Nl2AgentValidationError(
+            "The final proposal is incomplete: " + ", ".join(missing_fields)
+        )
+
+
+def _validate_persisted_resources(
+    dependencies: PublicationDependencies,
+    *,
+    agent_id: int,
+    tenant_id: str,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    tools = (
+        dependencies.resources.query_enabled_tools(agent_id, tenant_id, version_no=0)
+        or []
+    )
+    skills = (
+        dependencies.resources.query_enabled_skills(agent_id, tenant_id, version_no=0)
+        or []
+    )
+    _, _, invalid_references = dependencies.resources.resolve_resource_summaries(
+        tools,
+        skills,
+        tenant_id,
+    )
+    dependencies.resources.raise_for_invalid_references(invalid_references)
+    return tools, skills
+
+
+def _build_agent_update(
+    dependencies: PublicationDependencies,
+    *,
+    current_draft: Dict[str, Any],
+    proposal: PublicationProposal,
+    agent_id: int,
+    tenant_id: str,
+    primary_model_id: int,
+    model_ids: List[int],
+) -> Dict[str, Any]:
+    display_name = str(current_draft.get("display_name") or "").strip()[:50]
+    if not display_name:
+        raise Nl2AgentValidationError("The persisted agent display name is missing.")
+    agent_update: Dict[str, Any] = {
+        "display_name": display_name,
+        "name": dependencies.draft.generate_internal_name(
+            display_name,
+            agent_id,
+            tenant_id,
+        ),
+        "business_logic_model_id": primary_model_id,
+        "model_ids": model_ids[:5],
+    }
+    optional_values = (
+        ("description", proposal.description, 500),
+        ("business_description", proposal.business_description, 2000),
+        ("duty_prompt", proposal.duty_prompt, 8000),
+        ("constraint_prompt", proposal.constraint_prompt, 4000),
+        ("few_shots_prompt", proposal.few_shots_prompt, 8000),
+        ("greeting_message", proposal.greeting_message, 500),
+    )
+    for field_name, value, max_length in optional_values:
+        if value is not None:
+            agent_update[field_name] = str(value)[:max_length]
+    if proposal.example_questions is not None:
+        agent_update["example_questions"] = proposal.example_questions[:6]
+    if proposal.max_steps is not None:
+        agent_update["max_steps"] = max(1, min(30, int(proposal.max_steps)))
+    if proposal.requested_output_tokens is not None:
+        agent_update["requested_output_tokens"] = max(
+            1,
+            int(proposal.requested_output_tokens),
+        )
+    agent_update["provide_run_summary"] = bool(proposal.provide_run_summary)
+    if isinstance(proposal.verification_config, dict):
+        agent_update["verification_config"] = proposal.verification_config
+    agent_update["enable_context_manager"] = bool(proposal.enable_context_manager)
+    return agent_update
+
+
+def _persist_agent_update(
+    dependencies: PublicationDependencies,
+    *,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    agent_update: Dict[str, Any],
+) -> None:
+    try:
+        with dependencies.persistence.get_db_session() as db_session:
+            dependencies.persistence.update_agent(
+                agent_id=agent_id,
+                agent_info=AgentInfoRequest(**agent_update),
+                user_id=user_id,
+                version_no=0,
+                db_session=db_session,
+            )
+            completed = dependencies.persistence.complete_session(
+                tenant_id=tenant_id,
+                draft_agent_id=agent_id,
+                status="completed",
+                user_id=user_id,
+                db_session=db_session,
+            )
+            if not completed:
+                raise RuntimeError("NL2AGENT session is no longer active")
+    except Exception as exc:
+        logger.error(
+            "Failed to update NL2AGENT draft during publication: "
+            "tenant_id=%s draft_agent_id=%s",
+            tenant_id,
+            agent_id,
+            exc_info=True,
+        )
+        raise Nl2AgentOperationError("Failed to finalize agent.") from exc

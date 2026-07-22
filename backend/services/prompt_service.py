@@ -214,7 +214,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                         tenant_id=tenant_id,
                         exclude_agent_id=agent_id,
                         agents_cache=all_agents
-                    ):
+                    ) is True:
                         logger.info(
                             f"Agent name '{agent_name}' already exists, regenerating with LLM")
                         try:
@@ -260,7 +260,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                         tenant_id=tenant_id,
                         exclude_agent_id=agent_id,
                         agents_cache=all_agents
-                    ):
+                    ) is True:
                         logger.info(
                             f"Agent display_name '{agent_display_name}' already exists, regenerating with LLM")
                         try:
@@ -298,14 +298,6 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                         "is_complete": True
                     }
 
-    # 2. Update agent with the final result (skip in create mode)
-    if agent_id == 0:
-        logger.info("Skipping agent update in create mode (agent_id=0)")
-    else:
-        logger.info(
-            "Updating agent with business_description and prompt segments")
-        logger.info("Prompt generation and agent update completed successfully")
-
     # Check if any content was generated - if all fields are empty, model likely failed
     all_fields = ["duty", "constraint", "few_shots",
                   "agent_var_name", "agent_display_name", "agent_description"]
@@ -313,6 +305,24 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                       for field in all_fields)
     if not has_content:
         raise Exception("Failed to generate prompt content.")
+
+    # 2. Update agent with the final result (skip in create mode)
+    if agent_id == 0:
+        logger.info("Skipping agent update in create mode (agent_id=0)")
+    else:
+        logger.info(
+            "Updating agent with business_description and prompt segments")
+        update_agent(agent_id, AgentInfoRequest(
+            agent_id=agent_id,
+            name=final_results.get("agent_var_name") or None,
+            display_name=final_results.get("agent_display_name") or None,
+            description=final_results.get("agent_description") or None,
+            business_description=task_description,
+            duty_prompt=final_results.get("duty", ""),
+            constraint_prompt=final_results.get("constraint", ""),
+            few_shots_prompt=final_results.get("few_shots", ""),
+        ), user_id)
+        logger.info("Prompt generation and agent update completed successfully")
 
     # 3. Generate greeting message and example questions
     try:

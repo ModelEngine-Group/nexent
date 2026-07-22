@@ -14,6 +14,17 @@ logger = logging.getLogger("prompt_template_utils")
 
 PROMPT_GENERATE_TEMPLATE_KEY_MAP = PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 PROMPT_GENERATE_TEMPLATE_KEYS = PROMPT_GENERATE_TEMPLATE_FIELDS
+NL2AGENT_AGENT_INFO_FIELDS = (
+    "name",
+    "display_name",
+    "description",
+    "business_description",
+)
+NL2AGENT_PROMPT_SEGMENT_FIELDS = (
+    "duty_prompt",
+    "constraint_prompt",
+    "few_shots_prompt",
+)
 
 
 def get_prompt_generate_template_keys() -> list[str]:
@@ -54,6 +65,23 @@ def merge_prompt_generate_templates(
                 merged[key] = value
 
     return merged
+
+
+def _normalize_string_fields(
+    section: Optional[Dict[str, Any]],
+    supported_fields: tuple[str, ...],
+) -> Dict[str, str]:
+    """Return stripped string values for the supported field names."""
+    normalized: Dict[str, str] = {}
+    if not isinstance(section, dict):
+        return normalized
+
+    for key in supported_fields:
+        value = section.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized[key] = value.strip()
+
+    return normalized
 
 
 def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> Dict[str, Any]:
@@ -119,9 +147,9 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
         },
-        'agent_automation': {
-            LANGUAGE["ZH"]: 'backend/prompts/agent_automation_zh.yaml',
-            LANGUAGE["EN"]: 'backend/prompts/agent_automation_en.yaml'
+        'nl2agent_system_prompt': {
+            LANGUAGE["ZH"]: 'backend/prompts/nl2agent_system_prompt_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/nl2agent_system_prompt_en.yaml'
         }
     }
 
@@ -186,6 +214,47 @@ def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) 
         dict: Loaded prompt template configuration
     """
     return get_prompt_template('agent', language, is_manager=is_manager)
+
+
+def get_nl2agent_system_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
+    """
+    Get the NL2AGENT conversational builder system prompt template.
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        dict: Loaded NL2AGENT prompt template configuration
+    """
+    return get_prompt_template('nl2agent_system_prompt', language)
+
+
+def get_nl2agent_system_prompt(language: str = LANGUAGE["ZH"]) -> str:
+    """Return a non-empty runtime NL2AGENT system prompt."""
+    prompt_template = get_nl2agent_system_prompt_template(language)
+    system_prompt = prompt_template.get("system_prompt") if prompt_template else None
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        return system_prompt
+    raise ValueError("NL2AGENT system prompt YAML has no non-empty system_prompt field.")
+
+
+def get_nl2agent_seed_config(language: str = LANGUAGE["EN"]) -> Dict[str, Any]:
+    """Return NL2AGENT DB seed fields extracted from the YAML prompt file."""
+    prompt_template = get_nl2agent_system_prompt_template(language)
+    system_prompt = prompt_template.get("system_prompt") if prompt_template else None
+    return {
+        "agent_info": _normalize_string_fields(
+            prompt_template.get("agent_info") if prompt_template else None,
+            NL2AGENT_AGENT_INFO_FIELDS,
+        ),
+        "prompt_segments": _normalize_string_fields(
+            prompt_template.get("prompt_segments") if prompt_template else None,
+            NL2AGENT_PROMPT_SEGMENT_FIELDS,
+        ),
+        "system_prompt": system_prompt.strip()
+        if isinstance(system_prompt, str) and system_prompt.strip()
+        else None,
+    }
 
 
 def get_generate_title_prompt_template(language: str = 'zh') -> Dict[str, Any]:

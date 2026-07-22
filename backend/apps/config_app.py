@@ -43,6 +43,7 @@ from apps.cas_app import router as cas_router
 from apps.quota_app import tenant_quota_router, platform_quota_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
+from services.nl2agent_service import seed_nl2agent_default_agent
 
 # Create logger instance
 logger = logging.getLogger("base_app")
@@ -59,6 +60,15 @@ async def sync_default_prompt_template_on_startup():
         logger.info("System default prompt template synced successfully.")
     except Exception as exc:
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
+
+
+@app.on_event("startup")
+async def seed_nl2agent_on_startup():
+    """Seed the NL2AGENT default agent and its builtin tools on startup."""
+    try:
+        seed_nl2agent_default_agent()
+    except Exception as exc:
+        logger.error(f"Failed to seed NL2AGENT default agent: {str(exc)}")
 
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)

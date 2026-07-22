@@ -296,6 +296,10 @@ async def regenerate_agent_name_batch_api(request: AgentNameBatchRegenerateReque
 async def list_all_agent_info_api(
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
+    include_owned_nl2agent_drafts: bool = Query(
+        False,
+        description="Include only active NL2AGENT drafts owned by the caller",
+    ),
     authorization: Optional[str] = Header(None),
     request: Request = None
 ):
@@ -307,11 +311,14 @@ async def list_all_agent_info_api(
             authorization, request)
 
         agent_list = await list_all_agent_info_impl(
-            tenant_id=tenant_id, user_id=user_id
+            tenant_id=tenant_id,
+            user_id=user_id,
+            include_owned_nl2agent_drafts=include_owned_nl2agent_drafts,
         )
         if tenant_id != ASSET_OWNER_TENANT_ID:
             asset_agent_list = await list_all_agent_info_impl(
-                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id,
+                include_owned_nl2agent_drafts=include_owned_nl2agent_drafts,
             )
             return agent_list + asset_agent_list
         return agent_list
@@ -629,4 +636,3 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-

@@ -127,6 +127,14 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _valid_nl2agent_draft_id(agent_request: AgentRequest) -> int | None:
+    """Return the trusted positive Draft id without treating mocks as context."""
+    value = getattr(agent_request, "draft_agent_id", None)
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
@@ -925,7 +933,8 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    captured_final_answer = None
+    nl2agent_draft_id = _valid_nl2agent_draft_id(agent_request)
+    final_answer_parts: list[str] = []
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
@@ -957,6 +966,8 @@ async def _stream_agent_chunks(
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True)
+            if nl2agent_draft_id is not None:
+                raise
 
     # Tracks the unit currently being accumulated in memory. Each entry is
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
@@ -981,6 +992,24 @@ async def _stream_agent_chunks(
             stop_event=agent_run_info.stop_event,
         )
     )
+
+    if (
+        nl2agent_draft_id is not None
+        and not is_resume_mode
+        and isinstance(streaming_message_id, int)
+    ):
+        message_created_chunk = (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "assistant_message_created",
+                    "content": {"message_id": streaming_message_id},
+                }
+            )
+            + "\n\n"
+        )
+        await channel.publish(message_created_chunk)
+        yield message_created_chunk
 
     # In resume mode, emit a status event first
     if is_resume_mode:
@@ -1020,7 +1049,7 @@ async def _stream_agent_chunks(
                 continue
 
             if chunk_type == "final_answer":
-                captured_final_answer = chunk_content
+                final_answer_parts.append(chunk_content)
 
             if chunk_type == ProcessType.SKILL_ARTIFACT.value:
                 artifact_content = data.get("content")
@@ -1120,15 +1149,6 @@ async def _stream_agent_chunks(
                             update_unit_status,
                             current_unit["unit_id"],
                             "completed",
-                            user_id,
-                        )
-
-                    # Special-case: final_answer also updates message_content
-                    if chunk_type == "final_answer":
-                        submit(
-                            update_message_content,
-                            streaming_message_id,
-                            chunk_content,
                             user_id,
                         )
 
@@ -1268,6 +1288,18 @@ async def _stream_agent_chunks(
         await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
+        captured_final_answer = "".join(final_answer_parts)
+        was_stopped = (
+            getattr(agent_run_info, "stop_event", None)
+            and agent_run_info.stop_event.is_set()
+        )
+        terminal_status = (
+            "stopped"
+            if was_stopped
+            else "completed"
+            if stream_completed_normally
+            else "failed"
+        )
         # Finalize any in-flight unit and transition the parent message to its
         # terminal status before releasing the agent run slot.
         if streaming_message_id is not None:
@@ -1292,8 +1324,18 @@ async def _stream_agent_chunks(
                 except Exception:
                     logger.exception("Failed to mark last unit as completed")
 
-            was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-            terminal_status = "stopped" if was_stopped else "completed" if stream_completed_normally else "failed"
+            if terminal_status == "completed" and captured_final_answer:
+                try:
+                    # Delivery only accepts completed messages. Persist the entire
+                    # final answer before transitioning the parent row.
+                    update_message_content(
+                        streaming_message_id,
+                        captured_final_answer,
+                        user_id,
+                    )
+                except Exception:
+                    terminal_status = "failed"
+                    logger.exception("Failed to persist assistant message content")
             try:
                 update_message_status(
                     streaming_message_id,
@@ -1306,9 +1348,6 @@ async def _stream_agent_chunks(
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
 
-        was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-        terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
-
         agent_run_manager.unregister_agent_run(
             agent_request.conversation_id, user_id, status=terminal_status)
 
@@ -1320,7 +1359,7 @@ async def _stream_agent_chunks(
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
-            cleanup_task = asyncio.create_task(
+            asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
                     user_id=user_id
@@ -1937,6 +1976,20 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         user_id: User ID performing the deletion
     """
     try:
+        try:
+            from database.nl2agent_session_db import delete_nl2agent_session_by_agent
+
+            delete_nl2agent_session_by_agent(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                draft_agent_id=agent_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to clean an optional NL2AGENT session before Agent deletion: agent_id=%s",
+                agent_id,
+                exc_info=True,
+            )
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
@@ -2479,13 +2532,19 @@ async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str)
     return rowcount
 
 
-async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
+async def list_all_agent_info_impl(
+    tenant_id: str,
+    user_id: str,
+    include_owned_nl2agent_drafts: bool = False,
+) -> list[dict]:
     """
     list all agent info
 
     Args:
         tenant_id (str): tenant id
         user_id (str): user id (used for permission calculation and filtering)
+        include_owned_nl2agent_drafts: Include active builder drafts owned by
+            the caller. The runner and every other draft remain hidden.
 
     Raises:
         ValueError: failed to query all agent info
@@ -2512,6 +2571,14 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
+        owned_active_draft_ids: set[int] = set()
+        if include_owned_nl2agent_drafts:
+            from database.nl2agent_session_db import list_active_nl2agent_draft_ids
+
+            owned_active_draft_ids = set(
+                list_active_nl2agent_draft_ids(tenant_id, user_id)
+            )
+
         # Get all agent IDs that are registered as A2A Server agents
         a2a_server_agent_ids = get_server_agent_ids(tenant_id)
 
@@ -2520,6 +2587,12 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
         for agent in agent_list:
             if not agent["enabled"]:
+                continue
+
+            agent_name = agent.get("name") or ""
+            if agent_name == "nl2agent":
+                continue
+            if agent_name.startswith("draft_") and int(agent["agent_id"]) not in owned_active_draft_ids:
                 continue
 
             # Apply visibility filter for DEV/USER based on group overlap
@@ -2599,6 +2672,11 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "is_published": agent.get("current_version_no") is not None,
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+                "generation_status": (
+                    "active"
+                    if int(agent["agent_id"]) in owned_active_draft_ids
+                    else None
+                ),
             })
 
         return simple_agent_list
@@ -2848,7 +2926,7 @@ async def prepare_agent_run(
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
-    agent_run_info = await create_agent_run_info(
+    create_run_kwargs = dict(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
         query=agent_request.query,
@@ -2865,6 +2943,9 @@ async def prepare_agent_run(
         context_policy=agent_request.context_policy,
         enable_planning=agent_request.enable_plan,
     )
+    if _valid_nl2agent_draft_id(agent_request) is not None:
+        create_run_kwargs["draft_agent_id"] = agent_request.draft_agent_id
+    agent_run_info = await create_agent_run_info(**create_run_kwargs)
 
     historical_context = None
     if not agent_request.is_debug and agent_request.conversation_id is not None:
@@ -3170,9 +3251,8 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
-    # Auto-create conversation when conversation_id is not provided.
-    # Skip in debug mode: debug runs are ephemeral and must not persist
-    # conversations, titles, or messages to the user's history.
+    # Auto-create ordinary conversations before validating an optional NL2AGENT
+    # binding. Builder sessions already provide their durable conversation ID.
     is_new_conversation = False
     if agent_request.is_debug:
         logger.info(
@@ -3194,6 +3274,25 @@ async def run_agent_stream(
             resolved_user_id,
         )
 
+    draft_agent_id = getattr(agent_request, "draft_agent_id", None)
+    is_nl2agent_run = (
+        isinstance(draft_agent_id, int)
+        and not isinstance(draft_agent_id, bool)
+        and draft_agent_id > 0
+    )
+    if is_nl2agent_run:
+        from services.nl2agent_service import validate_nl2agent_run_context
+
+        resolved_runner_id = validate_nl2agent_run_context(
+            runner_agent_id=agent_request.agent_id,
+            draft_agent_id=draft_agent_id,
+            conversation_id=agent_request.conversation_id,
+            tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
+        )
+        if isinstance(resolved_runner_id, int):
+            agent_request.agent_id = resolved_runner_id
+
     if (
         not agent_request.is_debug
         and not is_new_conversation
@@ -3211,6 +3310,7 @@ async def run_agent_stream(
         not agent_request.is_debug
         and not resume
         and not is_new_conversation
+        and not is_nl2agent_run
         and agent_request.conversation_id is not None
         and agent_request.agent_id is not None
     ):
@@ -3392,6 +3492,17 @@ async def run_agent_stream(
         user_id=resolved_user_id,
         conversation_id=agent_request.conversation_id,
     )
+
+    if is_nl2agent_run:
+        from services.nl2agent_service import process_requirements_revision_text
+
+        process_requirements_revision_text(
+            runner_agent_id=agent_request.agent_id,
+            draft_agent_id=draft_agent_id,
+            tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
+            text=agent_request.query,
+        )
 
     if not agent_request.is_debug and not skip_user_save:
         save_messages(

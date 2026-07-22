@@ -41,11 +41,17 @@ from database.conversation_db import (
 )
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
+from agents.agent_run_manager import agent_run_manager
+from services.nl2agent_session_lifecycle_service import (
+    abandon_session_by_conversation,
+)
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
 
 logger = logging.getLogger("conversation_management_service")
+
+__all__ = ["get_latest_assistant_message", "get_last_unit_for_message"]
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
@@ -413,13 +419,18 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str) -
         raise Exception(str(e))
 
 
-def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
+def delete_conversation_service(
+    conversation_id: int,
+    user_id: str,
+    tenant_id: str | None = None,
+) -> bool:
     """
     Delete specified conversation
 
     Args:
         conversation_id: Conversation ID to delete
         user_id: User ID
+        tenant_id: Tenant ID
 
     Returns:
         bool: Whether the deletion was successful
@@ -435,6 +446,12 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
                 automation_error,
             )
 
+        if tenant_id is not None:
+            abandon_session_by_conversation(
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")

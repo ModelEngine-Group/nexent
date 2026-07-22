@@ -10,7 +10,6 @@ from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_RE
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
-    MCPContainerError,
     McpNotFoundError,
     McpValidationError,
     McpNameConflictError,
@@ -22,10 +21,10 @@ from database.remote_mcp_db import (
     delete_mcp_record_by_container_id,
     get_mcp_records_by_tenant,
     check_mcp_name_exists,
-    check_enabled_mcp_name_exists,
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
     update_mcp_record_manage_fields_by_id,
+    update_mcp_record_installation_config_by_id,
     update_mcp_record_enabled_by_id,
     update_mcp_record_container_fields_by_id,
     update_mcp_record_status_by_id,
@@ -76,7 +75,12 @@ def _format_mcp_connection_error(exc: BaseException) -> str:
 # Health Check
 # ---------------------------------------------------------------------------
 
-async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
+async def mcp_server_health(
+    remote_mcp_server: str,
+    authorization_token: str | None = None,
+    custom_headers: dict | None = None,
+    httpx_client_factory=None,
+) -> bool:
     """Check if an MCP server is healthy and reachable via MCP protocol.
 
     Returns True if the server is reachable and responds to tool listing.
@@ -89,35 +93,44 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
     if custom_headers:
         headers.update(custom_headers)
 
-    tool_names = await _mcp_protocol_health_check(url_stripped, headers)
+    tool_names = await _mcp_protocol_health_check(
+        url_stripped,
+        headers,
+        httpx_client_factory=httpx_client_factory,
+    )
     if not tool_names:
         raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
     return True
 
 
-async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[str]:
+async def _mcp_protocol_health_check(
+    url_stripped: str,
+    headers: dict,
+    httpx_client_factory=None,
+) -> list[str]:
     """Try to establish an MCP protocol-level connection and return tool names.
 
     Returns a list of tool names on success, or an empty list on failure.
     """
     try:
+        client_factory = httpx_client_factory or create_httpx_client
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client
+                httpx_client_factory=client_factory
             )
         elif url_stripped.endswith("/mcp"):
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client
+                httpx_client_factory=client_factory
             )
         else:
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client
+                httpx_client_factory=client_factory
             )
 
         async def list_mcp_tools() -> list:
@@ -355,8 +368,16 @@ async def _check_mcp_connectivity(
     headers: dict,
     is_container: bool,
     name: str,
+    httpx_client_factory=None,
 ) -> list[str] | None:
-    tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
+    if httpx_client_factory is None:
+        tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
+    else:
+        tool_names = await _mcp_protocol_health_check(
+            server_url.strip(),
+            headers,
+            httpx_client_factory=httpx_client_factory,
+        )
     if not tool_names:
         if is_container:
             logger.warning(
@@ -387,7 +408,8 @@ async def add_mcp_service(
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
-) -> None:
+    httpx_client_factory=None,
+) -> int | None:
     """Add an MCP service record.
 
     Args:
@@ -420,14 +442,20 @@ async def add_mcp_service(
     resolved_registry_json = registry_json or {}
     if server_url:
         headers = _build_mcp_headers(authorization_token, custom_headers)
-        tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+        tool_names = await _check_mcp_connectivity(
+            server_url,
+            headers,
+            is_container,
+            name,
+            httpx_client_factory=httpx_client_factory,
+        )
         if tool_names:
             resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
         status = True
 
-    create_mcp_record(
+    record = create_mcp_record(
         mcp_data={
             "mcp_name": name,
             "mcp_server": server_url,
@@ -447,6 +475,12 @@ async def add_mcp_service(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    mcp_id = record.get("mcp_id") if isinstance(record, dict) else None
+    if httpx_client_factory is not None and (
+        not isinstance(mcp_id, int) or mcp_id <= 0
+    ):
+        raise McpValidationError("MCP persistence returned no mcp_id")
+    return mcp_id
 
 
 async def add_container_mcp_service(
@@ -534,7 +568,7 @@ async def add_container_mcp_service(
 
         container_config = mcp_config.model_dump(exclude_none=True)
 
-        await add_mcp_service(
+        mcp_id = await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
             name=service_name,
@@ -545,12 +579,22 @@ async def add_container_mcp_service(
             authorization_token=auth_token,
             container_config=container_config,
             registry_json=registry_json,
+            config_json=container_config,
             market_id=market_id,
             enabled=True,
             container_id=container_info.get("container_id"),
             container_port=container_info.get("host_port"),
         )
     except Exception as exc:
+        container_id = container_info.get("container_id") if "container_info" in locals() else None
+        if container_id:
+            try:
+                await container_manager.stop_mcp_container(container_id)
+            except Exception:
+                logger.exception(
+                    "Failed to compensate MCP container after persistence failure: container_id=%s",
+                    container_id,
+                )
         logger.warning(f"Failed to start container MCP service: {exc}")
         raise
 
@@ -560,7 +604,57 @@ async def add_container_mcp_service(
         "container_id": container_info.get("container_id"),
         "container_name": container_info.get("container_name"),
         "host_port": container_info.get("host_port"),
+        "mcp_id": mcp_id,
     }
+
+
+async def reconfigure_container_mcp_service(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+    name: str,
+    description: str | None,
+    source: str,
+    tags: list | None,
+    authorization_token: str | None,
+    registry_json: dict,
+    port: int,
+    mcp_config: MCPConfigRequest,
+) -> None:
+    """Persist corrected container values and rebuild the existing service."""
+    current_record = get_mcp_record_by_id_and_tenant(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+    )
+    if not current_record:
+        raise McpNotFoundError("MCP record not found")
+
+    await update_mcp_service_enabled(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        mcp_id=mcp_id,
+        enabled=False,
+    )
+    update_mcp_record_installation_config_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name=name,
+        description=description,
+        tags=tags,
+        source=source,
+        authorization_token=authorization_token,
+        registry_json=registry_json,
+        config_json=mcp_config.model_dump(exclude_none=True),
+        container_port=port,
+    )
+    await update_mcp_service_enabled(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        mcp_id=mcp_id,
+        enabled=True,
+    )
 
 
 # ---------------------------------------------------------------------------

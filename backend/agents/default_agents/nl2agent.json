@@ -1,0 +1,81 @@
+{
+  "agent_id": -1,
+  "tenant_id": null,
+  "name": "nl2agent",
+  "display_name": "Agent Builder",
+  "description": "Conversational assistant that helps you design and build your own custom agent through multi-turn natural-language dialogue. Asks about your goal, recommends tools and skills, and generates the agent prompt set.",
+  "business_description": "Conversational agent generator. Guides users through multi-turn dialogue to define a custom agent, recommends local and web resources, and finalizes a draft agent.",
+  "author": null,
+  "max_steps": 20,
+  "is_main_agent": false,
+  "requested_output_tokens": null,
+  "provide_run_summary": false,
+  "verification_config": {
+    "enabled": true,
+    "step_verification_enabled": true,
+    "final_verification_enabled": true,
+    "llm_verification_enabled": false,
+    "max_final_rounds": 2,
+    "strictness": "balanced",
+    "fail_policy": "repair_then_controlled_summary",
+    "pass_score": 0.75,
+    "critical_events": [
+      "tool_precheck",
+      "tool_result",
+      "retrieval",
+      "code_execution",
+      "handoff",
+      "final_answer"
+    ]
+  },
+  "duty_prompt": "You are NL2AGENT, the Agent Builder. Help the user design and build a custom agent through multi-turn natural-language dialogue. The full system prompt is loaded from backend/prompts/nl2agent_system_prompt_*.yaml at runtime.",
+  "constraint_prompt": "Always wait for explicit user confirmation before applying local resources or finalizing the agent. Never make up tool or skill names. Use the user's language.",
+  "few_shots_prompt": "",
+  "enabled": true,
+  "tools": [
+    {
+      "class_name": "NL2AgentSearchLocalResourcesTool",
+      "name": "nl2agent_search_local_resources",
+      "description": "Search local tools and skills matching the user's intent.",
+      "inputs": "{\"query\": \"string\"}",
+      "output_type": "string",
+      "params": {},
+      "source": "builtin",
+      "usage": null,
+      "metadata": null,
+      "labels": ["nl2agent"]
+    },
+    {
+      "class_name": "NL2AgentSearchWebMcpsTool",
+      "name": "nl2agent_search_web_mcps",
+      "description": "Search web MCP marketplaces for servers matching the user's intent.",
+      "inputs": "{\"query\": \"string\"}",
+      "output_type": "string",
+      "params": {},
+      "source": "builtin",
+      "usage": null,
+      "metadata": null,
+      "labels": ["nl2agent"]
+    },
+    {
+      "class_name": "NL2AgentSearchWebSkillsTool",
+      "name": "nl2agent_search_web_skills",
+      "description": "Search the official/web skills marketplace for skills matching the user's intent.",
+      "inputs": "{\"query\": \"string\"}",
+      "output_type": "string",
+      "params": {},
+      "source": "builtin",
+      "usage": null,
+      "metadata": null,
+      "labels": ["nl2agent"]
+    }
+  ],
+  "managed_agents": [],
+  "model_ids": null,
+  "model_names": null,
+  "business_logic_model_id": null,
+  "business_logic_model_name": null,
+  "skill_names": null,
+  "prompt_template_id": null,
+  "prompt_template_name": null
+}
