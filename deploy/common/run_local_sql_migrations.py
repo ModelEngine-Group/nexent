@@ -13,7 +13,7 @@ from typing import Any, Callable
 import psycopg2
 
 
-MIGRATION_ID = "v2.3.0_0718_persist_nl2agent_runner.sql"
+MIGRATION_ID = "v2.4.0_0722_add_nl2agent.sql"
 LOCK_KEY = "nexent_sql_migrations"
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

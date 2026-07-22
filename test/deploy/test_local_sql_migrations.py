@@ -6,7 +6,11 @@ from typing import Any
 
 import pytest
 
-from deploy.common.run_local_sql_migrations import MigrationConfig, run_migrations
+from deploy.common.run_local_sql_migrations import (
+    MIGRATION_ID,
+    MigrationConfig,
+    run_migrations,
+)
 
 
 class FakeCursor:
@@ -89,6 +93,12 @@ def test_run_migrations_applies_files_in_natural_order_and_validates(
     ]
     assert migration_statements == ["SELECT 'v2_2.sql';", "SELECT 'v2_10.sql';"]
     assert any("information_schema.columns" in statement for statement in statements)
+    validation_calls = [
+        parameters
+        for statement, parameters in cursor.executions
+        if "information_schema.columns" in statement
+    ]
+    assert validation_calls == [(MIGRATION_ID,)]
     assert connect_calls == [{"host": "database"}]
     assert connection.autocommit is True
     assert cursor.closed is True
