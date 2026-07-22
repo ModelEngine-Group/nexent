@@ -51,4 +51,14 @@ ALTER TABLE nexent.mcp_record_t
 COMMENT ON COLUMN nexent.mcp_record_t.shared_fields IS
     'JSON object of field-level sharing flags (e.g. {"serverUrl": true, "authorizationToken": false})';
 
+-- -------------------------------------------------------------------------
+-- Grant EDIT permission to existing public MCPs
+-- Existing MCPs with NULL group_ids have no group restrictions
+-- and should be editable by all tenant users.
+-- -------------------------------------------------------------------------
+UPDATE nexent.mcp_record_t
+SET ingroup_permission = 'EDIT'
+WHERE group_ids IS NULL
+  AND delete_flag != 'Y';
+
 COMMIT;

@@ -1025,6 +1025,10 @@ async def get_remote_mcp_server_list(
     if user_groups is not None:
         filtered_records = []
         for record in mcp_records:
+            # NULL group_ids means public (backward compatible with pre-PR data)
+            if record.get("group_ids") is None:
+                filtered_records.append(record)
+                continue
             record_group_ids = (record.get("group_ids") or "").strip()
             # User can see MCPs they created
             if str(record.get("created_by") or record.get("user_id") or "") == user_id:
@@ -1065,6 +1069,9 @@ async def get_remote_mcp_server_list(
             permission = PERMISSION_READ
         else:
             permission = PERMISSION_EDIT if can_edit_all or str(created_by) == str(user_id) else PERMISSION_READ
+        # Public MCPs (NULL group_ids) are editable by all users
+        if record.get("group_ids") is None:
+            permission = PERMISSION_EDIT
         # For group-shared MCPs, respect ingroup_permission
         if permission == PERMISSION_READ and user_groups:
             record_group_ids = (record.get("group_ids") or "").strip()
