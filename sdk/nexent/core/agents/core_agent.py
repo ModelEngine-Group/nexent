@@ -1,6 +1,8 @@
 import json
 import ast
+import logging
 import time
+import uuid
 import threading
 from datetime import datetime
 from textwrap import dedent
@@ -13,7 +15,7 @@ from rich.text import Text
 from smolagents.agents import CodeAgent, handle_agent_output_types, AgentError, ActionOutput, RunResult
 from smolagents.local_python_executor import fix_final_answer_code
 from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
-from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT
+from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT, MessageRole
 from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
     extract_code_from_text
@@ -29,8 +31,14 @@ if TYPE_CHECKING:
 
 from .agent_model import AgentVerificationConfig
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
-from .verification import VerificationController, VerificationResult
+from .verification import (
+    VerificationController,
+    VerificationResult,
+    render_guardrail_refusal,
+    render_tool_input_refusal,
+)
 from ..utils.token_estimation import msg_token_count
+from .plan_repo import PlanRepo
 
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
@@ -182,6 +190,213 @@ class FinalAnswerError(Exception):
     pass
 
 
+class ToolInputBlockedError(AgentExecutionError):
+    """Raised by the guardrail tool-input wrap when a call is blocked.
+
+    Carries a ``refusal`` string for ``_step_stream`` to end the run without a retry loop.
+
+    Args:
+        refusal: User-facing refusal text used as the run's final answer.
+        logger: Optional logger forwarded to the base exception.
+    """
+
+    def __init__(self, refusal: str, logger=None):
+        super().__init__(refusal, logger)
+        self.refusal = refusal
+
+
+def _screened_tool_forward(engine, tool_name, controller, logger, original_forward, *args, **kwargs):
+    """Screen tool call args then dispatch to the original ``forward`` (checkpoint ③).
+
+    Args:
+        engine: GuardrailEngine that screens the resolved call args.
+        tool_name: Name of the wrapped tool.
+        controller: VerificationController used to emit + stash the refusal.
+        logger: Logger forwarded to ``ToolInputBlockedError``.
+        original_forward: The tool's real ``forward`` callable.
+        *args: Positional args of the tool call.
+        **kwargs: Keyword args of the tool call.
+
+    Returns:
+        Whatever ``original_forward`` returns (masked args are substituted on
+        ``mask``); raises ``ToolInputBlockedError`` on ``block``/``terminate``.
+    """
+    decision = engine.check_tool_args(args=args, kwargs=kwargs)
+    action = decision.effective_action
+    if action != "pass":
+        controller.emit(decision.verification_result, message=decision.message)
+    if action in ("block", "terminate"):
+        # Stash the refusal; _step_stream raises FinalAnswerError from it (no retry loop).
+        refusal = render_tool_input_refusal(decision, tool_name)
+        controller.pending_tool_block_refusal = refusal
+        raise ToolInputBlockedError(refusal, logger)
+    if action == "mask":
+        if decision.masked_args is not None:
+            args = decision.masked_args
+        if decision.masked_kwargs is not None:
+            kwargs = decision.masked_kwargs
+    return original_forward(*args, **kwargs)
+def _coerce_observer_arguments(arguments: Any) -> Any:
+    """Coerce AST/Python-literal arguments into a JSON-serializable payload.
+
+    smolagents may pass arguments either as a dict (after Python execution) or
+    as a JSON-encoded string (OpenAI-style). We accept both and emit a JSON-
+    friendly value into the observer so the downstream SSE chunk stays
+    consistent with the shape produced by builtin tools.
+    """
+    if arguments is None:
+        return None
+    if isinstance(arguments, (str, int, float, bool)):
+        return arguments
+    if isinstance(arguments, (dict, list)):
+        return arguments
+    return str(arguments)
+
+
+def _collect_call_arguments(call_node: "ast.Call") -> Dict[str, Any]:
+    """Extract positional + keyword arguments from an AST ``Call`` node.
+
+    Uses ``ast.literal_eval`` so we never reach into untrusted input at runtime:
+    the parsed code has not been executed yet, and ast literal-eval only accepts
+    safe Python literals.
+    """
+    arguments: Dict[str, Any] = {}
+
+    for index, arg in enumerate(call_node.args):
+        key = f"arg{index}"
+        try:
+            arguments[key] = ast.literal_eval(arg)
+        except (ValueError, SyntaxError):
+            # Fall back to source snippet when the argument is a complex
+            # expression (variable references, attribute access, etc.).
+            arguments[key] = ast.unparse(arg)
+
+    for keyword in call_node.keywords:
+        if keyword.arg is None:
+            # ``**kwargs`` spread; surface as a tagged entry for diagnostics.
+            try:
+                arguments["**kwargs"] = ast.unparse(keyword.value)
+            except Exception:
+                arguments["**kwargs"] = "<unparseable>"
+            continue
+        try:
+            arguments[keyword.arg] = ast.literal_eval(keyword.value)
+        except (ValueError, SyntaxError):
+            try:
+                arguments[keyword.arg] = ast.unparse(keyword.value)
+            except Exception:
+                arguments[keyword.arg] = "<unparseable>"
+
+    return arguments
+
+
+def _scan_code_for_tool_calls(
+    code_action: str,
+    known_tool_names: set,
+) -> List[Dict[str, Any]]:
+    """Walk ``code_action`` looking for calls to real tools.
+
+    Returns a list of dicts ``{name, arguments, line}`` preserving source order.
+    Tools not exposed via ``self.tools``/``self.managed_agents`` (e.g. builtin
+    Python helpers such as ``print`` or ``final_answer``) are ignored to keep
+    the emitted `tool` chunks accurate and aligned with the user's intent of
+    surfacing MCP / managed-agent invocations only.
+    """
+    if not code_action or not known_tool_names:
+        return []
+    try:
+        tree = ast.parse(code_action)
+    except SyntaxError:
+        # The smolagents parser will raise a more specific error downstream,
+        # so just return an empty list here.
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen_keys = set()  # dedupe identical call expressions
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if not name or name not in known_tool_names:
+            continue
+
+        arguments = _collect_call_arguments(node)
+        dedup_key = (name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        results.append(
+            {
+                "name": name,
+                "arguments": arguments,
+                "line": getattr(node, "lineno", None),
+            }
+        )
+
+    return results
+
+
+def _emit_real_tool_chunks_from_code(
+    observer: "MessageObserver",
+    agent_name: str,
+    code_action: str,
+    known_tool_names,
+) -> None:
+    """Translate real tool calls in ``code_action`` into observer TOOL chunks.
+
+    CodeAgent wraps every step in a synthetic ``python_interpreter`` ToolCall,
+    so without this bridge the SSE stream never sees the actual MCP /
+    managed-agent names the LLM invoked. We emit one `type=tool` chunk per
+    unique tool call AFTER the PARSE chunk has been published and BEFORE
+    ``python_executor(code_action)`` runs, so the downstream stream order is:
+
+        parse -> tool -> execution_logs
+
+    matching what the user sees during a real builtin-tool invocation.
+    """
+    if observer is None or not code_action:
+        return
+
+    normalized_names = {str(name) for name in (known_tool_names or set())}
+
+    calls = _scan_code_for_tool_calls(code_action, normalized_names)
+    fallback_logger = logging.getLogger(__name__)
+    if not calls:
+        # Visibility aid: when we expected real tools but found none, log at
+        # DEBUG so operators can confirm the bridge ran instead of silently
+        # skipping. Disabled by default to avoid noisy logs in production.
+        if normalized_names:
+            fallback_logger.debug(
+                "Tool bridge: no tool calls matched known tool names "
+                "(known=%d) in code_action of %d chars",
+                len(normalized_names),
+                len(code_action or ""),
+            )
+        return
+
+    for call in calls:
+        try:
+            observer.add_message(
+                agent_name or "",
+                ProcessType.TOOL,
+                "",
+                tool_name=call["name"],
+                tool_arguments=_coerce_observer_arguments(call["arguments"]),
+            )
+        except Exception:
+            fallback_logger.debug(
+                "Failed to bridge real tool call into observer: %s",
+                call["name"],
+                exc_info=True,
+            )
+
+
 class CoreAgent(CodeAgent):
     def __init__(
         self,
@@ -191,6 +406,10 @@ class CoreAgent(CodeAgent):
         *args,
         **kwargs
     ):
+        # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
+        self.enable_planning: bool = kwargs.pop("enable_planning", False)
+        redis_client = kwargs.pop("redis_client", None)
+
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.observer = observer
@@ -207,9 +426,6 @@ class CoreAgent(CodeAgent):
         # The factory injects exactly one independent runtime.  CoreAgent has
         # no legacy/managed fallback branch and cannot assemble context itself.
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
-        self.context_manager: Any = getattr(
-            self.context_runtime, "context_manager", None
-        )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -217,6 +433,13 @@ class CoreAgent(CodeAgent):
         # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
         # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
         self.code_block_tags = ["", ""]
+        self.plan_repo: Optional[PlanRepo] = None
+        self.current_plan = None
+        self.current_step_index = 0
+        self.lang = getattr(self, "lang", "en")
+
+        if self.enable_planning:
+            self.plan_repo = PlanRepo(redis_client=redis_client)
 
     def _verification_tool_names(self) -> List[str]:
         names = set()
@@ -227,6 +450,20 @@ class CoreAgent(CodeAgent):
                 continue
         names.add("final_answer")
         return sorted(names)
+
+    def _known_tool_names(self) -> set:
+        """Return the set of callable tool names exposed to ``code_action``.
+
+        Includes both flat tools (e.g. MCP tool functions) and managed agents
+        so the AST scanner below can attribute each call to a real tool name.
+        """
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                names.update(str(name) for name in container.keys())
+            except AttributeError:
+                continue
+        return names
 
     def _context_tools(self) -> List[Any]:
         """Return a stable tool list for ContextRuntime/ContextManager evidence.
@@ -242,6 +479,51 @@ class CoreAgent(CodeAgent):
                 iterable = container
             tools.extend(list(iterable or ()))
         return tools
+
+    def _guardrail_wrap_tools(self) -> None:
+        """Wrap each tool's forward() to screen resolved args before execution (checkpoint ③).
+
+        Blocked content never reaches the tool (vs checkpoint ②, which screens
+        output after the fact). Idempotent: already-wrapped tools are skipped.
+        Covers self.tools and self.managed_agents (incl. MCP).
+        """
+        engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if not engine:
+            return
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                iterable = container.values()
+            except AttributeError:
+                iterable = container
+            for tool in list(iterable or ()):
+                self._guardrail_wrap_one(tool, engine)
+
+    def _guardrail_wrap_one(self, tool, engine) -> None:
+        """Wrap a single tool's forward() with guardrail arg screening.
+
+        A blocked call raises ``AgentExecutionError`` so the tool never runs; a
+        passing call adds no observer traffic. Idempotent via ``_guardrail_wrapped``.
+
+        Args:
+            tool: Tool whose ``forward()`` is wrapped.
+            engine: GuardrailEngine that screens the resolved call args.
+        """
+        if tool is None or getattr(tool, "_guardrail_wrapped", False):
+            return
+        original_forward = getattr(tool, "forward", None)
+        if not callable(original_forward):
+            return
+        tool_name = getattr(tool, "name", "") or ""
+        controller = self.verification_controller
+        logger = self.logger
+        tool.forward = lambda *args, **kwargs: _screened_tool_forward(
+            engine, tool_name, controller, logger, original_forward, *args, **kwargs
+        )
+        try:
+            tool._guardrail_wrapped = True
+        except Exception:
+            # Some tool proxies block attribute writes; the wrap still took effect (worst case: harmless double-wrap).
+            pass
 
     def _append_verification_feedback(self, action_step: ActionStep, result: VerificationResult) -> None:
         feedback = self.verification_controller.build_feedback_observation(result)
@@ -360,6 +642,25 @@ Additional Args:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
+    @staticmethod
+    def _ensure_context_within_hard_budget(final_context: Any) -> None:
+        """Stop before the provider call when safe compaction cannot fit input."""
+        evidence = final_context.evidence
+        if evidence.over_hard_budget is True:
+            raise ValueError(
+                "Context input remains over the model hard budget after compaction: "
+                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
+            )
+
+    def _emit_history_summary_event(self) -> None:
+        payload = self.context_runtime.consume_history_summary_event()
+        if isinstance(payload, dict):
+            self.observer.add_message(
+                self.agent_name,
+                ProcessType.HISTORY_SUMMARY,
+                json.dumps(payload, ensure_ascii=False),
+            )
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -374,18 +675,15 @@ Additional Args:
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
-        # is already the COMPRESSED payload, so using it here made save%
-        # structurally ~0%. Use the ContextManager's truly-uncompressed memory
-        # token count (computed in compress_if_needed from the raw memory) as the
-        # baseline; fall back to the (compressed) input size when no
-        # ContextManager is active -- the legacy path does not compress, so 0% is
-        # correct there.
-        uncompressed_tokens = None
-        if self.context_manager is not None:
-            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        # is already the compressed payload, so use the ContextManager's raw
+        # memory token count when compression produced one. When compression is
+        # disabled, the final input size is the correct zero-savings baseline.
+        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
         if uncompressed_tokens:
             self._last_uncompressed_est = uncompressed_tokens
         else:
@@ -401,6 +699,26 @@ Additional Args:
 
         # Log model call parameters before execution
         self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
+        # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
+        guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if guardrail_engine:
+            decision = guardrail_engine.check_input(
+                input_messages=input_messages,
+            )
+            self.verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "terminate":
+                self._append_verification_feedback(memory_step, decision.verification_result)
+                # Pre-built refusal as the final answer; FinalAnswerError ends the run (no retry loop).
+                memory_step.model_output = render_guardrail_refusal(
+                    decision, input_messages
+                )
+                raise FinalAnswerError()
+            if decision.effective_action == "mask" and decision.masked_messages is not None:
+                input_messages = decision.masked_messages
+                self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
             chat_message: ChatMessage = self.model(input_messages,
@@ -459,6 +777,19 @@ Additional Args:
         )
         memory_step.tool_calls = [tool_call]
 
+        # Bridge the real tools invoked by `code_action` into the observer so the
+        # SSE stream carries `type=tool` chunks with the actual MCP/managed-agent
+        # name and arguments, instead of the synthetic `python_interpreter`
+        # placeholder below. We deliberately emit AFTER the PARSE chunk and BEFORE
+        # `python_executor(code_action)` runs so the chunk order matches the
+        # user-visible flow: parse -> tool call -> execution result.
+        _emit_real_tool_chunks_from_code(
+            self.observer,
+            self.agent_name,
+            code_action,
+            known_tool_names=self._known_tool_names(),
+        )
+
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
@@ -495,6 +826,14 @@ Additional Args:
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
+            # Guardrail ③ block: end the run with the stashed refusal (no retry loop).
+            # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
+            pending_refusal = getattr(getattr(self, "verification_controller", None), "pending_tool_block_refusal", None)
+            if pending_refusal or isinstance(e, ToolInputBlockedError):
+                refusal = pending_refusal or getattr(e, "refusal", "")
+                self.verification_controller.pending_tool_block_refusal = None
+                memory_step.model_output = refusal
+                raise FinalAnswerError()
             exec_duration_ms = (time.time() - exec_start) * 1000
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
@@ -545,11 +884,20 @@ Additional Args:
             if postcheck.severity == "warning":
                 self._append_verification_feedback(memory_step, postcheck)
 
-        # Pre-truncate observations when ContextManager is enabled. Keeps the
-        # head + tail of long outputs around a truncation marker so downstream
-        # compression sees bounded-length step records and the model can still
-        # search/read for the elided portion.
-        self.context_runtime.truncate_observation(memory_step)
+        # Guardrail checkpoint ②: screen tool output; block downgrades to mask
+        # because the tool already ran, then redact before memory.
+        guardrail_engine = getattr(verification_controller, "guardrail_engine", None) if verification_controller else None
+        if guardrail_engine:
+            decision = guardrail_engine.check_output(
+                observation=memory_step.observations,
+                code_action=code_action,
+            )
+            verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "mask" and decision.cleaned_content is not None:
+                memory_step.observations = decision.cleaned_content
+                self._append_verification_feedback(memory_step, decision.verification_result)
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -559,6 +907,15 @@ Additional Args:
             ]
         self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
         memory_step.action_output = code_output.output
+
+        # v1.4: Plan step state advances entirely via the update_plan_step
+        # tool. _implicit_advance_step is the only fallback we still run here:
+        # if the LLM skipped the tool on the final step before final_answer,
+        # we still want to flip the current row from in_progress to completed
+        # so the UI does not get stuck on a half-finished plan.
+        if self.enable_planning:
+            self._implicit_advance_step()
+
         yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
@@ -614,15 +971,20 @@ You have been provided with these additional arguments, that you can access usin
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
         if getattr(self, "python_executor", None):
+            self._guardrail_wrap_tools()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
-            return self._run_stream(task=self.task, max_steps=max_steps, images=images)
+            return self._run_stream_with_context_evidence(
+                task=self.task, max_steps=max_steps, images=images
+            )
         run_start_time = time.time()
-        steps = list(self._run_stream(task=self.task, max_steps=max_steps, images=images))
+        steps = list(self._run_stream_with_context_evidence(
+            task=self.task, max_steps=max_steps, images=images
+        ))
 
         # Outputs are returned only at the end. We only look at the last step.
         assert isinstance(steps[-1], FinalAnswerStep)
@@ -662,6 +1024,25 @@ You have been provided with these additional arguments, that you can access usin
             )
 
         return output
+
+    def _run_stream_with_context_evidence(
+        self,
+        *,
+        task: str,
+        max_steps: int,
+        images: list["PIL.Image.Image"] | None = None,
+    ):
+        """Finalize exactly one context evidence record for a complete loop."""
+
+        status = "error"
+        try:
+            yield from self._run_stream(task=task, max_steps=max_steps, images=images)
+            status = "cancelled" if self.stop_event.is_set() else "completed"
+        except GeneratorExit:
+            status = "cancelled"
+            raise
+        finally:
+            self.context_runtime.finalize_evidence(status=status)
 
     def __call__(self, task: str, **kwargs):
         """Adds additional prompting for the managed agent, runs it, and wraps the output.
@@ -712,6 +1093,13 @@ You have been provided with these additional arguments, that you can access usin
             if verification_config and verification_config.enabled
             else 1
         )
+
+        if self.enable_planning:
+            # v1.4: Plan creation happens lazily via the create_plan tool
+            # during the first LLM code block. No upfront planning step here.
+            self.current_plan = None
+            self.current_step_index = 0
+
         while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
 
@@ -831,6 +1219,12 @@ You have been provided with these additional arguments, that you can access usin
                     )
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
 
+        # Persist the final plan state for the whole conversation. The entry
+        # stays in Redis until the PlanRepo TTL expires; explicit replan /
+        # deletion is the responsibility of the caller.
+        if self.enable_planning:
+            self._cleanup_plan()
+
 
     def _collect_step_metrics(self, action_step: ActionStep):
         """Extract single-step data into structured metrics"""
@@ -930,6 +1324,8 @@ You have been provided with these additional arguments, that you can access usin
             task=task,
             final_answer_templates=self.prompt_templates,
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
 
         # Create the final memory step with error
@@ -977,3 +1373,132 @@ You have been provided with these additional arguments, that you can access usin
         self.memory.steps.append(final_memory_step)
 
         return model_output
+
+    # ----------------------------------------------------------------------
+    # Planning phase methods
+    # ----------------------------------------------------------------------
+
+    def _get_context_summary(self) -> Optional[str]:
+        """Extract a compressed context summary from ContextManager if available."""
+        if self.context_manager and hasattr(self.context_manager, "get_summary"):
+            try:
+                return self.context_manager.get_summary()
+            except Exception:
+                return None
+        return None
+
+    # ------------------------------------------------------------------ #
+    # v1.4: Plan callbacks invoked by the plan tools.
+    # ------------------------------------------------------------------ #
+    def _on_plan_created(self, plan: "AgentPlan") -> None:
+        """Callback fired by CreatePlanTool.forward after the plan is persisted.
+
+        Stores the plan on the agent and seeds current_step_index. The tool
+        itself already emitted the PLAN event and wrote to Redis; this hook
+        only takes care of the in-memory state on the agent.
+        """
+        self.current_plan = plan
+        self.current_step_index = 0
+
+    def _on_step_updated(self, plan: "AgentPlan", step_id: str, status: str) -> None:
+        """Callback fired by UpdatePlanStepTool.forward after a step changes.
+
+        Advances current_step_index past any completed/skipped steps so the
+        next LLM turn sees the right pointer. Event emission and persistence
+        are handled inside the tool.
+        """
+        self.current_plan = plan
+        self._advance_current_index()
+
+    def _advance_current_index(self) -> None:
+        """Move current_step_index to the next pending / in_progress step.
+
+        Skips steps that are already in a terminal state (completed / skipped).
+        Called after every update_plan_step invocation.
+        """
+        if not self.current_plan:
+            return
+        steps = self.current_plan.steps
+        next_index = self.current_step_index
+        while next_index < len(steps) and steps[next_index].status in ("completed", "skipped"):
+            next_index += 1
+        self.current_step_index = next_index
+        if (
+            next_index < len(steps)
+            and steps[next_index].status == "pending"
+            and self.current_step_index == next_index
+        ):
+            steps[next_index].status = "in_progress"
+
+    def _implicit_advance_step(self) -> None:
+        """Fallback when the LLM skipped update_plan_step.
+
+        If the current step is in_progress and every other step is already in
+        a terminal state, flip it to completed and advance. Mirrors what the
+        tool would have done; only used when the LLM jumped straight to
+        final_answer without calling update_plan_step.
+        """
+        if not (self.enable_planning and self.current_plan):
+            return
+        steps = self.current_plan.steps
+        idx = self.current_step_index
+        if idx >= len(steps):
+            return
+        cur = steps[idx]
+        if cur.status != "in_progress":
+            return
+        if not all(s.status in ("completed", "skipped") for i, s in enumerate(steps) if i != idx):
+            return
+        cur.status = "completed"
+        try:
+            self.observer.add_message(
+                self.agent_name, ProcessType.PLAN_STEP_UPDATE,
+                json.dumps({"step_id": cur.id, "status": "completed"}, ensure_ascii=False),
+            )
+        except Exception:
+            pass
+        if self.plan_repo:
+            try:
+                self.plan_repo.save(
+                    self.current_plan.model_dump(),
+                    conversation_id=self._get_conversation_id(),
+                    user_id=self._get_user_id(),
+                )
+            except Exception as e:
+                self.logger.log(f"Implicit plan save failed: {e}", level=LogLevel.WARN)
+        self._advance_current_index()
+
+    def _get_conversation_id(self) -> int:
+        """Extract conversation_id from context_manager."""
+        if self.context_manager and hasattr(self.context_manager, "conversation_id"):
+            return self.context_manager.conversation_id
+        return 0
+
+    def _get_user_id(self) -> str:
+        """Extract user_id from context_manager."""
+        if self.context_manager and hasattr(self.context_manager, "user_id"):
+            return str(self.context_manager.user_id)
+        return "anonymous"
+
+    def _cleanup_plan(self) -> None:
+        """Persist the final plan state.
+
+        The plan entry is intentionally kept in Redis so the whole
+        conversation retains its plan history. Cleanup is driven by the
+        ``PlanRepo`` TTL (24 hours by default), not by this method. Callers
+        that need to wipe a plan explicitly (e.g. on user "replan" action)
+        should invoke ``plan_repo.delete(...)`` directly.
+        """
+        if not (self.enable_planning and self.current_plan and self.plan_repo):
+            return
+        conv_id = self._get_conversation_id()
+        user_id = self._get_user_id()
+        try:
+            # Touch the TTL so the conversation's plan window is extended.
+            self.plan_repo.save(
+                self.current_plan.model_dump(),
+                conversation_id=conv_id,
+                user_id=user_id,
+            )
+        except Exception as e:
+            self.logger.log(f"Plan finalization failed: {e}", level=LogLevel.WARN)

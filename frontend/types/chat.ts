@@ -1,5 +1,6 @@
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 
 export type MessageRole = (typeof MESSAGE_ROLES)[keyof typeof MESSAGE_ROLES];
 
@@ -12,6 +13,9 @@ export interface TokenMetrics {
   total_output_tokens: number;
   estimated_context_tokens: number | null;
   token_threshold: number | null;
+  hard_input_budget_tokens: number | null;
+  context_processing_mode: "adaptive_compact" | "passthrough" | null;
+  output_finish_reason: string | null;
 }
 
 // Step related types
@@ -40,6 +44,7 @@ export interface StepContent {
     | typeof chatConfig.messageTypes.MEMORY_SEARCH
     | typeof chatConfig.messageTypes.PREPROCESS
     | typeof chatConfig.messageTypes.VERIFICATION
+    | typeof chatConfig.messageTypes.HISTORY_SUMMARY
     | typeof chatConfig.messageTypes.MAX_STEPS_REACHED;
   content: string;
   expanded: boolean;
@@ -204,6 +209,7 @@ export interface ChatMessageType {
   searchResults?: SearchResult[];
   attachments?: FileAttachment[];
   thinking?: any[];
+  automationProposal?: AgentAutomationProposalData;
 }
 
 // Message processing structure

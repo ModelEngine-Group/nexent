@@ -31,6 +31,7 @@ from apps.tenant_app import router as tenant_router
 from apps.group_app import router as group_router
 from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
+from apps.notification_app import router as notification_router
 from apps.a2a_client_app import router as a2a_client_router
 from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
@@ -39,6 +40,7 @@ from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
 from apps.aidp_app import router as aidp_router
 from apps.cas_app import router as cas_router
+from apps.quota_app import tenant_quota_router, platform_quota_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
 
@@ -96,9 +98,12 @@ app.include_router(tenant_router)
 app.include_router(group_router)
 app.include_router(user_router)
 app.include_router(invitation_router)
+app.include_router(notification_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
 app.include_router(haotian_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
 app.include_router(aidp_router)
+app.include_router(tenant_quota_router)
+app.include_router(platform_quota_router)

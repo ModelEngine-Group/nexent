@@ -118,6 +118,14 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'skill_creation_complicated': {
             LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
+        },
+        'guardrail_regex': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/guardrail_regex_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/guardrail_regex_en.yaml'
+        },
+        'agent_automation': {
+            LANGUAGE["ZH"]: 'backend/prompts/agent_automation_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/agent_automation_en.yaml'
         }
     }
 
@@ -168,6 +176,19 @@ def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[
         dict: Loaded prompt optimization template configuration
     """
     return get_prompt_template('prompt_optimize', language)
+
+
+def get_guardrail_regex_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
+    """Load the guardrail regex generation prompt template.
+
+    Args:
+        language: Language code ('zh' or 'en') selecting the template variant.
+
+    Returns:
+        The loaded template configuration dict, carrying the
+        ``GUARDRAIL_SYSTEM_PROMPT`` and ``GUARDRAIL_USER_PROMPT`` keys.
+    """
+    return get_prompt_template('guardrail_regex', language)
 
 
 def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:

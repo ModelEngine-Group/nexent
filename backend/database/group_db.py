@@ -292,6 +292,41 @@ def query_groups_by_user(user_id: str) -> List[Dict[str, Any]]:
         return [as_dict(record) for record in result]
 
 
+def query_groups_by_users(user_ids: List[str]) -> Dict[str, List[str]]:
+    """
+    Batch query group names for multiple users in a single query.
+
+    Args:
+        user_ids: List of user IDs
+
+    Returns:
+        Dict mapping user_id -> list of group names
+    """
+    if not user_ids:
+        return {}
+
+    result_map: Dict[str, List[str]] = {uid: [] for uid in user_ids}
+
+    with get_db_session() as session:
+        rows = (
+            session.query(TenantGroupUser.user_id, TenantGroupInfo.group_name)
+            .join(
+                TenantGroupInfo,
+                TenantGroupInfo.group_id == TenantGroupUser.group_id,
+            )
+            .filter(
+                TenantGroupUser.user_id.in_(user_ids),
+                TenantGroupUser.delete_flag == "N",
+                TenantGroupInfo.delete_flag == "N",
+            )
+            .all()
+        )
+        for uid, group_name in rows:
+            result_map[uid].append(group_name)
+
+    return result_map
+
+
 def check_user_in_group(user_id: str, group_id: int) -> bool:
     """
     Check if user is in a specific group

@@ -80,8 +80,6 @@ class ListDirectoryTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
-        self.running_prompt_zh = "正在列出目录内容..."
-        self.running_prompt_en = "Listing directory contents..."
 
     def _validate_path(self, directory_path: str) -> str:
         """Validate and resolve directory path within the workspace.
@@ -275,10 +273,9 @@ class ListDirectoryTool(Tool):
     def forward(self, directory_path: str = ".", max_depth: int = 3,
                show_hidden: bool = False, show_size: bool = True) -> str:
         try:
-            # Send tool run message if observer is available
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the listing card from inside the tool.
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "folder-tree", "text": f"Listing directory {directory_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

@@ -70,8 +70,6 @@ class SearchMemoryTool(Tool):
         self.agent_id = agent_id
         self.memory_user_config = memory_user_config
         self.observer = observer
-        self.running_prompt_en = "Searching memory..."
-        self.running_prompt_zh = "搜索记忆中..."
 
     def _resolve_memory_levels(self) -> list[str]:
         """Determine which memory levels to search based on user preferences.
@@ -92,9 +90,9 @@ class SearchMemoryTool(Tool):
 
     def forward(self, query: str, top_k: int = 5) -> str:
         logger.info(f"[ACTIVE MEMORY] SearchMemoryTool invoked: query={query[:200]}, top_k={top_k}, user_id={self.user_id}, agent_id={self.agent_id}")
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it appears for both direct and code_action
+        # invocations. This tool does not emit a card.
 
         memory_levels = self._resolve_memory_levels()
 
