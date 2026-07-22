@@ -4436,21 +4436,31 @@ class TestGetLocalToolsClassesDirect:
 
     @patch('backend.utils.tool_utils.importlib.import_module')
     def test_get_local_tools_classes_returns_classes(self, mock_import):
-        """Test that get_local_tools_classes returns a list of classes."""
-        # Create mock tool classes
-        mock_tool_class1 = type('TestTool1', (), {})
-        mock_tool_class2 = type('TestTool2', (), {})
+        """Only classes implementing the local tool catalog contract are returned."""
+        catalog_attributes = {
+            "name": "test_tool",
+            "description": "Test tool",
+            "inputs": {},
+            "output_type": "string",
+            "category": "test",
+        }
+        mock_tool_class = type('TestTool', (), catalog_attributes)
+        mock_builtin_tool_class = type(
+            'BuiltinTool',
+            (),
+            {key: value for key, value in catalog_attributes.items() if key != "category"},
+        )
 
         # Create a mock package with tool classes
         class MockPackage:
             def __init__(self):
-                self.TestTool1 = mock_tool_class1
-                self.TestTool2 = mock_tool_class2
+                self.TestTool = mock_tool_class
+                self.BuiltinTool = mock_builtin_tool_class
                 self.not_a_class = "string_value"
                 self.__name__ = 'nexent.core.tools'
 
             def __dir__(self):
-                return ['TestTool1', 'TestTool2', 'not_a_class', '__name__']
+                return ['TestTool', 'BuiltinTool', 'not_a_class', '__name__']
 
         mock_package = MockPackage()
         mock_import.return_value = mock_package
@@ -4459,11 +4469,9 @@ class TestGetLocalToolsClassesDirect:
         result = get_local_tools_classes()
 
         assert isinstance(result, list)
-        assert mock_tool_class1 in result
-        assert mock_tool_class2 in result
-        # String should not be included
+        assert mock_tool_class in result
+        assert mock_builtin_tool_class not in result
         assert "string_value" not in result
-
 
 # ============================================================
 # Outer API Tools Tests (Newly Added Functions 830-1237)

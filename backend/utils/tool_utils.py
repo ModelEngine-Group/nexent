@@ -3,14 +3,33 @@ import inspect
 from typing import List, Dict
 
 
+_LOCAL_TOOL_CATALOG_ATTRIBUTES = (
+    "name",
+    "description",
+    "inputs",
+    "output_type",
+    "category",
+)
+
+
+def _is_configurable_local_tool_class(obj: object) -> bool:
+    """Return whether an SDK class exposes the local tool catalog contract."""
+    return inspect.isclass(obj) and all(
+        hasattr(obj, attribute) for attribute in _LOCAL_TOOL_CATALOG_ATTRIBUTES
+    )
+
+
 def get_local_tools_classes() -> List[type]:
     """
-    Get all tool classes from the nexent.core.tools package.
+    Get configurable local tool classes from the nexent.core.tools package.
 
     Tools whose class-level ``category`` attribute is one of the SDK-internal
     categories (see ``ToolCategory``) are filtered out so they do not appear
     in the user-facing tool picker. These tools are injected by the SDK
     itself at agent construction time and must not be user-configurable.
+    The SDK package also exports system-managed and builtin tool classes. Those
+    classes are injected through dedicated runtime paths and intentionally do
+    not expose the complete local tool catalog contract.
 
     Returns:
         List of tool class objects
@@ -19,7 +38,7 @@ def get_local_tools_classes() -> List[type]:
     tools_classes = []
     for name in dir(tools_package):
         obj = getattr(tools_package, name)
-        if inspect.isclass(obj) and not _is_internal_tool(obj):
+        if _is_configurable_local_tool_class(obj) and not _is_internal_tool(obj):
             tools_classes.append(obj)
     return tools_classes
 
