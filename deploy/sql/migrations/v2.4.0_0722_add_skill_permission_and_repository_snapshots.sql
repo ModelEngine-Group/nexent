@@ -1,5 +1,5 @@
 -- Migration: Add skill group permissions and allow separate repository snapshots by status
--- Date: 2026-07-13
+-- Date: 2026-07-22
 -- Description: Align skill ownership and repository status behavior with agent repository semantics.
 
 SET search_path TO nexent;
