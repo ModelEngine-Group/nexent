@@ -698,6 +698,27 @@ export interface components {
        */
       reference_type: "model" | "tool" | "skill";
     };
+    /**
+     * Nl2AgentLocalRecommendationBatch
+     * @description Legacy local recommendation projection retained by the public API.
+     */
+    Nl2AgentLocalRecommendationBatch: {
+      /** Applied Skill Ids */
+      applied_skill_ids?: number[];
+      /** Applied Tool Ids */
+      applied_tool_ids?: number[];
+      /** Operation Id */
+      operation_id?: string | null;
+      /** Skill Ids */
+      skill_ids?: number[];
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "recommendations_ready" | "applying" | "applied" | "skipped";
+      /** Tool Ids */
+      tool_ids?: number[];
+    };
     /** Nl2AgentLocalRecommendationResponse */
     Nl2AgentLocalRecommendationResponse: {
       /** Applied Skill Ids */
@@ -1286,7 +1307,9 @@ export interface components {
       };
       /** Recommendation Batches */
       recommendation_batches?: {
-        [key: string]: components["schemas"]["RecommendationBatch"];
+        [
+          key: string
+        ]: components["schemas"]["Nl2AgentLocalRecommendationBatch"];
       };
       requirements_review: components["schemas"]["Nl2AgentRequirementsReviewResponse"];
       /**
@@ -1310,7 +1333,10 @@ export interface components {
         [key: string]: components["schemas"]["TrustedSearchBatch"];
       };
     };
-    /** OnlineRecommendationBatch */
+    /**
+     * OnlineRecommendationBatch
+     * @description Legacy public projection of an online recommendation aggregate.
+     */
     OnlineRecommendationBatch: {
       /** Item Keys */
       item_keys?: string[];
@@ -1325,27 +1351,9 @@ export interface components {
        */
       status: "recommendations_ready" | "completed";
     };
-    /** RecommendationBatch */
-    RecommendationBatch: {
-      /** Applied Skill Ids */
-      applied_skill_ids?: number[];
-      /** Applied Tool Ids */
-      applied_tool_ids?: number[];
-      /** Operation Id */
-      operation_id?: string | null;
-      /** Skill Ids */
-      skill_ids?: number[];
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "recommendations_ready" | "applying" | "applied" | "skipped";
-      /** Tool Ids */
-      tool_ids?: number[];
-    };
     /**
      * TrustedSearchBatch
-     * @description Backend-recorded proof that an SDK search produced one result batch.
+     * @description Legacy public projection of immutable search proof fields.
      */
     TrustedSearchBatch: {
       /** Item Keys */

@@ -660,6 +660,66 @@
         "title": "Nl2AgentInvalidReference",
         "type": "object"
       },
+      "Nl2AgentLocalRecommendationBatch": {
+        "additionalProperties": false,
+        "description": "Legacy local recommendation projection retained by the public API.",
+        "properties": {
+          "applied_skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Skill Ids",
+            "type": "array"
+          },
+          "applied_tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Tool Ids",
+            "type": "array"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "recommendations_ready",
+              "applying",
+              "applied",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "Nl2AgentLocalRecommendationBatch",
+        "type": "object"
+      },
       "Nl2AgentLocalRecommendationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2265,7 +2325,7 @@
           },
           "recommendation_batches": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/RecommendationBatch"
+              "$ref": "#/components/schemas/Nl2AgentLocalRecommendationBatch"
             },
             "title": "Recommendation Batches",
             "type": "object"
@@ -2307,6 +2367,7 @@
       },
       "OnlineRecommendationBatch": {
         "additionalProperties": false,
+        "description": "Legacy public projection of an online recommendation aggregate.",
         "properties": {
           "item_keys": {
             "items": {
@@ -2342,77 +2403,9 @@
         "title": "OnlineRecommendationBatch",
         "type": "object"
       },
-      "RecommendationBatch": {
-        "additionalProperties": false,
-        "properties": {
-          "applied_skill_ids": {
-            "items": {
-              "minimum": 1.0,
-              "type": "integer"
-            },
-            "maxItems": 100,
-            "title": "Applied Skill Ids",
-            "type": "array"
-          },
-          "applied_tool_ids": {
-            "items": {
-              "minimum": 1.0,
-              "type": "integer"
-            },
-            "maxItems": 100,
-            "title": "Applied Tool Ids",
-            "type": "array"
-          },
-          "operation_id": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operation Id"
-          },
-          "skill_ids": {
-            "items": {
-              "minimum": 1.0,
-              "type": "integer"
-            },
-            "maxItems": 100,
-            "title": "Skill Ids",
-            "type": "array"
-          },
-          "status": {
-            "enum": [
-              "recommendations_ready",
-              "applying",
-              "applied",
-              "skipped"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "tool_ids": {
-            "items": {
-              "minimum": 1.0,
-              "type": "integer"
-            },
-            "maxItems": 100,
-            "title": "Tool Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "RecommendationBatch",
-        "type": "object"
-      },
       "TrustedSearchBatch": {
         "additionalProperties": false,
-        "description": "Backend-recorded proof that an SDK search produced one result batch.",
+        "description": "Legacy public projection of immutable search proof fields.",
         "properties": {
           "item_keys": {
             "items": {

@@ -36,6 +36,13 @@ export type Nl2AgentCardRegistrationHandler = (
 export type Nl2AgentCardFailureReason =
   "truncated_fence" | "invalid_json" | "invalid_schema" | "missing_card";
 
+export interface Nl2AgentCardFailure {
+  cardType: Nl2AgentCardType;
+  reason: Nl2AgentCardFailureReason;
+  cardKey?: string;
+  agentIdError?: "missing" | "mismatch";
+}
+
 interface Nl2AgentCardDefinitionMap {
   "nl2agent-requirements-summary": {
     cardType: "requirements_summary";
@@ -90,12 +97,7 @@ export type ValidatedNl2AgentCard = {
 
 export interface Nl2AgentCardValidationResult {
   cards: ValidatedNl2AgentCard[];
-  failure?: {
-    cardType: Nl2AgentCardType;
-    reason: Nl2AgentCardFailureReason;
-    cardKey?: string;
-    agentIdError?: "missing" | "mismatch";
-  };
+  failure?: Nl2AgentCardFailure;
 }
 
 const LANGUAGE_TO_TYPE: {

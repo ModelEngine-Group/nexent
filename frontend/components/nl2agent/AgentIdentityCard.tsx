@@ -10,6 +10,7 @@ import {
   saveNl2AgentIdentity,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
+import { ActionCard } from "./ActionCard";
 
 export interface AgentIdentityCardProps {
   agentId: number;
@@ -78,8 +79,7 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
   };
 
   return (
-    <div className="my-3 rounded-lg border border-gray-200 bg-white p-4">
-      <div className="mb-3 text-sm font-medium">Agent Identity</div>
+    <ActionCard title="Agent Identity">
       <label className="mb-1 block text-xs text-gray-500">
         Agent Display Name
       </label>
@@ -107,6 +107,6 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
       >
         {saved ? "Identity Saved" : "Save Identity"}
       </Button>
-    </div>
+    </ActionCard>
   );
 };

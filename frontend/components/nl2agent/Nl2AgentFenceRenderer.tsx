@@ -6,24 +6,8 @@ import { useAuiState } from "@assistant-ui/react";
 import type { SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
 
 import { tryRenderNl2AgentCard } from "./index";
-import {
-  parseNl2AgentCard,
-  validateNl2AgentCards,
-  type ValidatedNl2AgentCard,
-} from "./cardValidation";
+import { parseNl2AgentCard } from "./cardValidation";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import { reportNl2AgentCardDelivery } from "@/services/nl2agentService";
-
-const deliveryKey = (messageId: number, card: ValidatedNl2AgentCard) =>
-  `${messageId}:${card.cardType}:${card.cardKey ?? ""}`;
-
-type CardDeliveryWorkflow = Pick<
-  ReturnType<typeof useNl2AgentWorkflow>,
-  | "claimCardDelivery"
-  | "completeCardDelivery"
-  | "continueWithText"
-  | "failCardDelivery"
->;
 
 export const resolveNl2AgentPersistedMessageId = (
   persistedMessageId: unknown,
@@ -42,56 +26,12 @@ export const resolveNl2AgentPersistedMessageId = (
   return undefined;
 };
 
-const reportRendered = async (
-  messageId: number,
-  card: ValidatedNl2AgentCard,
-  workflow: CardDeliveryWorkflow
-) => {
-  const key = deliveryKey(messageId, card);
-  if (!workflow.claimCardDelivery(key)) return;
-  try {
-    const result = await reportNl2AgentCardDelivery(card.agentId, {
-      message_id: messageId,
-      card_type: card.cardType,
-      status: "rendered",
-      card_key: card.cardKey,
-    });
-    workflow.completeCardDelivery(key);
-    if (result.chat_injection_text) {
-      await workflow.continueWithText(result.chat_injection_text);
-    }
-  } catch {
-    workflow.failCardDelivery(key);
-  }
-};
-
 export const Nl2AgentFenceRenderer = ({
   language,
   code,
 }: SyntaxHighlighterProps) => {
   const workflow = useNl2AgentWorkflow();
-  const {
-    agentId,
-    claimCardDelivery,
-    completeCardDelivery,
-    continueWithText,
-    editable,
-    failCardDelivery,
-  } = workflow;
-  const deliveryWorkflow = useMemo<CardDeliveryWorkflow>(
-    () => ({
-      claimCardDelivery,
-      completeCardDelivery,
-      continueWithText,
-      failCardDelivery,
-    }),
-    [
-      claimCardDelivery,
-      completeCardDelivery,
-      continueWithText,
-      failCardDelivery,
-    ]
-  );
+  const { agentId, editable, reportRenderedCard } = workflow;
   const messageIdValue = useAuiState((s) => s.message.id);
   const persistedMessageIdValue = useAuiState(
     (s) => s.message.metadata.custom.persistedMessageId
@@ -114,14 +54,14 @@ export const Nl2AgentFenceRenderer = ({
 
   const onRegistered = useCallback(async () => {
     if (!card || messageId === undefined) return;
-    await reportRendered(messageId, card, deliveryWorkflow);
-  }, [card, deliveryWorkflow, messageId]);
+    await reportRenderedCard(messageId, card);
+  }, [card, messageId, reportRenderedCard]);
 
   useEffect(() => {
     if (!registrationEnabled || !card || card.requiresRegistration) return;
     if (messageId === undefined) return;
-    void reportRendered(messageId, card, deliveryWorkflow);
-  }, [card, deliveryWorkflow, messageId, registrationEnabled]);
+    void reportRenderedCard(messageId, card).catch(() => undefined);
+  }, [card, messageId, registrationEnabled, reportRenderedCard]);
 
   if (!complete) {
     return (
@@ -202,16 +142,7 @@ export const nl2AgentComponentsByLanguage = Object.fromEntries(
 
 export const Nl2AgentMessageLifecycle = () => {
   const workflow = useNl2AgentWorkflow();
-  const {
-    active,
-    agentId,
-    busy,
-    claimCardDelivery,
-    completeCardDelivery,
-    continueWithText,
-    failCardDelivery,
-    sessionState,
-  } = workflow;
+  const { active, busy, continueWithText, processCompletedMessage } = workflow;
   const [manualRetryText, setManualRetryText] = useState<string>();
   const messageIdValue = useAuiState((s) => s.message.id);
   const persistedMessageIdValue = useAuiState(
@@ -236,44 +167,16 @@ export const Nl2AgentMessageLifecycle = () => {
     if (!active || !complete || !latest || messageId === undefined) {
       return;
     }
-    const validation = validateNl2AgentCards(text, agentId);
-    const expected = sessionState?.expected_card_types ?? [];
-    const failure =
-      validation.failure ??
-      (expected.length > 0 && validation.cards.length === 0
-        ? { cardType: expected[0], reason: "missing_card" as const }
-        : undefined);
-    if (!failure) return;
-    const key = `${messageId}:${failure.cardType}:${failure.cardKey ?? ""}:failed`;
-    if (!claimCardDelivery(key)) return;
-    void reportNl2AgentCardDelivery(agentId!, {
-      message_id: messageId,
-      card_type: failure.cardType,
-      status: "failed",
-      reason: failure.reason,
-      card_key: failure.cardKey,
-    })
-      .then(async (result) => {
-        completeCardDelivery(key);
-        if (result.auto_retry_allowed && result.chat_injection_text) {
-          await continueWithText(result.chat_injection_text);
-        } else if (result.chat_injection_text) {
-          setManualRetryText(result.chat_injection_text);
-        }
-      })
-      .catch(() => failCardDelivery(key));
+    void processCompletedMessage(messageId, text)
+      .then(setManualRetryText)
+      .catch(() => undefined);
   }, [
     active,
-    agentId,
-    claimCardDelivery,
     complete,
-    completeCardDelivery,
-    continueWithText,
-    failCardDelivery,
     latest,
     messageIdValue,
     persistedMessageIdValue,
-    sessionState,
+    processCompletedMessage,
     text,
   ]);
 

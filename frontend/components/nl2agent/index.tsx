@@ -9,10 +9,7 @@ import { FinalizeCard } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
-import {
-  isNl2AgentWorkflowConflict,
-  registerOnlineResourceRecommendations,
-} from "@/services/nl2agentService";
+import { isNl2AgentWorkflowConflict } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import {
@@ -43,7 +40,8 @@ export const OnlineRecommendationGroup: React.FC<{
   registrationEnabled = true,
 }) => {
   const workflow = useNl2AgentWorkflow();
-  const { notifyStateChanged } = workflow;
+  const { active, notifyStateChanged, registerOnlineRecommendations } =
+    workflow;
   const { execute, error } = useNl2AgentCardLifecycle(
     `online:${agentId}:${resourceType}:${recommendationBatchId}`
   );
@@ -68,18 +66,13 @@ export const OnlineRecommendationGroup: React.FC<{
   ]);
 
   const register = useCallback(async () => {
-    if (
-      registered ||
-      !recommendationBatchId ||
-      !workflow.active ||
-      !registrationEnabled
-    )
+    if (registered || !recommendationBatchId || !active || !registrationEnabled)
       return;
     setRegistrationRetryable(true);
     try {
       await execute(
         () =>
-          registerOnlineResourceRecommendations(agentId, {
+          registerOnlineRecommendations(agentId, {
             recommendation_batch_id: recommendationBatchId,
             resource_type: resourceType,
             item_keys: JSON.parse(serializedKeys),
@@ -110,9 +103,10 @@ export const OnlineRecommendationGroup: React.FC<{
     onRegistered,
     notifyStateChanged,
     recommendationBatchId,
+    registerOnlineRecommendations,
     resourceType,
     serializedKeys,
-    workflow.active,
+    active,
     registrationEnabled,
     registered,
   ]);

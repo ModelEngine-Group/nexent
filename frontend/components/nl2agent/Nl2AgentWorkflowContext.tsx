@@ -13,16 +13,27 @@ import { NL2AGENT_AUTO_CONTINUE_PREFIX } from "@/lib/chat/nl2agentContinuation";
 import type { Nl2AgentUserAction } from "@/lib/chat/nl2agentContinuation";
 import {
   getNl2AgentSessionState,
+  registerOnlineResourceRecommendations,
+  reportNl2AgentCardDelivery,
   resumeNl2AgentSession,
+  type Nl2AgentCardDeliveryResponse,
   type Nl2AgentSessionSummary,
   type Nl2AgentSessionState,
 } from "@/services/nl2agentService";
+import {
+  validateNl2AgentCards,
+  type Nl2AgentCardFailure,
+  type ValidatedNl2AgentCard,
+} from "./cardValidation";
+import type { components as Nl2AgentApiComponents } from "@/contracts/generated/nl2agent-api";
 
 export { NL2AGENT_AUTO_CONTINUE_PREFIX };
 
 export type Nl2AgentContinuationRequest =
   | { kind: "automatic"; text: string }
   | { kind: "user_action"; text: string; action: Nl2AgentUserAction };
+
+type Nl2AgentApiSchemas = Nl2AgentApiComponents["schemas"];
 
 interface Nl2AgentWorkflowContextValue {
   active: boolean;
@@ -50,6 +61,18 @@ interface Nl2AgentWorkflowContextValue {
   claimCardDelivery: (key: string) => boolean;
   completeCardDelivery: (key: string) => void;
   failCardDelivery: (key: string) => void;
+  reportRenderedCard: (
+    messageId: number,
+    card: ValidatedNl2AgentCard
+  ) => Promise<void>;
+  processCompletedMessage: (
+    messageId: number,
+    text: string
+  ) => Promise<string | undefined>;
+  registerOnlineRecommendations: (
+    targetAgentId: number,
+    payload: Nl2AgentApiSchemas["Nl2AgentOnlineRecommendationBatchRequest"]
+  ) => ReturnType<typeof registerOnlineResourceRecommendations>;
 }
 
 const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
@@ -71,6 +94,9 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   claimCardDelivery: () => false,
   completeCardDelivery: () => {},
   failCardDelivery: () => {},
+  reportRenderedCard: async () => {},
+  processCompletedMessage: async () => undefined,
+  registerOnlineRecommendations: registerOnlineResourceRecommendations,
 });
 
 export const Nl2AgentWorkflowProvider: React.FC<{
@@ -92,6 +118,12 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   onSessionResumed,
   onStateChanged,
 }) => {
+  const scopedAgentId = useMemo(() => {
+    if (agentId) return agentId;
+    const match = scopeKey.match(/(?:^|:)draft:(\d+)(?:$|:)/);
+    const parsed = Number(match?.[1]);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }, [agentId, scopeKey]);
   const [actionCount, setActionCount] = useState(0);
   const [continuing, setContinuing] = useState(false);
   const [inputBlockers, setInputBlockers] = useState<Set<string>>(new Set());
@@ -101,7 +133,10 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   const [sessionStateError, setSessionStateError] = useState<string>();
   const [resuming, setResuming] = useState(false);
   const [retries, setRetries] = useState<
-    Record<string, { request: Nl2AgentContinuationRequest; error: string }>
+    Record<
+      string,
+      { request: Nl2AgentContinuationRequest; error: string; attempts: number }
+    >
   >({});
   const continuingRef = useRef(false);
   const sessionRequestRef = useRef(0);
@@ -210,18 +245,19 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       if (!editable || !request?.text || continuingRef.current) return;
       continuingRef.current = true;
       setContinuing(true);
-      setRetries((current) => {
-        const next = { ...current };
-        delete next[scopeKey];
-        return next;
-      });
       try {
         await onContinueRef.current(request);
+        setRetries((current) => {
+          const next = { ...current };
+          delete next[scopeKey];
+          return next;
+        });
       } catch (error) {
         setRetries((current) => ({
           ...current,
           [scopeKey]: {
             request,
+            attempts: (current[scopeKey]?.attempts ?? 0) + 1,
             error:
               error instanceof Error
                 ? error.message
@@ -252,16 +288,110 @@ export const Nl2AgentWorkflowProvider: React.FC<{
 
   const retryContinuation = useCallback(async () => {
     const retry = retries[scopeKey];
-    if (retry) await continueRequest(retry.request);
+    if (retry && retry.attempts < 2) await continueRequest(retry.request);
   }, [continueRequest, retries, scopeKey]);
 
   const continuationError = retries[scopeKey]?.error;
+
+  const requireScopedAgent = useCallback(
+    (targetAgentId: number) => {
+      if (!enabled || !scopedAgentId || targetAgentId !== scopedAgentId) {
+        throw new Error("NL2AGENT card does not belong to the active session.");
+      }
+    },
+    [enabled, scopedAgentId]
+  );
+
+  const reportRenderedCard = useCallback(
+    async (messageId: number, card: ValidatedNl2AgentCard) => {
+      requireScopedAgent(card.agentId);
+      const key = `${messageId}:${card.cardType}:${card.cardKey ?? ""}`;
+      if (!claimCardDelivery(key)) return;
+      try {
+        const result = await reportNl2AgentCardDelivery(card.agentId, {
+          message_id: messageId,
+          card_type: card.cardType,
+          status: "rendered",
+          card_key: card.cardKey,
+        });
+        completeCardDelivery(key);
+        if (result.chat_injection_text) {
+          await continueWithText(result.chat_injection_text);
+        }
+      } catch (error) {
+        failCardDelivery(key);
+        throw error;
+      }
+    },
+    [
+      claimCardDelivery,
+      completeCardDelivery,
+      continueWithText,
+      failCardDelivery,
+      requireScopedAgent,
+    ]
+  );
+
+  const processCompletedMessage = useCallback(
+    async (messageId: number, text: string): Promise<string | undefined> => {
+      if (!enabled || !scopedAgentId) return undefined;
+      const validation = validateNl2AgentCards(text, scopedAgentId);
+      const expected = sessionState?.expected_card_types ?? [];
+      const failure: Nl2AgentCardFailure | undefined =
+        validation.failure ??
+        (expected.length > 0 && validation.cards.length === 0
+          ? { cardType: expected[0], reason: "missing_card" }
+          : undefined);
+      if (!failure) return undefined;
+      const key = `${messageId}:${failure.cardType}:${failure.cardKey ?? ""}:failed`;
+      if (!claimCardDelivery(key)) return undefined;
+      try {
+        const result: Nl2AgentCardDeliveryResponse =
+          await reportNl2AgentCardDelivery(scopedAgentId, {
+            message_id: messageId,
+            card_type: failure.cardType,
+            status: "failed",
+            reason: failure.reason,
+            card_key: failure.cardKey,
+          });
+        completeCardDelivery(key);
+        if (result.auto_retry_allowed && result.chat_injection_text) {
+          await continueWithText(result.chat_injection_text);
+          return undefined;
+        }
+        return result.chat_injection_text ?? undefined;
+      } catch (error) {
+        failCardDelivery(key);
+        throw error;
+      }
+    },
+    [
+      claimCardDelivery,
+      completeCardDelivery,
+      continueWithText,
+      enabled,
+      failCardDelivery,
+      sessionState,
+      scopedAgentId,
+    ]
+  );
+
+  const registerOnlineRecommendations = useCallback(
+    (
+      targetAgentId: number,
+      payload: Nl2AgentApiSchemas["Nl2AgentOnlineRecommendationBatchRequest"]
+    ) => {
+      requireScopedAgent(targetAgentId);
+      return registerOnlineResourceRecommendations(targetAgentId, payload);
+    },
+    [requireScopedAgent]
+  );
 
   const value = useMemo<Nl2AgentWorkflowContextValue>(
     () => ({
       active: enabled && editable,
       editable,
-      agentId: agentId ?? undefined,
+      agentId: scopedAgentId,
       continueWithText,
       continueWithUserAction,
       beginAction,
@@ -285,10 +415,12 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       claimCardDelivery,
       completeCardDelivery,
       failCardDelivery,
+      reportRenderedCard,
+      processCompletedMessage,
+      registerOnlineRecommendations,
     }),
     [
       actionCount,
-      agentId,
       beginAction,
       continueWithText,
       continueWithUserAction,
@@ -306,10 +438,14 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       claimCardDelivery,
       completeCardDelivery,
       failCardDelivery,
+      processCompletedMessage,
+      registerOnlineRecommendations,
+      reportRenderedCard,
       setInputBlocked,
       sessionState,
       sessionStateError,
       sessionStateLoading,
+      scopedAgentId,
       stateVersion,
     ]
   );

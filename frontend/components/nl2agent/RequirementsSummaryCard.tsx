@@ -23,6 +23,7 @@ import {
   type RequirementsSummaryCardPayload,
 } from "./cardPayloadTypes";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
+import { ActionCard, StaticFieldList } from "./ActionCard";
 
 export interface RequirementsSummaryCardProps {
   agentId: number;
@@ -225,22 +226,16 @@ export const RequirementsSummaryCard: React.FC<
   );
 
   return (
-    <div className="my-3 rounded-lg border border-gray-200 bg-white p-4">
-      <div className="mb-3 text-sm font-medium">
-        {t("nl2agent.requirements.title", "Requirements Summary")}
-      </div>
-      <dl className="space-y-3">
-        {labels.map(([field, label]) => (
-          <div key={field}>
-            <dt className="text-xs font-medium text-gray-500">
-              {t(`nl2agent.requirements.${label}`)}
-            </dt>
-            <dd className="mt-0.5 whitespace-pre-wrap text-sm text-gray-800">
-              {summary[field]}
-            </dd>
-          </div>
-        ))}
-      </dl>
+    <ActionCard
+      title={t("nl2agent.requirements.title", "Requirements Summary")}
+    >
+      <StaticFieldList
+        fields={labels.map(([field, label]) => ({
+          key: field,
+          label: t(`nl2agent.requirements.${label}`),
+          value: summary[field],
+        }))}
+      />
       {cardState === "loading" ? (
         <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
           <Spin size="small" />
@@ -311,6 +306,6 @@ export const RequirementsSummaryCard: React.FC<
           </Button>
         </div>
       ) : null}
-    </div>
+    </ActionCard>
   );
 };

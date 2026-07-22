@@ -191,4 +191,42 @@ describe("useNl2AgentCardLifecycle", () => {
 
     expect(result.current.workflow.busy).toBe(false);
   });
+
+  it("limits failed hidden continuations to two attempts", async () => {
+    const onContinue = vi.fn(async () => {
+      throw new Error("continuation unavailable");
+    });
+    const { result } = renderHook(useLifecycleWithWorkflow, {
+      wrapper: wrapperFor(onContinue),
+    });
+
+    await act(async () => {
+      await result.current.workflow.continueWithText("continue");
+    });
+    await act(async () => {
+      await result.current.workflow.retryContinuation();
+    });
+    await act(async () => {
+      await result.current.workflow.retryContinuation();
+    });
+
+    expect(onContinue).toHaveBeenCalledTimes(2);
+    expect(result.current.workflow.continuationError).toBe(
+      "continuation unavailable"
+    );
+  });
+
+  it("rejects actions for a card outside the active draft scope", async () => {
+    const { result } = renderHook(useLifecycleWithWorkflow, {
+      wrapper: wrapperFor(vi.fn(async () => undefined)),
+    });
+
+    expect(() =>
+      result.current.workflow.registerOnlineRecommendations(99, {
+        recommendation_batch_id: "batch-a",
+        resource_type: "mcp",
+        item_keys: [],
+      })
+    ).toThrow("does not belong to the active session");
+  });
 });
