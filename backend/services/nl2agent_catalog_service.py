@@ -62,6 +62,8 @@ class SkillInstallationDependencies:
     acquire_installation_lock: Callable[..., Optional[str]]
     renew_installation_lock: Callable[..., bool]
     release_installation_lock: Callable[..., Any]
+    get_installation_operation: Callable[..., Optional[Dict[str, Any]]]
+    transition_installation_operation: Callable[..., bool]
     reserve_installation: Callable[..., Dict[str, Any]]
     complete_installation: Callable[..., Dict[str, Any]]
     release_installation: Callable[..., Any]
@@ -551,6 +553,11 @@ async def install_web_skill(
         )
     operation_committed = False
     try:
+        durable_operation = dependencies.get_installation_operation(
+            tenant_id, agent_id, installation_key
+        )
+        if durable_operation and durable_operation.get("status") == "completed":
+            return _public_skill_install_result(durable_operation.get("result") or {})
         reservation = dependencies.reserve_installation(
             tenant_id,
             agent_id,
@@ -639,12 +646,39 @@ async def install_web_skill(
                 operation_id,
                 workflow_result,
             )
+            if not dependencies.transition_installation_operation(
+                tenant_id,
+                agent_id,
+                installation_key,
+                lock_token,
+                "completed",
+                checkpoint={"files_installed": True, "database_bound": True},
+                result=workflow_result,
+            ):
+                raise Nl2AgentOperationError(
+                    "The Skill was installed, but its durable operation lease was lost. Retry installation."
+                )
         except Exception as exc:
             raise Nl2AgentOperationError(
                 "The Skill was installed, but workflow state could not be reconciled. Retry installation."
             ) from exc
         return result
     except Exception:
+        try:
+            dependencies.transition_installation_operation(
+                tenant_id,
+                agent_id,
+                installation_key,
+                lock_token,
+                "failed",
+                checkpoint={"retryable": True},
+                error={
+                    "code": "installation_failed",
+                    "message": "Skill installation failed; reconciliation is required.",
+                },
+            )
+        except Exception:
+            logger.exception("Failed to persist durable NL2AGENT Skill failure state")
         if not operation_committed:
             try:
                 dependencies.release_installation(

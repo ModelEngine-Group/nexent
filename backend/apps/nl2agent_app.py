@@ -58,7 +58,7 @@ from consts.nl2agent_response import (
     Nl2AgentWebSkillInstallResponse,
     Nl2AgentWebSkillConfigurationResponse,
 )
-from services.nl2agent_service import (
+from services.nl2agent_runtime_service import (
     apply_local_resources_batch,
     confirm_online_resource_configuration,
     confirm_requirements_review,

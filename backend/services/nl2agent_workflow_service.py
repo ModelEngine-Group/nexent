@@ -376,6 +376,7 @@ async def get_session_state(
         )
     )
     workflow_summary = dependencies.summarize_workflow_state(workflow_state)
+    workflow_state.pop("recommendations", None)
     workflow_state.pop("online_installations", None)
     for batch in workflow_state.get("recommendation_batches", {}).values():
         batch.pop("operation_id", None)

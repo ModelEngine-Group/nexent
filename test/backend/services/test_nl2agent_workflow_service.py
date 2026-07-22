@@ -8,7 +8,7 @@ from test.backend.services.nl2agent_test_support import *  # noqa: F403
 async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
     _confirm_requirements()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -20,7 +20,7 @@ async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         lambda message_id, user_id: {
             "message_id": message_id,
@@ -30,7 +30,7 @@ async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         lambda conversation_id, user_id: (
             test_card_delivery_allows_two_automatic_retries.latest_id
@@ -41,7 +41,7 @@ async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
     for index in range(1, 4):
         test_card_delivery_allows_two_automatic_retries.latest_id = index
         results.append(
-            await nl2agent_service.report_card_delivery(
+            await nl2agent_runtime_service.report_card_delivery(
                 agent_id=202,
                 message_id=index,
                 card_type="model_selection",
@@ -64,14 +64,14 @@ async def test_card_delivery_allows_two_automatic_retries(monkeypatch):
 async def test_card_delivery_accepts_valid_card_in_persisted_message(monkeypatch):
     _confirm_requirements()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -86,12 +86,12 @@ async def test_card_delivery_accepts_valid_card_in_persisted_message(monkeypatch
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=10),
     )
 
-    result = await nl2agent_service.report_card_delivery(
+    result = await nl2agent_runtime_service.report_card_delivery(
         agent_id=202,
         message_id=10,
         card_type="model_selection",
@@ -132,14 +132,14 @@ async def test_revision_routing_accepts_the_targeted_model_card(monkeypatch):
     )
     nl2agent_session_catalog.enter_revision_mode("tenant_1", 202)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -154,12 +154,12 @@ async def test_revision_routing_accepts_the_targeted_model_card(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=72),
     )
 
-    result = await nl2agent_service.report_card_delivery(
+    result = await nl2agent_runtime_service.report_card_delivery(
         agent_id=202,
         message_id=72,
         card_type="model_selection",
@@ -186,14 +186,14 @@ async def test_requirements_card_delivery_omits_fingerprint_card_key(monkeypatch
         + "\n```"
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -206,12 +206,12 @@ async def test_requirements_card_delivery_omits_fingerprint_card_key(monkeypatch
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=10),
     )
 
-    first = await nl2agent_service.report_card_delivery(
+    first = await nl2agent_runtime_service.report_card_delivery(
         agent_id=202,
         message_id=10,
         card_type="requirements_summary",
@@ -221,7 +221,7 @@ async def test_requirements_card_delivery_omits_fingerprint_card_key(monkeypatch
         tenant_id="tenant_1",
         user_id="user_1",
     )
-    duplicate = await nl2agent_service.report_card_delivery(
+    duplicate = await nl2agent_runtime_service.report_card_delivery(
         agent_id=202,
         message_id=10,
         card_type="requirements_summary",
@@ -244,14 +244,14 @@ async def test_card_delivery_accepts_valid_card_from_completed_message_units(
 ):
     _confirm_requirements()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -264,7 +264,7 @@ async def test_card_delivery_accepts_valid_card_from_completed_message_units(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message_units",
         MagicMock(
             return_value=[
@@ -282,12 +282,12 @@ async def test_card_delivery_accepts_valid_card_from_completed_message_units(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=10),
     )
 
-    result = await nl2agent_service.report_card_delivery(
+    result = await nl2agent_runtime_service.report_card_delivery(
         agent_id=202,
         message_id=10,
         card_type="model_selection",
@@ -318,14 +318,14 @@ async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
 ):
     _confirm_requirements()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -338,12 +338,12 @@ async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=10),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message_units",
         MagicMock(
             return_value=[
@@ -360,7 +360,7 @@ async def test_card_delivery_rejects_rendered_receipt_without_valid_card(
         Nl2AgentStaleCardError,
         match="does not contain",
     ):
-        await nl2agent_service.report_card_delivery(
+        await nl2agent_runtime_service.report_card_delivery(
             agent_id=202,
             message_id=10,
             card_type="model_selection",
@@ -401,14 +401,14 @@ async def test_dual_online_cards_accept_registration_and_receipts_in_either_orde
             item_keys=[],
         )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -428,7 +428,7 @@ async def test_dual_online_cards_accept_registration_and_receipts_in_either_orde
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=20),
     )
@@ -439,10 +439,10 @@ async def test_dual_online_cards_accept_registration_and_receipts_in_either_orde
     ]
     for resource_type in ordered_types:
         batch_id, card_type = batches[resource_type]
-        await nl2agent_service.register_online_resource_recommendations(
+        await nl2agent_runtime_service.register_online_resource_recommendations(
             202, batch_id, resource_type, [], "tenant_1", "user_1"
         )
-        await nl2agent_service.report_card_delivery(
+        await nl2agent_runtime_service.report_card_delivery(
             agent_id=202,
             message_id=20,
             card_type=card_type,
@@ -466,16 +466,16 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
     create_conversation = MagicMock(return_value={"conversation_id": 303})
 
     monkeypatch.setattr(
-        nl2agent_service, "search_agent_id_by_agent_name", search_builder
+        nl2agent_runtime_service, "search_agent_id_by_agent_name", search_builder
     )
-    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", search_agent)
-    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
-    monkeypatch.setattr(nl2agent_service, "create_conversation", create_conversation)
+    monkeypatch.setattr(nl2agent_runtime_service, "search_agent_info_by_agent_id", search_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_agent", create_draft)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_conversation", create_conversation)
     monkeypatch.setattr(
-        nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
+        nl2agent_runtime_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
     )
 
-    result = await nl2agent_service.start_session(
+    result = await nl2agent_runtime_service.start_session(
         user_id="user_1", tenant_id="tenant_1", language="en"
     )
     Nl2AgentSessionStartResponse.model_validate(result)
@@ -491,12 +491,12 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
 
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
     search_agent.assert_called_once_with(agent_id=101, tenant_id="tenant_1")
-    nl2agent_service.list_all_tools.assert_awaited_once_with(
+    nl2agent_runtime_service.list_all_tools.assert_awaited_once_with(
         tenant_id="tenant_1",
         labels=None,
         limit=2_000,
     )
-    nl2agent_service.list_community_mcp_services.assert_awaited_once_with(
+    nl2agent_runtime_service.list_community_mcp_services.assert_awaited_once_with(
         search=None,
         cursor=None,
         limit=100,
@@ -529,32 +529,32 @@ async def test_start_session_keeps_installable_and_recoverable_official_skills(
         {"skill_id": 3, "name": "missing-files", "status": "resource_missing"},
     ]
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_official_skills_with_status",
         MagicMock(return_value=official_skills),
     )
     monkeypatch.setattr(
-        nl2agent_service, "search_agent_id_by_agent_name", MagicMock(return_value=101)
+        nl2agent_runtime_service, "search_agent_id_by_agent_name", MagicMock(return_value=101)
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(return_value=_seeded_nl2agent_info()),
     )
     monkeypatch.setattr(
-        nl2agent_service, "create_agent", MagicMock(return_value={"agent_id": 202})
+        nl2agent_runtime_service, "create_agent", MagicMock(return_value={"agent_id": 202})
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_conversation",
         MagicMock(return_value={"conversation_id": 303}),
     )
     monkeypatch.setattr(
-        nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
+        nl2agent_runtime_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
     )
 
     with caplog.at_level("WARNING"):
-        await nl2agent_service.start_session(
+        await nl2agent_runtime_service.start_session(
             user_id="user_1",
             tenant_id="tenant_1",
             language="en",
@@ -577,28 +577,28 @@ async def test_start_session_degrades_when_registry_catalog_is_unavailable(
     _, transaction = _mock_database_transaction(monkeypatch)
     create_draft = MagicMock(return_value={"agent_id": 202})
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_id_by_agent_name",
         MagicMock(return_value=101),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(return_value=_seeded_nl2agent_info()),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "list_registry_mcp_services",
         AsyncMock(side_effect=RuntimeError("registry unavailable")),
     )
-    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_agent", create_draft)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_conversation",
         MagicMock(return_value={"conversation_id": 303}),
     )
 
-    result = await nl2agent_service.start_session(
+    result = await nl2agent_runtime_service.start_session(
         user_id="user_1", tenant_id="tenant_1", language="en"
     )
 
@@ -615,22 +615,22 @@ async def test_start_session_does_not_expose_state_when_database_commit_fails(
     _, transaction = _mock_database_transaction(monkeypatch)
     transaction.__exit__.side_effect = RuntimeError("commit failed")
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_id_by_agent_name",
         MagicMock(return_value=101),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(return_value=_seeded_nl2agent_info()),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_agent",
         MagicMock(return_value={"agent_id": 202}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_conversation",
         MagicMock(return_value={"conversation_id": 303}),
     )
@@ -639,7 +639,7 @@ async def test_start_session_does_not_expose_state_when_database_commit_fails(
         Nl2AgentOperationError,
         match="Failed to initialize NL2AGENT session",
     ):
-        await nl2agent_service.start_session(
+        await nl2agent_runtime_service.start_session(
             user_id="user_1", tenant_id="tenant_1", language="en"
         )
 
@@ -663,26 +663,26 @@ async def test_start_session_provisions_builder_for_existing_tenant_when_missing
     provision_builder = MagicMock(return_value=101)
 
     monkeypatch.setattr(
-        nl2agent_service, "search_agent_id_by_agent_name", search_builder
+        nl2agent_runtime_service, "search_agent_id_by_agent_name", search_builder
     )
     monkeypatch.setattr(
-        nl2agent_service, "seed_nl2agent_default_agent", provision_builder
+        nl2agent_runtime_service, "seed_nl2agent_default_agent", provision_builder
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(return_value=_seeded_nl2agent_info()),
     )
     monkeypatch.setattr(
-        nl2agent_service, "create_agent", MagicMock(return_value={"agent_id": 202})
+        nl2agent_runtime_service, "create_agent", MagicMock(return_value={"agent_id": 202})
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_conversation",
         MagicMock(return_value={"conversation_id": 303}),
     )
 
-    result = await nl2agent_service.start_session(
+    result = await nl2agent_runtime_service.start_session(
         user_id="user_1", tenant_id="tenant_1", language="en"
     )
 
@@ -702,22 +702,22 @@ async def test_start_session_fails_before_draft_creation_when_provisioning_fails
 ):
     create_draft = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_id_by_agent_name",
         MagicMock(side_effect=ValueError("agent not found")),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "seed_nl2agent_default_agent",
         MagicMock(return_value=provisioned_id),
     )
-    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_agent", create_draft)
 
     with pytest.raises(
         Nl2AgentOperationError,
         match="could not be provisioned for this tenant",
     ):
-        await nl2agent_service.start_session(
+        await nl2agent_runtime_service.start_session(
             user_id="user_1",
             tenant_id="tenant_1",
             language="en",
@@ -732,24 +732,24 @@ async def test_start_session_fails_before_draft_creation_when_builder_is_incompl
 ):
     create_draft = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_id_by_agent_name",
         MagicMock(return_value=101),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(return_value=_seeded_nl2agent_info()),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_or_update_tool_by_tool_info",
         MagicMock(side_effect=RuntimeError("binding failed")),
     )
-    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_agent", create_draft)
 
     with pytest.raises(Nl2AgentOperationError, match="default agent is not ready"):
-        await nl2agent_service.start_session(
+        await nl2agent_runtime_service.start_session(
             user_id="user_1",
             tenant_id="tenant_1",
             language="en",
@@ -776,17 +776,17 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
     create_conversation = MagicMock(return_value={"conversation_id": 303})
 
     monkeypatch.setattr(
-        nl2agent_service, "search_agent_id_by_agent_name", search_builder
+        nl2agent_runtime_service, "search_agent_id_by_agent_name", search_builder
     )
-    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", search_agent)
-    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
-    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
-    monkeypatch.setattr(nl2agent_service, "create_conversation", create_conversation)
+    monkeypatch.setattr(nl2agent_runtime_service, "search_agent_info_by_agent_id", search_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "update_agent", update_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_agent", create_draft)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_conversation", create_conversation)
     monkeypatch.setattr(
-        nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
+        nl2agent_runtime_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
     )
 
-    result = await nl2agent_service.start_session(
+    result = await nl2agent_runtime_service.start_session(
         user_id="user_1", tenant_id="tenant_1", language="en"
     )
 
@@ -815,9 +815,13 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
     db_session, transaction = _mock_database_transaction(monkeypatch)
     _mock_selectable_models(monkeypatch)
     update_agent = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    set_confirmed = MagicMock(return_value={"model_selection_confirmed": True})
+    monkeypatch.setattr(nl2agent_runtime_service, "update_agent", update_agent)
+    monkeypatch.setattr(
+        nl2agent_runtime_service, "set_model_selection_confirmed", set_confirmed
+    )
 
-    result = await nl2agent_service.select_models(
+    result = await nl2agent_runtime_service.select_models(
         agent_id=202,
         primary_model_id=7,
         fallback_model_ids=[8],
@@ -830,10 +834,13 @@ async def test_select_models_persists_primary_and_ordered_fallbacks(monkeypatch)
     assert request.business_logic_model_id == 7
     assert request.model_ids == [7, 8]
     assert update_agent.call_args.kwargs["db_session"] is db_session
+    set_confirmed.assert_called_once_with(
+        "tenant_1", 202, True, db_session=db_session
+    )
     transaction.__exit__.assert_called_once_with(None, None, None)
     assert result["fallback_model_ids"] == [8]
     assert (
-        result["chat_injection_text"] == nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT
+        result["chat_injection_text"] == nl2agent_runtime_service.NL2AGENT_CHAT_INJECTION_TEXT
     )
 
 
@@ -842,14 +849,14 @@ async def test_select_models_accepts_legacy_chat_model_type(monkeypatch):
     _confirm_requirements()
     _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_model_records",
         MagicMock(
             return_value=[
@@ -863,9 +870,9 @@ async def test_select_models_accepts_legacy_chat_model_type(monkeypatch):
         ),
     )
     update_agent = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "update_agent", update_agent)
 
-    result = await nl2agent_service.select_models(
+    result = await nl2agent_runtime_service.select_models(
         agent_id=202,
         primary_model_id=8,
         fallback_model_ids=[],
@@ -878,87 +885,9 @@ async def test_select_models_accepts_legacy_chat_model_type(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_select_models_rolls_back_database_when_redis_write_fails(
-    monkeypatch,
-):
-    _confirm_requirements()
-    db_session, transaction = _mock_database_transaction(monkeypatch)
-    _mock_selectable_models(monkeypatch)
-    update_agent = MagicMock()
-    set_confirmed = MagicMock(
-        side_effect=[
-            RuntimeError("Redis unavailable"),
-            {"model_selection_confirmed": False},
-        ]
-    )
-    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
-    monkeypatch.setattr(
-        nl2agent_service,
-        "set_model_selection_confirmed",
-        set_confirmed,
-    )
-
-    with pytest.raises(
-        Nl2AgentOperationError,
-        match="Failed to save the model selection",
-    ) as exc_info:
-        await nl2agent_service.select_models(
-            agent_id=202,
-            primary_model_id=7,
-            fallback_model_ids=[],
-            tenant_id="tenant_1",
-            user_id="user_1",
-        )
-
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert update_agent.call_args.kwargs["db_session"] is db_session
-    transaction.__exit__.assert_called_once()
-    assert transaction.__exit__.call_args.args[0] is RuntimeError
-    assert [record.args for record in set_confirmed.call_args_list] == [
-        ("tenant_1", 202, True),
-        ("tenant_1", 202, False),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_select_models_restores_redis_when_database_commit_fails(
-    monkeypatch,
-):
-    _confirm_requirements()
-    _, transaction = _mock_database_transaction(monkeypatch)
-    transaction.__exit__.side_effect = RuntimeError("database commit failed")
-    _mock_selectable_models(monkeypatch)
-    monkeypatch.setattr(nl2agent_service, "update_agent", MagicMock())
-    set_confirmed = MagicMock()
-    monkeypatch.setattr(
-        nl2agent_service,
-        "set_model_selection_confirmed",
-        set_confirmed,
-    )
-
-    with pytest.raises(
-        Nl2AgentOperationError,
-        match="Failed to save the model selection",
-    ) as exc_info:
-        await nl2agent_service.select_models(
-            agent_id=202,
-            primary_model_id=7,
-            fallback_model_ids=[],
-            tenant_id="tenant_1",
-            user_id="user_1",
-        )
-
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert [record.args for record in set_confirmed.call_args_list] == [
-        ("tenant_1", 202, True),
-        ("tenant_1", 202, False),
-    ]
-
-
-@pytest.mark.asyncio
 async def test_select_models_requires_confirmed_requirements(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
@@ -969,7 +898,7 @@ async def test_select_models_requires_confirmed_requirements(monkeypatch):
         Nl2AgentWorkflowConflictError,
         match="Confirm the requirements summary",
     ):
-        await nl2agent_service.select_models(
+        await nl2agent_runtime_service.select_models(
             agent_id=202,
             primary_model_id=7,
             fallback_model_ids=[],
@@ -1015,47 +944,6 @@ def test_finalize_request_rejects_model_supplied_prompt_template_id():
         )
 
 
-def test_mcp_installation_lock_renews_only_for_its_owner():
-    token = nl2agent_session_catalog.acquire_mcp_installation_lock(
-        "tenant_1", 202, "install-key"
-    )
-
-    assert token
-    assert nl2agent_session_catalog.renew_mcp_installation_lock(
-        "tenant_1", 202, "install-key", token
-    )
-    assert not nl2agent_session_catalog.renew_mcp_installation_lock(
-        "tenant_1", 202, "install-key", "wrong-token"
-    )
-
-
-def test_mcp_options_share_one_recommendation_installation_lock():
-    remote_operation = nl2agent_mcp_service.installation_key(
-        202, "registry:github", "remote-0"
-    )
-    package_operation = nl2agent_mcp_service.installation_key(
-        202, "registry:github", "package-0"
-    )
-    lock_key = nl2agent_mcp_service.installation_lock_key(202, "registry:github")
-
-    assert remote_operation != package_operation
-    token = nl2agent_session_catalog.acquire_mcp_installation_lock(
-        "tenant_1", 202, lock_key
-    )
-    assert token
-    assert (
-        nl2agent_session_catalog.acquire_mcp_installation_lock(
-            "tenant_1", 202, lock_key
-        )
-        is None
-    )
-
-    other_lock_key = nl2agent_mcp_service.installation_lock_key(202, "registry:slack")
-    assert nl2agent_session_catalog.acquire_mcp_installation_lock(
-        "tenant_1", 202, other_lock_key
-    )
-
-
 def test_idempotent_state_mutation_does_not_increment_revision():
     first = nl2agent_session_catalog.record_card_delivery(
         "tenant_1",
@@ -1097,7 +985,7 @@ async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
         wait_forever,
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match="ownership was lost"):
+    with pytest.raises(nl2agent_runtime_service.AgentRunException, match="ownership was lost"):
         await nl2agent_mcp_service._perform_with_lock_heartbeat(
             dependencies,
             agent_id=202,
@@ -1115,12 +1003,12 @@ async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
 @pytest.mark.asyncio
 async def test_register_requirements_review_returns_normalized_state(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
 
-    result = await nl2agent_service.register_requirements_review(
+    result = await nl2agent_runtime_service.register_requirements_review(
         202,
         {**_REQUIREMENTS_SUMMARY, "goal": "  Build   a document assistant  "},
         "tenant_1",
@@ -1139,7 +1027,7 @@ async def test_register_requirements_review_recovers_confirmed_state_without_sta
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -1153,12 +1041,12 @@ async def test_register_requirements_review_recovers_confirmed_state_without_sta
         "tenant_1", 202
     )["revision"]
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_require_workflow_action",
         MagicMock(side_effect=AssertionError("registration must be replayable")),
     )
 
-    result = await nl2agent_service.register_requirements_review(
+    result = await nl2agent_runtime_service.register_requirements_review(
         202,
         _REQUIREMENTS_SUMMARY,
         "tenant_1",
@@ -1182,7 +1070,7 @@ async def test_register_online_resources_recovers_batch_without_stage_gate(
     completed,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -1194,12 +1082,12 @@ async def test_register_online_resources_recovers_batch_without_stage_gate(
         "tenant_1", 202
     )["revision"]
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_require_workflow_action",
         MagicMock(side_effect=AssertionError("registration must be replayable")),
     )
 
-    result = await nl2agent_service.register_online_resource_recommendations(
+    result = await nl2agent_runtime_service.register_online_resource_recommendations(
         202,
         "online_mcp",
         "mcp",
@@ -1221,7 +1109,7 @@ async def test_register_online_resources_recovers_batch_without_stage_gate(
 @pytest.mark.asyncio
 async def test_confirm_requirements_review_returns_auto_continue(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -1229,7 +1117,7 @@ async def test_confirm_requirements_review_returns_auto_continue(monkeypatch):
         "tenant_1", 202, _REQUIREMENTS_SUMMARY
     )
 
-    result = await nl2agent_service.confirm_requirements_review(
+    result = await nl2agent_runtime_service.confirm_requirements_review(
         202, review["fingerprint"], "tenant_1", "user_1"
     )
 
@@ -1237,14 +1125,14 @@ async def test_confirm_requirements_review_returns_auto_continue(monkeypatch):
         "agent_id": 202,
         "status": "confirmed",
         "fingerprint": review["fingerprint"],
-        "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
+        "chat_injection_text": nl2agent_runtime_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
 
 @pytest.mark.asyncio
 async def test_confirm_requirements_review_rejects_stale_fingerprint(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -1256,7 +1144,7 @@ async def test_confirm_requirements_review_rejects_stale_fingerprint(monkeypatch
         nl2agent_session_catalog.Nl2AgentSessionCatalogError,
         match="requirements summary is stale",
     ):
-        await nl2agent_service.confirm_requirements_review(
+        await nl2agent_runtime_service.confirm_requirements_review(
             202, "0" * 64, "tenant_1", "user_1"
         )
 
@@ -1266,17 +1154,17 @@ def test_process_requirements_revision_text_updates_nl2agent_draft(monkeypatch):
         "tenant_1", 202, _REQUIREMENTS_SUMMARY
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "find_agent_info_by_agent_id",
         MagicMock(return_value={"agent_id": 1, "name": "nl2agent"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
 
-    result = nl2agent_service.process_requirements_revision_text(
+    result = nl2agent_runtime_service.process_requirements_revision_text(
         1, 202, "tenant_1", "user_1", "change the expected output"
     )
 
@@ -1293,24 +1181,24 @@ async def test_revised_requirements_card_starts_new_delivery_cycle(monkeypatch):
         "tenant_1", 202, 10, "requirements_summary", "rendered"
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "find_agent_info_by_agent_id",
         MagicMock(return_value={"agent_id": 1, "name": "nl2agent"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
 
-    nl2agent_service.process_requirements_revision_text(
+    nl2agent_runtime_service.process_requirements_revision_text(
         1, 202, "tenant_1", "user_1", "change the expected output"
     )
     revised_summary = {
         **_REQUIREMENTS_SUMMARY,
         "expected_output": "A presentation with speaker notes",
     }
-    registration = await nl2agent_service.register_requirements_review(
+    registration = await nl2agent_runtime_service.register_requirements_review(
         202, revised_summary, "tenant_1", "user_1"
     )
     message_content = (
@@ -1319,7 +1207,7 @@ async def test_revised_requirements_card_starts_new_delivery_cycle(monkeypatch):
         + "\n```"
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_message",
         MagicMock(
             return_value={
@@ -1332,12 +1220,12 @@ async def test_revised_requirements_card_starts_new_delivery_cycle(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_latest_assistant_message_id",
         MagicMock(return_value=11),
     )
 
-    delivery = await nl2agent_service.report_card_delivery(
+    delivery = await nl2agent_runtime_service.report_card_delivery(
         agent_id=202,
         message_id=11,
         card_type="requirements_summary",
@@ -1358,24 +1246,24 @@ async def test_revised_requirements_card_starts_new_delivery_cycle(monkeypatch):
 
 def test_process_requirements_revision_ignores_non_nl2agent_runner(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "find_agent_info_by_agent_id",
         MagicMock(return_value={"agent_id": 1, "name": "other_agent"}),
     )
 
-    assert nl2agent_service.process_requirements_revision_text(
+    assert nl2agent_runtime_service.process_requirements_revision_text(
         1, 202, "tenant_1", "user_1", "confirm requirements"
     ) == {"intent": "not_applicable"}
 
 
 def test_process_requirements_revision_ignores_missing_runner(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "find_agent_info_by_agent_id",
         MagicMock(return_value=None),
     )
 
-    assert nl2agent_service.process_requirements_revision_text(
+    assert nl2agent_runtime_service.process_requirements_revision_text(
         999, 202, "tenant_1", "user_1", "confirm requirements"
     ) == {"intent": "not_applicable"}
 
@@ -1384,14 +1272,14 @@ def test_process_requirements_revision_ignores_missing_runner(monkeypatch):
 async def test_select_models_rejects_unavailable_model(monkeypatch):
     _confirm_requirements()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_model_records",
         MagicMock(
             return_value=[
@@ -1401,9 +1289,9 @@ async def test_select_models_rejects_unavailable_model(monkeypatch):
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException, match="currently unavailable"
+        nl2agent_runtime_service.AgentRunException, match="currently unavailable"
     ):
-        await nl2agent_service.select_models(
+        await nl2agent_runtime_service.select_models(
             agent_id=202,
             primary_model_id=7,
             fallback_model_ids=[],
@@ -1426,18 +1314,18 @@ async def test_select_models_rejects_unavailable_model(monkeypatch):
 async def test_select_models_rejects_non_platform_llms(monkeypatch, records, message):
     _confirm_requirements()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "get_model_records", MagicMock(return_value=records)
+        nl2agent_runtime_service, "get_model_records", MagicMock(return_value=records)
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match=message):
-        await nl2agent_service.select_models(
+    with pytest.raises(nl2agent_runtime_service.AgentRunException, match=message):
+        await nl2agent_runtime_service.select_models(
             agent_id=202,
             primary_model_id=7,
             fallback_model_ids=[],
@@ -1449,7 +1337,7 @@ async def test_select_models_rejects_non_platform_llms(monkeypatch, records, mes
 @pytest.mark.asyncio
 async def test_finalize_rejects_draft_without_persisted_primary_model(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -1462,9 +1350,9 @@ async def test_finalize_rejects_draft_without_persisted_primary_model(monkeypatc
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException, match="Select a primary LLM"
+        nl2agent_runtime_service.AgentRunException, match="Select a primary LLM"
     ):
-        await nl2agent_service.finalize_agent(
+        await nl2agent_runtime_service.finalize_agent(
             agent_id=202,
             user_id="user_1",
             tenant_id="tenant_1",
@@ -1474,7 +1362,7 @@ async def test_finalize_rejects_draft_without_persisted_primary_model(monkeypatc
 @pytest.mark.asyncio
 async def test_finalize_revalidates_persisted_model_availability(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -1487,7 +1375,7 @@ async def test_finalize_revalidates_persisted_model_availability(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_model_records",
         MagicMock(
             return_value=[
@@ -1497,10 +1385,10 @@ async def test_finalize_revalidates_persisted_model_availability(monkeypatch):
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        nl2agent_runtime_service.AgentRunException,
         match="Reopen the model-selection card",
     ):
-        await nl2agent_service.finalize_agent(
+        await nl2agent_runtime_service.finalize_agent(
             agent_id=202,
             user_id="user_1",
             tenant_id="tenant_1",
@@ -1512,7 +1400,7 @@ async def test_finalize_rejects_output_tokens_above_primary_model_capacity(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -1525,7 +1413,7 @@ async def test_finalize_rejects_output_tokens_above_primary_model_capacity(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_model_records",
         MagicMock(
             return_value=[
@@ -1540,13 +1428,13 @@ async def test_finalize_rejects_output_tokens_above_primary_model_capacity(
         ),
     )
     update_agent = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "update_agent", update_agent)
 
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        nl2agent_runtime_service.AgentRunException,
         match="requested_output_tokens cannot exceed.*1024",
     ):
-        await nl2agent_service.finalize_agent(
+        await nl2agent_runtime_service.finalize_agent(
             agent_id=202,
             user_id="user_1",
             tenant_id="tenant_1",

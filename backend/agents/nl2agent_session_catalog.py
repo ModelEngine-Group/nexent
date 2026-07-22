@@ -7,9 +7,8 @@ import re
 import unicodedata
 import uuid
 from copy import deepcopy
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-
-import redis
 
 from agents import nl2agent_session_store as _session_store
 
@@ -29,9 +28,7 @@ from utils.nl2agent_catalog_snapshot import (
 
 logger = logging.getLogger(__name__)
 
-_INSTALLATION_LOCK_KEY_PREFIX = "nl2agent:mcp_installation_lock"
 _INSTALLATION_LOCK_TTL_SECONDS = 5 * 60
-_CAS_MAX_RETRIES = _session_store.CAS_MAX_RETRIES
 _REQUIREMENTS_FIELDS = (
     "goal",
     "audience_or_scenario",
@@ -121,13 +118,6 @@ _NO_MODIFICATION_PHRASES = {
 
 Nl2AgentSessionCatalogError = _session_store.Nl2AgentSessionCatalogError
 Nl2AgentStateConflictError = _session_store.Nl2AgentStateConflictError
-
-
-def get_redis_service():
-    """Resolve the legacy installation lock service until durable operations take over."""
-    from services.redis_service import get_redis_service as redis_service_factory
-
-    return redis_service_factory()
 
 
 _validate_identifiers = _session_store.validate_identifiers
@@ -370,6 +360,7 @@ def set_model_selection_confirmed(
     confirmed: bool = True,
     *,
     finish_revision: bool = True,
+    db_session=None,
 ) -> Dict[str, Any]:
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
 
@@ -379,7 +370,7 @@ def set_model_selection_confirmed(
             _finish_revision(state)
         return {"model_selection_confirmed": state.model_selection_confirmed}
 
-    return _mutate_session_state(tenant, draft_id, mutate)
+    return _mutate_session_state(tenant, draft_id, mutate, db_session=db_session)
 
 
 def record_card_delivery(
@@ -1201,17 +1192,8 @@ def get_nl2agent_search_catalogs(
 def delete_nl2agent_session_catalogs(
     tenant_id: Optional[str], draft_agent_id: Optional[int]
 ) -> None:
-    """Delete one draft's workflow and catalog keys during initialization compensation."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    client = get_redis_service().client
-    keys = [
-        _cache_key(tenant, draft_id),
-        _state_key(tenant, draft_id),
-    ]
-    keys.extend(
-        client.scan_iter(match=f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:*")
-    )
-    client.delete(*keys)
+    """Compatibility hook; PostgreSQL transaction rollback owns initialization cleanup."""
+    _validate_identifiers(tenant_id, draft_agent_id)
 
 
 def acquire_mcp_installation_lock(
@@ -1219,17 +1201,98 @@ def acquire_mcp_installation_lock(
     draft_agent_id: Optional[int],
     installation_key: str,
 ) -> Optional[str]:
-    """Acquire a tenant/draft installation lock and return its ownership token."""
+    """Claim a durable installation lease and return its ownership token."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    token = uuid.uuid4().hex
-    key = f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:{installation_key}"
-    acquired = get_redis_service().client.set(
-        key,
-        token,
-        nx=True,
-        ex=_INSTALLATION_LOCK_TTL_SECONDS,
+    from database.nl2agent_installation_db import (
+        InstallationLeaseConflictError,
+        claim_installation_operation,
     )
-    return token if acquired else None
+    from database.nl2agent_session_db import Nl2AgentSessionIdentity, get_nl2agent_session
+
+    session = get_nl2agent_session(tenant, draft_id)
+    if session is None:
+        return None
+    token = uuid.uuid4().hex
+    operation_id = hashlib.sha256(
+        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
+    ).hexdigest()
+    identity = Nl2AgentSessionIdentity(
+        tenant_id=tenant,
+        user_id=str(session["user_id"]),
+        runner_agent_id=int(session["runner_agent_id"]),
+        draft_agent_id=draft_id,
+        conversation_id=int(session["conversation_id"]),
+    )
+    try:
+        claim_installation_operation(
+            identity=identity,
+            operation_id=operation_id,
+            installation_key=installation_key,
+            request_fingerprint=operation_id,
+            resource_type=("skill" if installation_key.startswith("skill:") else "mcp"),
+            lease_owner=token,
+            lease_expires_at=datetime.utcnow() + timedelta(seconds=_INSTALLATION_LOCK_TTL_SECONDS),
+        )
+    except InstallationLeaseConflictError:
+        return None
+    return token
+
+
+def _installation_identity(tenant_id: str, draft_agent_id: int):
+    """Resolve the complete active Session identity for an installation operation."""
+    from database.nl2agent_session_db import Nl2AgentSessionIdentity, get_nl2agent_session
+
+    session = get_nl2agent_session(tenant_id, draft_agent_id)
+    if session is None:
+        return None
+    return Nl2AgentSessionIdentity(
+        tenant_id=tenant_id,
+        user_id=str(session["user_id"]),
+        runner_agent_id=int(session["runner_agent_id"]),
+        draft_agent_id=draft_agent_id,
+        conversation_id=int(session["conversation_id"]),
+    )
+
+
+def get_installation_operation(
+    tenant_id: Optional[str], draft_agent_id: Optional[int], installation_key: str
+) -> Optional[Dict[str, Any]]:
+    """Load a durable installation outcome through the active Session identity."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    identity = _installation_identity(tenant, draft_id)
+    if identity is None:
+        return None
+    from database.nl2agent_installation_db import get_installation_operation as load
+
+    return load(identity=identity, installation_key=installation_key)
+
+
+def transition_installation_operation(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    installation_key: str,
+    token: str,
+    status: str,
+    *,
+    checkpoint: Optional[Dict[str, Any]] = None,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Persist a secret-free checkpoint or outcome for the current lease owner."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    from database.nl2agent_installation_db import transition_installation_operation as persist
+
+    operation_id = hashlib.sha256(
+        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
+    ).hexdigest()
+    return persist(
+        operation_id=operation_id,
+        lease_owner=token,
+        status=status,
+        checkpoint=checkpoint,
+        result=result,
+        error=error,
+    )
 
 
 def release_mcp_installation_lock(
@@ -1238,25 +1301,14 @@ def release_mcp_installation_lock(
     installation_key: str,
     token: str,
 ) -> None:
-    """Release an installation lock only when the caller still owns it."""
+    """Release a durable installation lease only for its owner."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    key = f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:{installation_key}"
-    client = get_redis_service().client
-    for _attempt in range(_CAS_MAX_RETRIES):
-        pipe = client.pipeline()
-        try:
-            pipe.watch(key)
-            if pipe.get(key) != token:
-                pipe.unwatch()
-                return
-            pipe.multi()
-            pipe.delete(key)
-            pipe.execute()
-            return
-        except redis.WatchError:
-            continue
-        finally:
-            pipe.reset()
+    from database.nl2agent_installation_db import release_installation_lease
+
+    operation_id = hashlib.sha256(
+        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
+    ).hexdigest()
+    release_installation_lease(operation_id=operation_id, lease_owner=token)
 
 
 def renew_mcp_installation_lock(
@@ -1265,23 +1317,15 @@ def renew_mcp_installation_lock(
     installation_key: str,
     token: str,
 ) -> bool:
-    """Extend an installation lock only while the caller still owns it."""
+    """Extend a durable installation lease only while the caller owns it."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    key = f"{_INSTALLATION_LOCK_KEY_PREFIX}:{tenant}:{draft_id}:{installation_key}"
-    client = get_redis_service().client
-    for _attempt in range(_CAS_MAX_RETRIES):
-        pipe = client.pipeline()
-        try:
-            pipe.watch(key)
-            if pipe.get(key) != token:
-                pipe.unwatch()
-                return False
-            pipe.multi()
-            pipe.expire(key, _INSTALLATION_LOCK_TTL_SECONDS)
-            result = pipe.execute()
-            return bool(result and result[0])
-        except redis.WatchError:
-            continue
-        finally:
-            pipe.reset()
-    return False
+    from database.nl2agent_installation_db import renew_installation_operation
+
+    operation_id = hashlib.sha256(
+        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
+    ).hexdigest()
+    return renew_installation_operation(
+        operation_id=operation_id,
+        lease_owner=token,
+        lease_expires_at=datetime.utcnow() + timedelta(seconds=_INSTALLATION_LOCK_TTL_SECONDS),
+    )

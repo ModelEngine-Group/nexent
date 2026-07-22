@@ -1,4 +1,4 @@
-"""NL2AGENT conversational agent generator service.
+"""Runtime composition for NL2AGENT's narrow workflow services.
 
 Provides the business logic for the NL2AGENT default agent: a conversational agent
 that helps users build custom agents via multi-turn chat.
@@ -35,6 +35,7 @@ from agents.nl2agent_session_catalog import (
     confirm_agent_identity,
     delete_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
+    get_installation_operation,
     get_nl2agent_session_state,
     initialize_nl2agent_session_state,
     register_recommendation_batch,
@@ -52,6 +53,7 @@ from agents.nl2agent_session_catalog import (
     reserve_online_installation,
     set_nl2agent_session_catalogs,
     set_model_selection_confirmed,
+    transition_installation_operation,
     summarize_workflow_state,
     update_mcp_workflow,
 )
@@ -440,8 +442,6 @@ async def select_models(
 
     validated_models = _validate_available_llm_ids(tenant_id, ordered_ids)
 
-    previous_confirmation = bool(workflow_state.get("model_selection_confirmed"))
-    redis_write_attempted = False
     try:
         with get_db_session() as db_session:
             update_agent(
@@ -454,24 +454,13 @@ async def select_models(
                 version_no=0,
                 db_session=db_session,
             )
-            redis_write_attempted = True
-            set_model_selection_confirmed(tenant_id, agent_id, True)
+            set_model_selection_confirmed(
+                tenant_id,
+                agent_id,
+                True,
+                db_session=db_session,
+            )
     except Exception as exc:
-        if redis_write_attempted:
-            try:
-                set_model_selection_confirmed(
-                    tenant_id,
-                    agent_id,
-                    previous_confirmation,
-                    finish_revision=False,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to compensate NL2AGENT model selection state: "
-                    "tenant_id=%s draft_agent_id=%s",
-                    tenant_id,
-                    agent_id,
-                )
         raise Nl2AgentOperationError("Failed to save the model selection.") from exc
     return {
         "agent_id": agent_id,
@@ -548,6 +537,8 @@ def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
             acquire_installation_lock=acquire_mcp_installation_lock,
             renew_installation_lock=renew_mcp_installation_lock,
             release_installation_lock=release_mcp_installation_lock,
+            get_installation_operation=get_installation_operation,
+            transition_installation_operation=transition_installation_operation,
         ),
         provider=McpProviderDependencies(
             get_mcp_records=get_mcp_records_by_tenant,
@@ -965,6 +956,8 @@ def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependenc
         acquire_installation_lock=acquire_mcp_installation_lock,
         renew_installation_lock=renew_mcp_installation_lock,
         release_installation_lock=release_mcp_installation_lock,
+        get_installation_operation=get_installation_operation,
+        transition_installation_operation=transition_installation_operation,
         reserve_installation=reserve_online_installation,
         complete_installation=complete_online_installation,
         release_installation=release_online_installation,

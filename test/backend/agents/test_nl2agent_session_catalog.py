@@ -3,7 +3,6 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from unittest.mock import MagicMock
 
-import fakeredis
 import pytest
 
 from agents import nl2agent_session_catalog as catalog_module
@@ -11,13 +10,7 @@ from agents import nl2agent_session_store as session_store
 
 
 @pytest.fixture
-def fake_redis(monkeypatch):
-    client = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(
-        catalog_module,
-        "get_redis_service",
-        MagicMock(return_value=MagicMock(client=client)),
-    )
+def durable_session(monkeypatch):
     initial_state = catalog_module.initialize_nl2agent_session_state(
         "tenant_1", 202, conversation_id=902
     )
@@ -64,7 +57,7 @@ def fake_redis(monkeypatch):
     monkeypatch.setattr(
         catalog_module, "set_nl2agent_session_catalogs", set_session_catalogs
     )
-    return client
+    return durable_snapshot
 
 
 def _catalogs():
@@ -147,13 +140,13 @@ def _prepare_final_review():
     )
 
 
-def test_catalogs_round_trip_through_authoritative_session(fake_redis):
+def test_catalogs_round_trip_through_authoritative_session(durable_session):
     catalog_module.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
     assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == _catalogs()
 
 
 def test_search_projection_hides_installed_mcp_and_marks_installed_skill(
-    fake_redis,
+    durable_session,
 ):
     catalogs = {
         **_catalogs(),
@@ -193,7 +186,7 @@ def test_search_projection_hides_installed_mcp_and_marks_installed_skill(
     assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == catalogs
 
 
-def test_missing_catalogs_raise_contextual_error(fake_redis, monkeypatch):
+def test_missing_catalogs_raise_contextual_error(durable_session, monkeypatch):
     monkeypatch.setattr(
         session_store, "load_durable_session", MagicMock(return_value=None)
     )
@@ -203,7 +196,7 @@ def test_missing_catalogs_raise_contextual_error(fake_redis, monkeypatch):
     ):
         catalog_module.get_nl2agent_session_catalogs("tenant_1", 202)
 
-def test_malformed_catalogs_are_rejected_from_database(fake_redis, monkeypatch):
+def test_malformed_catalogs_are_rejected_from_database(durable_session, monkeypatch):
     snapshot = session_store.load_durable_session("tenant_1", 202)
     snapshot["session_catalogs"] = {"tool_catalog": "not-a-list"}
     monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=snapshot))
@@ -215,7 +208,7 @@ def test_malformed_catalogs_are_rejected_from_database(fake_redis, monkeypatch):
         catalog_module.get_nl2agent_session_catalogs("tenant_1", 202)
 
 def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(
-    fake_redis,
+    durable_session,
 ):
     first = _register_local_batch("batch_1", [3, 1], [7])
     second = _register_local_batch("batch_1", [3, 1], [7])
@@ -229,7 +222,7 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
     catalog_module.assert_resource_review_complete("tenant_1", 202)
 
 
-def test_local_apply_and_skip_cannot_both_reserve_the_same_batch(fake_redis):
+def test_local_apply_and_skip_cannot_both_reserve_the_same_batch(durable_session):
     _register_local_batch("race", [1], [])
 
     def reserve_apply():
@@ -261,7 +254,7 @@ def test_local_apply_and_skip_cannot_both_reserve_the_same_batch(fake_redis):
     }
 
 
-def test_completed_local_apply_is_idempotent_only_for_its_owner(fake_redis):
+def test_completed_local_apply_is_idempotent_only_for_its_owner(durable_session):
     _register_local_batch("batch_1", [1], [])
     catalog_module.reserve_recommendation_batch_apply(
         "tenant_1", 202, "batch_1", "apply-op", [1], []
@@ -284,13 +277,13 @@ def test_completed_local_apply_is_idempotent_only_for_its_owner(fake_redis):
         )
 
 
-def test_empty_recommendation_batch_can_be_explicitly_skipped(fake_redis):
+def test_empty_recommendation_batch_can_be_explicitly_skipped(durable_session):
     _register_local_batch("empty_batch", [], [])
     catalog_module.resolve_recommendation_batch("tenant_1", 202, "empty_batch", "skipped")
     catalog_module.assert_resource_review_complete("tenant_1", 202)
 
 
-def test_recommendation_registration_requires_exact_trusted_search(fake_redis):
+def test_recommendation_registration_requires_exact_trusted_search(durable_session):
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
         match="trusted search result",
@@ -316,7 +309,7 @@ def test_recommendation_registration_requires_exact_trusted_search(fake_redis):
         )
 
 
-def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
+def test_trusted_search_batch_is_idempotent_but_immutable(durable_session):
     first = catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
@@ -346,7 +339,7 @@ def test_trusted_search_batch_is_idempotent_but_immutable(fake_redis):
         )
 
 
-def test_stage_validated_search_batch_is_atomic_with_workflow_stage(fake_redis):
+def test_stage_validated_search_batch_is_atomic_with_workflow_stage(durable_session):
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
         match="requirements_collecting",
@@ -412,13 +405,13 @@ def test_stage_validated_search_batch_is_atomic_with_workflow_stage(fake_redis):
     assert "online_too_early" not in state["trusted_search_batches"]
 
 
-def test_identity_confirmation_round_trip(fake_redis):
+def test_identity_confirmation_round_trip(durable_session):
     assert not catalog_module.get_nl2agent_session_state("tenant_1", 202)["identity_confirmed"]
     catalog_module.confirm_agent_identity("tenant_1", 202)
     assert catalog_module.get_nl2agent_session_state("tenant_1", 202)["identity_confirmed"]
 
 
-def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_redis):
+def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(durable_session):
     catalog_module.update_mcp_workflow(
         "tenant_1",
         202,
@@ -438,7 +431,7 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(fake_r
     assert "config_values" not in workflow
 
 
-def test_mcp_bind_and_skip_reservations_are_mutually_exclusive(fake_redis):
+def test_mcp_bind_and_skip_reservations_are_mutually_exclusive(durable_session):
     catalog_module.update_mcp_workflow(
         "tenant_1",
         202,
@@ -478,7 +471,7 @@ def test_mcp_bind_and_skip_reservations_are_mutually_exclusive(fake_redis):
     assert workflow["binding_operation_id"] in {"bind-op", "skip-op"}
 
 
-def test_mcp_binding_reservation_rejects_tools_not_discovered(fake_redis):
+def test_mcp_binding_reservation_rejects_tools_not_discovered(durable_session):
     catalog_module.update_mcp_workflow(
         "tenant_1",
         202,
@@ -498,7 +491,7 @@ def test_mcp_binding_reservation_rejects_tools_not_discovered(fake_redis):
         )
 
 
-def test_completed_mcp_binding_is_idempotent_only_for_its_owner(fake_redis):
+def test_completed_mcp_binding_is_idempotent_only_for_its_owner(durable_session):
     catalog_module.update_mcp_workflow(
         "tenant_1",
         202,
@@ -529,7 +522,7 @@ def test_completed_mcp_binding_is_idempotent_only_for_its_owner(fake_redis):
         )
 
 
-def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_redis):
+def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(durable_session):
     first = _register_online_batch(
         "online_mcp", "mcp", ["registry:b", "registry:a"]
     )
@@ -558,7 +551,7 @@ def test_online_batches_are_idempotent_and_new_batches_reset_confirmation(fake_r
         catalog_module.assert_online_configuration_complete("tenant_1", 202)
 
 
-def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
+def test_online_completion_blocks_only_unresolved_mcp_workflows(durable_session):
     _register_online_batch("online_mcp", "mcp", [])
     _register_online_batch("online_skill", "skill", [])
     catalog_module.update_mcp_workflow("tenant_1", 202, "registry:github", status="connected", mcp_id=5)
@@ -569,7 +562,7 @@ def test_online_completion_blocks_only_unresolved_mcp_workflows(fake_redis):
     catalog_module.complete_online_configuration("tenant_1", 202)
 
 
-def test_online_completion_blocks_active_skill_installation(fake_redis):
+def test_online_completion_blocks_active_skill_installation(durable_session):
     _prepare_online_review()
     catalog_module.reserve_online_installation(
         "tenant_1", 202, "skill:12", "install-skill:12"
@@ -591,7 +584,7 @@ def test_online_completion_blocks_active_skill_installation(fake_redis):
     catalog_module.complete_online_configuration("tenant_1", 202)
 
 
-def test_online_installation_reservation_rejects_another_operation(fake_redis):
+def test_online_installation_reservation_rejects_another_operation(durable_session):
     _prepare_online_review()
     catalog_module.reserve_online_installation(
         "tenant_1", 202, "skill:12", "install-skill:12"
@@ -606,7 +599,7 @@ def test_online_installation_reservation_rejects_another_operation(fake_redis):
         )
 
 
-def test_online_completion_requires_both_catalogs(fake_redis):
+def test_online_completion_requires_both_catalogs(durable_session):
     _register_online_batch("online_mcp", "mcp", [])
 
     with pytest.raises(
@@ -623,7 +616,7 @@ def test_online_completion_requires_both_catalogs(fake_redis):
 
 
 def test_malformed_online_state_is_rejected_with_context(
-    fake_redis, caplog, monkeypatch
+    durable_session, caplog, monkeypatch
 ):
     snapshot = session_store.load_durable_session("tenant_1", 202)
     snapshot["workflow_state"] = {
@@ -644,7 +637,7 @@ def test_malformed_online_state_is_rejected_with_context(
     assert "Malformed NL2AGENT session state" in caplog.text
 
 
-def test_session_state_is_isolated_by_tenant_and_draft(fake_redis, monkeypatch):
+def test_session_state_is_isolated_by_tenant_and_draft(durable_session, monkeypatch):
     _register_local_batch("batch_1", [1], [])
     primary = session_store.load_durable_session("tenant_1", 202)
     snapshots = {
@@ -677,7 +670,7 @@ def test_session_state_is_isolated_by_tenant_and_draft(fake_redis, monkeypatch):
     assert not catalog_module.get_nl2agent_session_state("tenant_2", 202)["recommendation_batches"]
 
 
-def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
+def test_failed_card_delivery_is_idempotent_and_retries_twice(durable_session):
     first = catalog_module.record_card_delivery(
         "tenant_1",
         202,
@@ -712,7 +705,7 @@ def test_failed_card_delivery_is_idempotent_and_retries_twice(fake_redis):
     assert third["retry_count"] == 3
 
 
-def test_failed_delivery_never_rolls_back_business_state(fake_redis):
+def test_failed_delivery_never_rolls_back_business_state(durable_session):
     _register_local_batch("pending", [1], [])
     _register_local_batch("applied", [2], [])
     _complete_local_apply("applied", [2], [])
@@ -732,14 +725,14 @@ def test_failed_delivery_never_rolls_back_business_state(fake_redis):
     assert batches["applied"]["status"] == "applied"
 
 
-def test_rendered_delivery_resets_retry_count(fake_redis):
+def test_rendered_delivery_resets_retry_count(durable_session):
     catalog_module.record_card_delivery("tenant_1", 202, 1, "model_selection", "failed", reason="invalid_json")
     rendered = catalog_module.record_card_delivery("tenant_1", 202, 2, "model_selection", "rendered")
     assert rendered["retry_count"] == 0
     assert rendered["status"] == "rendered"
 
 
-def test_requirements_summary_registration_and_button_confirmation(fake_redis):
+def test_requirements_summary_registration_and_button_confirmation(durable_session):
     summary = {
         "goal": "  Create presentations  ",
         "audience_or_scenario": "Office   users",
@@ -762,7 +755,7 @@ def test_requirements_summary_registration_and_button_confirmation(fake_redis):
     catalog_module.assert_requirements_confirmed("tenant_1", 202)
 
 
-def test_changed_requirements_summary_resets_confirmation(fake_redis):
+def test_changed_requirements_summary_resets_confirmation(durable_session):
     summary = {
         "goal": "Create presentations",
         "audience_or_scenario": "Office users",
@@ -816,7 +809,7 @@ def test_requirements_message_classifier(text, expected):
     assert catalog_module.classify_requirements_message_intent(text) == expected
 
 
-def test_requirements_modification_returns_to_collecting(fake_redis):
+def test_requirements_modification_returns_to_collecting(durable_session):
     catalog_module.register_requirements_summary(
         "tenant_1",
         202,
@@ -835,7 +828,7 @@ def test_requirements_modification_returns_to_collecting(fake_redis):
     assert result["status"] == "collecting"
 
 
-def test_requirements_modification_invalidates_only_summary_delivery(fake_redis):
+def test_requirements_modification_invalidates_only_summary_delivery(durable_session):
     catalog_module.register_requirements_summary(
         "tenant_1",
         202,
@@ -878,7 +871,7 @@ def test_requirements_modification_invalidates_only_summary_delivery(fake_redis)
 
 
 @pytest.mark.parametrize("text", ["确认需求", "yes", "可以继续"])
-def test_text_confirmation_requires_button(fake_redis, text):
+def test_text_confirmation_requires_button(durable_session, text):
     catalog_module.register_requirements_summary(
         "tenant_1",
         202,
@@ -897,7 +890,7 @@ def test_text_confirmation_requires_button(fake_redis, text):
     assert result["status"] == "awaiting_confirmation"
 
 
-def test_non_revision_text_preserves_requirements_delivery(fake_redis):
+def test_non_revision_text_preserves_requirements_delivery(durable_session):
     catalog_module.register_requirements_summary(
         "tenant_1",
         202,
@@ -923,7 +916,7 @@ def test_non_revision_text_preserves_requirements_delivery(fake_redis):
 
 @pytest.mark.parametrize("text", ["No change, looks good", "无需修改，可以继续"])
 def test_negated_modification_keeps_requirements_awaiting_confirmation(
-    fake_redis,
+    durable_session,
     text,
 ):
     registered = catalog_module.register_requirements_summary(
@@ -949,7 +942,7 @@ def test_negated_modification_keeps_requirements_awaiting_confirmation(
     assert result["fingerprint"] == registered["fingerprint"]
 
 
-def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake_redis):
+def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(durable_session):
     original = {
         "goal": "Create presentations",
         "audience_or_scenario": "Office users",
@@ -974,7 +967,7 @@ def test_stale_requirement_card_cannot_overwrite_or_confirm_current_summary(fake
         catalog_module.confirm_requirements_summary("tenant_1", 202, first["fingerprint"])
 
 
-def test_concurrent_online_batch_registration_preserves_both_updates(fake_redis):
+def test_concurrent_online_batch_registration_preserves_both_updates(durable_session):
     catalog_module._record_trusted_search_batch(
         "tenant_1",
         202,
@@ -1019,7 +1012,7 @@ def test_concurrent_online_batch_registration_preserves_both_updates(fake_redis)
     assert state["revision"] == 4
 
 
-def test_workflow_summary_is_authoritative(fake_redis):
+def test_workflow_summary_is_authoritative(durable_session):
     summary = catalog_module.get_workflow_summary("tenant_1", 202)
     assert summary["current_stage"] == "requirements_collecting"
     assert summary["allowed_actions"] == [
@@ -1045,7 +1038,7 @@ def test_workflow_summary_is_authoritative(fake_redis):
     assert catalog_module.get_workflow_summary("tenant_1", 202)["current_stage"] == "model_selection"
 
 
-def test_missing_or_old_workflow_state_is_rejected(fake_redis, monkeypatch):
+def test_missing_or_old_workflow_state_is_rejected(durable_session, monkeypatch):
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="missing"):
         catalog_module.get_nl2agent_session_state("tenant_1", 999)
 
@@ -1059,37 +1052,7 @@ def test_missing_or_old_workflow_state_is_rejected(fake_redis, monkeypatch):
         catalog_module.get_nl2agent_session_state("tenant_1", 303)
 
 
-def test_mcp_installation_lock_is_owned_and_recoverable(fake_redis):
-    token = catalog_module.acquire_mcp_installation_lock(
-        "tenant_1", 202, "stable-key"
-    )
-    assert token
-    assert (
-        catalog_module.acquire_mcp_installation_lock(
-            "tenant_1", 202, "stable-key"
-        )
-        is None
-    )
-
-    catalog_module.release_mcp_installation_lock(
-        "tenant_1", 202, "stable-key", "wrong-owner"
-    )
-    assert (
-        catalog_module.acquire_mcp_installation_lock(
-            "tenant_1", 202, "stable-key"
-        )
-        is None
-    )
-
-    catalog_module.release_mcp_installation_lock(
-        "tenant_1", 202, "stable-key", token
-    )
-    assert catalog_module.acquire_mcp_installation_lock(
-        "tenant_1", 202, "stable-key"
-    )
-
-
-def test_revision_routing_preserves_idempotent_final_receipt(fake_redis):
+def test_revision_routing_preserves_idempotent_final_receipt(durable_session):
     _prepare_final_review()
 
     catalog_module.enter_revision_mode("tenant_1", 202)
@@ -1108,7 +1071,7 @@ def test_revision_routing_preserves_idempotent_final_receipt(fake_redis):
     assert state["card_delivery"]["final_review"]["message_id"] == 71
 
 
-def test_model_revision_returns_to_a_fresh_final_review(fake_redis):
+def test_model_revision_returns_to_a_fresh_final_review(durable_session):
     _prepare_final_review()
     catalog_module.enter_revision_mode("tenant_1", 202)
     catalog_module.record_card_delivery(
@@ -1125,7 +1088,7 @@ def test_model_revision_returns_to_a_fresh_final_review(fake_redis):
     assert summary["expected_card_types"] == ["final_review"]
 
 
-def test_new_final_card_completes_direct_proposal_revision(fake_redis):
+def test_new_final_card_completes_direct_proposal_revision(durable_session):
     _prepare_final_review()
     catalog_module.enter_revision_mode("tenant_1", 202)
 
@@ -1138,7 +1101,7 @@ def test_new_final_card_completes_direct_proposal_revision(fake_redis):
     assert state["card_delivery"]["final_review"]["message_id"] == 73
 
 
-def test_requirements_revision_reconfirms_without_resetting_other_stages(fake_redis):
+def test_requirements_revision_reconfirms_without_resetting_other_stages(durable_session):
     _prepare_final_review()
     catalog_module.enter_revision_mode("tenant_1", 202)
     review = catalog_module.register_requirements_summary(

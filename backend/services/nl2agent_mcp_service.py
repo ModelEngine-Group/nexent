@@ -36,6 +36,8 @@ class McpLockDependencies:
     acquire_installation_lock: Callable[..., Optional[str]]
     renew_installation_lock: Callable[..., bool]
     release_installation_lock: Callable[..., Any]
+    get_installation_operation: Callable[..., Optional[Dict[str, Any]]]
+    transition_installation_operation: Callable[..., bool]
 
 
 @dataclass(frozen=True)
@@ -139,7 +141,12 @@ async def install_recommended_mcp(
             "This MCP installation is already in progress. Retry after it completes."
         )
     try:
-        return await _perform_with_lock_heartbeat(
+        durable_operation = dependencies.lock.get_installation_operation(
+            tenant_id, agent_id, stable_key
+        )
+        if durable_operation and durable_operation.get("status") == "completed":
+            return deepcopy(durable_operation.get("result") or {})
+        result = await _perform_with_lock_heartbeat(
             dependencies,
             agent_id=agent_id,
             recommendation_id=recommendation_id,
@@ -151,6 +158,19 @@ async def install_recommended_mcp(
             lock_key=lock_key,
             lock_token=lock_token,
         )
+        if not dependencies.lock.transition_installation_operation(
+            tenant_id,
+            agent_id,
+            stable_key,
+            lock_token,
+            "completed",
+            checkpoint={"provider_persisted": True, "discovery_completed": True},
+            result=result,
+        ):
+            raise Nl2AgentOperationError(
+                "MCP installation completed, but its durable operation lease was lost. Retry installation."
+            )
+        return result
     except Exception as exc:
         try:
             dependencies.session.update_mcp_workflow(
@@ -167,6 +187,21 @@ async def install_recommended_mcp(
             )
         except Exception:
             logger.exception("Failed to persist NL2AGENT MCP failure state")
+        try:
+            dependencies.lock.transition_installation_operation(
+                tenant_id,
+                agent_id,
+                stable_key,
+                lock_token,
+                "failed",
+                checkpoint={"retryable": True},
+                error={
+                    "code": "installation_failed",
+                    "message": "MCP installation failed; retry is allowed.",
+                },
+            )
+        except Exception:
+            logger.exception("Failed to persist durable NL2AGENT MCP failure state")
         if isinstance(exc, AgentRunException):
             raise
         raise Nl2AgentExternalServiceError(

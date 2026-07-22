@@ -8,7 +8,7 @@ from test.backend.services.nl2agent_test_support import *  # noqa: F403
 def _official_skill_static_configuration(monkeypatch):
     """Keep focused install tests independent from official ZIP and database I/O."""
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_official_skill_configuration",
         MagicMock(
             side_effect=lambda skill_name, _tenant_id=None: {
@@ -25,19 +25,19 @@ def _official_skill_static_configuration(monkeypatch):
 async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
     db_session, _ = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value={"mcp_id": 5, "mcp_name": "github"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
@@ -51,7 +51,7 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
         ),
     )
     bind = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind)
     reserve_binding = MagicMock(
         return_value={
             "recommendation_id": "registry:github",
@@ -60,13 +60,13 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
     )
     complete_binding = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "reserve_mcp_binding_operation", reserve_binding
+        nl2agent_runtime_service, "reserve_mcp_binding_operation", reserve_binding
     )
     monkeypatch.setattr(
-        nl2agent_service, "complete_mcp_binding_operation", complete_binding
+        nl2agent_runtime_service, "complete_mcp_binding_operation", complete_binding
     )
 
-    result = await nl2agent_service.bind_mcp_tools(
+    result = await nl2agent_runtime_service.bind_mcp_tools(
         agent_id=202, mcp_id=5, tool_ids=[11], tenant_id="tenant_1", user_id="user_1"
     )
 
@@ -86,7 +86,7 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
 async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypatch):
     _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -97,12 +97,12 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value={"mcp_id": 5, "mcp_name": "github"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
@@ -116,7 +116,7 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         ),
     )
     bind = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind)
     nl2agent_session_catalog.update_mcp_workflow(
         "tenant_1",
         202,
@@ -126,7 +126,7 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         discovered_tool_ids=[11],
         bound_tool_ids=[],
     )
-    real_complete = nl2agent_service.complete_mcp_binding_operation
+    real_complete = nl2agent_runtime_service.complete_mcp_binding_operation
     attempts = 0
 
     def flaky_complete(*args, **kwargs):
@@ -139,11 +139,11 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         return real_complete(*args, **kwargs)
 
     monkeypatch.setattr(
-        nl2agent_service, "complete_mcp_binding_operation", flaky_complete
+        nl2agent_runtime_service, "complete_mcp_binding_operation", flaky_complete
     )
 
     with pytest.raises(Nl2AgentOperationError, match="Retry binding"):
-        await nl2agent_service.bind_mcp_tools(
+        await nl2agent_runtime_service.bind_mcp_tools(
             agent_id=202,
             mcp_id=5,
             tool_ids=[11],
@@ -154,7 +154,7 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
     state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
     assert state["mcp_workflows"]["registry:github"]["status"] == "binding"
 
-    result = await nl2agent_service.bind_mcp_tools(
+    result = await nl2agent_runtime_service.bind_mcp_tools(
         agent_id=202,
         mcp_id=5,
         tool_ids=[11],
@@ -172,19 +172,19 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
 async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
     _, transaction = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value={"mcp_id": 5, "mcp_name": "github"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
@@ -199,7 +199,7 @@ async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
         ),
     )
     bind = MagicMock(side_effect=[None, RuntimeError("second tool failed")])
-    monkeypatch.setattr(nl2agent_service, "create_or_update_tool_by_tool_info", bind)
+    monkeypatch.setattr(nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind)
     reserve_binding = MagicMock(
         return_value={
             "recommendation_id": "registry:github",
@@ -208,17 +208,17 @@ async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
     )
     release_binding = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "reserve_mcp_binding_operation", reserve_binding
+        nl2agent_runtime_service, "reserve_mcp_binding_operation", reserve_binding
     )
     monkeypatch.setattr(
-        nl2agent_service, "release_mcp_binding_operation", release_binding
+        nl2agent_runtime_service, "release_mcp_binding_operation", release_binding
     )
 
     with pytest.raises(
         Nl2AgentOperationError,
         match="Failed to bind MCP tools",
     ):
-        await nl2agent_service.bind_mcp_tools(
+        await nl2agent_runtime_service.bind_mcp_tools(
             agent_id=202,
             mcp_id=5,
             tool_ids=[11, 12],
@@ -241,14 +241,14 @@ async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
 async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
     db_session, _ = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value={"mcp_id": 5, "mcp_name": "github"}),
     )
@@ -260,19 +260,19 @@ async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
     )
     complete_binding = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "reserve_mcp_binding_operation", reserve_binding
+        nl2agent_runtime_service, "reserve_mcp_binding_operation", reserve_binding
     )
     monkeypatch.setattr(
-        nl2agent_service, "complete_mcp_binding_operation", complete_binding
+        nl2agent_runtime_service, "complete_mcp_binding_operation", complete_binding
     )
     delete_instances = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "delete_tool_instances_by_ids",
         delete_instances,
     )
 
-    result = await nl2agent_service.skip_mcp_tool_binding(
+    result = await nl2agent_runtime_service.skip_mcp_tool_binding(
         202,
         5,
         "tenant_1",
@@ -304,7 +304,7 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
 ):
     release_lock = MagicMock(side_effect=RuntimeError("redis release failed"))
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "release_mcp_installation_lock",
         release_lock,
     )
@@ -341,21 +341,21 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
     }
     nl2agent_session_catalog.set_nl2agent_session_catalogs("tenant_1", 202, catalogs)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_session_catalogs",
         MagicMock(return_value=catalogs),
     )
     add_mcp = AsyncMock(return_value=5)
-    monkeypatch.setattr(nl2agent_service, "add_mcp_service", add_mcp)
+    monkeypatch.setattr(nl2agent_runtime_service, "add_mcp_service", add_mcp)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_records_by_tenant",
         MagicMock(
             return_value=[
@@ -369,12 +369,12 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
     )
     discover_tools = AsyncMock(return_value=[MagicMock()])
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tool_from_remote_mcp_server",
         discover_tools,
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(
             return_value={
@@ -385,7 +385,7 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "upsert_discovered_mcp_tools",
         MagicMock(
             return_value=[
@@ -393,7 +393,7 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
             ]
         ),
     )
-    result = await nl2agent_service.install_recommended_mcp(
+    result = await nl2agent_runtime_service.install_recommended_mcp(
         agent_id=202,
         recommendation_id="registry:github",
         option_id="remote-0",
@@ -418,17 +418,17 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
     }
     assert "secret-token" not in str(result)
     release_lock.assert_called_once()
-    nl2agent_service.validate_nl2agent_remote_mcp_url.assert_called_once_with(
+    nl2agent_runtime_service.validate_nl2agent_remote_mcp_url.assert_called_once_with(
         "https://acme.example/eu/sse"
     )
     assert add_mcp.call_args.kwargs["server_url"] == "https://acme.example/eu/sse"
     assert add_mcp.call_args.kwargs["authorization_token"] == "secret-token"
-    pinned_factory = nl2agent_service.build_pinned_httpx_client_factory.return_value
+    pinned_factory = nl2agent_runtime_service.build_pinned_httpx_client_factory.return_value
     assert add_mcp.call_args.kwargs["httpx_client_factory"] is pinned_factory
     assert discover_tools.call_args.kwargs["httpx_client_factory"] is pinned_factory
     assert [
         call.args[0]
-        for call in nl2agent_service.build_pinned_httpx_client_factory.call_args_list
+        for call in nl2agent_runtime_service.build_pinned_httpx_client_factory.call_args_list
     ] == [
         "https://acme.example/eu/sse",
         "https://mcp.example/sse",
@@ -484,43 +484,43 @@ async def test_install_recommended_mcp_resumes_existing_installation_by_provenan
         "registry_json": {"nl2agent_installation_key": installation_key},
     }
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_session_catalogs",
         MagicMock(return_value=catalogs),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_records_by_tenant",
         MagicMock(return_value=[record]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value=record),
     )
     add_mcp = AsyncMock()
-    monkeypatch.setattr(nl2agent_service, "add_mcp_service", add_mcp)
+    monkeypatch.setattr(nl2agent_runtime_service, "add_mcp_service", add_mcp)
     update_mcp = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "update_mcp_service", update_mcp)
+    monkeypatch.setattr(nl2agent_runtime_service, "update_mcp_service", update_mcp)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tool_from_remote_mcp_server",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "upsert_discovered_mcp_tools",
         MagicMock(return_value=[]),
     )
 
-    result = await nl2agent_service.install_recommended_mcp(
+    result = await nl2agent_runtime_service.install_recommended_mcp(
         agent_id=202,
         recommendation_id="registry:github",
         option_id="remote-0",
@@ -559,14 +559,14 @@ async def test_install_recommended_mcp_rejects_missing_declared_remote_variable(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_session_catalogs",
         MagicMock(
             return_value={
@@ -597,7 +597,7 @@ async def test_install_recommended_mcp_rejects_missing_declared_remote_variable(
         Nl2AgentValidationError,
         match="Missing required MCP configuration",
     ):
-        await nl2agent_service.install_recommended_mcp(
+        await nl2agent_runtime_service.install_recommended_mcp(
             agent_id=202,
             recommendation_id="registry:required-config",
             option_id="remote-0",
@@ -647,21 +647,21 @@ async def test_install_recommended_package_preserves_registry_arguments_and_envi
     }
     nl2agent_session_catalog.set_nl2agent_session_catalogs("tenant_1", 202, catalogs)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_session_catalogs",
         MagicMock(return_value=catalogs),
     )
     add_container = AsyncMock(return_value={"mcp_id": 6})
-    monkeypatch.setattr(nl2agent_service, "add_container_mcp_service", add_container)
+    monkeypatch.setattr(nl2agent_runtime_service, "add_container_mcp_service", add_container)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_records_by_tenant",
         MagicMock(
             return_value=[
@@ -670,7 +670,7 @@ async def test_install_recommended_package_preserves_registry_arguments_and_envi
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(
             return_value={
@@ -681,12 +681,12 @@ async def test_install_recommended_package_preserves_registry_arguments_and_envi
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "get_tool_from_remote_mcp_server", AsyncMock(return_value=[])
+        nl2agent_runtime_service, "get_tool_from_remote_mcp_server", AsyncMock(return_value=[])
     )
     monkeypatch.setattr(
-        nl2agent_service, "upsert_discovered_mcp_tools", MagicMock(return_value=[])
+        nl2agent_runtime_service, "upsert_discovered_mcp_tools", MagicMock(return_value=[])
     )
-    await nl2agent_service.install_recommended_mcp(
+    await nl2agent_runtime_service.install_recommended_mcp(
         agent_id=202,
         recommendation_id="registry:package-mcp",
         option_id="package-0",
@@ -744,51 +744,51 @@ async def test_install_recommended_package_reconfigures_existing_container(
         catalogs,
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_session_catalogs",
         MagicMock(return_value=catalogs),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_records_by_tenant",
         MagicMock(return_value=[record]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value=record),
     )
     add_container = AsyncMock()
     reconfigure_container = AsyncMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "add_container_mcp_service",
         add_container,
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "reconfigure_container_mcp_service",
         reconfigure_container,
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tool_from_remote_mcp_server",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "upsert_discovered_mcp_tools",
         MagicMock(return_value=[]),
     )
 
-    result = await nl2agent_service.install_recommended_mcp(
+    result = await nl2agent_runtime_service.install_recommended_mcp(
         agent_id=202,
         recommendation_id="registry:package-mcp",
         option_id="package-0",
@@ -816,7 +816,7 @@ async def test_install_community_container_merges_card_secret_without_persisting
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
@@ -845,14 +845,14 @@ async def test_install_community_container_merges_card_secret_without_persisting
     }
     nl2agent_session_catalog.set_nl2agent_session_catalogs("tenant_1", 202, catalogs)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_session_catalogs",
         MagicMock(return_value=catalogs),
     )
     add_container = AsyncMock(return_value={"mcp_id": 7})
-    monkeypatch.setattr(nl2agent_service, "add_container_mcp_service", add_container)
+    monkeypatch.setattr(nl2agent_runtime_service, "add_container_mcp_service", add_container)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_records_by_tenant",
         MagicMock(
             return_value=[
@@ -865,7 +865,7 @@ async def test_install_community_container_merges_card_secret_without_persisting
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_mcp_record_by_id_and_tenant",
         MagicMock(
             return_value={
@@ -876,12 +876,12 @@ async def test_install_community_container_merges_card_secret_without_persisting
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "get_tool_from_remote_mcp_server", AsyncMock(return_value=[])
+        nl2agent_runtime_service, "get_tool_from_remote_mcp_server", AsyncMock(return_value=[])
     )
     monkeypatch.setattr(
-        nl2agent_service, "upsert_discovered_mcp_tools", MagicMock(return_value=[])
+        nl2agent_runtime_service, "upsert_discovered_mcp_tools", MagicMock(return_value=[])
     )
-    await nl2agent_service.install_recommended_mcp(
+    await nl2agent_runtime_service.install_recommended_mcp(
         agent_id=202,
         recommendation_id="community:55",
         option_id="community-container",
@@ -909,17 +909,17 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
     install_from_zip = MagicMock(return_value=["search-web-tavily"])
     bind_skill = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+        nl2agent_runtime_service, "install_skills_from_zip_for_tenant", install_from_zip
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_official_skill_configuration",
         MagicMock(
             return_value={
@@ -933,7 +933,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tenant_skill_by_name",
         MagicMock(
             return_value={
@@ -953,7 +953,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
+        nl2agent_runtime_service, "create_or_update_skill_by_skill_info", bind_skill
     )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1",
@@ -975,7 +975,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         },
     )
 
-    result = await nl2agent_service.install_web_skill(
+    result = await nl2agent_runtime_service.install_web_skill(
         agent_id=202,
         skill_id=0,
         skill_name="search-web-tavily",
@@ -1028,7 +1028,7 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
         == "installed"
     )
 
-    retried = await nl2agent_service.install_web_skill(
+    retried = await nl2agent_runtime_service.install_web_skill(
         agent_id=202,
         skill_id=0,
         skill_name="search-web-tavily",
@@ -1050,7 +1050,7 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
     install_from_zip = MagicMock(return_value=["search-web-tavily"])
     bind_skill = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -1061,12 +1061,12 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "install_skills_from_zip_for_tenant",
         install_from_zip,
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tenant_skill_by_name",
         MagicMock(
             return_value={
@@ -1076,7 +1076,7 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_or_update_skill_by_skill_info",
         bind_skill,
     )
@@ -1094,7 +1094,7 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
             ],
         },
     )
-    real_complete = nl2agent_service.complete_online_installation
+    real_complete = nl2agent_runtime_service.complete_online_installation
     attempts = 0
 
     def flaky_complete(*args, **kwargs):
@@ -1107,13 +1107,13 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
         return real_complete(*args, **kwargs)
 
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "complete_online_installation",
         flaky_complete,
     )
 
     with pytest.raises(Nl2AgentOperationError, match="Retry installation"):
-        await nl2agent_service.install_web_skill(
+        await nl2agent_runtime_service.install_web_skill(
             agent_id=202,
             skill_id=12,
             skill_name="search-web-tavily",
@@ -1129,7 +1129,7 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
     ):
         nl2agent_session_catalog.complete_online_configuration("tenant_1", 202)
 
-    result = await nl2agent_service.install_web_skill(
+    result = await nl2agent_runtime_service.install_web_skill(
         agent_id=202,
         skill_id=12,
         skill_name="search-web-tavily",
@@ -1148,7 +1148,7 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
 async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
     release_lock = MagicMock(side_effect=RuntimeError("redis release failed"))
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "release_mcp_installation_lock",
         release_lock,
     )
@@ -1156,20 +1156,20 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
     install_by_id = MagicMock(return_value=[107])
     bind_skill = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
-    monkeypatch.setattr(nl2agent_service, "install_skills_for_tenant", install_by_id)
+    monkeypatch.setattr(nl2agent_runtime_service, "install_skills_for_tenant", install_by_id)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tenant_skill_by_id",
         MagicMock(return_value={"skill_id": 107, "name": "legacy-source"}),
     )
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
+        nl2agent_runtime_service, "create_or_update_skill_by_skill_info", bind_skill
     )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1",
@@ -1191,7 +1191,7 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
         },
     )
 
-    result = await nl2agent_service.install_web_skill(
+    result = await nl2agent_runtime_service.install_web_skill(
         agent_id=202,
         skill_id=77,
         tenant_id="tenant_1",
@@ -1225,24 +1225,24 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
 async def test_install_web_skill_keeps_recommendation_when_binding_fails(monkeypatch):
     _prepare_required_online_review()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "install_skills_from_zip_for_tenant",
         MagicMock(return_value=["search-web-tavily"]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tenant_skill_by_name",
         MagicMock(return_value={"skill_id": 112, "skill_name": "search-web-tavily"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_or_update_skill_by_skill_info",
         MagicMock(side_effect=RuntimeError("write failed")),
     )
@@ -1258,7 +1258,7 @@ async def test_install_web_skill_keeps_recommendation_when_binding_fails(monkeyp
     )
 
     with pytest.raises(Nl2AgentOperationError, match="could not be bound"):
-        await nl2agent_service.install_web_skill(
+        await nl2agent_runtime_service.install_web_skill(
             agent_id=202,
             skill_id=12,
             skill_name="search-web-tavily",
@@ -1275,20 +1275,20 @@ async def test_install_web_skill_keeps_recommendation_when_binding_fails(monkeyp
 async def test_install_web_skill_rejects_empty_install_result(monkeypatch):
     _prepare_required_online_review()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "install_skills_from_zip_for_tenant",
         MagicMock(return_value=[]),
     )
     bind_skill = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
+        nl2agent_runtime_service, "create_or_update_skill_by_skill_info", bind_skill
     )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1",
@@ -1306,7 +1306,7 @@ async def test_install_web_skill_rejects_empty_install_result(monkeypatch):
     )
 
     with pytest.raises(Nl2AgentExternalServiceError, match="Failed to install"):
-        await nl2agent_service.install_web_skill(
+        await nl2agent_runtime_service.install_web_skill(
             agent_id=202,
             skill_id=12,
             skill_name="search-web-tavily",
@@ -1320,20 +1320,20 @@ async def test_install_web_skill_rejects_empty_install_result(monkeypatch):
 @pytest.mark.asyncio
 async def test_install_web_skill_validates_draft_ownership(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "require_active_session",
-        MagicMock(side_effect=nl2agent_service.Nl2AgentDraftNotFoundError()),
+        MagicMock(side_effect=nl2agent_runtime_service.Nl2AgentDraftNotFoundError()),
     )
     install_from_zip = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+        nl2agent_runtime_service, "install_skills_from_zip_for_tenant", install_from_zip
     )
 
     with pytest.raises(
-        nl2agent_service.Nl2AgentDraftNotFoundError,
+        nl2agent_runtime_service.Nl2AgentDraftNotFoundError,
         match="draft agent not found",
     ):
-        await nl2agent_service.install_web_skill(
+        await nl2agent_runtime_service.install_web_skill(
             agent_id=202,
             skill_id=0,
             skill_name="search-web-tavily",
@@ -1345,7 +1345,7 @@ async def test_install_web_skill_validates_draft_ownership(monkeypatch):
 
 def test_get_owned_draft_uses_session_owner_instead_of_agent_naming(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={
@@ -1356,7 +1356,7 @@ def test_get_owned_draft_uses_session_owner_instead_of_agent_naming(monkeypatch)
         ),
     )
 
-    result = nl2agent_service._get_owned_draft(
+    result = nl2agent_runtime_service._get_owned_draft(
         202, "tenant_1", user_id="user_1"
     )
 
@@ -1365,16 +1365,16 @@ def test_get_owned_draft_uses_session_owner_instead_of_agent_naming(monkeypatch)
 
 def test_get_owned_draft_reports_active_session_configuration_loss(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(side_effect=ValueError("agent not found")),
     )
 
     with pytest.raises(
-        nl2agent_service.Nl2AgentOperationError,
+        nl2agent_runtime_service.Nl2AgentOperationError,
         match="configuration is unavailable",
     ):
-        nl2agent_service._get_owned_draft(202, "tenant_1", user_id="user_1")
+        nl2agent_runtime_service._get_owned_draft(202, "tenant_1", user_id="user_1")
 
 
 def test_validate_nl2agent_run_context_accepts_exact_user_session_binding(monkeypatch):
@@ -1393,13 +1393,13 @@ def test_validate_nl2agent_run_context_accepts_exact_user_session_binding(monkey
             "status": "active",
         }
     )
-    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", query_agent)
-    monkeypatch.setattr(nl2agent_service, "get_conversation", get_conversation)
+    monkeypatch.setattr(nl2agent_runtime_service, "search_agent_info_by_agent_id", query_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "get_conversation", get_conversation)
     monkeypatch.setattr(
-        nl2agent_service, "require_active_session", get_session
+        nl2agent_runtime_service, "require_active_session", get_session
     )
 
-    resolved_runner_id = nl2agent_service.validate_nl2agent_run_context(
+    resolved_runner_id = nl2agent_runtime_service.validate_nl2agent_run_context(
         runner_agent_id=101,
         draft_agent_id=202,
         conversation_id=902,
@@ -1419,7 +1419,7 @@ def test_validate_nl2agent_run_context_accepts_exact_user_session_binding(monkey
 
 def test_validate_nl2agent_run_context_recovers_missing_runner(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "require_active_session",
         MagicMock(
             return_value={
@@ -1431,12 +1431,12 @@ def test_validate_nl2agent_run_context_recovers_missing_runner(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_conversation",
         MagicMock(return_value={"conversation_id": 902}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             side_effect=[
@@ -1446,7 +1446,7 @@ def test_validate_nl2agent_run_context_recovers_missing_runner(monkeypatch):
         ),
     )
 
-    assert nl2agent_service.validate_nl2agent_run_context(
+    assert nl2agent_runtime_service.validate_nl2agent_run_context(
         runner_agent_id=None,
         draft_agent_id=202,
         conversation_id=902,
@@ -1458,7 +1458,7 @@ def test_validate_nl2agent_run_context_recovers_missing_runner(monkeypatch):
 def test_validate_nl2agent_run_context_rejects_runner_mismatch(monkeypatch):
     query_agent = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "require_active_session",
         MagicMock(
             return_value={
@@ -1470,14 +1470,14 @@ def test_validate_nl2agent_run_context_rejects_runner_mismatch(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_conversation",
         MagicMock(return_value={"conversation_id": 902}),
     )
-    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", query_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "search_agent_info_by_agent_id", query_agent)
 
-    with pytest.raises(nl2agent_service.Nl2AgentValidationError):
-        nl2agent_service.validate_nl2agent_run_context(
+    with pytest.raises(nl2agent_runtime_service.Nl2AgentValidationError):
+        nl2agent_runtime_service.validate_nl2agent_run_context(
             runner_agent_id=999,
             draft_agent_id=202,
             conversation_id=902,
@@ -1492,7 +1492,7 @@ def test_validate_nl2agent_run_context_rejects_active_session_conversation_misma
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             side_effect=[
@@ -1502,15 +1502,15 @@ def test_validate_nl2agent_run_context_rejects_active_session_conversation_misma
         ),
     )
     get_conversation = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "get_conversation", get_conversation)
+    monkeypatch.setattr(nl2agent_runtime_service, "get_conversation", get_conversation)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "require_active_session",
-        MagicMock(side_effect=nl2agent_service.Nl2AgentDraftNotFoundError()),
+        MagicMock(side_effect=nl2agent_runtime_service.Nl2AgentDraftNotFoundError()),
     )
 
-    with pytest.raises(nl2agent_service.Nl2AgentDraftNotFoundError):
-        nl2agent_service.validate_nl2agent_run_context(
+    with pytest.raises(nl2agent_runtime_service.Nl2AgentDraftNotFoundError):
+        nl2agent_runtime_service.validate_nl2agent_run_context(
             runner_agent_id=101,
             draft_agent_id=202,
             conversation_id=903,
@@ -1525,7 +1525,7 @@ def test_validate_nl2agent_run_context_rejects_conversation_not_owned_by_user(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             side_effect=[
@@ -1535,10 +1535,10 @@ def test_validate_nl2agent_run_context_rejects_conversation_not_owned_by_user(
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "get_conversation", MagicMock(return_value=None)
+        nl2agent_runtime_service, "get_conversation", MagicMock(return_value=None)
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "require_active_session",
         MagicMock(
             return_value={
@@ -1550,8 +1550,8 @@ def test_validate_nl2agent_run_context_rejects_conversation_not_owned_by_user(
         ),
     )
 
-    with pytest.raises(nl2agent_service.Nl2AgentDraftNotFoundError):
-        nl2agent_service.validate_nl2agent_run_context(
+    with pytest.raises(nl2agent_runtime_service.Nl2AgentDraftNotFoundError):
+        nl2agent_runtime_service.validate_nl2agent_run_context(
             runner_agent_id=101,
             draft_agent_id=202,
             conversation_id=902,
@@ -1562,15 +1562,15 @@ def test_validate_nl2agent_run_context_rejects_conversation_not_owned_by_user(
 
 def test_validate_nl2agent_run_context_rejects_non_builder_runner(monkeypatch):
     query_agent = MagicMock(return_value={"agent_id": 101, "name": "other_agent"})
-    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", query_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "search_agent_info_by_agent_id", query_agent)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_conversation",
         MagicMock(return_value={"conversation_id": 902}),
     )
 
-    with pytest.raises(nl2agent_service.Nl2AgentValidationError):
-        nl2agent_service.validate_nl2agent_run_context(
+    with pytest.raises(nl2agent_runtime_service.Nl2AgentValidationError):
+        nl2agent_runtime_service.validate_nl2agent_run_context(
             runner_agent_id=101,
             draft_agent_id=202,
             conversation_id=902,
@@ -1583,7 +1583,7 @@ def test_validate_nl2agent_run_context_rejects_non_builder_runner(monkeypatch):
 
 def test_validate_nl2agent_run_context_requires_conversation(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             side_effect=[
@@ -1593,10 +1593,10 @@ def test_validate_nl2agent_run_context_requires_conversation(monkeypatch):
         ),
     )
     get_session = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "require_active_session", get_session)
+    monkeypatch.setattr(nl2agent_runtime_service, "require_active_session", get_session)
 
-    with pytest.raises(nl2agent_service.Nl2AgentValidationError):
-        nl2agent_service.validate_nl2agent_run_context(
+    with pytest.raises(nl2agent_runtime_service.Nl2AgentValidationError):
+        nl2agent_runtime_service.validate_nl2agent_run_context(
             runner_agent_id=101,
             draft_agent_id=202,
             conversation_id=None,
@@ -1612,7 +1612,7 @@ def test_validate_nl2agent_run_context_rejects_terminal_session(
     monkeypatch, terminal_status
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             side_effect=[
@@ -1622,16 +1622,16 @@ def test_validate_nl2agent_run_context_rejects_terminal_session(
         ),
     )
     get_session = MagicMock(
-        side_effect=nl2agent_service.Nl2AgentDraftNotFoundError()
+        side_effect=nl2agent_runtime_service.Nl2AgentDraftNotFoundError()
     )
     get_conversation = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "require_active_session", get_session
+        nl2agent_runtime_service, "require_active_session", get_session
     )
-    monkeypatch.setattr(nl2agent_service, "get_conversation", get_conversation)
+    monkeypatch.setattr(nl2agent_runtime_service, "get_conversation", get_conversation)
 
-    with pytest.raises(nl2agent_service.Nl2AgentDraftNotFoundError):
-        nl2agent_service.validate_nl2agent_run_context(
+    with pytest.raises(nl2agent_runtime_service.Nl2AgentDraftNotFoundError):
+        nl2agent_runtime_service.validate_nl2agent_run_context(
             runner_agent_id=101,
             draft_agent_id=202,
             conversation_id=902,
@@ -1654,22 +1654,22 @@ async def test_install_web_skill_recovers_resource_missing_catalog_item(monkeypa
     install_from_zip = MagicMock(return_value=["missing-files"])
     bind_skill = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+        nl2agent_runtime_service, "install_skills_from_zip_for_tenant", install_from_zip
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_tenant_skill_by_name",
         MagicMock(return_value={"skill_id": 12, "skill_name": "missing-files"}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_or_update_skill_by_skill_info",
         bind_skill,
     )
@@ -1688,7 +1688,7 @@ async def test_install_web_skill_recovers_resource_missing_catalog_item(monkeypa
         },
     )
 
-    result = await nl2agent_service.install_web_skill(
+    result = await nl2agent_runtime_service.install_web_skill(
         agent_id=202,
         skill_id=12,
         skill_name="missing-files",
@@ -1710,7 +1710,7 @@ async def test_install_web_skill_recovers_resource_missing_catalog_item(monkeypa
 
 async def test_install_web_skill_rejects_mismatched_id_and_name(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
@@ -1718,7 +1718,7 @@ async def test_install_web_skill_rejects_mismatched_id_and_name(monkeypatch):
     )
     install_from_zip = MagicMock()
     monkeypatch.setattr(
-        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+        nl2agent_runtime_service, "install_skills_from_zip_for_tenant", install_from_zip
     )
     nl2agent_session_catalog.set_nl2agent_session_catalogs(
         "tenant_1",
@@ -1733,9 +1733,9 @@ async def test_install_web_skill_rejects_mismatched_id_and_name(monkeypatch):
     )
 
     with pytest.raises(
-        nl2agent_service.AgentRunException, match="not available for installation"
+        nl2agent_runtime_service.AgentRunException, match="not available for installation"
     ):
-        await nl2agent_service.install_web_skill(
+        await nl2agent_runtime_service.install_web_skill(
             agent_id=202,
             skill_id=12,
             skill_name="skill-b",

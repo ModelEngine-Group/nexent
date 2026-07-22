@@ -1,5 +1,6 @@
 """Discovery, lifecycle, and retention policy for durable NL2AGENT sessions."""
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
@@ -8,10 +9,12 @@ from agents.nl2agent_session_catalog import (
     delete_nl2agent_session_catalogs,
     enter_revision_mode,
 )
-from agents.nl2agent_session_store import recover_committed_cache_best_effort
+from agents.nl2agent_session_store import (
+    parse_session_state,
+    recover_committed_cache_best_effort,
+)
 from agents.nl2agent_workflow import (
     WORKFLOW_SCHEMA_VERSION,
-    Nl2AgentWorkflowState,
     evaluate_workflow,
     state_to_dict,
 )
@@ -151,7 +154,11 @@ def resume_session(
         enter_revision_mode(tenant_id, draft_agent_id)
         return _public_session(record)
 
-    state = Nl2AgentWorkflowState.model_validate(record.get("workflow_state"))
+    state = parse_session_state(
+        json.dumps(record.get("workflow_state"), ensure_ascii=False),
+        tenant_id,
+        draft_agent_id,
+    )
     if evaluate_workflow(state).current_stage != "final_review":
         raise Nl2AgentWorkflowConflictError(
             "Only a completed final-review session can be resumed for editing."
@@ -175,8 +182,10 @@ def resume_session(
         )
         if current.get("status") != NL2AGENT_SESSION_ACTIVE:
             raise Nl2AgentDraftNotFoundError()
-        current_state = Nl2AgentWorkflowState.model_validate(
-            current.get("workflow_state")
+        current_state = parse_session_state(
+            json.dumps(current.get("workflow_state"), ensure_ascii=False),
+            tenant_id,
+            draft_agent_id,
         )
         if not current_state.revision_mode:
             raise Nl2AgentWorkflowConflictError(

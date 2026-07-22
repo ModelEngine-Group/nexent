@@ -6,7 +6,6 @@ import json
 from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
 
-import fakeredis
 import pytest
 from pydantic import ValidationError
 
@@ -36,7 +35,7 @@ from consts.nl2agent_response import (
 from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
-from services import nl2agent_catalog_service, nl2agent_mcp_service, nl2agent_service
+from services import nl2agent_catalog_service, nl2agent_mcp_service, nl2agent_runtime_service
 from services.nl2agent_resource_service import (
     _resolve_tool_config_values,
     redact_tool_parameter_defaults,
@@ -48,7 +47,7 @@ from services.nl2agent_seed_service import NL2AGENT_VERIFICATION_CONFIG
 def _active_nl2agent_session(monkeypatch):
     """Keep workflow unit tests focused beyond the session authorization boundary."""
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "require_active_session",
         MagicMock(
             return_value={
@@ -229,21 +228,21 @@ def _mock_database_transaction(monkeypatch):
     transaction.__enter__.return_value = session
     transaction.__exit__.return_value = False
     monkeypatch.setattr(
-        nl2agent_service, "get_db_session", MagicMock(return_value=transaction)
+        nl2agent_runtime_service, "get_db_session", MagicMock(return_value=transaction)
     )
     return session, transaction
 
 
 def _mock_selectable_models(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
         MagicMock(
             return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_model_records",
         MagicMock(
             return_value=[
@@ -266,12 +265,6 @@ def _mock_selectable_models(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def mock_nl2agent_seed_defaults(monkeypatch):
-    fake_redis = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(
-        nl2agent_session_catalog,
-        "get_redis_service",
-        MagicMock(return_value=MagicMock(client=fake_redis)),
-    )
     initial_state = nl2agent_session_catalog.initialize_nl2agent_session_state(
         "tenant_1", 202, conversation_id=902
     )
@@ -304,7 +297,7 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         set_session_catalogs,
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "set_nl2agent_session_catalogs",
         set_session_catalogs,
     )
@@ -343,27 +336,52 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     transaction.__enter__.return_value = MagicMock()
     transaction.__exit__.return_value = None
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_db_session",
         MagicMock(return_value=transaction),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
+        "acquire_mcp_installation_lock",
+        MagicMock(return_value="durable-operation-owner"),
+    )
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
+        "renew_mcp_installation_lock",
+        MagicMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
+        "release_mcp_installation_lock",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
+        "get_installation_operation",
+        MagicMock(return_value={"status": "running"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
+        "transition_installation_operation",
+        MagicMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
         "update_nl2agent_session_status",
         MagicMock(return_value=True),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_require_workflow_action",
         MagicMock(),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "build_pinned_httpx_client_factory",
         MagicMock(return_value=MagicMock(name="pinned_httpx_client_factory")),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_nl2agent_seed_config",
         MagicMock(
             return_value={
@@ -383,47 +401,47 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_model_records",
         MagicMock(return_value=[]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "seed_nl2agent_builtin_tools",
         MagicMock(return_value=[11, 12, 13]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "create_or_update_tool_by_tool_info",
         MagicMock(),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "validate_nl2agent_remote_mcp_url",
         MagicMock(side_effect=lambda url: url),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "list_all_tools",
         AsyncMock(return_value=_RAW_TOOL_ROWS),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "list_tenant_skills",
         MagicMock(return_value=_RAW_SKILL_ROWS),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "list_registry_mcp_services",
         AsyncMock(return_value={"servers": _REGISTRY_RESULTS}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "list_community_mcp_services",
         AsyncMock(return_value={"items": _COMMUNITY_RESULTS}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "get_official_skills_with_status",
         MagicMock(return_value=_OFFICIAL_SKILLS),
     )

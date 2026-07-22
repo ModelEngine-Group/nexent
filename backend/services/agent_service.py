@@ -3281,7 +3281,7 @@ async def run_agent_stream(
         and draft_agent_id > 0
     )
     if is_nl2agent_run:
-        from services.nl2agent_service import validate_nl2agent_run_context
+        from services.nl2agent_runtime_service import validate_nl2agent_run_context
 
         resolved_runner_id = validate_nl2agent_run_context(
             runner_agent_id=agent_request.agent_id,
@@ -3495,13 +3495,13 @@ async def run_agent_stream(
 
     nl2agent_user_action = getattr(agent_request, "nl2agent_user_action", None)
     if is_nl2agent_run and nl2agent_user_action is not None:
-        from services.nl2agent_service import NL2AGENT_CHAT_INJECTION_TEXT
+        from services.nl2agent_runtime_service import NL2AGENT_CHAT_INJECTION_TEXT
 
         # The persisted message remains human-readable while the model receives
         # the server-owned control directive for the authoritative state check.
         agent_request.query = NL2AGENT_CHAT_INJECTION_TEXT
     elif is_nl2agent_run:
-        from services.nl2agent_service import process_requirements_revision_text
+        from services.nl2agent_runtime_service import process_requirements_revision_text
 
         process_requirements_revision_text(
             runner_agent_id=agent_request.agent_id,

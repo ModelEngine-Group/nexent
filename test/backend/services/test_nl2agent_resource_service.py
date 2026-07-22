@@ -14,20 +14,20 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
     bind_skill = MagicMock()
     db_session, transaction = _mock_database_transaction(monkeypatch)
 
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
+    monkeypatch.setattr(nl2agent_runtime_service, "query_tools_by_ids_for_tenant", query_tools)
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+        nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind_tool
     )
-    monkeypatch.setattr(nl2agent_service, "query_skills_by_ids", query_skills)
+    monkeypatch.setattr(nl2agent_runtime_service, "query_skills_by_ids", query_skills)
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
+        nl2agent_runtime_service, "create_or_update_skill_by_skill_info", bind_skill
     )
     monkeypatch.setattr(
-        nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202})
+        nl2agent_runtime_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202})
     )
     _register_local_batch("batch_1", [42], [7])
 
-    result = await nl2agent_service.apply_local_resources_batch(
+    result = await nl2agent_runtime_service.apply_local_resources_batch(
         agent_id=202,
         recommendation_batch_id="batch_1",
         tool_ids=[42],
@@ -44,7 +44,7 @@ async def test_apply_local_resources_batch_binds_tools_and_tenant_skills_atomica
         "bound_skill_count": 1,
         "tool_ids": [42],
         "skill_ids": [7],
-        "chat_injection_text": nl2agent_service.NL2AGENT_CHAT_INJECTION_TEXT,
+        "chat_injection_text": nl2agent_runtime_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
     tool_request = bind_tool.call_args.kwargs["tool_info"]
@@ -72,7 +72,7 @@ async def test_register_local_resources_rejects_ids_outside_session_catalog(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -80,10 +80,10 @@ async def test_register_local_resources_rejects_ids_outside_session_catalog(
         "tenant_1", 202, _EXPECTED_SESSION_CATALOGS
     )
     with pytest.raises(
-        nl2agent_service.AgentRunException,
+        nl2agent_runtime_service.AgentRunException,
         match="outside this session catalog",
     ):
-        await nl2agent_service.register_local_resource_recommendations(
+        await nl2agent_runtime_service.register_local_resource_recommendations(
             agent_id=202,
             recommendation_batch_id="forged_batch",
             tool_ids=[999],
@@ -98,12 +98,12 @@ async def test_register_local_resources_rejects_ids_outside_session_catalog(
 @pytest.mark.asyncio
 async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(
             return_value=[
@@ -124,7 +124,7 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_skills_by_ids",
         MagicMock(return_value=[{"skill_id": 7, "name": "brief-writer"}]),
     )
@@ -140,7 +140,7 @@ async def test_register_local_resources_accepts_catalog_subset(monkeypatch):
         skill_ids=[7],
     )
 
-    result = await nl2agent_service.register_local_resource_recommendations(
+    result = await nl2agent_runtime_service.register_local_resource_recommendations(
         agent_id=202,
         recommendation_batch_id="trusted_batch",
         tool_ids=[1],
@@ -173,7 +173,7 @@ async def test_register_local_resources_recovers_resolved_batch_without_stage_ga
     resolved_status,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -192,12 +192,12 @@ async def test_register_local_resources_recovers_resolved_batch_without_stage_ga
         "tenant_1", 202
     )["revision"]
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_require_workflow_action",
         MagicMock(side_effect=AssertionError("registration must be replayable")),
     )
 
-    result = await nl2agent_service.register_local_resource_recommendations(
+    result = await nl2agent_runtime_service.register_local_resource_recommendations(
         agent_id=202,
         recommendation_batch_id="recover_batch",
         tool_ids=[],
@@ -230,17 +230,17 @@ async def test_register_local_resources_does_not_advance_state_for_deleted_resou
     error_message,
 ):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(return_value=[] if missing_resource == "tool" else [{"tool_id": 1}]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_skills_by_ids",
         MagicMock(
             return_value=[] if missing_resource == "skill" else [{"skill_id": 7}]
@@ -258,8 +258,8 @@ async def test_register_local_resources_does_not_advance_state_for_deleted_resou
         skill_ids=[7],
     )
 
-    with pytest.raises(nl2agent_service.AgentRunException, match=error_message):
-        await nl2agent_service.register_local_resource_recommendations(
+    with pytest.raises(nl2agent_runtime_service.AgentRunException, match=error_message):
+        await nl2agent_runtime_service.register_local_resource_recommendations(
             agent_id=202,
             recommendation_batch_id="deleted_resource_batch",
             tool_ids=[1],
@@ -275,7 +275,7 @@ async def test_register_local_resources_does_not_advance_state_for_deleted_resou
 @pytest.mark.asyncio
 async def test_register_local_resources_rejects_unproven_catalog_batch(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -287,7 +287,7 @@ async def test_register_local_resources_rejects_unproven_catalog_batch(monkeypat
         nl2agent_session_catalog.Nl2AgentSessionCatalogError,
         match="trusted search result",
     ):
-        await nl2agent_service.register_local_resource_recommendations(
+        await nl2agent_runtime_service.register_local_resource_recommendations(
             agent_id=202,
             recommendation_batch_id="unproven_batch",
             tool_ids=[1],
@@ -300,7 +300,7 @@ async def test_register_local_resources_rejects_unproven_catalog_batch(monkeypat
 @pytest.mark.asyncio
 async def test_genuine_empty_local_search_can_register_its_trusted_batch(monkeypatch):
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -321,7 +321,7 @@ async def test_genuine_empty_local_search_can_register_its_trusted_batch(monkeyp
     )
     payload = json.loads(tool(query="unmatched capability"))
 
-    registered = await nl2agent_service.register_local_resource_recommendations(
+    registered = await nl2agent_runtime_service.register_local_resource_recommendations(
         agent_id=202,
         recommendation_batch_id=payload["recommendation_batch_id"],
         tool_ids=[],
@@ -353,16 +353,16 @@ async def test_apply_local_resources_batch_uses_catalog_param_defaults(monkeypat
     bind_tool = MagicMock()
     _mock_database_transaction(monkeypatch)
 
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
+    monkeypatch.setattr(nl2agent_runtime_service, "query_tools_by_ids_for_tenant", query_tools)
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+        nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind_tool
     )
     monkeypatch.setattr(
-        nl2agent_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202})
+        nl2agent_runtime_service, "_get_owned_draft", MagicMock(return_value={"agent_id": 202})
     )
     _register_local_batch("batch_1", [42], [])
 
-    result = await nl2agent_service.apply_local_resources_batch(
+    result = await nl2agent_runtime_service.apply_local_resources_batch(
         agent_id=202,
         recommendation_batch_id="batch_1",
         tool_ids=[42],
@@ -419,7 +419,7 @@ def test_resolve_tool_config_values_validates_structured_values_and_choices():
     assert _resolve_tool_config_values(
         42, schema, {"indexes": ["docs"], "mode": "safe"}
     ) == {"indexes": ["docs"], "mode": "safe"}
-    with pytest.raises(nl2agent_service.AgentRunException, match="declared choice"):
+    with pytest.raises(nl2agent_runtime_service.AgentRunException, match="declared choice"):
         _resolve_tool_config_values(
             42, schema, {"indexes": ["docs"], "mode": "invalid"}
         )
@@ -433,23 +433,23 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(
     bind_skill = MagicMock(side_effect=RuntimeError("skill write failed"))
     _, transaction = _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_tools_by_ids_for_tenant",
         MagicMock(return_value=[{"tool_id": 42, "params": {}}]),
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "query_skills_by_ids",
         MagicMock(return_value=[{"skill_id": 7, "name": "writer"}]),
     )
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+        nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind_tool
     )
     monkeypatch.setattr(
-        nl2agent_service, "create_or_update_skill_by_skill_info", bind_skill
+        nl2agent_runtime_service, "create_or_update_skill_by_skill_info", bind_skill
     )
     monkeypatch.setattr(
-        nl2agent_service,
+        nl2agent_runtime_service,
         "_get_owned_draft",
         MagicMock(return_value={"agent_id": 202}),
     )
@@ -459,7 +459,7 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(
         Nl2AgentOperationError,
         match="no resources were applied",
     ):
-        await nl2agent_service.apply_local_resources_batch(
+        await nl2agent_runtime_service.apply_local_resources_batch(
             agent_id=202,
             recommendation_batch_id="batch_1",
             tool_ids=[42],
@@ -479,10 +479,10 @@ async def test_apply_local_resources_batch_rolls_back_every_binding_on_failure(
 @pytest.mark.asyncio
 async def test_apply_local_resources_batch_rejects_invalid_draft_agent_id(monkeypatch):
     query_tools = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids_for_tenant", query_tools)
+    monkeypatch.setattr(nl2agent_runtime_service, "query_tools_by_ids_for_tenant", query_tools)
 
-    with pytest.raises(nl2agent_service.AgentRunException):
-        await nl2agent_service.apply_local_resources_batch(
+    with pytest.raises(nl2agent_runtime_service.AgentRunException):
+        await nl2agent_runtime_service.apply_local_resources_batch(
             agent_id=0,
             recommendation_batch_id="batch_1",
             tool_ids=[42],
@@ -497,10 +497,10 @@ async def test_apply_local_resources_batch_rejects_invalid_draft_agent_id(monkey
 @pytest.mark.asyncio
 async def test_finalize_agent_rejects_invalid_draft_agent_id(monkeypatch):
     update_agent = MagicMock()
-    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    monkeypatch.setattr(nl2agent_runtime_service, "update_agent", update_agent)
 
-    with pytest.raises(nl2agent_service.AgentRunException):
-        await nl2agent_service.finalize_agent(
+    with pytest.raises(nl2agent_runtime_service.AgentRunException):
+        await nl2agent_runtime_service.finalize_agent(
             agent_id=0,
             user_id="user_1",
             tenant_id="tenant_1",

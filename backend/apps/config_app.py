@@ -43,7 +43,7 @@ from apps.cas_app import router as cas_router
 from apps.quota_app import tenant_quota_router, platform_quota_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
-from services.nl2agent_service import seed_nl2agent_default_agent
+from services.nl2agent_runtime_service import seed_nl2agent_default_agent
 
 # Create logger instance
 logger = logging.getLogger("base_app")
