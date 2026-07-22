@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import AppException
+from consts.exceptions import AppException, QuotaExceededError
 
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,20 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "code": exc.error_code.value,
                 "message": exc.message,
                 "details": exc.details if exc.details else None
+            },
+        )
+
+    @app.exception_handler(QuotaExceededError)
+    async def quota_exceeded_exception_handler(request, exc):
+        logger.warning("QuotaExceededError: %s", exc)
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": "TenantStorageFull",
+                "message": str(exc),
+                "usage_bytes": exc.usage_bytes,
+                "hard_limit_bytes": exc.hard_limit_bytes,
+                "exceeded_by_bytes": exc.exceeded_by_bytes,
             },
         )
 

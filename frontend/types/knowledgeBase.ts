@@ -51,6 +51,8 @@ export interface KnowledgeBaseCreateParams {
   group_ids?: number[];
   is_multimodal?: boolean;
   preserve_source_file?: boolean;
+  // Per-KB soft storage quota in bytes (null = unlimited)
+  quota_limit_bytes?: number | null;
 }
 
 // Document type

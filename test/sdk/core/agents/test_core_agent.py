@@ -14,7 +14,7 @@ import os
 import sys
 import threading
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from threading import Event
 
 
@@ -2674,3 +2674,130 @@ class TestLogModelCallParameters:
         # Verify warning was logged via the except block
         # The exception handler logs via self.logger.log()
         agent.logger.log.assert_called()
+
+
+# ----------------------------------------------------------------------------
+# Tests for real tool-call observer helpers
+# ----------------------------------------------------------------------------
+
+
+def test_coerce_observer_arguments_preserves_json_compatible_values():
+    """Keep values accepted by observer payloads unchanged."""
+    values = [None, "{\"query\": \"test\"}", 3, 2.5, True, {"key": "value"}, ["item"]]
+
+    assert [core_agent_module._coerce_observer_arguments(value) for value in values] == values
+
+
+def test_coerce_observer_arguments_stringifies_other_values():
+    """Convert non-serializable values to their string representation."""
+    value = object()
+
+    assert core_agent_module._coerce_observer_arguments(value) == str(value)
+
+
+def test_collect_call_arguments_extracts_literals_expressions_and_kwargs():
+    """Extract safe literals and retain source for non-literal expressions."""
+    call_node = core_agent_module.ast.parse(
+        "search(42, user.query, limit=5, filters={'tag': 'sdk'}, **options)"
+    ).body[0].value
+
+    assert core_agent_module._collect_call_arguments(call_node) == {
+        "arg0": 42,
+        "arg1": "user.query",
+        "limit": 5,
+        "filters": {"tag": "sdk"},
+        "**kwargs": "options",
+    }
+
+
+def test_collect_call_arguments_handles_unparseable_keyword_expression(monkeypatch):
+    """Use a diagnostic placeholder when keyword source cannot be reconstructed."""
+    call_node = core_agent_module.ast.parse("search(query=value)").body[0].value
+    original_unparse = core_agent_module.ast.unparse
+
+    def fail_for_keyword(node):
+        if isinstance(node, core_agent_module.ast.Name):
+            raise ValueError("cannot unparse")
+        return original_unparse(node)
+
+    monkeypatch.setattr(core_agent_module.ast, "unparse", fail_for_keyword)
+
+    assert core_agent_module._collect_call_arguments(call_node) == {"query": "<unparseable>"}
+
+
+def test_scan_code_for_tool_calls_filters_deduplicates_and_preserves_source_order():
+    """Report distinct exposed tool calls while ignoring builtins and unknown calls."""
+    code = """print('start')
+search(query='nexent')
+worker.run(task='summarize')
+search(query='nexent')
+unknown_tool()
+"""
+
+    assert core_agent_module._scan_code_for_tool_calls(code, {"search", "run"}) == [
+        {"name": "search", "arguments": {"query": "nexent"}, "line": 2},
+        {"name": "run", "arguments": {"task": "summarize"}, "line": 3},
+    ]
+
+
+def test_scan_code_for_tool_calls_returns_empty_for_invalid_or_unconfigured_code():
+    """Ignore malformed code and code without exposed tool names."""
+    assert core_agent_module._scan_code_for_tool_calls("search(", {"search"}) == []
+    assert core_agent_module._scan_code_for_tool_calls("search()", set()) == []
+    assert core_agent_module._scan_code_for_tool_calls("", {"search"}) == []
+
+
+def test_emit_real_tool_chunks_from_code_emits_tool_payloads():
+    """Bridge each matching tool call to the observer with its extracted arguments."""
+    observer = MagicMock()
+
+    core_agent_module._emit_real_tool_chunks_from_code(
+        observer,
+        "research-agent",
+        "search(query='nexent')\nworker(task='summarize')",
+        {"search", "worker"},
+    )
+
+    assert observer.add_message.call_args_list == [
+        call(
+            "research-agent",
+            core_agent_module.ProcessType.TOOL,
+            "",
+            tool_name="search",
+            tool_arguments={"query": "nexent"},
+        ),
+        call(
+            "research-agent",
+            core_agent_module.ProcessType.TOOL,
+            "",
+            tool_name="worker",
+            tool_arguments={"task": "summarize"},
+        ),
+    ]
+
+
+def test_emit_real_tool_chunks_from_code_skips_empty_input_and_observer_errors():
+    """Do not propagate missing input or observer failures into agent execution."""
+    observer = MagicMock()
+    observer.add_message.side_effect = RuntimeError("observer unavailable")
+
+    core_agent_module._emit_real_tool_chunks_from_code(None, "agent", "search()", {"search"})
+    core_agent_module._emit_real_tool_chunks_from_code(observer, "agent", "", {"search"})
+    core_agent_module._emit_real_tool_chunks_from_code(observer, "agent", "search()", {"search"})
+
+    observer.add_message.assert_called_once()
+
+
+def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones():
+    """Collect stringified keys from tools and managed agents only."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = type("Agent", (), {})()
+    agent.tools = {"search": MagicMock(), 7: MagicMock()}
+    agent.managed_agents = {"planner": MagicMock()}
+
+    assert module.CoreAgent._known_tool_names(agent) == {"search", "7", "planner"}
+
+    agent.tools = ["not-a-mapping"]
+    agent.managed_agents = None
+
+    assert module.CoreAgent._known_tool_names(agent) == set()

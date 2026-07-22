@@ -46,7 +46,6 @@ export default async function RootLayout({
         <NextThemesProvider
           attribute="class"
           defaultTheme="light"
-          enableSystem
           disableTransitionOnChange
         >
           <I18nProviderWrapper locale={locale}>

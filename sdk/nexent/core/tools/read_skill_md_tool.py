@@ -179,7 +179,11 @@ class ReadSkillMdTool:
             return f"[Error] Failed to read '{file_path}': {e}"
 
 
-# Global instance for tool execution
+# Global instance for tool execution (singleton - created once per process)
+# NOTE: This singleton approach has a known limitation: when multiple agents/tenants
+# share the same process with different local_skills_dir paths, only the first
+# initialized instance is reused. For tenant-isolated scenarios, ensure that
+# local_skills_dir includes the tenant_id as a subdirectory (handled by SkillManager).
 _skill_md_tool = None
 
 
@@ -190,6 +194,14 @@ def get_read_skill_md_tool(
     version_no: int = 0,
 ) -> ReadSkillMdTool:
     """Get or create the skill md tool instance.
+
+    This function uses a singleton pattern for efficiency. The singleton is
+    initialized on the first call and reused for subsequent calls.
+
+    NOTE: For tenant isolation, ensure that local_skills_dir paths are
+    constructed to include tenant_id as a subdirectory. For example:
+        local_skills_dir = "/skills" + "/" + tenant_id  # -> "/skills/tenant123"
+    This way, the SkillManager will correctly scope skills per tenant.
 
     Args:
         local_skills_dir: Path to local skills storage.

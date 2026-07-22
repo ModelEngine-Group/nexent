@@ -549,6 +549,7 @@ class AgentInfoRequest(BaseModel):
     model_ids: Optional[List[int]] = None
     max_steps: Optional[int] = Field(default=None, ge=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
+    is_main_agent: Optional[bool] = None
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
@@ -651,6 +652,7 @@ class ExportAndImportAgentInfo(BaseModel):
     author: Optional[str] = None
     max_steps: int
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
+    is_main_agent: bool = True
     provide_run_summary: bool
     verification_config: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None

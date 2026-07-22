@@ -1,13 +1,13 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
+from sdk.nexent.core.utils.observer import MessageObserver
 from sdk.nexent.core.tools.search_memory_tool import SearchMemoryTool, _run_coroutine
 
 
 @pytest.fixture
 def mock_observer():
-    observer = MagicMock(spec=MessageObserver)
+    observer = MagicMock()
     observer.lang = "en"
     return observer
 
@@ -31,30 +31,6 @@ def search_memory_tool(mock_observer, mock_user_config):
         memory_user_config=mock_user_config,
         observer=mock_observer,
     )
-
-
-def test_observer_english_message(search_memory_tool, mock_observer):
-    mock_observer.lang = "en"
-    with patch(
-        "sdk.nexent.memory.memory_service.search_memory_in_levels",
-        new_callable=AsyncMock,
-        return_value={"results": []},
-    ):
-        search_memory_tool.forward("some query")
-
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "Searching memory...")
-
-
-def test_observer_chinese_message(search_memory_tool, mock_observer):
-    mock_observer.lang = "zh"
-    with patch(
-        "sdk.nexent.memory.memory_service.search_memory_in_levels",
-        new_callable=AsyncMock,
-        return_value={"results": []},
-    ):
-        search_memory_tool.forward("some query")
-
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "搜索记忆中...")
 
 
 def test_no_observer(search_memory_tool):

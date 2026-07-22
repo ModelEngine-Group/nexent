@@ -16,6 +16,7 @@ export type AgentConfigUpdate = Partial<
     | "model_ids"
     | "max_step"
     | "requested_output_tokens"
+    | "is_main_agent"
     | "provide_run_summary"
     | "description"
     | "duty_prompt"
@@ -77,6 +78,27 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
 
 // ========== Core Interfaces ==========
 
+export interface PublishedAgent {
+  id: string;
+  agent_id: number;
+  name: string;
+  display_name?: string;
+  description: string;
+  author?: string;
+  unavailable_reasons?: string[];
+  model_ids?: number[];
+  model_names?: string[];
+  /** Single model name resolved from model_ids for display purposes */
+  model_name?: string;
+  is_available?: boolean;
+  is_new?: boolean;
+  group_ids?: string;
+  permission?: "EDIT" | "READ_ONLY";
+  current_version_no?: number;
+  greeting_message?: string;
+  example_questions?: string[];
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -89,6 +111,7 @@ export interface Agent {
   model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;

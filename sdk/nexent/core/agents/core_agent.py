@@ -1,5 +1,6 @@
 import json
 import ast
+import logging
 import time
 import threading
 from datetime import datetime
@@ -29,7 +30,12 @@ if TYPE_CHECKING:
 
 from .agent_model import AgentVerificationConfig
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
-from .verification import VerificationController, VerificationResult
+from .verification import (
+    VerificationController,
+    VerificationResult,
+    render_guardrail_refusal,
+    render_tool_input_refusal,
+)
 from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
@@ -182,6 +188,213 @@ class FinalAnswerError(Exception):
     pass
 
 
+class ToolInputBlockedError(AgentExecutionError):
+    """Raised by the guardrail tool-input wrap when a call is blocked.
+
+    Carries a ``refusal`` string for ``_step_stream`` to end the run without a retry loop.
+
+    Args:
+        refusal: User-facing refusal text used as the run's final answer.
+        logger: Optional logger forwarded to the base exception.
+    """
+
+    def __init__(self, refusal: str, logger=None):
+        super().__init__(refusal, logger)
+        self.refusal = refusal
+
+
+def _screened_tool_forward(engine, tool_name, controller, logger, original_forward, *args, **kwargs):
+    """Screen tool call args then dispatch to the original ``forward`` (checkpoint ③).
+
+    Args:
+        engine: GuardrailEngine that screens the resolved call args.
+        tool_name: Name of the wrapped tool.
+        controller: VerificationController used to emit + stash the refusal.
+        logger: Logger forwarded to ``ToolInputBlockedError``.
+        original_forward: The tool's real ``forward`` callable.
+        *args: Positional args of the tool call.
+        **kwargs: Keyword args of the tool call.
+
+    Returns:
+        Whatever ``original_forward`` returns (masked args are substituted on
+        ``mask``); raises ``ToolInputBlockedError`` on ``block``/``terminate``.
+    """
+    decision = engine.check_tool_args(args=args, kwargs=kwargs)
+    action = decision.effective_action
+    if action != "pass":
+        controller.emit(decision.verification_result, message=decision.message)
+    if action in ("block", "terminate"):
+        # Stash the refusal; _step_stream raises FinalAnswerError from it (no retry loop).
+        refusal = render_tool_input_refusal(decision, tool_name)
+        controller.pending_tool_block_refusal = refusal
+        raise ToolInputBlockedError(refusal, logger)
+    if action == "mask":
+        if decision.masked_args is not None:
+            args = decision.masked_args
+        if decision.masked_kwargs is not None:
+            kwargs = decision.masked_kwargs
+    return original_forward(*args, **kwargs)
+def _coerce_observer_arguments(arguments: Any) -> Any:
+    """Coerce AST/Python-literal arguments into a JSON-serializable payload.
+
+    smolagents may pass arguments either as a dict (after Python execution) or
+    as a JSON-encoded string (OpenAI-style). We accept both and emit a JSON-
+    friendly value into the observer so the downstream SSE chunk stays
+    consistent with the shape produced by builtin tools.
+    """
+    if arguments is None:
+        return None
+    if isinstance(arguments, (str, int, float, bool)):
+        return arguments
+    if isinstance(arguments, (dict, list)):
+        return arguments
+    return str(arguments)
+
+
+def _collect_call_arguments(call_node: "ast.Call") -> Dict[str, Any]:
+    """Extract positional + keyword arguments from an AST ``Call`` node.
+
+    Uses ``ast.literal_eval`` so we never reach into untrusted input at runtime:
+    the parsed code has not been executed yet, and ast literal-eval only accepts
+    safe Python literals.
+    """
+    arguments: Dict[str, Any] = {}
+
+    for index, arg in enumerate(call_node.args):
+        key = f"arg{index}"
+        try:
+            arguments[key] = ast.literal_eval(arg)
+        except (ValueError, SyntaxError):
+            # Fall back to source snippet when the argument is a complex
+            # expression (variable references, attribute access, etc.).
+            arguments[key] = ast.unparse(arg)
+
+    for keyword in call_node.keywords:
+        if keyword.arg is None:
+            # ``**kwargs`` spread; surface as a tagged entry for diagnostics.
+            try:
+                arguments["**kwargs"] = ast.unparse(keyword.value)
+            except Exception:
+                arguments["**kwargs"] = "<unparseable>"
+            continue
+        try:
+            arguments[keyword.arg] = ast.literal_eval(keyword.value)
+        except (ValueError, SyntaxError):
+            try:
+                arguments[keyword.arg] = ast.unparse(keyword.value)
+            except Exception:
+                arguments[keyword.arg] = "<unparseable>"
+
+    return arguments
+
+
+def _scan_code_for_tool_calls(
+    code_action: str,
+    known_tool_names: set,
+) -> List[Dict[str, Any]]:
+    """Walk ``code_action`` looking for calls to real tools.
+
+    Returns a list of dicts ``{name, arguments, line}`` preserving source order.
+    Tools not exposed via ``self.tools``/``self.managed_agents`` (e.g. builtin
+    Python helpers such as ``print`` or ``final_answer``) are ignored to keep
+    the emitted `tool` chunks accurate and aligned with the user's intent of
+    surfacing MCP / managed-agent invocations only.
+    """
+    if not code_action or not known_tool_names:
+        return []
+    try:
+        tree = ast.parse(code_action)
+    except SyntaxError:
+        # The smolagents parser will raise a more specific error downstream,
+        # so just return an empty list here.
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen_keys = set()  # dedupe identical call expressions
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if not name or name not in known_tool_names:
+            continue
+
+        arguments = _collect_call_arguments(node)
+        dedup_key = (name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        results.append(
+            {
+                "name": name,
+                "arguments": arguments,
+                "line": getattr(node, "lineno", None),
+            }
+        )
+
+    return results
+
+
+def _emit_real_tool_chunks_from_code(
+    observer: "MessageObserver",
+    agent_name: str,
+    code_action: str,
+    known_tool_names,
+) -> None:
+    """Translate real tool calls in ``code_action`` into observer TOOL chunks.
+
+    CodeAgent wraps every step in a synthetic ``python_interpreter`` ToolCall,
+    so without this bridge the SSE stream never sees the actual MCP /
+    managed-agent names the LLM invoked. We emit one `type=tool` chunk per
+    unique tool call AFTER the PARSE chunk has been published and BEFORE
+    ``python_executor(code_action)`` runs, so the downstream stream order is:
+
+        parse -> tool -> execution_logs
+
+    matching what the user sees during a real builtin-tool invocation.
+    """
+    if observer is None or not code_action:
+        return
+
+    normalized_names = {str(name) for name in (known_tool_names or set())}
+
+    calls = _scan_code_for_tool_calls(code_action, normalized_names)
+    fallback_logger = logging.getLogger(__name__)
+    if not calls:
+        # Visibility aid: when we expected real tools but found none, log at
+        # DEBUG so operators can confirm the bridge ran instead of silently
+        # skipping. Disabled by default to avoid noisy logs in production.
+        if normalized_names:
+            fallback_logger.debug(
+                "Tool bridge: no tool calls matched known tool names "
+                "(known=%d) in code_action of %d chars",
+                len(normalized_names),
+                len(code_action or ""),
+            )
+        return
+
+    for call in calls:
+        try:
+            observer.add_message(
+                agent_name or "",
+                ProcessType.TOOL,
+                "",
+                tool_name=call["name"],
+                tool_arguments=_coerce_observer_arguments(call["arguments"]),
+            )
+        except Exception:
+            fallback_logger.debug(
+                "Failed to bridge real tool call into observer: %s",
+                call["name"],
+                exc_info=True,
+            )
+
+
 class CoreAgent(CodeAgent):
     def __init__(
         self,
@@ -228,6 +441,20 @@ class CoreAgent(CodeAgent):
         names.add("final_answer")
         return sorted(names)
 
+    def _known_tool_names(self) -> set:
+        """Return the set of callable tool names exposed to ``code_action``.
+
+        Includes both flat tools (e.g. MCP tool functions) and managed agents
+        so the AST scanner below can attribute each call to a real tool name.
+        """
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                names.update(str(name) for name in container.keys())
+            except AttributeError:
+                continue
+        return names
+
     def _context_tools(self) -> List[Any]:
         """Return a stable tool list for ContextRuntime/ContextManager evidence.
 
@@ -242,6 +469,51 @@ class CoreAgent(CodeAgent):
                 iterable = container
             tools.extend(list(iterable or ()))
         return tools
+
+    def _guardrail_wrap_tools(self) -> None:
+        """Wrap each tool's forward() to screen resolved args before execution (checkpoint ③).
+
+        Blocked content never reaches the tool (vs checkpoint ②, which screens
+        output after the fact). Idempotent: already-wrapped tools are skipped.
+        Covers self.tools and self.managed_agents (incl. MCP).
+        """
+        engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if not engine:
+            return
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                iterable = container.values()
+            except AttributeError:
+                iterable = container
+            for tool in list(iterable or ()):
+                self._guardrail_wrap_one(tool, engine)
+
+    def _guardrail_wrap_one(self, tool, engine) -> None:
+        """Wrap a single tool's forward() with guardrail arg screening.
+
+        A blocked call raises ``AgentExecutionError`` so the tool never runs; a
+        passing call adds no observer traffic. Idempotent via ``_guardrail_wrapped``.
+
+        Args:
+            tool: Tool whose ``forward()`` is wrapped.
+            engine: GuardrailEngine that screens the resolved call args.
+        """
+        if tool is None or getattr(tool, "_guardrail_wrapped", False):
+            return
+        original_forward = getattr(tool, "forward", None)
+        if not callable(original_forward):
+            return
+        tool_name = getattr(tool, "name", "") or ""
+        controller = self.verification_controller
+        logger = self.logger
+        tool.forward = lambda *args, **kwargs: _screened_tool_forward(
+            engine, tool_name, controller, logger, original_forward, *args, **kwargs
+        )
+        try:
+            tool._guardrail_wrapped = True
+        except Exception:
+            # Some tool proxies block attribute writes; the wrap still took effect (worst case: harmless double-wrap).
+            pass
 
     def _append_verification_feedback(self, action_step: ActionStep, result: VerificationResult) -> None:
         feedback = self.verification_controller.build_feedback_observation(result)
@@ -402,6 +674,26 @@ Additional Args:
         # Log model call parameters before execution
         self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
+        # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
+        guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if guardrail_engine:
+            decision = guardrail_engine.check_input(
+                input_messages=input_messages,
+            )
+            self.verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "terminate":
+                self._append_verification_feedback(memory_step, decision.verification_result)
+                # Pre-built refusal as the final answer; FinalAnswerError ends the run (no retry loop).
+                memory_step.model_output = render_guardrail_refusal(
+                    decision, input_messages
+                )
+                raise FinalAnswerError()
+            if decision.effective_action == "mask" and decision.masked_messages is not None:
+                input_messages = decision.masked_messages
+                self._append_verification_feedback(memory_step, decision.verification_result)
+
         try:
             chat_message: ChatMessage = self.model(input_messages,
                                                    stop_sequences=stop_sequences, **additional_args)
@@ -459,6 +751,19 @@ Additional Args:
         )
         memory_step.tool_calls = [tool_call]
 
+        # Bridge the real tools invoked by `code_action` into the observer so the
+        # SSE stream carries `type=tool` chunks with the actual MCP/managed-agent
+        # name and arguments, instead of the synthetic `python_interpreter`
+        # placeholder below. We deliberately emit AFTER the PARSE chunk and BEFORE
+        # `python_executor(code_action)` runs so the chunk order matches the
+        # user-visible flow: parse -> tool call -> execution result.
+        _emit_real_tool_chunks_from_code(
+            self.observer,
+            self.agent_name,
+            code_action,
+            known_tool_names=self._known_tool_names(),
+        )
+
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
@@ -495,6 +800,14 @@ Additional Args:
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
+            # Guardrail ③ block: end the run with the stashed refusal (no retry loop).
+            # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
+            pending_refusal = getattr(getattr(self, "verification_controller", None), "pending_tool_block_refusal", None)
+            if pending_refusal or isinstance(e, ToolInputBlockedError):
+                refusal = pending_refusal or getattr(e, "refusal", "")
+                self.verification_controller.pending_tool_block_refusal = None
+                memory_step.model_output = refusal
+                raise FinalAnswerError()
             exec_duration_ms = (time.time() - exec_start) * 1000
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
@@ -544,6 +857,20 @@ Additional Args:
                 )
             if postcheck.severity == "warning":
                 self._append_verification_feedback(memory_step, postcheck)
+
+        # Guardrail checkpoint ②: screen tool output; block downgrades to mask (tool already ran), redact before memory. Never raises, never loops.
+        guardrail_engine = getattr(verification_controller, "guardrail_engine", None) if verification_controller else None
+        if guardrail_engine:
+            decision = guardrail_engine.check_output(
+                observation=memory_step.observations,
+                code_action=code_action,
+            )
+            verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "mask" and decision.cleaned_content is not None:
+                memory_step.observations = decision.cleaned_content
+                self._append_verification_feedback(memory_step, decision.verification_result)
 
         # Pre-truncate observations when ContextManager is enabled. Keeps the
         # head + tail of long outputs around a truncation marker so downstream
@@ -614,6 +941,7 @@ You have been provided with these additional arguments, that you can access usin
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
         if getattr(self, "python_executor", None):
+            self._guardrail_wrap_tools()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})

@@ -26,6 +26,7 @@ sys.modules['smolagents.tool'] = mock_smolagents.tool
 # Mock nexent.skills before loading
 mock_skill_manager = MagicMock()
 
+
 class MockSkillManager:
     def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
         self.local_skills_dir = local_skills_dir

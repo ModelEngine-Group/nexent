@@ -570,27 +570,60 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
         raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {str(e)}")
 
 
+async def _get_visible_published_agents(ctx: NorthboundContext) -> list[dict]:
+    """Return published agents visible to the northbound caller."""
+    agent_info_list = await list_published_agents_impl(
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+    )
+    if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
+        agent_info_list.extend(await list_published_agents_impl(
+            tenant_id=ASSET_OWNER_TENANT_ID,
+            user_id=ctx.user_id,
+        ))
+    return agent_info_list
+
+
 async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
-        agent_info_list = await list_published_agents_impl(
-            tenant_id=ctx.tenant_id,
-            user_id=ctx.user_id,
-        )
-        # Match the same scope as /agent/published_list: non-asset-owner tenants
-        # also get the asset owner's published agents merged in.
-        if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
-            asset_agent_list = await list_published_agents_impl(
-                tenant_id=ASSET_OWNER_TENANT_ID,
-                user_id=ctx.user_id,
-            )
-            agent_info_list.extend(asset_agent_list)
-        # Remove internal information that partner don't need
+        agent_info_list = await _get_visible_published_agents(ctx)
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
         raise Exception(f"Failed to get agent info list for tenant {ctx.tenant_id}: {str(e)}")
+
+
+async def get_agent_info_by_name_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return one visible published agent selected by its exact agent name."""
+    if not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    try:
+        agent_info_list = await _get_visible_published_agents(ctx)
+        agent_info = next(
+            (
+                item for item in agent_info_list
+                if item.get("name") == agent_name
+            ),
+            None,
+        )
+        if agent_info is None:
+            raise LookupError(f"Published agent not found: {agent_name}")
+
+        result = dict(agent_info)
+        result.pop("agent_id", None)
+        return {"message": "success", "data": result, "requestId": ctx.request_id}
+    except (ValueError, LookupError):
+        raise
+    except Exception as e:
+        raise Exception(
+            f"Failed to get agent info for agent_name {agent_name} in tenant {ctx.tenant_id}: {str(e)}"
+        )
 
 
 async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:

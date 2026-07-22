@@ -196,6 +196,7 @@ export const useSaveGuard = () => {
         group_ids: groupIds,
         model_ids: modelIdsToSave,
         max_steps: currentEditedAgent.max_step,
+        is_main_agent: currentEditedAgent.is_main_agent ?? true,
         provide_run_summary: currentEditedAgent.provide_run_summary,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,
