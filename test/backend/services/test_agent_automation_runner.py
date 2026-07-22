@@ -600,7 +600,7 @@ async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(
     monkeypatch.setattr(
         runner,
         "_fail_run",
-        lambda run, task, code, message, check: {
+        lambda run, task, code, message: {
             "status": "FAILED",
             "error_code": code,
             "error_message": message,

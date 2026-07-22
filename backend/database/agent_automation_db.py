@@ -60,6 +60,27 @@ def _escape_like_pattern(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _task_list_conditions(
+    tenant_id: str,
+    user_id: str,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    conditions = [
+        AgentAutomationTask.tenant_id == tenant_id,
+        AgentAutomationTask.user_id == user_id,
+        AgentAutomationTask.delete_flag == "N",
+        AgentAutomationTask.status != "DELETED",
+    ]
+    if status:
+        conditions.append(AgentAutomationTask.status == status)
+    normalized_search = search.strip() if search else ""
+    if normalized_search:
+        pattern = f"%{_escape_like_pattern(normalized_search)}%"
+        conditions.append(AgentAutomationTask.title.ilike(pattern, escape="\\"))
+    return conditions
+
+
 def list_tasks(
     tenant_id: str,
     user_id: str,
@@ -67,24 +88,41 @@ def list_tasks(
     search: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     with get_db_session() as session:
-        conditions = [
-            AgentAutomationTask.tenant_id == tenant_id,
-            AgentAutomationTask.user_id == user_id,
-            AgentAutomationTask.delete_flag == "N",
-            AgentAutomationTask.status != "DELETED",
-        ]
-        if status:
-            conditions.append(AgentAutomationTask.status == status)
-        normalized_search = search.strip() if search else ""
-        if normalized_search:
-            pattern = f"%{_escape_like_pattern(normalized_search)}%"
-            conditions.append(AgentAutomationTask.title.ilike(pattern, escape="\\"))
+        conditions = _task_list_conditions(tenant_id, user_id, status, search)
         rows = session.execute(
             select(AgentAutomationTask)
             .where(*conditions)
             .order_by(desc(AgentAutomationTask.update_time))
         ).scalars().all()
         return [as_dict(row) for row in rows]
+
+
+def list_tasks_paginated(
+    tenant_id: str,
+    user_id: str,
+    status: Optional[str],
+    search: Optional[str],
+    page: int,
+    page_size: int,
+) -> Dict[str, Any]:
+    with get_db_session() as session:
+        conditions = _task_list_conditions(tenant_id, user_id, status, search)
+        total = session.execute(
+            select(func.count()).select_from(AgentAutomationTask).where(*conditions)
+        ).scalar_one()
+        rows = session.execute(
+            select(AgentAutomationTask)
+            .where(*conditions)
+            .order_by(desc(AgentAutomationTask.update_time))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).scalars().all()
+        return {
+            "items": [as_dict(row) for row in rows],
+            "total": int(total or 0),
+            "page": page,
+            "page_size": page_size,
+        }
 
 
 def update_task(task_id: int, tenant_id: str, user_id: str, values: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -389,6 +427,38 @@ def list_runs(task_id: int, tenant_id: str, user_id: str, limit: int = 50) -> Li
             .limit(limit)
         ).scalars().all()
         return [as_dict(row) for row in rows]
+
+
+def list_runs_paginated(
+    task_id: int,
+    tenant_id: str,
+    user_id: str,
+    page: int,
+    page_size: int,
+) -> Dict[str, Any]:
+    conditions = [
+        AgentAutomationRun.task_id == task_id,
+        AgentAutomationRun.tenant_id == tenant_id,
+        AgentAutomationRun.user_id == user_id,
+        AgentAutomationRun.delete_flag == "N",
+    ]
+    with get_db_session() as session:
+        total = session.execute(
+            select(func.count()).select_from(AgentAutomationRun).where(*conditions)
+        ).scalar_one()
+        rows = session.execute(
+            select(AgentAutomationRun)
+            .where(*conditions)
+            .order_by(desc(AgentAutomationRun.scheduled_fire_at))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).scalars().all()
+        return {
+            "items": [as_dict(row) for row in rows],
+            "total": int(total or 0),
+            "page": page,
+            "page_size": page_size,
+        }
 
 
 def get_active_run_task_ids(task_ids: List[int], tenant_id: str, user_id: str) -> set[int]:

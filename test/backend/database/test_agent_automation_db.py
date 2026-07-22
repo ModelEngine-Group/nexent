@@ -2,7 +2,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from database import agent_automation_db
-from database.db_models import AgentAutomationTask
+from database.db_models import AgentAutomationRun, AgentAutomationTask
+
+AGENT_AUTOMATION_MIGRATION = Path("deploy/sql/migrations/v2.4.0_0722_add_agent_automation.sql")
 
 
 class _FakeRow:
@@ -112,6 +114,49 @@ def test_list_tasks_filters_by_owner_status_and_literal_title_search(monkeypatch
     assert r"%100\%\_天气%" in compiled.params.values()
 
 
+def test_list_tasks_paginated_counts_and_applies_offset(monkeypatch):
+    class CountResult:
+        def scalar_one(self):
+            return 23
+
+    class RowsResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [{"task_id": 21}]
+
+    class PaginatedSession(_FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.statements = []
+
+        def execute(self, statement, params=None):
+            self.statements.append(statement)
+            return CountResult() if len(self.statements) == 1 else RowsResult()
+
+    fake_session = PaginatedSession()
+
+    @contextmanager
+    def fake_get_db_session():
+        yield fake_session
+
+    monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
+    monkeypatch.setattr(agent_automation_db, "as_dict", lambda value: value)
+
+    result = agent_automation_db.list_tasks_paginated("tenant", "user", "ACTIVE", None, page=3, page_size=10)
+
+    assert result == {
+        "items": [{"task_id": 21}],
+        "total": 23,
+        "page": 3,
+        "page_size": 10,
+    }
+    assert "count" in str(fake_session.statements[0]).lower()
+    assert "LIMIT" in str(fake_session.statements[1])
+    assert "OFFSET" in str(fake_session.statements[1])
+
+
 def test_claim_due_tasks_uses_db_lease_and_skip_locked(monkeypatch):
     fake_session = _FakeSession()
 
@@ -210,14 +255,12 @@ def test_conversation_unique_active_index_exists_in_orm_and_sql():
     assert unique_index.unique is True
     assert "status <> 'DELETED'" in str(unique_index.dialect_options["postgresql"]["where"])
 
-    init_sql = Path("deploy/sql/init.sql").read_text()
-    migration_sql = Path("deploy/sql/migrations/v2.3.0_0713_add_agent_automation.sql").read_text()
-    for sql in (init_sql, migration_sql):
-        assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_task_t" in sql
-        assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_run_t" in sql
-        assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t" in sql
-        assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_conversation_active" in sql
-        assert "WHERE delete_flag = 'N' AND status <> 'DELETED'" in sql
+    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text()
+    assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_task_t" in migration_sql
+    assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_run_t" in migration_sql
+    assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t" in migration_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_conversation_active" in migration_sql
+    assert "WHERE delete_flag = 'N' AND status <> 'DELETED'" in migration_sql
 
 
 def test_active_scheduled_occurrence_has_unique_partial_index():
@@ -226,11 +269,21 @@ def test_active_scheduled_occurrence_has_unique_partial_index():
     ].indexes}
     assert "uq_agent_automation_active_occurrence" in index_names
 
+    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text()
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence" in migration_sql
+    assert "status IN ('QUEUED', 'RUNNING')" in migration_sql
+
+
+def test_run_capability_check_column_is_removed_from_schema():
+    assert "capability_check" not in AgentAutomationRun.__table__.columns
+
     init_sql = Path("deploy/sql/init.sql").read_text()
-    migration_sql = Path("deploy/sql/migrations/v2.3.0_0713_add_agent_automation.sql").read_text()
-    for sql in (init_sql, migration_sql):
-        assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence" in sql
-        assert "status IN ('QUEUED', 'RUNNING')" in sql
+    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text()
+
+    assert "agent_automation_run_t" not in init_sql
+    assert "capability_check JSONB" not in init_sql
+    assert "capability_check JSONB" not in migration_sql
+    assert "DROP COLUMN IF EXISTS capability_check" in migration_sql
 
 
 def test_task_crud_helpers_cover_owner_scoped_success_paths(monkeypatch):
@@ -302,6 +355,49 @@ def test_run_crud_helpers_cover_lifecycle_and_owner_filters(monkeypatch):
     assert agent_automation_db.cancel_runs_by_conversation(9, "user", "deleted") == 1
     assert agent_automation_db.list_runs(1, "tenant", "user", limit=1) == [payload]
     assert agent_automation_db.has_active_run_for_conversation(9) is True
+
+
+def test_list_runs_paginated_counts_and_applies_offset(monkeypatch):
+    class CountResult:
+        def scalar_one(self):
+            return 7
+
+    class RowsResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [{"run_id": 6}]
+
+    class PaginatedSession(_FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.statements = []
+
+        def execute(self, statement, params=None):
+            self.statements.append(statement)
+            return CountResult() if len(self.statements) == 1 else RowsResult()
+
+    fake_session = PaginatedSession()
+
+    @contextmanager
+    def fake_get_db_session():
+        yield fake_session
+
+    monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
+    monkeypatch.setattr(agent_automation_db, "as_dict", lambda value: value)
+
+    result = agent_automation_db.list_runs_paginated(1, "tenant", "user", page=2, page_size=5)
+
+    assert result == {
+        "items": [{"run_id": 6}],
+        "total": 7,
+        "page": 2,
+        "page_size": 5,
+    }
+    assert "count" in str(fake_session.statements[0]).lower()
+    assert "LIMIT" in str(fake_session.statements[1])
+    assert "OFFSET" in str(fake_session.statements[1])
 
 
 def test_lease_recovery_helpers_cover_empty_and_success_paths(monkeypatch):

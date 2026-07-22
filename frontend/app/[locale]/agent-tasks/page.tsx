@@ -66,6 +66,8 @@ const taskStatusFilters = [
   "PAUSED_BY_SYSTEM",
   "COMPLETED",
 ];
+const DEFAULT_TASK_PAGE_SIZE = 20;
+const DEFAULT_RUN_PAGE_SIZE = 10;
 
 function CompactSearchFilter({
   value,
@@ -203,6 +205,9 @@ export default function AgentTasksPage() {
   const params = useParams<{ locale: string }>();
   const { t, i18n } = useTranslation("common");
   const [tasks, setTasks] = useState<AgentAutomationTask[]>([]);
+  const [taskTotal, setTaskTotal] = useState(0);
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskPageSize, setTaskPageSize] = useState(DEFAULT_TASK_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [taskNameSearch, setTaskNameSearch] = useState("");
   const [agentNameSearch, setAgentNameSearch] = useState("");
@@ -218,6 +223,10 @@ export default function AgentTasksPage() {
     null
   );
   const [runs, setRuns] = useState<AgentAutomationRun[]>([]);
+  const [runTotal, setRunTotal] = useState(0);
+  const [runPage, setRunPage] = useState(1);
+  const [runPageSize, setRunPageSize] = useState(DEFAULT_RUN_PAGE_SIZE);
+  const [runLoading, setRunLoading] = useState(false);
   const [form] = Form.useForm();
   const loadRequestIdRef = useRef(0);
 
@@ -274,9 +283,14 @@ export default function AgentTasksPage() {
         status: statusFilter,
         search: taskNameSearch,
         agentName: agentNameSearch,
+        page: taskPage,
+        pageSize: taskPageSize,
       });
       if (requestId === loadRequestIdRef.current) {
-        setTasks(loadedTasks);
+        setTasks(loadedTasks.items);
+        setTaskTotal(loadedTasks.total);
+        setTaskPage(loadedTasks.page);
+        setTaskPageSize(loadedTasks.page_size);
       }
     } catch (error: unknown) {
       if (requestId === loadRequestIdRef.current) {
@@ -289,30 +303,43 @@ export default function AgentTasksPage() {
         setLoading(false);
       }
     }
-  }, [agentNameSearch, statusFilter, taskNameSearch, t]);
+  }, [
+    agentNameSearch,
+    statusFilter,
+    taskNameSearch,
+    taskPage,
+    taskPageSize,
+    t,
+  ]);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
 
   const handleTableChange: TableProps<AgentAutomationTask>["onChange"] = (
-    _pagination,
+    pagination,
     filters
   ) => {
     const nextTaskName = filters.title?.[0];
     const nextAgentName = filters.agent_name?.[0];
     const nextStatus = filters.status?.[0];
-    setTaskNameSearch(
-      typeof nextTaskName === "string" ? nextTaskName.trim() : ""
-    );
-    setAgentNameSearch(
-      typeof nextAgentName === "string" ? nextAgentName.trim() : ""
-    );
-    setStatusFilter(
+    const nextTaskSearch =
+      typeof nextTaskName === "string" ? nextTaskName.trim() : "";
+    const nextAgentSearch =
+      typeof nextAgentName === "string" ? nextAgentName.trim() : "";
+    const nextStatusFilter =
       typeof nextStatus === "string"
         ? (nextStatus as AutomationTaskListStatus)
-        : undefined
-    );
+        : undefined;
+    const filtersChanged =
+      nextTaskSearch !== taskNameSearch ||
+      nextAgentSearch !== agentNameSearch ||
+      nextStatusFilter !== statusFilter;
+    setTaskNameSearch(nextTaskSearch);
+    setAgentNameSearch(nextAgentSearch);
+    setStatusFilter(nextStatusFilter);
+    setTaskPage(filtersChanged ? 1 : pagination.current || 1);
+    setTaskPageSize(pagination.pageSize || DEFAULT_TASK_PAGE_SIZE);
   };
 
   const openEdit = (task: AgentAutomationTask) => {
@@ -340,20 +367,42 @@ export default function AgentTasksPage() {
     }
   };
 
+  const loadRuns = useCallback(
+    async (
+      task: AgentAutomationTask,
+      page = runPage,
+      pageSize = runPageSize
+    ) => {
+      setRunLoading(true);
+      try {
+        const loadedRuns = await agentAutomationService.runs(task.task_id, {
+          page,
+          pageSize,
+        });
+        setRuns(loadedRuns.items);
+        setRunTotal(loadedRuns.total);
+        setRunPage(loadedRuns.page);
+        setRunPageSize(loadedRuns.page_size);
+      } catch (error: unknown) {
+        message.error(
+          getAutomationErrorMessage(
+            error,
+            t,
+            "agentAutomation.page.historyLoadFailed"
+          )
+        );
+      } finally {
+        setRunLoading(false);
+      }
+    },
+    [runPage, runPageSize, t]
+  );
+
   const openRuns = async (task: AgentAutomationTask) => {
     setSelectedTask(task);
     setHistoryOpen(true);
-    try {
-      setRuns(await agentAutomationService.runs(task.task_id));
-    } catch (error: unknown) {
-      message.error(
-        getAutomationErrorMessage(
-          error,
-          t,
-          "agentAutomation.page.historyLoadFailed"
-        )
-      );
-    }
+    setRunPage(1);
+    await loadRuns(task, 1, runPageSize);
   };
 
   const cancelRun = async (run: AgentAutomationRun) => {
@@ -361,7 +410,7 @@ export default function AgentTasksPage() {
       await agentAutomationService.cancelRun(run.run_id);
       message.success(t("agentAutomation.page.cancelRunSuccess"));
       if (selectedTask) {
-        setRuns(await agentAutomationService.runs(selectedTask.task_id));
+        await loadRuns(selectedTask);
         await loadTasks();
       }
     } catch (error: unknown) {
@@ -387,7 +436,7 @@ export default function AgentTasksPage() {
           await agentAutomationService.deleteRun(run.run_id);
           message.success(t("agentAutomation.page.deleteRunSuccess"));
           if (selectedTask) {
-            setRuns(await agentAutomationService.runs(selectedTask.task_id));
+            await loadRuns(selectedTask);
             await loadTasks();
           }
         } catch (error: unknown) {
@@ -510,7 +559,10 @@ export default function AgentTasksPage() {
       filterDropdown: () => (
         <CompactSearchFilter
           value={taskNameSearch}
-          onChange={setTaskNameSearch}
+          onChange={(value) => {
+            setTaskNameSearch(value);
+            setTaskPage(1);
+          }}
           placeholder={t("agentAutomation.page.taskSearchPlaceholder")}
         />
       ),
@@ -545,7 +597,10 @@ export default function AgentTasksPage() {
       filterDropdown: () => (
         <CompactSearchFilter
           value={agentNameSearch}
-          onChange={setAgentNameSearch}
+          onChange={(value) => {
+            setAgentNameSearch(value);
+            setTaskPage(1);
+          }}
           placeholder={t("agentAutomation.page.agentSearchPlaceholder")}
         />
       ),
@@ -576,11 +631,12 @@ export default function AgentTasksPage() {
       filterDropdown: ({ close }) => (
         <CompactStatusFilter
           currentValue={statusFilter || ""}
-          onChange={(value) =>
+          onChange={(value) => {
             setStatusFilter(
               value ? (value as AutomationTaskListStatus) : undefined
-            )
-          }
+            );
+            setTaskPage(1);
+          }}
           close={close}
           allLabel={t("agentAutomation.page.allStatuses")}
           options={taskStatusFilters.map((status) => ({
@@ -742,7 +798,12 @@ export default function AgentTasksPage() {
         columns={columns}
         dataSource={tasks}
         onChange={handleTableChange}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: taskPage,
+          pageSize: taskPageSize,
+          total: taskTotal,
+          showSizeChanger: true,
+        }}
         locale={{ emptyText: t("agentAutomation.page.empty") }}
       />
 
@@ -880,13 +941,30 @@ export default function AgentTasksPage() {
             : t("agentAutomation.page.historyTitle")
         }
         open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
+        onClose={() => {
+          setHistoryOpen(false);
+          setSelectedTask(null);
+          setRuns([]);
+          setRunTotal(0);
+          setRunPage(1);
+        }}
         width={720}
       >
         <Table
           rowKey="run_id"
           dataSource={runs}
-          pagination={false}
+          loading={runLoading}
+          pagination={{
+            current: runPage,
+            pageSize: runPageSize,
+            total: runTotal,
+            showSizeChanger: true,
+            onChange: (page, pageSize) => {
+              if (selectedTask) {
+                void loadRuns(selectedTask, page, pageSize);
+              }
+            },
+          }}
           columns={[
             {
               title: t("agentAutomation.page.status"),

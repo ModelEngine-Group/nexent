@@ -114,6 +114,16 @@ def _enrich_task_with_agent_name(task: Dict[str, Any], tenant_id: str, user_id: 
     return _enrich_tasks_with_agent_names([task], tenant_id, user_id)[0]
 
 
+def _paginate(items: List[Dict[str, Any]], page: int, page_size: int) -> Dict[str, Any]:
+    start = (page - 1) * page_size
+    return {
+        "items": items[start:start + page_size],
+        "total": len(items),
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 def _parse_trigger(raw: Dict[str, Any] | ScheduleTrigger) -> ScheduleTrigger:
     return raw if isinstance(raw, ScheduleTrigger) else ScheduleTrigger.model_validate(raw)
 
@@ -556,13 +566,30 @@ class AgentAutomationFacade:
         status: Optional[str] = None,
         search: Optional[str] = None,
         agent_name: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any] | List[Dict[str, Any]]:
         if status == "ENABLED":
             db_status = "ACTIVE"
         elif status == "RUNNING":
             db_status = None
         else:
             db_status = status
+        needs_post_filter = status in {"ENABLED", "RUNNING"} or bool((agent_name or "").strip())
+        if page is not None and page_size is not None and not needs_post_filter:
+            paged = agent_automation_db.list_tasks_paginated(
+                tenant_id,
+                user_id,
+                db_status,
+                search,
+                page,
+                page_size,
+            )
+            return {
+                **paged,
+                "items": _enrich_tasks_with_agent_names(paged["items"], tenant_id, user_id),
+            }
+
         tasks = agent_automation_db.list_tasks(tenant_id, user_id, db_status, search)
         enriched_tasks = _enrich_tasks_with_agent_names(tasks, tenant_id, user_id)
         if status == "ENABLED":
@@ -575,6 +602,8 @@ class AgentAutomationFacade:
                 task for task in enriched_tasks
                 if normalized_agent_name in str(task.get("agent_name") or "").casefold()
             ]
+        if page is not None and page_size is not None:
+            return _paginate(enriched_tasks, page, page_size)
         return enriched_tasks
 
     def get_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
@@ -686,8 +715,17 @@ class AgentAutomationFacade:
             raise AutomationNotFoundError("Automation task not found.")
         return True
 
-    def list_runs(self, task_id: int, tenant_id: str, user_id: str) -> List[Dict[str, Any]]:
+    def list_runs(
+        self,
+        task_id: int,
+        tenant_id: str,
+        user_id: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any] | List[Dict[str, Any]]:
         self.get_task(task_id, tenant_id, user_id)
+        if page is not None and page_size is not None:
+            return agent_automation_db.list_runs_paginated(task_id, tenant_id, user_id, page, page_size)
         return agent_automation_db.list_runs(task_id, tenant_id, user_id)
 
     async def run_task_now(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:

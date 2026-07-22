@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS nexent.agent_automation_run_t (
     duration_ms BIGINT,
     error_code VARCHAR(64),
     error_message TEXT,
-    capability_check JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -109,6 +108,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence
     WHERE delete_flag = 'N'
       AND trigger_type = 'SCHEDULED'
       AND status IN ('QUEUED', 'RUNNING');
+
+ALTER TABLE nexent.agent_automation_run_t
+    DROP COLUMN IF EXISTS capability_check;
 
 CREATE INDEX IF NOT EXISTS idx_agent_automation_proposal_owner
     ON nexent.agent_automation_proposal_t (tenant_id, user_id, status)

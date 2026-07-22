@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
@@ -118,6 +118,8 @@ async def list_tasks(
     status: Optional[str] = Query(default=None),
     search: Optional[str] = Query(default=None, max_length=200),
     agent_name: Optional[str] = Query(default=None, max_length=200),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     authorization: Optional[str] = Header(None),
 ):
     try:
@@ -129,6 +131,8 @@ async def list_tasks(
                 status,
                 search,
                 agent_name,
+                page,
+                page_size,
             )
         )
     except HTTPException:
@@ -194,10 +198,15 @@ async def delete_task(task_id: int, authorization: Optional[str] = Header(None))
 
 
 @router.get("/{task_id}/runs", response_model=AutomationResponse)
-async def list_runs(task_id: int, authorization: Optional[str] = Header(None)):
+async def list_runs(
+    task_id: int,
+    authorization: Optional[str] = Header(None),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.list_runs(task_id, tenant_id, user_id))
+        return AutomationResponse(data=agent_automation_facade.list_runs(task_id, tenant_id, user_id, page, page_size))
     except AgentAutomationError as exc:
         raise _map_error(exc)
 

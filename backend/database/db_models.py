@@ -204,7 +204,6 @@ class AgentAutomationRun(TableBase):
     duration_ms = Column(BigInteger, nullable=True, doc="Run duration in milliseconds")
     error_code = Column(String(64), nullable=True, doc="Automation error code")
     error_message = Column(Text, nullable=True, doc="Automation error message")
-    capability_check = Column(JSONB, nullable=True, doc="Capability check result before execution")
 
 
 class AgentAutomationProposal(TableBase):
