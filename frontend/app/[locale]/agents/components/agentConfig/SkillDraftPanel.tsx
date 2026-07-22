@@ -227,55 +227,57 @@ export default function SkillDraftPanel({
             </Col>
           </Row>
 
-          <Can permission="group:read">
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item
-                  name="group_ids"
-                  label={t("agent.userGroup")}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select
-                    mode="multiple"
-                    placeholder={t("agent.userGroup")}
-                    options={groupSelectOptions}
-                    allowClear
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  name="ingroup_permission"
-                  label={t("tenantResources.knowledgeBase.permission")}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select
-                    placeholder={t("tenantResources.knowledgeBase.permission")}
-                    options={[
-                      {
-                        value: "EDIT",
-                        label: t(
-                          "tenantResources.knowledgeBase.permission.EDIT"
-                        ),
-                      },
-                      {
-                        value: "READ_ONLY",
-                        label: t(
-                          "tenantResources.knowledgeBase.permission.READ_ONLY"
-                        ),
-                      },
-                      {
-                        value: "PRIVATE",
-                        label: t(
-                          "tenantResources.knowledgeBase.permission.PRIVATE"
-                        ),
-                      },
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Can>
+          {!readOnly ? (
+            <Can permission="group:read">
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="group_ids"
+                    label={t("agent.userGroup")}
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Select
+                      mode="multiple"
+                      placeholder={t("agent.userGroup")}
+                      options={groupSelectOptions}
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="ingroup_permission"
+                    label={t("tenantResources.knowledgeBase.permission")}
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Select
+                      placeholder={t("tenantResources.knowledgeBase.permission")}
+                      options={[
+                        {
+                          value: "EDIT",
+                          label: t(
+                            "tenantResources.knowledgeBase.permission.EDIT"
+                          ),
+                        },
+                        {
+                          value: "READ_ONLY",
+                          label: t(
+                            "tenantResources.knowledgeBase.permission.READ_ONLY"
+                          ),
+                        },
+                        {
+                          value: "PRIVATE",
+                          label: t(
+                            "tenantResources.knowledgeBase.permission.PRIVATE"
+                          ),
+                        },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Can>
+          ) : null}
 
           <Form.Item
             name="description"
