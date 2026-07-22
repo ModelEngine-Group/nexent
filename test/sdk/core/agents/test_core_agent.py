@@ -307,6 +307,21 @@ ProcessType = _module_mocks["sdk.nexent.core.utils.observer"].ProcessType
 MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserver
 
 
+def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = object.__new__(module.CoreAgent)
+    agent.context_runtime = MagicMock()
+    agent.stop_event = MagicMock()
+    agent.stop_event.is_set.return_value = False
+    agent._run_stream = MagicMock(return_value=iter(["first", "second"]))
+
+    stream = agent._run_stream_with_context_evidence(task="task", max_steps=2)
+    assert next(stream) == "first"
+    stream.close()
+
+    agent.context_runtime.finalize_evidence.assert_called_once_with(status="cancelled")
+
+
 # ----------------------------------------------------------------------------
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
@@ -1767,6 +1782,8 @@ class TestRunStreamRealExecution:
         }
         runtime.chars_per_token = 1.5
         runtime.token_threshold = token_threshold
+        runtime.token_counts.return_value = {"uncompressed": None, "compressed": None}
+        runtime.consume_history_summary_event.return_value = None
         return runtime
 
     def _load_core_agent_in_isolation(self):
@@ -1904,12 +1921,21 @@ class TestRunStreamRealExecution:
 
             # Execute
             spec.loader.exec_module(module)
-
             return module
         finally:
             # Restore original modules
             for name, module in original_modules.items():
                 sys.modules[name] = module
+
+    def test_rejects_context_over_hard_budget_before_model_call(self):
+        module = self._load_core_agent_in_isolation()
+        final_context = MagicMock()
+        final_context.evidence.over_hard_budget = True
+        final_context.evidence.final_token_estimate = 120
+        final_context.evidence.hard_budget = 100
+
+        with pytest.raises(ValueError, match="120 > 100"):
+            module.CoreAgent._ensure_context_within_hard_budget(final_context)
 
     def test_run_stream_max_steps_path_real_execution(self):
         """Test that actually executes _run_stream and covers max_steps path lines."""
@@ -1985,7 +2011,6 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
-        agent.context_manager = None
         agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
@@ -2017,10 +2042,6 @@ class TestRunStreamRealExecution:
         agent = object.__new__(CoreAgent)
         agent.step_metrics = []
         agent._last_uncompressed_est = 110
-        agent.context_manager = MagicMock()
-        agent.context_manager.config.enabled = True
-        agent.context_manager.config.token_threshold = 4096
-        agent.context_manager.config.chars_per_token = 1.5
         agent.context_runtime = self._context_runtime_mock(
             calls=1,
             input_tokens=80,
@@ -2050,8 +2071,8 @@ class TestRunStreamRealExecution:
             token_threshold=4096,
         )
 
-    def test_step_stream_uses_context_manager_for_uncompressed_est(self):
-        """_step_stream pulls _last_uncompressed_est from ContextManager.get_token_counts()."""
+    def test_step_stream_uses_context_runtime_for_uncompressed_est(self):
+        """_step_stream pulls the raw estimate through the runtime contract."""
         module = self._load_core_agent_in_isolation()
         CoreAgent = module.CoreAgent
 
@@ -2067,12 +2088,13 @@ class TestRunStreamRealExecution:
 
         agent.context_runtime = self._context_runtime_mock()
         agent.context_runtime.chars_per_token = 1.0
+        agent.context_runtime.token_counts.return_value = {
+            "uncompressed": 5000,
+            "compressed": 1000,
+        }
         mock_context = MagicMock()
         mock_context.messages = [MagicMock()]
         agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
-
-        agent.context_manager = MagicMock()
-        agent.context_manager.get_token_counts.return_value = {"last_uncompressed": 5000}
 
         agent.model = MagicMock()
         response = MagicMock()
@@ -2093,8 +2115,8 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
-    def test_step_stream_falls_back_without_context_manager(self):
-        """_step_stream falls back to msg_token_count when context_manager is None."""
+    def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
+        """_step_stream estimates messages when the runtime has no raw sample."""
         module = self._load_core_agent_in_isolation()
         CoreAgent = module.CoreAgent
 
@@ -2114,8 +2136,6 @@ class TestRunStreamRealExecution:
         mock_context.messages = [MagicMock()]
         agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
 
-        agent.context_manager = None
-
         agent.model = MagicMock()
         response = MagicMock()
         response.content = "ok"
@@ -2133,7 +2153,7 @@ class TestRunStreamRealExecution:
         except (StopIteration, ValueError):
             pass
 
-        # When context_manager is None, falls back to msg_token_count
+        # When the runtime has no raw count, fall back to msg_token_count.
         assert agent._last_uncompressed_est != 5000
 
     def test_run_stream_stop_event_path_real_execution(self):
@@ -2347,7 +2367,6 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
-        agent.context_manager = None
         agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 

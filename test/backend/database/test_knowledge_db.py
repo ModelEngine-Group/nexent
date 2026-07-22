@@ -2064,13 +2064,14 @@ def test_get_knowledge_name_map_by_index_names_success(monkeypatch, mock_session
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     index_names = ["index1", "index2"]
-    result = get_knowledge_name_map_by_index_names(index_names)
+    result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
 
     expected = {
         "index1": "Knowledge Base 1",
         "index2": "Knowledge Base 2",
     }
     assert result == expected
+    assert any("tenant_id" in str(condition) for condition in query.filter.call_args.args)
 
 
 def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_session):
@@ -2104,7 +2105,7 @@ def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_s
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     index_names = ["index1", "index2"]
-    result = get_knowledge_name_map_by_index_names(index_names)
+    result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
 
     expected = {
         "index1": "Knowledge Base 1",
@@ -2115,7 +2116,7 @@ def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_s
 
 def test_get_knowledge_name_map_by_index_names_empty_list(monkeypatch):
     """Test get_knowledge_name_map_by_index_names with empty list returns empty dict"""
-    result = get_knowledge_name_map_by_index_names([])
+    result = get_knowledge_name_map_by_index_names([], tenant_id="tenant-1")
 
     assert result == {}
 
@@ -2140,7 +2141,7 @@ def test_get_knowledge_name_map_by_index_names_no_results(monkeypatch, mock_sess
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     index_names = ["nonexistent1", "nonexistent2"]
-    result = get_knowledge_name_map_by_index_names(index_names)
+    result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
 
     # Should return index_names as fallback for all
     expected = {
@@ -2167,7 +2168,7 @@ def test_get_knowledge_name_map_by_index_names_exception(monkeypatch, mock_sessi
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        get_knowledge_name_map_by_index_names(["index1", "index2"])
+        get_knowledge_name_map_by_index_names(["index1", "index2"], tenant_id="tenant-1")
 
 
 def test_get_index_name_by_knowledge_name_fallback_to_index_name(monkeypatch, mock_session):
@@ -2243,7 +2244,7 @@ def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
         ("get_knowledge_info_by_tenant_and_source", ("t1", "datamate"), {}),
         ("update_model_name_by_index_name", ("i1", "m1", "t1", "u1"), {}),
         ("get_index_name_by_knowledge_name", ("kb1", "t1"), {}),
-        ("get_knowledge_name_map_by_index_names", (["i1"],), {}),
+        ("get_knowledge_name_map_by_index_names", (["i1"], "t1"), {}),
         ("update_summary_frequency", ("i1", "1d", "t1", "u1"), {}),
         ("update_last_summary_time", ("i1",), {}),
         ("update_last_doc_update_time", ("i1",), {}),

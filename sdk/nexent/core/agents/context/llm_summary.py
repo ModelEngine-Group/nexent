@@ -8,8 +8,9 @@ from typing import List, Optional
 from smolagents.models import ChatMessage, MessageRole
 
 from ..summary_cache import CompressionCallRecord
-from ..summary_config import ContextManagerConfig
 from .budget import _is_context_length_error, format_summary_output
+from .config import ContextManagerConfig
+
 
 logger = logging.getLogger("agent_context.llm_summary")
 

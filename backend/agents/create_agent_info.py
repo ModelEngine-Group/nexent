@@ -4,10 +4,13 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
-from nexent.core.agents.summary_config import ContextManagerConfig
+from nexent.core.agents.context import (
+    ContextManagerConfig,
+    PolicyLayers,
+    resolve_policy,
+)
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
@@ -50,10 +53,10 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.context_utils import build_context_components
+from utils.context_utils import build_context_inputs
 from utils.redis_utils import get_redis_client
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
-from consts.model import AgentToolParamsRequest, ToolParamsRequest
+from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
@@ -705,6 +708,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
@@ -764,9 +768,7 @@ async def create_agent_config(
     constraint_prompt = agent_info.get("constraint_prompt", "")
     few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
-    # Get template content (use manager template if has any sub-agents)
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    prompt_template = get_agent_prompt_template(is_manager=is_manager, language=language)
 
     # Get app information
     default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
@@ -905,12 +907,11 @@ async def create_agent_config(
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
 
-    # Select the context path once.  Managed assembly receives raw components
-    # and must never consume a Jinja-rendered legacy prompt.
+    # This compatibility flag controls compression only. ContextManager remains
+    # the single context assembly path when compression is disabled.
     enable_context_manager = agent_info.get("enable_context_manager", False)
 
-    # Assemble legacy system_prompt only for the isolated fallback path.
-    # Get skills list for prompt template
+    # Get the skills included in ContextManager items.
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
@@ -933,12 +934,6 @@ async def create_agent_config(
         "knowledge_base_summary": knowledge_base_summary,
         "user_id": user_id,
     }
-    system_prompt = ""
-    if not enable_context_manager:
-        system_prompt = Template(
-            prompt_template["system_prompt"], undefined=StrictUndefined
-        ).render(render_kwargs)
-
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None
     if model_id_to_use is not None:
@@ -973,6 +968,13 @@ async def create_agent_config(
         hard_input_budget_tokens = 0
         context_token_threshold = input_budget
 
+    context_window_tokens = (
+        resolved_capacity_snapshot.context_window_tokens
+        if resolved_capacity_snapshot is not None
+        and resolved_capacity_snapshot.context_window_tokens is not None
+        else input_budget
+    )
+
     logger.info(
         "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
         agent_id,
@@ -981,41 +983,62 @@ async def create_agent_config(
         model_info.get("model_name") if model_info else model_name,
     )
 
-    # Managed context assembly starts from raw sources.  No legacy rendered
-    # prompt is supplied on this path.
-    context_components = []
-    if enable_context_manager:
-        context_components = build_context_components(
-            duty=duty_prompt,
-            constraint=constraint_prompt,
-            few_shots=few_shots_prompt,
-            app_name=app_name,
-            app_description=app_description,
-            user_id=user_id,
-            language=language,
-            is_manager=is_manager,
-            enable_planning=enable_planning,
-            tools=render_kwargs["tools"],
-            skills=skills,
-            managed_agents=render_kwargs["managed_agents"],
-            external_a2a_agents=render_kwargs["external_a2a_agents"],
-            memory_list=memory_list,
-            memory_search_query=last_user_query,
-            knowledge_base_summary=knowledge_base_summary,
-            kb_ids=kb_ids,
-        )
+    context_items = build_context_inputs(
+        duty=duty_prompt,
+        constraint=constraint_prompt,
+        few_shots=few_shots_prompt,
+        app_name=app_name,
+        app_description=app_description,
+        user_id=user_id,
+        language=language,
+        is_manager=is_manager,
+        enable_planning=enable_planning,
+        tools=render_kwargs["tools"],
+        skills=skills,
+        managed_agents=render_kwargs["managed_agents"],
+        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        memory_list=memory_list,
+        memory_search_query=last_user_query,
+        knowledge_base_summary=knowledge_base_summary,
+        kb_ids=kb_ids,
+    )
 
-        logger.info(
-            f"Agent {agent_id} context assembly: "
-            f"skills_count={len(skills)}, "
-            f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
-        )
+    logger.info(
+        f"Agent {agent_id} context assembly: "
+        f"skills_count={len(skills)}, "
+        f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
+    )
+    policy_layers = PolicyLayers.model_validate({
+        "platform": {
+            "processing_mode": "adaptive_compact" if enable_context_manager else "passthrough"
+        },
+        "tenant": tenant_config_manager.get_context_policy(tenant_id),
+        "agent": agent_info.get("context_policy"),
+        "request": request_context_policy,
+    })
+    effective_context_policy = resolve_policy(policy_layers)
+    effective_processing_mode = getattr(
+        effective_context_policy.processing_mode,
+        "value",
+        effective_context_policy.processing_mode,
+    )
+    policy_layers_payload = (
+        policy_layers.model_dump(mode="json")
+        if hasattr(policy_layers, "model_dump")
+        else policy_layers
+    )
+    logger.info(
+        "Agent %s effective context policy: processing_mode=%s layers=%s",
+        agent_id,
+        effective_processing_mode,
+        policy_layers_payload,
+    )
     cm_config = ContextManagerConfig(
-        enabled=enable_context_manager,
         token_threshold=context_token_threshold,
+        context_window_tokens=context_window_tokens,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
-        strategy="full",
+        policy_layers=policy_layers,
     )
 
 
@@ -1024,7 +1047,6 @@ async def create_agent_config(
         description="undefined" if agent_info["description"] is None else agent_info["description"],
         prompt_templates=await prepare_prompt_templates(
             is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,
-            system_prompt=system_prompt,
             language=language,
             agent_id=agent_id
         ),
@@ -1036,7 +1058,7 @@ async def create_agent_config(
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
-        context_components=context_components,
+        context_items=context_items,
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
@@ -1136,7 +1158,10 @@ async def create_tool_config_list(
             display_name_to_index_map = {}
             index_name_to_display_map = {}
             if index_names:
-                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                knowledge_name_map = get_knowledge_name_map_by_index_names(
+                    index_names,
+                    tenant_id=tenant_id,
+                )
                 # Reverse the mapping: display_name (knowledge_name) -> index_name
                 for idx_name, kb_name in knowledge_name_map.items():
                     display_name_to_index_map[kb_name] = idx_name
@@ -1242,7 +1267,6 @@ async def discover_langchain_tools():
 
 async def prepare_prompt_templates(
     is_manager: bool,
-    system_prompt: str,
     language: str = 'zh',
     agent_id: int = None,
 ):
@@ -1251,7 +1275,6 @@ async def prepare_prompt_templates(
 
     Args:
         is_manager: Whether it is a manager mode
-        system_prompt: System prompt content
         language: Language code ('zh' or 'en')
         agent_id: Agent ID for fetching skill instances
 
@@ -1259,7 +1282,10 @@ async def prepare_prompt_templates(
         dict: Prompt template configuration
     """
     prompt_templates = get_agent_prompt_template(is_manager, language)
-    prompt_templates["system_prompt"] = system_prompt
+    # Stable context is assembled exclusively by ContextManager. Keep the key
+    # for smolagents prompt-template compatibility, but never source it from a
+    # second rendering path.
+    prompt_templates["system_prompt"] = ""
 
     return prompt_templates
 
@@ -1464,6 +1490,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
 ):
     # Determine which version_no to use based on is_debug flag
@@ -1499,6 +1526,8 @@ async def create_agent_run_info(
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
+    if context_policy is not None:
+        create_config_kwargs["request_context_policy"] = context_policy
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 

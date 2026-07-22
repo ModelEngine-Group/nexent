@@ -1,24 +1,29 @@
-import json
+from __future__ import annotations
+
 import functools
 import inspect
+import json
 import logging
 import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
-
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
-from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
+from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+
+if TYPE_CHECKING:
+    from .context import ContextItemInput
+
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -401,7 +406,12 @@ class NexentAgent:
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
-    def create_single_agent(self, agent_config: AgentConfig):
+    def create_single_agent(
+        self,
+        agent_config: AgentConfig,
+        *,
+        context_items_override: Sequence["ContextItemInput"] | None = None,
+    ) -> CoreAgent:
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
 
@@ -455,25 +465,27 @@ class NexentAgent:
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Choose one context runtime at construction time.  The managed and
-            # legacy implementations do not call one another after this point.
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config and ctx_config.enabled:
-                from .agent_context import ContextManager
-                from ..context_runtime.managed.runtime import ManagedContextRuntime
+            # ContextManager is the only production context assembly path.
+            # ContextPolicy controls whether adaptive compaction is active.
+            from .context import ContextManager, ContextManagerConfig, ManagedContextRuntime
 
-                context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps,
-                )
-                context_runtime = ManagedContextRuntime(
-                    context_manager,
-                    components=getattr(agent_config, 'context_components', None) or [],
-                )
-            else:
-                from ..context_runtime.legacy.runtime import LegacyContextRuntime
-
-                context_runtime = LegacyContextRuntime()
+            ctx_config = (
+                getattr(agent_config, "context_manager_config", None)
+                or ContextManagerConfig()
+            )
+            context_manager = ContextManager(
+                config=ctx_config,
+                max_steps=agent_config.max_steps,
+            )
+            context_items = (
+                list(context_items_override)
+                if context_items_override is not None
+                else (getattr(agent_config, "context_items", None) or [])
+            )
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                items=context_items,
+            )
 
             # Create the agent
             agent = CoreAgent(
@@ -593,11 +605,15 @@ class NexentAgent:
                             ).get("estimated_input_tokens")
 
                         token_threshold = None
-                        if (
-                            hasattr(self.agent, "context_manager")
-                            and self.agent.context_manager is not None
-                        ):
-                            token_threshold = self.agent.context_manager.config.token_threshold
+                        context_window_tokens = None
+                        hard_input_budget_tokens = None
+                        context_processing_mode = None
+                        context_runtime = getattr(self.agent, "context_runtime", None)
+                        if context_runtime is not None:
+                            token_threshold = context_runtime.token_threshold
+                            context_window_tokens = context_runtime.context_window_tokens
+                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
                             "step_number": step_log.step_number,
@@ -607,6 +623,14 @@ class NexentAgent:
                             "total_output_tokens": total_output_tokens,
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
+                            "context_window_tokens": context_window_tokens,
+                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "context_processing_mode": context_processing_mode,
+                            "output_finish_reason": getattr(
+                                getattr(self.agent, "model", None),
+                                "last_finish_reason",
+                                None,
+                            ),
                         }
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
@@ -732,8 +756,9 @@ class NexentAgent:
             f"est_raw_i={total_raw:>{w_raw}}  save={total_save_str:>{w_save}} | "
             f"hit={hit_total_str:>{w_hit}}"
         )
-        if self.agent.context_manager:
-            lines.append(f"Context Manager Global: {self.agent.context_manager.get_all_compression_stats()}")
+        context_runtime = getattr(self.agent, "context_runtime", None)
+        if context_runtime is not None:
+            lines.append(f"Context Manager Global: {context_runtime.global_compression_stats()}")
 
         lines.append(
             "-----"

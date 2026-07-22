@@ -22,6 +22,7 @@ from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 TEST_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = TEST_ROOT.parent
@@ -242,6 +243,14 @@ def _load_agent_model_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    context_package = ModuleType("sdk.nexent.core.agents.context")
+    context_package.__path__ = []
+    context_models = ModuleType("sdk.nexent.core.agents.context.models")
+    class ContextItemInput(BaseModel):
+        id: str = "item"
+    context_models.ContextItemInput = ContextItemInput
+    sys.modules["sdk.nexent.core.agents.context"] = context_package
+    sys.modules["sdk.nexent.core.agents.context.models"] = context_models
 
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.agent_model", agent_model_path)
     module = importlib.util.module_from_spec(spec)
@@ -657,6 +666,9 @@ class TestMemoryContext:
 
 class TestAgentRunInfo:
     """Tests for AgentRunInfo Pydantic model."""
+
+    def test_agent_run_info_does_not_own_context_manager(self):
+        assert "context_manager" not in agent_model_module.AgentRunInfo.model_fields
 
     def test_agent_run_info_creation(self):
         """Test AgentRunInfo creation with all fields."""

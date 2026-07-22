@@ -19,6 +19,7 @@ class ProcessType(Enum):
     ERROR = "error"  # error field
     OTHER = "other"  # temporary other fields
     TOKEN_COUNT = "token_count"  # record the number of tokens used in each step
+    HISTORY_SUMMARY = "history_summary"  # newly-created context compression checkpoint
 
     SEARCH_CONTENT = "search_content"  # search content in tool
     PICTURE_WEB = "picture_web"  # record the image after联网搜索
@@ -138,6 +139,7 @@ class MessageObserver:
             ProcessType.OTHER: default_transformer,
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
+            ProcessType.HISTORY_SUMMARY: default_transformer,
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,

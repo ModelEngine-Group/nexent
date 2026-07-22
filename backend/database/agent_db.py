@@ -200,6 +200,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.setdefault("is_main_agent", True)
     info_with_metadata.setdefault("verification_config", None)
+    info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -239,6 +240,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "enable_context_manager": new_agent.enable_context_manager,
             "requested_output_tokens": new_agent.requested_output_tokens,
             "verification_config": new_agent.verification_config,
+            "context_policy": getattr(new_agent, "context_policy", None),
             "greeting_message": new_agent.greeting_message,
             "example_questions": new_agent.example_questions,
             "current_version_no": new_agent.current_version_no,
