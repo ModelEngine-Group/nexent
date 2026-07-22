@@ -461,9 +461,9 @@ def optimize_prompt_section_impl(
 
 
 def _extract_json_object(raw: str) -> Optional[dict]:
-    """从可能含 markdown 代码块/前后文字的 LLM 输出中提取首个 JSON 对象。
+    """Extract the first JSON object from LLM output that may contain markdown fences / surrounding text.
 
-    容错:markdown fence、前后解释文字、单引号、尾随逗号。
+    Fallbacks: markdown fence, surrounding explanation text, single quotes, trailing commas.
     """
     text = (raw or "").strip()
     if not text:
@@ -477,7 +477,7 @@ def _extract_json_object(raw: str) -> Optional[dict]:
         return json.loads(snippet)
     except (ValueError, TypeError):
         pass
-    # 容错:单引号 → 双引号、去尾随逗号
+    # Fallback: single quotes -> double quotes, strip trailing commas
     import re as _re
     try:
         fixed = snippet.replace("'", '"')
@@ -485,9 +485,9 @@ def _extract_json_object(raw: str) -> Optional[dict]:
         return json.loads(fixed)
     except (ValueError, TypeError):
         pass
-    # 容错:LLM 常把 regex 转义(\d \w \s \. 等)直接塞进 JSON 字符串,
-    # 单反斜杠在 JSON 里非法(只认 \" \\ \/ \b \f \n \r \t \uXXXX)。
-    # 把反斜杠后非合法转义字符的,补成双反斜杠。
+    # Fallback: LLM often inlines regex escapes (\d \w \s \. etc.) directly into JSON strings.
+    # A single backslash is invalid in JSON (only \" \\ \/ \b \f \n \r \t \uXXXX are allowed).
+    # Double up backslashes that are not part of a valid JSON escape sequence.
     try:
         fixed = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', snippet)
         return json.loads(fixed)
@@ -501,11 +501,31 @@ def generate_guardrail_rules_impl(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
 ) -> dict:
-    """调用 LLM 根据自然语言描述生成护栏正则规则，返回 {type, candidates|rules}。
+    """Generate guardrail regex rules from a natural-language description via LLM.
 
-    type=single → {type, candidates:[{pattern, desc}]}
-    type=multi  → {type, rules:[{name, pattern, severity, desc}]}
+    Loads the guardrail prompt template, renders the user prompt with the
+    description, calls the LLM, and extracts the JSON object from the (possibly
+    malformed) response. Tolerates markdown fences, surrounding prose, single
+    quotes, trailing commas, and invalid JSON escapes such as ``\\d`` (LLMs
+    often paste regex escapes with a single backslash).
+
+    Args:
+        description: Natural-language description of what to match or block.
+        model_id: ID of the LLM model used for generation.
+        tenant_id: Tenant ID for model resolution and monitoring.
+        language: Language code ('zh' or 'en') selecting the prompt template.
+
+    Returns:
+        A dict keyed by ``type``:
+        - ``{"type": "single", "candidates": [{"pattern": str, "desc": str}]}``
+        - ``{"type": "multi", "rules": [{"name": str, "pattern": str,
+          "severity": str, "desc": str}]}``
+
+    Raises:
+        AppException: If ``description`` is empty, the LLM returns nothing,
+            or the response is not valid JSON / carries an unknown ``type``.
     """
+
     if not (description or "").strip():
         raise AppException(
             ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
@@ -524,7 +544,7 @@ def generate_guardrail_rules_impl(
         tenant_id=tenant_id,
     ).strip()
 
-    # 诊断日志:记录 LLM 原始输出(便于排查"格式不对"问题)
+    # Diagnostic log: record raw LLM output (for troubleshooting "bad format" issues)
     logger.info("[guardrail] desc=%r model_id=%s raw(500)=%s", description[:80], model_id, (raw or "")[:500])
 
     if not raw:
@@ -532,7 +552,7 @@ def generate_guardrail_rules_impl(
 
     parsed = _extract_json_object(raw)
     if not isinstance(parsed, dict):
-        logger.warning("[guardrail] JSON 解析失败, raw=%s", (raw or "")[:800])
+        logger.warning("[guardrail] JSON parse failed, raw=%s", (raw or "")[:800])
         raise AppException(
             ErrorCode.MODEL_PROMPT_GENERATION_FAILED,
             "LLM did not return valid JSON for guardrail rules.",

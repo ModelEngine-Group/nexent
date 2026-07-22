@@ -179,14 +179,14 @@ def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[
 
 
 def get_guardrail_regex_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
-    """
-    Get guardrail regex generation template.
+    """Load the guardrail regex generation prompt template.
 
     Args:
-        language: Language code ('zh' or 'en')
+        language: Language code ('zh' or 'en') selecting the template variant.
 
     Returns:
-        dict: Loaded guardrail regex template configuration
+        The loaded template configuration dict, carrying the
+        ``GUARDRAIL_SYSTEM_PROMPT`` and ``GUARDRAIL_USER_PROMPT`` keys.
     """
     return get_prompt_template('guardrail_regex', language)
 

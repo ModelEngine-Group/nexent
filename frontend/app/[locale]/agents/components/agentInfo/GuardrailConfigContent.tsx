@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { theme, App } from "antd";
@@ -71,102 +71,6 @@ const SEVERITY_META: Record<
   pass: { color: "success", icon: <ShieldCheck /> },
 };
 
-// Inline toggle row for the guardrail enable switch + status summary
-function GuardrailSummaryToggle({
-  enabled,
-  onToggle,
-  ruleCount,
-  severityCounts,
-}: {
-  enabled: boolean;
-  onToggle: (enabled: boolean) => void;
-  ruleCount: number;
-  severityCounts: Record<GuardrailSeverity, number>;
-}) {
-  const { token } = theme.useToken();
-  const { t } = useTranslation("common");
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 14px",
-        borderRadius: 10,
-        border: `0.5px solid ${enabled ? "#B5D4F4" : token.colorBorderSecondary}`,
-        background: enabled ? "#E6F1FB" : token.colorFillQuaternary,
-        flex: 1,
-      }}
-    >
-      <div
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: 7,
-          background: enabled ? "#185FA5" : token.colorBgContainer,
-          color: enabled ? "#fff" : token.colorTextTertiary,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        <ShieldCheck size={15} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Text strong style={{ fontSize: 13, color: enabled ? "#042C53" : token.colorText }}>
-            {t("agent.guardrail.summaryTitle") || "Guardrail"}
-          </Text>
-          <Tag
-            style={{
-              fontSize: 10,
-              margin: 0,
-              padding: "1px 8px",
-              borderRadius: 10,
-              border: "none",
-              background: enabled ? "#185FA5" : token.colorFillSecondary,
-              color: enabled ? "#fff" : token.colorTextTertiary,
-            }}
-          >
-            {ruleCount} {t("agent.guardrail.rules") || "rules"}
-          </Tag>
-        </div>
-        {enabled && ruleCount > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-            {severityCounts.block > 0 && (
-              <Tag color="error" style={{ margin: 0, fontSize: 10, padding: "0 6px" }}>
-                <ShieldOff size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />
-                {severityCounts.block}
-              </Tag>
-            )}
-            {severityCounts.mask > 0 && (
-              <Tag color="warning" style={{ margin: 0, fontSize: 10, padding: "0 6px" }}>
-                <ShieldAlert size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />
-                {severityCounts.mask}
-              </Tag>
-            )}
-            {severityCounts.pass > 0 && (
-              <Tag color="success" style={{ margin: 0, fontSize: 10, padding: "0 6px" }}>
-                <ShieldCheck size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />
-                {severityCounts.pass}
-              </Tag>
-            )}
-          </div>
-        )}
-        {!enabled && (
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {t("agent.guardrail.disabledHint") || "Guardrail is disabled. Enable to apply rules."}
-          </Text>
-        )}
-      </div>
-      <Tooltip title={enabled ? (t("agent.guardrail.disable") || "Disable") : (t("agent.guardrail.enable") || "Enable")}>
-        <Switch checked={enabled} onChange={onToggle} size="small" />
-      </Tooltip>
-    </div>
-  );
-}
-
 interface AiCandidate {
   pattern: string;
   desc: string;
@@ -182,6 +86,43 @@ interface AiRuleSuggestion {
 type AiResult =
   | { type: "single"; candidates: AiCandidate[] }
   | { type: "multi"; rules: AiRuleSuggestion[] };
+
+interface TestMatch {
+  ruleIndex: number;
+  ruleName: string;
+  severity: GuardrailSeverity;
+  matchText: string;
+  matchStart: number;
+  matchEnd: number;
+}
+
+/** Compute regex test matches for the preview — hoisted out of the component to keep its cognitive complexity down. */
+function computeTestMatches(rules: GuardrailRule[], testText: string): TestMatch[] {
+  if (!testText.trim()) return [];
+  const matches: TestMatch[] = [];
+  rules.forEach((rule, idx) => {
+    if (!rule.pattern.trim()) return;
+    try {
+      const re = compileGuardrailRegex(rule.pattern, "g");
+      if (!re) return;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(testText)) !== null) {
+        matches.push({
+          ruleIndex: idx,
+          ruleName: rule.name,
+          severity: rule.severity,
+          matchText: m[0],
+          matchStart: m.index,
+          matchEnd: m.index + m[0].length,
+        });
+        if (m.index === re.lastIndex) re.lastIndex++;
+      }
+    } catch {
+      // Invalid regex, skip
+    }
+  });
+  return matches;
+}
 
 export interface GuardrailConfigContentRef {
   getDraft: () => GuardrailConfig;
@@ -301,6 +242,29 @@ const GuardrailConfigContent = forwardRef<
   const [draft, setDraft] = useState<GuardrailConfig>(config);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [testText, setTestText] = useState("");
+  const [highlightedRuleKeys, setHighlightedRuleKeys] = useState<Set<number>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 5;
+
+  // Snapshot of the committed config — rules not in this snapshot are "unsaved"
+  const committedRulesRef = useRef<GuardrailRule[]>(config.rules || []);
+  useEffect(() => {
+    committedRulesRef.current = config.rules || [];
+  }, [config.rules]);
+
+  // Determine which draft rules are unsaved (not present in committed config)
+  const unsavedRuleKeys = useMemo(() => {
+    const committed = committedRulesRef.current;
+    const committedNames = new Set(committed.map((r: GuardrailRule) => r.name + "|" + r.pattern));
+    const result = new Set<number>();
+    draft.rules.forEach((rule, index) => {
+      const key = rule.name + "|" + rule.pattern;
+      if (!committedNames.has(key)) {
+        result.add(index);
+      }
+    });
+    return result;
+  }, [draft.rules, config.rules]);
 
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -324,6 +288,19 @@ const GuardrailConfigContent = forwardRef<
       setAiModelId(defaultModelId);
     }
   }, [defaultModelId, aiModelId]);
+
+  // Auto-clear highlighted rules after 6 seconds (extended to survive page switches)
+  useEffect(() => {
+    if (highlightedRuleKeys.size === 0) return;
+    const timer = setTimeout(() => setHighlightedRuleKeys(new Set()), 6000);
+    return () => clearTimeout(timer);
+  }, [highlightedRuleKeys]);
+
+  // Keep currentPage in valid range when rules change
+  const totalPages = Math.max(1, Math.ceil(draft.rules.length / PAGE_SIZE));
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>();
@@ -373,7 +350,9 @@ const GuardrailConfigContent = forwardRef<
       severity: "block",
       description: "",
     };
-    updateDraft((prev) => ({ ...prev, rules: [...prev.rules, newRule] }));
+    updateDraft((prev) => ({ ...prev, rules: [newRule, ...prev.rules] }));
+    setHighlightedRuleKeys((prev) => new Set([...prev, 0]));
+    setCurrentPage(1);
   }, [updateDraft]);
 
   const handleDeleteRule = useCallback((index: number) => {
@@ -382,6 +361,11 @@ const GuardrailConfigContent = forwardRef<
       rules: prev.rules.filter((_, i) => i !== index),
     }));
     setSelectedKeys((prev) => prev.filter((k) => k !== index));
+    setHighlightedRuleKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
+    });
   }, [updateDraft]);
 
   const handleDuplicateRule = useCallback((index: number) => {
@@ -389,9 +373,13 @@ const GuardrailConfigContent = forwardRef<
       const original = prev.rules[index];
       const newRule: GuardrailRule = { ...original, name: `${original.name}_copy` };
       const newRules = [...prev.rules];
-      newRules.splice(index + 1, 0, newRule);
+      newRules.splice(index, 0, newRule);
       return { ...prev, rules: newRules };
     });
+    const newIndex = index;
+    setHighlightedRuleKeys((prev) => new Set([...prev, newIndex]));
+    const targetPage = Math.ceil((newIndex + 1) / PAGE_SIZE);
+    setCurrentPage(targetPage);
   }, [updateDraft]);
 
   const handleUpdateRule = useCallback(
@@ -410,6 +398,7 @@ const GuardrailConfigContent = forwardRef<
       ...prev,
       rules: prev.rules.filter((_, i) => !selectedKeys.includes(i)),
     }));
+    setHighlightedRuleKeys(new Set());
     setSelectedKeys([]);
   }, [updateDraft, selectedKeys]);
 
@@ -420,41 +409,10 @@ const GuardrailConfigContent = forwardRef<
       : (t("agent.guardrail.invalidPattern") || "Invalid regex");
   }, [t]);
 
-  interface TestMatch {
-    ruleIndex: number;
-    ruleName: string;
-    severity: GuardrailSeverity;
-    matchText: string;
-    matchStart: number;
-    matchEnd: number;
-  }
-
-  const testMatches: TestMatch[] = useMemo(() => {
-    if (!testText.trim()) return [];
-    const matches: TestMatch[] = [];
-    draft.rules.forEach((rule, idx) => {
-      if (!rule.pattern.trim()) return;
-      try {
-        const re = compileGuardrailRegex(rule.pattern, "g");
-        if (!re) return;
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(testText)) !== null) {
-          matches.push({
-            ruleIndex: idx,
-            ruleName: rule.name,
-            severity: rule.severity,
-            matchText: m[0],
-            matchStart: m.index,
-            matchEnd: m.index + m[0].length,
-          });
-          if (m.index === re.lastIndex) re.lastIndex++;
-        }
-      } catch {
-        // Invalid regex, skip
-      }
-    });
-    return matches;
-  }, [testText, draft.rules]);
+  const testMatches: TestMatch[] = useMemo(
+    () => computeTestMatches(draft.rules, testText),
+    [testText, draft.rules],
+  );
 
   const renderTestPreview = () => {
     if (!testText.trim()) return null;
@@ -594,6 +552,7 @@ const GuardrailConfigContent = forwardRef<
   }, [aiInput, aiModelId, message, t]);
 
   const handleApplySingleCandidate = useCallback((pattern: string) => {
+    let addedIndex: number | null = null;
     updateDraft((prev) => {
       const newRules = [...prev.rules];
       let targetIndex = focusedPatternIndex;
@@ -603,36 +562,47 @@ const GuardrailConfigContent = forwardRef<
       }
 
       if (targetIndex === -1 || targetIndex === null) {
-        newRules.push({
+        newRules.unshift({
           name: `rule_${Date.now()}`,
           pattern,
           severity: "block",
           description: "",
         });
+        addedIndex = 0;
       } else if (targetIndex < newRules.length) {
         newRules[targetIndex] = { ...newRules[targetIndex], pattern };
+        addedIndex = targetIndex;
       }
 
       return { ...prev, rules: newRules };
     });
+    if (addedIndex !== null) {
+      setHighlightedRuleKeys((prev) => new Set([...prev, addedIndex as number]));
+      const targetPage = Math.ceil(((addedIndex as number) + 1) / PAGE_SIZE);
+      setCurrentPage(targetPage);
+    }
     setAiInput("");
     setAiResult(null);
     setFocusedPatternIndex(null);
   }, [focusedPatternIndex, updateDraft]);
 
   const handleImportMultiRules = useCallback((selectedRules: AiRuleSuggestion[]) => {
+    const count = selectedRules.length;
     updateDraft((prev) => ({
       ...prev,
       rules: [
-        ...prev.rules,
         ...selectedRules.map((r) => ({
           name: r.name,
           pattern: r.pattern,
           severity: r.severity,
           description: r.desc,
         })),
+        ...prev.rules,
       ],
     }));
+    const newIndices = Array.from({ length: count }, (_, i) => i);
+    setHighlightedRuleKeys((prev) => new Set([...prev, ...newIndices]));
+    setCurrentPage(1);
     setAiInput("");
     setAiResult(null);
   }, [updateDraft]);
@@ -789,7 +759,15 @@ const GuardrailConfigContent = forwardRef<
             {aiResult.candidates.map((cand, i) => (
               <div
                 key={i}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleApplySingleCandidate(cand.pattern)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleApplySingleCandidate(cand.pattern);
+                  }
+                }}
                 style={{
                   padding: "10px 12px",
                   border: `0.5px solid ${token.colorBorderSecondary}`,
@@ -910,7 +888,10 @@ const GuardrailConfigContent = forwardRef<
           {t("agent.guardrail.batch.selected") || "Selected"} {selectedKeys.length}
         </Text>
         <Popconfirm
-          title={t("agent.guardrail.batch.confirmDelete") || `Delete ${selectedKeys.length} selected rules?`}
+          title={
+            t("agent.guardrail.batch.confirmDelete", { count: selectedKeys.length }) ||
+            `Delete ${selectedKeys.length} selected rules?`
+          }
           onConfirm={handleBatchDelete}
         >
           <Button size="small" danger icon={<Trash2 size={12} />}>
@@ -1008,7 +989,15 @@ const GuardrailConfigContent = forwardRef<
             ].map((ex, i) => (
               <span
                 key={i}
+                role="button"
+                tabIndex={0}
                 onClick={() => setAiInput(ex.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setAiInput(ex.value);
+                  }
+                }}
                 style={{
                   fontSize: 11,
                   padding: "2px 8px",
@@ -1083,6 +1072,15 @@ const GuardrailConfigContent = forwardRef<
           </Button>
         </div>
 
+        <style>{`
+          .guardrule-row-highlight > td {
+            background: #E6F1FB !important;
+          }
+          .guardrule-row-highlight:hover > td {
+            background: #D5E8F8 !important;
+          }
+        `}</style>
+
         {!draft.enabled ? (
           <div style={{
             padding: "16px 12px",
@@ -1118,13 +1116,32 @@ const GuardrailConfigContent = forwardRef<
           <Table<any>
             dataSource={draft.rules.map((rule, index) => ({ ...rule, key: index }))}
             columns={columns as ColumnsType<any>}
-            pagination={false}
+            pagination={
+              draft.rules.length > PAGE_SIZE
+                ? {
+                    current: currentPage,
+                    pageSize: PAGE_SIZE,
+                    size: "small",
+                    showSizeChanger: false,
+                    showTotal: (total, range) =>
+                      `${range[0]}-${range[1]} / ${total}`,
+                    onChange: (page) => setCurrentPage(page),
+                  }
+                : false
+            }
             size="small"
             scroll={{ x: 700 }}
             rowSelection={{
               selectedRowKeys: selectedKeys,
               onChange: (keys) => setSelectedKeys(keys as number[]),
               columnWidth: 32,
+            }}
+            rowClassName={(record) => {
+              const idx = record.key as number;
+              if (highlightedRuleKeys.has(idx) || unsavedRuleKeys.has(idx)) {
+                return "guardrule-row-highlight";
+              }
+              return "";
             }}
           />
           {/* --- Test preview --- */}

@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
-from consts.exceptions import SkillDuplicateError, AppException
+from consts.exceptions import ForbiddenError, SkillDuplicateError, AppException
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
@@ -71,6 +71,8 @@ async def agent_run_api(
             authorization=authorization,
             resume=resume,
         )
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -170,9 +172,22 @@ async def generate_guardrail_rules_api(
     language: str = Body("zh", embed=True),
     authorization: Optional[str] = Header(None),
 ):
-    """
-    Generate guardrail regex rules from a natural-language description via LLM.
-    Returns {type: "single"|"multi", candidates|rules}.
+    """Generate guardrail regex rules from a natural-language description.
+
+    Derives tenant_id and language from the authenticated caller, delegates to
+    :func:`generate_guardrail_rules_impl`, and wraps the result as JSON.
+
+    Args:
+        http_request: Incoming HTTP request, used for auth-context resolution.
+        description: Natural-language description of what to match or block.
+        model_id: ID of the LLM model to use for generation.
+        language: Language override ('zh' or 'en'); falls back to the auth
+            context language when not provided or empty.
+        authorization: Bearer token header used to derive the tenant_id.
+
+    Returns:
+        JSONResponse with ``{"message": "Success", "data": <result>}`` on
+        success, or ``{"message": <error>, "data": null}`` on AppException.
     """
     _, tenant_id, auth_language = get_current_user_info(authorization, http_request)
     try:
@@ -187,7 +202,7 @@ async def generate_guardrail_rules_api(
             content={"message": "Success", "data": result},
         )
     except AppException as e:
-        logger.error(f"Generate guardrail rules error: {str(e)}")
+        logger.exception(f"Generate guardrail rules error: {e}")
         return JSONResponse(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             content={"message": str(e), "data": None},
