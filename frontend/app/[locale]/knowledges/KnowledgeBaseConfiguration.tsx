@@ -45,6 +45,7 @@ import {
   DocumentProvider,
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
+import quotaService from "@/services/quotaService";
 
 const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
 const normalizeEmbeddingModelType = (type: string) =>
@@ -169,6 +170,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Get available embedding models for knowledge base creation
   const { models } = useModelList({ enabled: true });
+
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -229,6 +231,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
   const [newKbPreserveSourceFile, setNewKbPreserveSourceFile] =
     useState<boolean>(true);
+  const [newKbQuotaBytes, setNewKbQuotaBytes] = useState<number | null>(null);
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
@@ -828,7 +831,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           newKbGroupIds,
           parsedSelectedModel.displayName,
           isMultimodal,
-          newKbPreserveSourceFile
+          newKbPreserveSourceFile,
+          newKbQuotaBytes,
         );
 
         if (!newKB) {
@@ -1101,6 +1105,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onSelectedGroupIdsChange={setNewKbGroupIds}
                 preserveSourceFile={newKbPreserveSourceFile}
                 onPreserveSourceFileChange={setNewKbPreserveSourceFile}
+                quotaLimitBytes={newKbQuotaBytes}
+                onQuotaLimitBytesChange={setNewKbQuotaBytes}
                 // Embedding model for create mode
                 availableEmbeddingModels={availableEmbeddingModels}
                 selectedEmbeddingModel={newKbEmbeddingModel}

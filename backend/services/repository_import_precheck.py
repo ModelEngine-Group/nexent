@@ -181,6 +181,7 @@ def _extract_mcp_server_names(snapshot: Any) -> Set[str]:
 
 def _extract_knowledge_bases(
     snapshot: Any,
+    tenant_id: str,
 ) -> List[Tuple[str, str, Optional[str]]]:
     """Return (key, display_name, description) tuples for knowledge bases."""
     index_names: Set[str] = set()
@@ -198,7 +199,10 @@ def _extract_knowledge_bases(
     if not index_names:
         return []
 
-    name_map = get_knowledge_name_map_by_index_names(list(index_names))
+    name_map = get_knowledge_name_map_by_index_names(
+        list(index_names),
+        tenant_id=tenant_id,
+    )
     items: List[Tuple[str, str, Optional[str]]] = []
     for index_name in sorted(index_names):
         display_name = name_map.get(index_name) or index_name
@@ -276,7 +280,7 @@ def build_repository_import_precheck(
             reason_code=reason,
         ))
 
-    for key, kb_name, description in _extract_knowledge_bases(snapshot):
+    for key, kb_name, description in _extract_knowledge_bases(snapshot, tenant_id):
         index_name = key.split(":", 1)[1]
         available, reason = _check_kb_available(index_name, tenant_id)
         record = get_knowledge_record({

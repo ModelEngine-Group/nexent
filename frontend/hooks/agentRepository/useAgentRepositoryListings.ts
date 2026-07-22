@@ -28,9 +28,7 @@ export async function invalidateAgentRepositoryCaches(
   ] as const;
 
   await Promise.all(
-    keys.map((queryKey) =>
-      queryClient.refetchQueries({ queryKey, type: "all" })
-    )
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey }))
   );
 }
 
@@ -82,13 +80,16 @@ export function useUpdateAgentRepositoryStatus() {
     mutationFn: ({
       agentRepositoryId,
       status,
+      content,
     }: {
       agentRepositoryId: number;
       status: AgentRepositoryListingStatus;
+      content?: string;
     }) =>
       agentRepositoryService.updateAgentRepositoryStatus(
         agentRepositoryId,
-        status
+        status,
+        content
       ),
     onSuccess: async () => {
       await invalidateAgentRepositoryCaches(queryClient);

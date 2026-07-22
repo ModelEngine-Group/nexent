@@ -121,9 +121,11 @@ export async function createAgentRepositoryListing(
 
 export async function updateAgentRepositoryStatus(
   agentRepositoryId: number,
-  status: AgentRepositoryListingStatus
+  status: AgentRepositoryListingStatus,
+  content?: string
 ): Promise<AgentRepositoryListingItem> {
   try {
+    const trimmedContent = content?.trim();
     const response = await fetchWithErrorHandling(
       API_ENDPOINTS.agentRepository.updateStatus(agentRepositoryId),
       {
@@ -132,7 +134,10 @@ export async function updateAgentRepositoryStatus(
           ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(trimmedContent ? { content: trimmedContent } : {}),
+        }),
       }
     );
 

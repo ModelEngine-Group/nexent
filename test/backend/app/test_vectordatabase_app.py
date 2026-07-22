@@ -1605,6 +1605,31 @@ async def test_update_index_partial_update(auth_data):
 
 
 @pytest.mark.asyncio
+async def test_update_index_clear_quota(auth_data):
+    """Test that an explicit null quota removes the knowledge base limit."""
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+        mock_update.return_value = True
+
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json={"quota_limit_bytes": None},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        mock_update.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            knowledge_name=None,
+            ingroup_permission=None,
+            group_ids=None,
+            tenant_id=auth_data["tenant_id"],
+            user_id=auth_data["user_id"],
+            quota_limit_bytes=None
+        )
+
+
+@pytest.mark.asyncio
 async def test_update_index_value_error(auth_data):
     """
     Test updating a knowledge base with invalid permission value.

@@ -26,8 +26,10 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .run_skill_script_tool import run_skill_script
 from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
+from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
     "MySqlTool",
@@ -52,6 +54,7 @@ __all__ = [
     "DeleteDirectoryTool",
     "MoveItemTool",
     "ListDirectoryTool",
+    "ParallelExecutorTool",
     "TerminalTool",
     "AnalyzeTextFileTool",
     "AnalyzeImageTool",
@@ -62,4 +65,6 @@ __all__ = [
     "read_skill_config",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "CreatePlanTool",
+    "UpdatePlanStepTool",
 ]

@@ -14,6 +14,7 @@ import {
   Card,
   App,
   Alert,
+  Modal,
   Tooltip,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -44,6 +45,8 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
+import GuardrailConfigContent from "./GuardrailConfigContent";
+import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
@@ -54,6 +57,7 @@ export default function AgentGenerateDetail({}) {
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const [form] = Form.useForm();
+  const [advancedSettingsForm] = Form.useForm();
 
   // Group data - get all groups for tenant, then filter to accessible ones
   const { data: groupData } = useGroupList(user?.tenantId ?? null);
@@ -119,6 +123,9 @@ export default function AgentGenerateDetail({}) {
   const [promptTemplateManagerOpen, setPromptTemplateManagerOpen] = useState(false);
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
   const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [advancedSettingsTab, setAdvancedSettingsTab] = useState<"basic" | "guardrail">("basic");
+  const guardrailContentRef = useRef<GuardrailConfigContentRef>(null);
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
   useEffect(() => {
@@ -221,6 +228,7 @@ export default function AgentGenerateDetail({}) {
       mainAgentModelIds: mainAgentModelIds,
       mainAgentMaxStep: editedAgent.max_step || 15,
       requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
+      isMainAgent: editedAgent.is_main_agent ?? true,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -475,6 +483,58 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(null);
   };
 
+  const handleOpenAdvancedSettings = () => {
+    advancedSettingsForm.setFieldsValue({
+      agentAuthor: editedAgent.author || "",
+      group_ids: normalizeNumberArray(editedAgent.group_ids || []),
+      ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
+      mainAgentMaxStep: editedAgent.max_step || 15,
+      provideRunSummary: editedAgent.provide_run_summary ?? false,
+      requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
+      isMainAgent: editedAgent.is_main_agent ?? true,
+      verificationEnabled: editedAgent.verification_config?.enabled ?? false,
+    });
+    setAdvancedSettingsTab("basic");
+    setAdvancedSettingsOpen(true);
+  };
+
+  const handleSaveAdvancedSettings = async () => {
+    const values = await advancedSettingsForm.validateFields();
+    const groupIds = normalizeNumberArray(
+      values.group_ids ?? editedAgent.group_ids ?? []
+    );
+    const ingroupPermission =
+      values.ingroup_permission ?? editedAgent.ingroup_permission ?? "READ_ONLY";
+    // Commit guardrail draft from the ref
+    const guardrailDraft = guardrailContentRef.current?.getDraft();
+    const verificationConfig = {
+      ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+      enabled: values.verificationEnabled,
+      ...(guardrailDraft ? { guardrail_config: guardrailDraft } : {}),
+    };
+
+    updateAgentConfig({
+      author: values.agentAuthor,
+      group_ids: groupIds,
+      ingroup_permission: ingroupPermission,
+      max_step: values.mainAgentMaxStep,
+      is_main_agent: values.isMainAgent,
+      provide_run_summary: values.provideRunSummary,
+      requested_output_tokens: values.requestedOutputTokens ?? null,
+      verification_config: verificationConfig,
+    });
+    form.setFieldsValue({
+      agentAuthor: values.agentAuthor,
+      group_ids: groupIds,
+      ingroup_permission: ingroupPermission,
+      mainAgentMaxStep: values.mainAgentMaxStep,
+      isMainAgent: values.isMainAgent,
+      provideRunSummary: values.provideRunSummary,
+      requestedOutputTokens: values.requestedOutputTokens ?? null,
+      verificationEnabled: values.verificationEnabled,
+    });
+    setAdvancedSettingsOpen(false);
+  };
 
   const handleSaveExpandModal = (content: string) => {
     switch (expandModalType) {
@@ -728,7 +788,11 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("businessLogic.config.template.label")}:
                       </span>
-                      <Form.Item name="promptTemplateId" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <Form.Item
+                        name="promptTemplateId"
+                        className="mb-0"
+                        style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}
+                      >
                         <Select
                           onChange={handlePromptTemplateChange}
                           loading={loadingPromptTemplates}
@@ -765,7 +829,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("model.type.llm")}:
                       </span>
-                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}>
                         <Select
                           onChange={handleModelChange}
                           loading={loadingModels}
@@ -817,9 +881,18 @@ export default function AgentGenerateDetail({}) {
       {/* Agent Detail Section */}
       <Row gutter={[12, 12]} className="mb-3">
         <Col xs={24}>
-          <h4 className="text-md font-medium text-gray-700">
-            {t("agent.detailContent.title")}
-          </h4>
+          <Flex align="center" justify="space-between">
+            <h4 className="text-md font-medium text-gray-700 mb-0">
+              {t("agent.detailContent.title")}
+            </h4>
+            <Button
+              icon={<Settings2 size={16} />}
+              onClick={handleOpenAdvancedSettings}
+              disabled={!editable || isGenerating}
+            >
+              {t("agent.advancedSettings.button")}
+            </Button>
+          </Flex>
         </Col>
       </Row>
 
@@ -897,76 +970,8 @@ export default function AgentGenerateDetail({}) {
                         />
                       </Form.Item>
 
-                      <Can permission="group:read">
-                        <Row gutter={16}>
-                          <Col span={12}>
-                            <Form.Item
-                              name="group_ids"
-                              label={t("agent.userGroup")}
-                            >
-                              <Select
-                                mode="multiple"
-                                placeholder={t("agent.userGroup")}
-                                options={groupSelectOptions}
-                                allowClear
-                                onChange={(value) => {
-                                  const nextGroupIds = normalizeNumberArray(value || []);
-                                  const currentGroupIds = normalizeNumberArray(
-                                    editedAgent.group_ids || []
-                                  );
-                                  if (
-                                    JSON.stringify(nextGroupIds) ===
-                                    JSON.stringify(currentGroupIds)
-                                  ) {
-                                    return;
-                                  }
-                                  updateAgentConfig({ group_ids: nextGroupIds });
-                                }}
-                              />
-                            </Form.Item>
-                          </Col>
-                          <Col span={12}>
-                            <Form.Item
-                              name="ingroup_permission"
-                              label={t("tenantResources.knowledgeBase.permission")}
-                            >
-                              <Select
-                                placeholder={t("tenantResources.knowledgeBase.permission")}
-                                options={[
-                                  { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
-                                  { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
-                                  { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
-                                ]}
-                                onChange={(value) => {
-                                  updateAgentConfig({ ingroup_permission: value });
-                                }}
-                              />
-                            </Form.Item>
-                          </Col>
-                        </Row>
-                      </Can>
-
                       <Row gutter={16}>
-                        <Col span={8}>
-                          <Form.Item
-                            name="agentAuthor"
-                            label={t("agent.author")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("agent.authorPlaceholder"),
-                              },
-                            ]}
-                          >
-                            <Input
-                              placeholder={t("agent.authorPlaceholder")}
-                              onBlur={(e) =>
-                                updateAgentConfig({ author: e.target.value })
-                              }
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={16}>
+                        <Col span={24}>
                           <Form.Item
                             name="mainAgentModels"
                             label={t("businessLogic.config.model")}
@@ -1029,131 +1034,6 @@ export default function AgentGenerateDetail({}) {
                                 );
                               })}
                             </Select>
-                          </Form.Item>
-                        </Col>
-                      </Row>
-
-                      <Row gutter={16}>
-                        <Col span={12}>
-                          <Form.Item
-                            name="mainAgentMaxStep"
-                            label={t("businessLogic.config.maxSteps")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("businessLogic.config.maxSteps"),
-                              },
-                              {
-                                type: "number",
-                                min: 1,
-                                message: t("businessLogic.config.maxSteps"),
-                              },
-                            ]}
-                          >
-                            <InputNumber
-                              min={1}
-                              style={{ width: "100%" }}
-                              onBlur={() => {
-                                const value = form.getFieldValue("mainAgentMaxStep");
-                                updateAgentConfig({ max_step: value || 1 });
-                              }}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item
-                            name="provideRunSummary"
-                            label={t("agent.provideRunSummary")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("agent.provideRunSummary.error"),
-                              },
-                            ]}
-                          >
-                            <Select
-                              options={[
-                                { value: true, label: t("common.yes") },
-                                { value: false, label: t("common.no") },
-                              ]}
-                              onChange={(value) => {
-                                updateAgentConfig({ provide_run_summary: value });
-                              }}
-                            />
-                          </Form.Item>
-                        </Col>
-                      </Row>
-
-                      <Row gutter={16}>
-                        <Col span={12}>
-                          <Form.Item
-                            name="requestedOutputTokens"
-                            label={t("agent.requestedOutputTokens")}
-                            tooltip={t("agent.requestedOutputTokens.tooltip")}
-                            rules={[
-                              {
-                                type: "number",
-                                min: 1,
-                                message: t("agent.requestedOutputTokens.error"),
-                              },
-                              ...(selectedMainAgentModel?.maxOutputTokens
-                                ? [
-                                    {
-                                      type: "number" as const,
-                                      max: selectedMainAgentModel.maxOutputTokens,
-                                      message: t(
-                                        "agent.requestedOutputTokens.maxError",
-                                        { max: selectedMainAgentModel.maxOutputTokens }
-                                      ),
-                                    },
-                                  ]
-                                : []),
-                            ]}
-                          >
-                            <InputNumber
-                              min={1}
-                              max={selectedMainAgentModel?.maxOutputTokens}
-                              precision={0}
-                              placeholder={
-                                selectedMainAgentModel?.defaultOutputReserveTokens
-                                  ? String(selectedMainAgentModel.defaultOutputReserveTokens)
-                                  : undefined
-                              }
-                              style={{ width: "100%" }}
-                              onChange={(value) => {
-                                updateAgentConfig({
-                                  requested_output_tokens:
-                                    typeof value === "number" ? value : null,
-                                });
-                              }}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item
-                            name="verificationEnabled"
-                            label={t("agent.verification")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("agent.verification.error"),
-                              },
-                            ]}
-                          >
-                            <Select
-                              options={[
-                                { value: true, label: t("common.yes") },
-                                { value: false, label: t("common.no") },
-                              ]}
-                              onChange={(value) => {
-                                updateAgentConfig({
-                                  verification_config: {
-                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
-                                    enabled: value,
-                                  },
-                                });
-                              }}
-                            />
                           </Form.Item>
                         </Col>
                       </Row>
@@ -1271,6 +1151,197 @@ export default function AgentGenerateDetail({}) {
           </Tabs>
         </Col>
       </Row>
+
+      <Modal
+        title={t("agent.advancedSettings.title")}
+        open={advancedSettingsOpen}
+        centered
+        destroyOnClose={false}
+        onCancel={() => setAdvancedSettingsOpen(false)}
+        onOk={handleSaveAdvancedSettings}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
+        okButtonProps={{ disabled: !editable || isGenerating }}
+        width={760}
+        styles={{ body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 8 } }}
+      >
+        {/* Tab bar — pill style */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+          {[
+            { key: "basic" as const, label: t("agent.advancedSettings.tab.basic") || "Basic settings" },
+            { key: "guardrail" as const, label: t("agent.guardrail.summaryTitle") || "Guardrail" },
+          ].map((tab) => {
+            const active = advancedSettingsTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setAdvancedSettingsTab(tab.key)}
+                style={{
+                  padding: "6px 18px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: active ? "#fff" : "#5F5E5A",
+                  background: active ? "#185FA5" : "#F1EFE8",
+                  border: "none",
+                  borderRadius: 20,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: advancedSettingsTab === "basic" ? "block" : "none" }}>
+        <Form form={advancedSettingsForm} layout="vertical" disabled={!editable || isGenerating}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="agentAuthor"
+                label={t("agent.author")}
+                rules={[{ required: true, message: t("agent.authorPlaceholder") }]}
+              >
+                <Input placeholder={t("agent.authorPlaceholder")} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="isMainAgent"
+                label={t("agent.isMainAgent")}
+                rules={[{ required: true, message: t("agent.isMainAgent.error") }]}
+              >
+                <Select
+                  options={[
+                    { value: true, label: t("common.yes") },
+                    { value: false, label: t("common.no") },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Can permission="group:read">
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="group_ids" label={t("agent.userGroup")}>
+                  <Select
+                    mode="multiple"
+                    placeholder={t("agent.userGroup")}
+                    options={groupSelectOptions}
+                    allowClear
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="ingroup_permission"
+                  label={t("tenantResources.knowledgeBase.permission")}
+                >
+                  <Select
+                    placeholder={t("tenantResources.knowledgeBase.permission")}
+                    options={[
+                      { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
+                      { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
+                      { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Can>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="mainAgentMaxStep"
+                label={t("businessLogic.config.maxSteps")}
+                rules={[
+                  { required: true, message: t("businessLogic.config.maxSteps") },
+                  { type: "number", min: 1, message: t("businessLogic.config.maxSteps") },
+                ]}
+              >
+                <InputNumber min={1} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="provideRunSummary"
+                label={t("agent.provideRunSummary")}
+                rules={[{ required: true, message: t("agent.provideRunSummary.error") }]}
+              >
+                <Select
+                  options={[
+                    { value: true, label: t("common.yes") },
+                    { value: false, label: t("common.no") },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="requestedOutputTokens"
+                label={t("agent.requestedOutputTokens")}
+                tooltip={t("agent.requestedOutputTokens.tooltip")}
+                rules={[
+                  { type: "number", min: 1, message: t("agent.requestedOutputTokens.error") },
+                  ...(selectedMainAgentModel?.maxOutputTokens
+                    ? [{
+                        type: "number" as const,
+                        max: selectedMainAgentModel.maxOutputTokens,
+                        message: t("agent.requestedOutputTokens.maxError", {
+                          max: selectedMainAgentModel.maxOutputTokens,
+                        }),
+                      }]
+                    : []),
+                ]}
+              >
+                <InputNumber
+                  min={1}
+                  max={selectedMainAgentModel?.maxOutputTokens}
+                  precision={0}
+                  placeholder={selectedMainAgentModel?.defaultOutputReserveTokens
+                    ? String(selectedMainAgentModel.defaultOutputReserveTokens)
+                    : undefined}
+                  style={{ width: "100%" }}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="verificationEnabled"
+                label={t("agent.verification")}
+                rules={[{ required: true, message: t("agent.verification.error") }]}
+              >
+                <Select
+                  options={[
+                    { value: true, label: t("common.yes") },
+                    { value: false, label: t("common.no") },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+        </div>
+
+        {/* Guardrail tab content */}
+        <div style={{ display: advancedSettingsTab === "guardrail" ? "block" : "none" }}>
+          <GuardrailConfigContent
+            ref={guardrailContentRef}
+            config={
+              (editedAgent.verification_config?.guardrail_config) || {
+                enabled: false,
+                rules: [],
+                default_action: "pass",
+              }
+            }
+            llmModels={availableLlmModels}
+            defaultModelId={selectedMainAgentModel?.id}
+          />
+        </div>
+      </Modal>
 
       {/* Expand Edit Modal */}
       <ExpandEditModal
