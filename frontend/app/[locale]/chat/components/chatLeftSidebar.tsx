@@ -424,7 +424,7 @@ export function ChatSidebar({
       collapsedWidth={40}
       trigger={null}
       theme="light"
-      className="border-r border-transparent !bg-[rgb(242,248,255)] w-full"
+      className="chat-left-sidebar border-r border-transparent w-full "
     >
       {!collapsed ? (
         <div className="flex flex-col h-full w-full overflow-hidden space-between">
@@ -492,6 +492,11 @@ export function ChatSidebar({
         renderCollapsedSidebar()
       )}
       <style jsx global>{`
+        .ant-layout-sider.chat-left-sidebar,
+        .ant-layout-sider.chat-left-sidebar .ant-layout-sider-children {
+          background-color: #F2F8FF !important;
+        }
+
         .chat-sidebar-title-fade {
           -webkit-mask-image: linear-gradient(
             to right,
