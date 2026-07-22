@@ -31,28 +31,34 @@ export function usePublishedAgentList({
 
 	const agents = query.data ?? [];
 
+	const availableAgents = useMemo(() => {
+		return agents.filter((a) => a.is_available !== false);
+	}, [agents]);
+
+	const availableMainAgents = useMemo(() => {
+		return agents.filter((agent) => agent.is_available !== false && agent.is_main_agent !== false);
+	}, [agents]);
+
 	const filteredAgents = useMemo(() => {
 		const trimmedSearch = search.trim();
-		const searchFiltered = (() => {
-			if (!trimmedSearch) {
-				return agents;
-			}
-			const searchLower = trimmedSearch.toLowerCase();
-			return agents.filter((agent) => {
-				const name = agent.name?.toLowerCase() || "";
-				const displayName = agent.display_name?.toLowerCase() || "";
-				const description = agent.description?.toLowerCase() || "";
-				const author = agent.author?.toLowerCase() || "";
-				return (
-					name.includes(searchLower) ||
-					displayName.includes(searchLower) ||
-					description.includes(searchLower) ||
-					author.includes(searchLower)
-				);
-			});
-		})();
-		return searchFiltered;
-	}, [agents, search]);
+		if (!trimmedSearch) {
+			return availableMainAgents;
+		}
+
+		const searchLower = trimmedSearch.toLowerCase();
+		return availableMainAgents.filter((agent) => {
+			const name = agent.name?.toLowerCase() || "";
+			const displayName = agent.display_name?.toLowerCase() || "";
+			const description = agent.description?.toLowerCase() || "";
+			const author = agent.author?.toLowerCase() || "";
+			return (
+				name.includes(searchLower) ||
+				displayName.includes(searchLower) ||
+				description.includes(searchLower) ||
+				author.includes(searchLower)
+			);
+		});
+	}, [availableMainAgents, search]);
 
 	const totalPages = useMemo(() => {
 		return Math.max(1, Math.ceil(filteredAgents.length / pageSize));
@@ -63,10 +69,6 @@ export function usePublishedAgentList({
 		return filteredAgents.slice(startIndex, startIndex + pageSize);
 	}, [filteredAgents, page, pageSize]);
 
-	const availableAgents = useMemo(() => {
-		return agents.filter((a) => a.is_available !== false);
-	}, [agents]);
-
 	const updateSearch = useCallback((value: string) => {
 		setSearch(value);
 	}, []);
@@ -75,6 +77,7 @@ export function usePublishedAgentList({
 		...query,
 		agents,
 		availableAgents,
+		availableMainAgents,
 		paginatedAgents,
 		filteredAgents,
 		page,
