@@ -151,10 +151,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 stop_event=agent_run_info.stop_event,
                 redis_client=agent_run_info.redis_client,
             )
-            agent = nexent.create_single_agent(
+            agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
                 context_items_override=_get_authorized_context_items(agent_run_info),
-            )  # NOSONAR - constructs the trusted CoreAgent implementation selected by this SDK.
+            )
             nexent.set_agent(agent)
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
@@ -173,10 +173,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     mcp_tool_collection=tool_collection,
                     redis_client=agent_run_info.redis_client,
                 )
-                agent = nexent.create_single_agent(
+                agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,
                     context_items_override=_get_authorized_context_items(agent_run_info),
-                )  # NOSONAR - constructs the trusted CoreAgent implementation selected by this SDK.
+                )
                 nexent.set_agent(agent)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
