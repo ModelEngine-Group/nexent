@@ -709,15 +709,15 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
     @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    async def test_no_group_ids_mcp_visible(
+    async def test_no_group_ids_mcp_hidden_from_non_creator(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
-        """MCPs with no group_ids should be visible to all users."""
+        """MCPs with no group_ids should be hidden from non-creator users (like agent behavior)."""
         mock_tenant.return_value = {"user_role": "DEV"}
         mock_groups.return_value = [2]
         mock_mgr.return_value.list_mcp_containers.return_value = []
         mock_records.return_value = [
-            {"mcp_name": "public", "group_ids": "", "created_by": "other",
+            {"mcp_name": "nogroup", "group_ids": "", "created_by": "other",
              "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
              "source": "local", "update_time": "", "tags": [], "container_port": None,
              "registry_json": None, "config_json": None, "market_id": None},
@@ -725,7 +725,7 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
 
         result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
         names = [r['remote_mcp_server_name'] for r in result]
-        self.assertIn("public", names)
+        self.assertNotIn("nogroup", names)
 
     @patch('backend.services.remote_mcp_service.query_group_ids_by_user', side_effect=Exception('query failed'))
     @patch('backend.services.remote_mcp_service.MCPContainerManager')

@@ -1030,10 +1030,6 @@ async def get_remote_mcp_server_list(
             if str(record.get("created_by") or record.get("user_id") or "") == user_id:
                 filtered_records.append(record)
                 continue
-            # User can see MCPs with no group restriction
-            if not record_group_ids:
-                filtered_records.append(record)
-                continue
             # User can see MCPs where they belong to at least one allowed group
             if user_groups:
                 allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
