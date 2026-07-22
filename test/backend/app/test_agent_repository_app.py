@@ -474,6 +474,7 @@ def test_list_my_editable_agents_api_success_default_ownership(
         page_size=10,
         search=None,
         new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -516,6 +517,7 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
         page_size=10,
         search=None,
         new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -558,6 +560,7 @@ def test_list_my_editable_agents_api_passes_pagination_and_search(
         page_size=5,
         search="alpha",
         new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -600,6 +603,50 @@ def test_list_my_editable_agents_api_passes_new_agent_padding(
         page_size=10,
         search=None,
         new_agent_padding=True,
+        agent_id=None,
+    )
+
+
+def test_list_my_editable_agents_api_passes_agent_id(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards agent_id query parameter to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_list_mine.return_value = {
+        "items": [],
+        "counts": {"all": 0, "created": 0, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 0,
+            "total_pages": 0,
+        },
+    }
+
+    response = client.get(
+        "/repository/agent/mine?agent_id=123",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list_mine.assert_called_once_with(
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        ownership="all",
+        page=1,
+        page_size=10,
+        search=None,
+        new_agent_padding=False,
+        agent_id=123,
     )
 
 
