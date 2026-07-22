@@ -47,6 +47,7 @@ app.add_middleware(
 EXPECTED_API_KEY = "mock-aidp-key"
 TENANT = "aidp"  # tenant segment used in all path prefixes
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
+_MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 
 # =============================================================================
 # In-memory state
@@ -602,6 +603,92 @@ def fusion_search(
 
     logger.info("SEARCH  query=%r kds=%r returned=%d", request.query, request.kds_list, len(final))
     return JSONResponse(content={"result": final, "total_return_count": len(final)})
+
+
+# =============================================================================
+# ModelService — lists VLM/LLM models applicable to AIDP applications
+# =============================================================================
+
+# Seeded models mirror the shape of real AIDP ModelService responses. The
+# ``application`` field determines which AIDP app a model can serve (the
+# backend's ``_is_kb_applicable`` post-filters by "All" or the requested app).
+_MOCK_MODELS: List[Dict[str, Any]] = [
+    {
+        "api_key": "",
+        "application": "All",
+        "created_at": 1782716626,
+        "max_tokens": 32768,
+        "model_name": "model_1",
+        "properties": {"description": "General purpose LLM.", "model_type": "external"},
+        "service": "llm",
+        "temperature": 0.6,
+        "top_k": 10,
+        "top_p": 0.8,
+        "url": "http://localhost:11025/v1",
+    },
+    {
+        "application": ["KnowledgeBase"],
+        "model_name": "Qwen3-VL-8B-Instruct",
+        "properties": {"description": "Vision-language model served internally for caption generation.", "model_type": "internal"},
+        "service": "llm",
+        "url": "http://caption-service.model-service.svc.cluster.local:8111/v1/chat/completions",
+    },
+    {
+        "api_key": "",
+        "application": "All",
+        "created_at": 1783070801,
+        "max_tokens": 32768,
+        "model_name": "Qwen3-VL-32B-Instruct",
+        "properties": {"description": "Larger vision-language model for high-quality captioning.", "model_type": "external"},
+        "service": "llm",
+        "temperature": 0.6,
+        "top_k": 10,
+        "top_p": 0.8,
+        "url": "http://localhost:11025/v1",
+    },
+    {
+        "api_key": "",
+        "application": "All",
+        "created_at": 1783474808,
+        "max_tokens": 32780,
+        "model_name": "InternVL2-26B",
+        "properties": {"description": "Open-source multimodal model.", "model_type": "external"},
+        "service": "llm",
+        "temperature": 1.5,
+        "top_k": 50,
+        "top_p": 0.5,
+        "url": "https://localhost:11443/v1",
+    },
+    # The following model targets a different application ("DocumentParsing")
+    # and must be FILTERED OUT by the backend's _is_kb_applicable() filter.
+    {
+        "api_key": "",
+        "application": ["DocumentParsing"],
+        "created_at": 1783062626,
+        "model_name": "doc-parser-only",
+        "properties": {"description": "Should NOT appear for KnowledgeBase.", "model_type": "external"},
+        "service": "llm",
+    },
+]
+
+
+@app.get(_MODELS_PREFIX)
+def list_models(
+    service: str = Query("llm"),
+    app: str = Query("KnowledgeBase"),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Return the list of registered models. Real AIDP does NOT filter by the
+    ``app`` query param — callers must post-filter by ``application``. The
+    backend (aidp_service._is_kb_applicable) does this, so we just dump the
+    raw seed data here.
+    """
+    _check_auth(authorization)
+    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(_MOCK_MODELS))
+    return JSONResponse(content={
+        "service": service,
+        "models": _MOCK_MODELS,
+    })
 
 
 # =============================================================================
