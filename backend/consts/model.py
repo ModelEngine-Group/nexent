@@ -758,6 +758,9 @@ class AgentRepositoryListingCreateRequest(BaseModel):
     tool_count: Optional[int] = Field(
         None, ge=0, description="Total tool count across all agents in the bundle"
     )
+    content: Optional[str] = Field(
+        None, description="Listing note when submitting for review"
+    )
 
 
 class AgentRepositoryListingDetailResponse(BaseModel):

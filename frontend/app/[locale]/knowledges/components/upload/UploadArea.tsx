@@ -242,7 +242,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       fileList,
       onChange: handleChange,
       customRequest: handleCustomRequest,
-      accept: ".pdf,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
+      accept: ".pdf,.doc,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
       showUploadList: true,
       disabled: disabled,
       progress: {
