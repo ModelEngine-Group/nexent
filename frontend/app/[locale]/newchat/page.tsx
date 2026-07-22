@@ -259,11 +259,12 @@ const HomeContent: FC<{
   }, [onBack]);
 
   const handleAgentSelectedFromLanding = useCallback(
-    (agent: Agent) => {
+    async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
+      await runtime.threads.switchToNewThread();
       onAgentSelected(agent);
     },
-    [onAgentSelected],
+    [runtime, onAgentSelected],
   );
 
   // Conditional rendering must happen after all hooks
