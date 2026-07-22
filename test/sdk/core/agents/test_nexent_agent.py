@@ -2271,6 +2271,83 @@ class TestCreateBuiltinTool:
         )
         assert result is mock_tool_instance
 
+    def test_create_builtin_tool_read_skill_config_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates ReadSkillConfigTool with the correct arguments.
+
+        Covers the ReadSkillConfigTool branch (lines 354-357) and verifies
+        that all four constructor parameters are forwarded correctly, and the
+        observer is NOT passed (per the source signature).
+        """
+        mock_tool_instance = MagicMock(name="ReadSkillConfigToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="ReadSkillConfigTool")
+        mock_read_skill_config_tool_module = MagicMock()
+        mock_read_skill_config_tool_module.ReadSkillConfigTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="ReadSkillConfigTool",
+            name="read_skill_config",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 31,
+                "tenant_id": "tenant_config",
+                "version_no": 9,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.read_skill_config_tool": mock_read_skill_config_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=31,
+            tenant_id="tenant_config",
+            version_no=9,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_read_skill_config_tool_no_metadata(self, nexent_agent_instance):
+        """Test create_builtin_tool defaults metadata fields to None/0 when metadata is absent.
+
+        Verifies ``metadata = tool_config.metadata or {}`` substitutes an empty
+        dict when ``metadata`` is None so version_no falls back to 0.
+        """
+        mock_tool_instance = MagicMock(name="ReadSkillConfigToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="ReadSkillConfigTool")
+        mock_read_skill_config_tool_module = MagicMock()
+        mock_read_skill_config_tool_module.ReadSkillConfigTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="ReadSkillConfigTool",
+            name="read_skill_config",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata=None,
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.read_skill_config_tool": mock_read_skill_config_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=None,
+            tenant_id=None,
+            version_no=0,
+        )
+        assert result is mock_tool_instance
+
 
 class TestCreateToolExceptionHandling:
     """Tests for exception handling in create_tool method."""

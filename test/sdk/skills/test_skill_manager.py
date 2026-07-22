@@ -3615,5 +3615,214 @@ class TestSkillManagerAddToTreeTypeConflictBranch:
         assert dir_entries[0]["children"][0]["name"] == "nested.txt"
 
 
+class TestSkillManagerResolveTenantDir:
+    """Cover ``SkillManager.resolve_tenant_dir`` validation branches.
+
+    Targets:
+    * line 68-69: ``tenant_id is None`` short-circuit returning the root
+    * line 70-71: non-string / whitespace-only ``tenant_id``
+    * line 72-73: absolute-path ``tenant_id`` rejection
+    * line 75-76: traversal escape via ``os.path.commonpath``
+    """
+
+    def test_resolve_tenant_dir_returns_root_when_tenant_id_is_none(self):
+        """When tenant_id is None, the method must return base_skills_dir as-is."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.resolve_tenant_dir(tenant_id=None)
+            assert result == manager.base_skills_dir
+
+    def test_resolve_tenant_dir_valid_tenant(self):
+        """A plain tenant id resolves to base_skills_dir/tenant_id."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.resolve_tenant_dir(tenant_id="tenant-a")
+            assert result == os.path.join(manager.base_skills_dir, "tenant-a")
+
+    def test_resolve_tenant_dir_rejects_non_string_tenant(self):
+        """Non-string tenant_id (e.g. int) must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="tenant_id must be a non-empty string or explicit None"
+            ):
+                manager.resolve_tenant_dir(tenant_id=123)
+
+    def test_resolve_tenant_dir_rejects_whitespace_only_tenant(self):
+        """Whitespace-only tenant_id must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="tenant_id must be a non-empty string or explicit None"
+            ):
+                manager.resolve_tenant_dir(tenant_id="   ")
+
+    def test_resolve_tenant_dir_rejects_empty_tenant(self):
+        """Empty string tenant_id must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="tenant_id must be a non-empty string or explicit None"
+            ):
+                manager.resolve_tenant_dir(tenant_id="")
+
+    def test_resolve_tenant_dir_rejects_absolute_path(self):
+        """Absolute-path tenant_id must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            # Use a platform-appropriate absolute path. On Windows
+            # ``/etc/passwd`` is not absolute (no drive), so build one
+            # with ``os.path.abspath`` and the platform's root anchor.
+            abs_tenant = os.path.abspath(os.sep + "etc" + os.sep + "passwd")
+            with pytest.raises(ValueError, match="tenant_id must not be an absolute path"):
+                manager.resolve_tenant_dir(tenant_id=abs_tenant)
+
+    def test_resolve_tenant_dir_rejects_traversal_escape(self):
+        """tenant_id that resolves outside base_skills_dir must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(ValueError, match="tenant_id resolves outside base_skills_dir"):
+                manager.resolve_tenant_dir(tenant_id="..")
+
+    def test_resolve_tenant_dir_without_base_dir_raises(self):
+        """When base_skills_dir is None, the method must raise ValueError."""
+        SkillManager._instance = None
+        SkillManager._instance_lock = threading.Lock()
+        manager = SkillManager(base_skills_dir=None)
+        with pytest.raises(ValueError, match="base_skills_dir is not configured"):
+            manager.resolve_tenant_dir(tenant_id="anything")
+
+
+class TestSkillManagerResolveSkillDir:
+    """Cover ``SkillManager.resolve_skill_dir`` validation branches.
+
+    Targets:
+    * line 81-82: empty / non-string ``skill_name`` rejection
+    * line 83-84: absolute-path ``skill_name`` rejection
+    * line 87-88: traversal escape via ``os.path.commonpath``
+    """
+
+    def test_resolve_skill_dir_valid_skill(self):
+        """A plain skill_name resolves to base_skills_dir/skill_name."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.resolve_skill_dir("my-skill", tenant_id=None)
+            assert result == os.path.join(manager.base_skills_dir, "my-skill")
+
+    def test_resolve_skill_dir_under_tenant(self):
+        """With a tenant, the path is base_skills_dir/tenant/skill_name."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.resolve_skill_dir("my-skill", tenant_id="tenant-a")
+            expected = os.path.join(manager.base_skills_dir, "tenant-a", "my-skill")
+            assert result == expected
+
+    def test_resolve_skill_dir_rejects_non_string_skill(self):
+        """Non-string skill_name must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="skill_name must be a non-empty string"
+            ):
+                manager.resolve_skill_dir(None, tenant_id=None)
+
+    def test_resolve_skill_dir_rejects_empty_skill(self):
+        """Empty skill_name must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="skill_name must be a non-empty string"
+            ):
+                manager.resolve_skill_dir("", tenant_id=None)
+
+    def test_resolve_skill_dir_rejects_whitespace_skill(self):
+        """Whitespace-only skill_name must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="skill_name must be a non-empty string"
+            ):
+                manager.resolve_skill_dir("   ", tenant_id=None)
+
+    def test_resolve_skill_dir_rejects_absolute_path(self):
+        """Absolute-path skill_name must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            # Use a platform-appropriate absolute path so ``os.path.isabs``
+            # returns True on both POSIX and Windows.
+            abs_skill = os.path.abspath(os.sep + "etc" + os.sep + "passwd")
+            with pytest.raises(ValueError, match="skill_name must not be an absolute path"):
+                manager.resolve_skill_dir(abs_skill, tenant_id=None)
+
+    def test_resolve_skill_dir_rejects_traversal_escape(self):
+        """skill_name that resolves outside the tenant root must raise ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="skill_name resolves outside the tenant directory"
+            ):
+                manager.resolve_skill_dir("..", tenant_id=None)
+
+    def test_resolve_skill_dir_rejects_traversal_escape_under_tenant(self):
+        """Traversal that escapes the tenant (not just the skill) must raise."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(
+                ValueError, match="skill_name resolves outside the tenant directory"
+            ):
+                manager.resolve_skill_dir("..", tenant_id="tenant-a")
+
+
+class TestSkillManagerInitDoubleCheckedLocking:
+    """Cover the double-checked locking branch in ``SkillManager.__init__``.
+
+    Targets lines 58-60, the second ``hasattr(self, "_initialized")`` check
+    that runs **after** acquiring ``_instance_lock``. This branch fires when
+    another thread initialised the singleton between the unguarded check on
+    line 56 and the lock acquisition on line 58.
+
+    To deterministically reproduce that race we patch the module-level
+    ``hasattr`` so the first call returns ``False`` (line 56 fast-path
+    miss) and the second call returns ``True`` (line 59 fast-path hit
+    after the lock has been taken).
+    """
+
+    def test_init_double_check_branch_skips_reassignment(self, mocker):
+        """When the second ``hasattr`` returns True, ``base_skills_dir``
+        must not be overwritten by the late caller's argument."""
+        import builtins as _builtins
+
+        SkillManager._instance = None
+        SkillManager._instance_lock = threading.Lock()
+
+        manager = SkillManager(base_skills_dir="/initial/path")
+
+        real_hasattr = _builtins.hasattr
+        call_state = {"count": 0}
+
+        def fake_hasattr(obj, name):
+            # Track hasattr calls made inside SkillManager.__init__.
+            # The very first call (line 56) returns False (allow init),
+            # the next call (line 59, inside the lock) returns True
+            # (another thread already initialised).
+            if obj is manager and name == "_initialized":
+                call_state["count"] += 1
+                if call_state["count"] == 1:
+                    return False
+                return True
+            return real_hasattr(obj, name)
+
+        mocker.patch("builtins.hasattr", side_effect=fake_hasattr)
+
+        # Second constructor call - the line-59 branch should return
+        # before any base_skills_dir assignment runs.
+        manager.__init__(base_skills_dir="/late/caller/path")
+
+        # base_skills_dir must still be the value set by the first init,
+        # NOT the second caller's "/late/caller/path".
+        assert manager.base_skills_dir == os.path.abspath("/initial/path")
+        assert call_state["count"] >= 2
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
