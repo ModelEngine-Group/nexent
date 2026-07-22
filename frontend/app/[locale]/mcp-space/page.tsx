@@ -90,19 +90,24 @@ function getDeploymentCategoryStats(
   items: DeploymentCountable[],
   t: (key: string) => string
 ): Array<{ value: DeploymentFilter; label: string; count: number }> {
+  const hasLocalImage = items.some(
+    (item) => resolveDeploymentType(item) === McpDeploymentType.LOCAL_IMAGE
+  );
   return [
     {
       value: FILTER_ALL,
       label: t("mcpTools.deploymentType.all"),
       count: items.length,
     },
-    ...deploymentCategories.map((deploymentType) => ({
-      value: deploymentType,
-      label: t(getDeploymentTypeLabelKey(deploymentType)),
-      count: items.filter(
-        (item) => resolveDeploymentType(item) === deploymentType
-      ).length,
-    })),
+    ...deploymentCategories
+      .filter((dt) => dt !== McpDeploymentType.LOCAL_IMAGE || hasLocalImage)
+      .map((deploymentType) => ({
+        value: deploymentType,
+        label: t(getDeploymentTypeLabelKey(deploymentType)),
+        count: items.filter(
+          (item) => resolveDeploymentType(item) === deploymentType
+        ).length,
+      })),
   ];
 }
 
