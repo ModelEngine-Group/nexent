@@ -30,8 +30,47 @@ def _create_mock_smolagents():
 
     # agents submodule
     agents_mod = ModuleType("smolagents.agents")
-    for _name in ["CodeAgent", "populate_template", "handle_agent_output_types", "AgentError", "ActionOutput", "RunResult"]:
+    for _name in ["populate_template", "handle_agent_output_types", "AgentError", "ActionOutput", "RunResult"]:
         setattr(agents_mod, _name, MagicMock(name=f"smolagents.agents.{_name}"))
+
+    # Provide a realistic CodeAgent so that CoreAgent.__init__ (which pops
+    # enable_planning from kwargs) does not create spurious MagicMock attributes.
+    from unittest.mock import MagicMock as _MagicMock
+
+    class _RealisticCodeAgent:
+        # v1.4: _run_stream checks self.enable_planning; ensure the attr exists.
+        enable_planning = False
+
+        def __init__(self, *args, **kwargs):
+            # Pop keys that CoreAgent.__init__ manages so they don't pollute
+            # the parent's kwargs; always set enable_planning from the class-level
+            # default above (CoreAgent already assigned it before calling super).
+            self.enable_planning = kwargs.pop("enable_planning", self.enable_planning)
+            self.tools = kwargs.pop("tools", {}) or {}
+            self.managed_agents = kwargs.pop("managed_agents", {}) or {}
+            self.prompt_templates = kwargs.pop("prompt_templates", {}) or {}
+            self.max_steps = kwargs.pop("max_steps", 10)
+            self.code_block_tags = ["", ""]
+            self.memory = _MagicMock()
+            self.memory.steps = []
+            self.model = kwargs.pop("model", None)
+            self.logger = _MagicMock()
+            self.state = {}
+            self.step_number = 1
+            self.monitor = _MagicMock()
+            self.python_executor = _MagicMock()
+            self.system_prompt = ""
+            self._use_structured_outputs_internally = False
+            self.name = "agent"
+            self.agent_name = "agent"
+            self.return_full_result = False
+            self.final_answer_checks = []
+            self.provide_run_summary = False
+            self.context_runtime = _MagicMock()
+            self.lang = getattr(self, "lang", "en")
+
+    setattr(agents_mod, "CodeAgent", _RealisticCodeAgent)
+    setattr(mock_smolagents, "CodeAgent", _RealisticCodeAgent)
     setattr(mock_smolagents, "agents", agents_mod)
 
     # local_python_executor submodule
@@ -519,7 +558,7 @@ second_block()
 
 def test_parse_code_blobs_python_match():
     """Test parse_code_blobs raises ValueError for ```python\\ncontent\\n``` pattern.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -538,7 +577,7 @@ And some more text."""
 
 def test_parse_code_blobs_py_match():
     """Test parse_code_blobs raises ValueError for ```py\\ncontent\\n``` pattern.
-    
+
     Note: ```py blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -557,7 +596,7 @@ And some more text."""
 
 def test_parse_code_blobs_multiple_matches():
     """Test parse_code_blobs raises ValueError when multiple ```python/```py blocks are present.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -579,7 +618,7 @@ print("Second")
 
 def test_parse_code_blobs_direct_python_code():
     """Test parse_code_blobs with direct Python code (no code blocks).
-    
+
     Direct Python code without code blocks will raise ValueError because
     it's not wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
     """
@@ -658,7 +697,7 @@ incomplete code without closing backticks"""
 
 def test_parse_code_blobs_py_with_newline_after_fence():
     """Test parse_code_blobs raises ValueError for ```py\\ncontent\\n``` pattern.
-    
+
     Note: ```py blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -674,7 +713,7 @@ print("hello")
 
 def test_parse_code_blobs_python_with_newline_after_fence():
     """Test parse_code_blobs raises ValueError for ```python\\ncontent\\n``` pattern.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -690,7 +729,7 @@ print("hello")
 
 def test_parse_code_blobs_single_line():
     """Test parse_code_blobs raises ValueError for single-line ```python block.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -707,7 +746,7 @@ print("Hello")
 
 def test_parse_code_blobs_mixed_content():
     """Test parse_code_blobs raises ValueError when mixed content contains only ```python blocks.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -883,7 +922,7 @@ def test_final_answer_error_creation():
 
 def test_parse_code_blobs_whitespace_variation():
     """Test parse_code_blobs raises ValueError for ```python block with whitespace variation.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -897,7 +936,7 @@ print("hello")
 
 def test_parse_code_blobs_no_newline_at_end():
     """Test parse_code_blobs raises ValueError for ```python block without trailing newline.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -912,7 +951,7 @@ And some text."""
 
 def test_parse_code_blobs_with_comments():
     """Test parse_code_blobs raises ValueError for ```python block with comments.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -927,7 +966,7 @@ x = 1  # inline comment
 
 def test_parse_code_blobs_with_multiline_string():
     """Test parse_code_blobs raises ValueError for ```python block with multiline strings.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -1077,7 +1116,7 @@ def test_parse_code_blobs_whitespace_only_run_block():
 
 def test_parse_code_blobs_special_characters():
     """Test parse_code_blobs raises ValueError for ```python block with special characters.
-    
+
     Note: ```python blocks are intentionally NOT supported to prevent
     KB content containing code examples from being accidentally executed.
     """
@@ -1122,7 +1161,7 @@ def test():
 
 def test_parse_code_blobs_only_whitespace_text():
     """Test parse_code_blobs raises ValueError for whitespace-only text.
-    
+
     Whitespace-only text is not valid executable code because it's not
     wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
     """
@@ -1739,6 +1778,8 @@ class TestRunStreamRealExecution:
 
         # Create a minimal base class that mimics CodeAgent
         class MinimalCodeAgent:
+            enable_planning = False  # v1.4: CoreAgent._run_stream checks this attr
+
             def __init__(self, *args, **kwargs):
                 pass
 

@@ -1021,6 +1021,7 @@ async def list_published_agents_impl(
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),
+                "is_main_agent": agent.get("is_main_agent", True),
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),

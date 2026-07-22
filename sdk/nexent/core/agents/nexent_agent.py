@@ -142,14 +142,17 @@ class NexentAgent:
     def __init__(self, observer: MessageObserver,
                  model_config_list: List[ModelConfig],
                  stop_event: Event,
-                 mcp_tool_collection=None):
+                 mcp_tool_collection=None,
+                 redis_client=None):
         """
         init the agent create factory
 
         Args:
-            mcp_tool_collection:
-            observer:
-            model_config_list:
+            observer: MessageObserver instance
+            model_config_list: List of model configurations
+            stop_event: Threading event for stop control
+            mcp_tool_collection: Optional MCP tool collection
+            redis_client: Redis client for plan persistence
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -158,6 +161,7 @@ class NexentAgent:
         self.model_config_list = model_config_list
         self.stop_event = stop_event
         self.mcp_tool_collection = mcp_tool_collection
+        self.redis_client = redis_client
 
         self.agent = None
 
@@ -205,9 +209,7 @@ class NexentAgent:
                 # `document_paths` is intentionally hidden from the LLM and only
                 # populated via tool_params from the northbound interface.
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer",
-                                                 "rerank_model", "display_name_to_index_map",
-                                                 "document_paths"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -368,6 +370,12 @@ class NexentAgent:
             )
             from nexent.core.tools.read_skill_config_tool import read_skill_config
             return read_skill_config
+        elif class_name == "CreatePlanTool":
+            from nexent.core.tools.plan_tools import CreatePlanTool
+            return CreatePlanTool()
+        elif class_name == "UpdatePlanStepTool":
+            from nexent.core.tools.plan_tools import UpdatePlanStepTool
+            return UpdatePlanStepTool()
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -476,14 +484,31 @@ class NexentAgent:
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
-                verification_config=agent_config.verification_config,
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
                 context_runtime=context_runtime,
+                enable_planning=agent_config.enable_planning,
+                redis_client=self.redis_client,
             )
             agent.stop_event = self.stop_event
+
+            # Wire plan tool deps if the plan tools are present in agent_config.tools.
+            # CoreAgent already knows enable_planning (set above); use that to gate wiring.
+            if agent.enable_planning:
+                if (create_plan := agent.tools.get("create_plan")) is not None:
+                    create_plan.observer = agent.observer
+                    create_plan.plan_repo = agent.plan_repo
+                    create_plan._on_plan_created = agent._on_plan_created
+                    create_plan._get_conversation_id = agent._get_conversation_id
+                    create_plan._get_user_id = agent._get_user_id
+                if (update_step := agent.tools.get("update_plan_step")) is not None:
+                    update_step.observer = agent.observer
+                    update_step.plan_repo = agent.plan_repo
+                    update_step._on_step_updated = agent._on_step_updated
+                    update_step._get_conversation_id = agent._get_conversation_id
+                    update_step._get_user_id = agent._get_user_id
 
             return agent
         except Exception as e:

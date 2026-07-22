@@ -1552,9 +1552,27 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         )
         # Keep disabled instances for their saved configuration, but do not
         # return them as selected skills in the agent configuration.
-        agent_info["skills"] = [
+        instances = [
             instance for instance in instances if instance.get("enabled", True)
         ]
+
+        # Fallback: verify each instance's skill_id still exists in ag_skill_info_t
+        valid_skill_ids = skill_db.get_valid_skill_ids(
+            tenant_id=tenant_id,
+            skill_ids=[inst.get("skill_id") for inst in instances if isinstance(inst, dict)]
+        )
+        filtered = []
+        for inst in instances:
+            skill_id = inst.get("skill_id")
+            if skill_id in valid_skill_ids:
+                filtered.append(inst)
+            else:
+                logger.warning(
+                    "Filtering out stale skill instance: agent_id=%s, skill_id=%s (not found in ag_skill_info_t)",
+                    agent_id, skill_id,
+                )
+        agent_info["skills"] = filtered
+
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
@@ -3035,6 +3053,7 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        enable_planning=agent_request.enable_plan,
     )
 
     # Mount conversation-level reusable ContextManager if enabled

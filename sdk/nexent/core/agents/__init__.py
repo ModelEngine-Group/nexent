@@ -13,8 +13,10 @@ from typing import Any
 _AGENT_MODEL_MODULE = ".agent_model"
 _SUMMARY_CACHE_MODULE = ".summary_cache"
 
+
 _EXPORTS = {
     "CoreAgent": (".core_agent", "CoreAgent"),
+    "PlanRepo": (".plan_repo", "PlanRepo"),
     "ModelConfig": (_AGENT_MODEL_MODULE, "ModelConfig"),
     "ToolConfig": (_AGENT_MODEL_MODULE, "ToolConfig"),
     "MCPBinding": (_AGENT_MODEL_MODULE, "MCPBinding"),

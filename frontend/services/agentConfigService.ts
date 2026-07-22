@@ -211,6 +211,7 @@ export const fetchPublishedAgentList = async () => {
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
+      is_main_agent: agent.is_main_agent,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
