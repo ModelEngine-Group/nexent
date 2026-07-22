@@ -925,8 +925,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     let messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const buildStreamResult = (content: any[]): ChatModelRunResult => ({
+    let persistedMessageId: number | undefined;
+    const buildStreamResult = (
+      content: any[],
+      timing?: NonNullable<ChatModelRunResult["metadata"]>["timing"]
+    ): ChatModelRunResult => ({
       content,
+      metadata: {
+        ...(timing ? { timing } : {}),
+        custom: persistedMessageId === undefined ? {} : { persistedMessageId },
+      },
     });
 
     const streamStartTime = Date.now();
@@ -954,6 +962,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (chunk.type === "assistant_message_created") {
             const persistedId = Number(chunk.content?.message_id);
             if (Number.isInteger(persistedId) && persistedId > 0) {
+              persistedMessageId = persistedId;
               messageId = String(persistedId);
             }
             continue;
@@ -1152,6 +1161,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (chunk.type === "assistant_message_created") {
             const persistedId = Number(chunk.content?.message_id);
             if (Number.isInteger(persistedId) && persistedId > 0) {
+              persistedMessageId = persistedId;
               messageId = String(persistedId);
             }
           } else if (chunk.type === "execution_logs") {
@@ -1333,16 +1343,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         }
       }
 
-      const finalResult = buildStreamResult(contentParts);
-      if (storedTiming) {
-        yield { ...finalResult, messageId, ...storedTiming } as any;
-      } else {
-        yield {
-          ...finalResult,
-          messageId,
-          ...buildTimingResult(streamStartTime, firstTokenTime, toolCallCount),
-        } as any;
-      }
+      const finalTiming =
+        storedTiming ??
+        buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
+      yield buildStreamResult(contentParts, finalTiming.metadata.timing);
     } finally {
       reader.releaseLock();
     }

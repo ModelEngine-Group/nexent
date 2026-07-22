@@ -83,6 +83,9 @@ describe("online recommendation registration lifecycle", () => {
     await waitFor(() =>
       expect(registerRequirementsSummary).toHaveBeenCalledOnce()
     );
+    expect(
+      await screen.findByRole("button", { name: "Confirm Requirements" })
+    ).toBeEnabled();
     expect(registerRequirementsSummary).toHaveBeenCalledWith(202, {
       goal: "Build presentations",
       audience_or_scenario: "Office users",

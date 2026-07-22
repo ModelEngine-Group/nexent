@@ -1359,7 +1359,7 @@ async def _stream_agent_chunks(
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
-            asyncio.create_task(
+            cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
                     user_id=user_id

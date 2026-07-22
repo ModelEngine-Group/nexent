@@ -18,6 +18,23 @@ import { reportNl2AgentCardDelivery } from "@/services/nl2agentService";
 const deliveryKey = (messageId: number, card: ValidatedNl2AgentCard) =>
   `${messageId}:${card.cardType}:${card.cardKey ?? ""}`;
 
+export const resolveNl2AgentPersistedMessageId = (
+  persistedMessageId: unknown,
+  runtimeMessageId: unknown
+): number | undefined => {
+  for (const candidate of [persistedMessageId, runtimeMessageId]) {
+    if (
+      typeof candidate === "boolean" ||
+      (typeof candidate === "string" && candidate.trim() === "")
+    ) {
+      continue;
+    }
+    const numericId = Number(candidate);
+    if (Number.isInteger(numericId) && numericId > 0) return numericId;
+  }
+  return undefined;
+};
+
 const reportRendered = async (
   messageId: number,
   card: ValidatedNl2AgentCard,
@@ -47,31 +64,38 @@ export const Nl2AgentFenceRenderer = ({
 }: SyntaxHighlighterProps) => {
   const workflow = useNl2AgentWorkflow();
   const messageIdValue = useAuiState((s) => s.message.id);
+  const persistedMessageIdValue = useAuiState(
+    (s) => s.message.metadata.custom.persistedMessageId
+  );
   const complete = useAuiState((s) => s.message.status?.type === "complete");
   const latest = useAuiState(
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
-  const messageId = Number(messageIdValue);
+  const messageId = resolveNl2AgentPersistedMessageId(
+    persistedMessageIdValue,
+    messageIdValue
+  );
   const validation = useMemo(
     () => parseNl2AgentCard(language, code, workflow.agentId),
     [code, language, workflow.agentId]
   );
   const card = validation.cards[0];
-  const interactive =
-    complete && latest && workflow.editable && Number.isInteger(messageId);
+  const interactive = complete && latest && workflow.editable;
+  const registrationEnabled = interactive && messageId !== undefined;
 
   const onRegistered = useCallback(
     async (_receipt: Nl2AgentCardRegistrationReceipt) => {
-      if (!card || !Number.isInteger(messageId)) return;
+      if (!card || messageId === undefined) return;
       await reportRendered(messageId, card, workflow);
     },
     [card, messageId, workflow]
   );
 
   useEffect(() => {
-    if (!interactive || !card || card.requiresRegistration) return;
+    if (!registrationEnabled || !card || card.requiresRegistration) return;
+    if (messageId === undefined) return;
     void reportRendered(messageId, card, workflow);
-  }, [card, interactive, messageId, workflow]);
+  }, [card, messageId, registrationEnabled, workflow]);
 
   if (!complete) {
     return (
@@ -86,7 +110,7 @@ export const Nl2AgentFenceRenderer = ({
     code,
     workflow.agentId,
     onRegistered,
-    interactive
+    registrationEnabled
   );
   if (!rendered) return null;
   return (
@@ -154,6 +178,9 @@ export const Nl2AgentMessageLifecycle = () => {
   const workflow = useNl2AgentWorkflow();
   const [manualRetryText, setManualRetryText] = useState<string>();
   const messageIdValue = useAuiState((s) => s.message.id);
+  const persistedMessageIdValue = useAuiState(
+    (s) => s.message.metadata.custom.persistedMessageId
+  );
   const complete = useAuiState((s) => s.message.status?.type === "complete");
   const latest = useAuiState(
     (s) => s.thread.messages.at(-1)?.id === s.message.id
@@ -166,13 +193,11 @@ export const Nl2AgentMessageLifecycle = () => {
   );
 
   useEffect(() => {
-    const messageId = Number(messageIdValue);
-    if (
-      !workflow.active ||
-      !complete ||
-      !latest ||
-      !Number.isInteger(messageId)
-    ) {
+    const messageId = resolveNl2AgentPersistedMessageId(
+      persistedMessageIdValue,
+      messageIdValue
+    );
+    if (!workflow.active || !complete || !latest || messageId === undefined) {
       return;
     }
     const validation = validateNl2AgentCards(text, workflow.agentId);
@@ -201,7 +226,14 @@ export const Nl2AgentMessageLifecycle = () => {
         }
       })
       .catch(() => workflow.failCardDelivery(key));
-  }, [complete, latest, messageIdValue, text, workflow]);
+  }, [
+    complete,
+    latest,
+    messageIdValue,
+    persistedMessageIdValue,
+    text,
+    workflow,
+  ]);
 
   if (!manualRetryText) return null;
   return (

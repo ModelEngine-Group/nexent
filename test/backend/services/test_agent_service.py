@@ -14578,9 +14578,15 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     ):
         collected.append(chunk)
 
+    await asyncio.sleep(0)
+
     assert collected
     assert statuses[-1] == (4242, "stopped", "user1")
     assert unregister_calls[-1] == (999, "user1", "stopped")
+    agent_service._cleanup_channel_later.assert_awaited_once_with(
+        conversation_id=999,
+        user_id="user1",
+    )
 
 
 @pytest.mark.asyncio
