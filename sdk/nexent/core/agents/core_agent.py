@@ -30,7 +30,12 @@ if TYPE_CHECKING:
 
 from .agent_model import AgentVerificationConfig
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
-from .verification import VerificationController, VerificationResult
+from .verification import (
+    VerificationController,
+    VerificationResult,
+    render_guardrail_refusal,
+    render_tool_input_refusal,
+)
 from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
@@ -183,6 +188,52 @@ class FinalAnswerError(Exception):
     pass
 
 
+class ToolInputBlockedError(AgentExecutionError):
+    """Raised by the guardrail tool-input wrap when a call is blocked.
+
+    Carries a ``refusal`` string for ``_step_stream`` to end the run without a retry loop.
+
+    Args:
+        refusal: User-facing refusal text used as the run's final answer.
+        logger: Optional logger forwarded to the base exception.
+    """
+
+    def __init__(self, refusal: str, logger=None):
+        super().__init__(refusal, logger)
+        self.refusal = refusal
+
+
+def _screened_tool_forward(engine, tool_name, controller, logger, original_forward, *args, **kwargs):
+    """Screen tool call args then dispatch to the original ``forward`` (checkpoint ③).
+
+    Args:
+        engine: GuardrailEngine that screens the resolved call args.
+        tool_name: Name of the wrapped tool.
+        controller: VerificationController used to emit + stash the refusal.
+        logger: Logger forwarded to ``ToolInputBlockedError``.
+        original_forward: The tool's real ``forward`` callable.
+        *args: Positional args of the tool call.
+        **kwargs: Keyword args of the tool call.
+
+    Returns:
+        Whatever ``original_forward`` returns (masked args are substituted on
+        ``mask``); raises ``ToolInputBlockedError`` on ``block``/``terminate``.
+    """
+    decision = engine.check_tool_args(args=args, kwargs=kwargs)
+    action = decision.effective_action
+    if action != "pass":
+        controller.emit(decision.verification_result, message=decision.message)
+    if action in ("block", "terminate"):
+        # Stash the refusal; _step_stream raises FinalAnswerError from it (no retry loop).
+        refusal = render_tool_input_refusal(decision, tool_name)
+        controller.pending_tool_block_refusal = refusal
+        raise ToolInputBlockedError(refusal, logger)
+    if action == "mask":
+        if decision.masked_args is not None:
+            args = decision.masked_args
+        if decision.masked_kwargs is not None:
+            kwargs = decision.masked_kwargs
+    return original_forward(*args, **kwargs)
 def _coerce_observer_arguments(arguments: Any) -> Any:
     """Coerce AST/Python-literal arguments into a JSON-serializable payload.
 
@@ -419,6 +470,51 @@ class CoreAgent(CodeAgent):
             tools.extend(list(iterable or ()))
         return tools
 
+    def _guardrail_wrap_tools(self) -> None:
+        """Wrap each tool's forward() to screen resolved args before execution (checkpoint ③).
+
+        Blocked content never reaches the tool (vs checkpoint ②, which screens
+        output after the fact). Idempotent: already-wrapped tools are skipped.
+        Covers self.tools and self.managed_agents (incl. MCP).
+        """
+        engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if not engine:
+            return
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                iterable = container.values()
+            except AttributeError:
+                iterable = container
+            for tool in list(iterable or ()):
+                self._guardrail_wrap_one(tool, engine)
+
+    def _guardrail_wrap_one(self, tool, engine) -> None:
+        """Wrap a single tool's forward() with guardrail arg screening.
+
+        A blocked call raises ``AgentExecutionError`` so the tool never runs; a
+        passing call adds no observer traffic. Idempotent via ``_guardrail_wrapped``.
+
+        Args:
+            tool: Tool whose ``forward()`` is wrapped.
+            engine: GuardrailEngine that screens the resolved call args.
+        """
+        if tool is None or getattr(tool, "_guardrail_wrapped", False):
+            return
+        original_forward = getattr(tool, "forward", None)
+        if not callable(original_forward):
+            return
+        tool_name = getattr(tool, "name", "") or ""
+        controller = self.verification_controller
+        logger = self.logger
+        tool.forward = lambda *args, **kwargs: _screened_tool_forward(
+            engine, tool_name, controller, logger, original_forward, *args, **kwargs
+        )
+        try:
+            tool._guardrail_wrapped = True
+        except Exception:
+            # Some tool proxies block attribute writes; the wrap still took effect (worst case: harmless double-wrap).
+            pass
+
     def _append_verification_feedback(self, action_step: ActionStep, result: VerificationResult) -> None:
         feedback = self.verification_controller.build_feedback_observation(result)
         if action_step.observations:
@@ -596,6 +692,26 @@ Additional Args:
         # Log model call parameters before execution
         self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
+        # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
+        guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if guardrail_engine:
+            decision = guardrail_engine.check_input(
+                input_messages=input_messages,
+            )
+            self.verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "terminate":
+                self._append_verification_feedback(memory_step, decision.verification_result)
+                # Pre-built refusal as the final answer; FinalAnswerError ends the run (no retry loop).
+                memory_step.model_output = render_guardrail_refusal(
+                    decision, input_messages
+                )
+                raise FinalAnswerError()
+            if decision.effective_action == "mask" and decision.masked_messages is not None:
+                input_messages = decision.masked_messages
+                self._append_verification_feedback(memory_step, decision.verification_result)
+
         try:
             chat_message: ChatMessage = self.model(input_messages,
                                                    stop_sequences=stop_sequences, **additional_args)
@@ -702,6 +818,14 @@ Additional Args:
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
+            # Guardrail ③ block: end the run with the stashed refusal (no retry loop).
+            # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
+            pending_refusal = getattr(getattr(self, "verification_controller", None), "pending_tool_block_refusal", None)
+            if pending_refusal or isinstance(e, ToolInputBlockedError):
+                refusal = pending_refusal or getattr(e, "refusal", "")
+                self.verification_controller.pending_tool_block_refusal = None
+                memory_step.model_output = refusal
+                raise FinalAnswerError()
             exec_duration_ms = (time.time() - exec_start) * 1000
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
@@ -751,6 +875,21 @@ Additional Args:
                 )
             if postcheck.severity == "warning":
                 self._append_verification_feedback(memory_step, postcheck)
+
+        # Guardrail checkpoint ②: screen tool output; block downgrades to mask
+        # because the tool already ran, then redact before memory.
+        guardrail_engine = getattr(verification_controller, "guardrail_engine", None) if verification_controller else None
+        if guardrail_engine:
+            decision = guardrail_engine.check_output(
+                observation=memory_step.observations,
+                code_action=code_action,
+            )
+            verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "mask" and decision.cleaned_content is not None:
+                memory_step.observations = decision.cleaned_content
+                self._append_verification_feedback(memory_step, decision.verification_result)
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -815,6 +954,7 @@ You have been provided with these additional arguments, that you can access usin
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
         if getattr(self, "python_executor", None):
+            self._guardrail_wrap_tools()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})
