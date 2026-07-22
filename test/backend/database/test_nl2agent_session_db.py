@@ -52,10 +52,10 @@ def test_create_session_uses_caller_transaction(monkeypatch):
         "workflow_revision": 0,
     }
     session.add.assert_called_once()
-    assert session.add.call_args.args[0].runner_agent_id == 7
+    created = session.add.call_args.args[0]
+    assert created.runner_agent_id == 7
+    assert created.session_catalogs == {"tool_catalog": []}
     session.flush.assert_called_once()
-    session.execute.assert_called_once()
-    assert "DO UPDATE" in str(session.execute.call_args.args[0])
 
 
 def test_get_session_can_enforce_owner(monkeypatch):
@@ -80,20 +80,16 @@ def test_get_session_can_enforce_owner(monkeypatch):
     assert query.filter.call_count == 2
 
 
-def test_get_session_snapshot_hydrates_shared_catalog(monkeypatch):
+def test_get_session_snapshot_reads_inline_catalog(monkeypatch):
     record = SimpleNamespace(
         session_id=1,
-        catalog_snapshot_id="digest",
+        session_catalogs={"tool_catalog": [{"tool_id": 1}]},
     )
-    snapshot = SimpleNamespace(catalogs={"tool_catalog": [{"tool_id": 1}]})
     session_query = MagicMock()
     session_query.filter.return_value = session_query
     session_query.first.return_value = record
-    snapshot_query = MagicMock()
-    snapshot_query.filter.return_value = snapshot_query
-    snapshot_query.first.return_value = snapshot
     session = MagicMock()
-    session.query.side_effect = [session_query, snapshot_query]
+    session.query.return_value = session_query
     monkeypatch.setattr(
         nl2agent_session_db,
         "get_db_session",
@@ -109,10 +105,10 @@ def test_get_session_snapshot_hydrates_shared_catalog(monkeypatch):
 
     assert result == {
         "session_id": 1,
-        "catalog_snapshot_id": "digest",
+        "session_catalogs": {"tool_catalog": [{"tool_id": 1}]},
         "catalog_snapshot": {"tool_catalog": [{"tool_id": 1}]},
     }
-    assert session.query.call_count == 2
+    assert session.query.call_count == 1
 
 
 def test_get_session_by_conversation_is_owner_and_status_scoped(monkeypatch):
@@ -303,8 +299,6 @@ def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
     session.query.side_effect = [
         session_query,
         *mutation_queries,
-        live_reference_query,
-        snapshot_query,
     ]
     monkeypatch.setattr(
         nl2agent_session_db,
@@ -323,7 +317,6 @@ def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
     assert all(query.update.call_count == 1 for query in mutation_queries)
     assert all(record.delete_flag == "Y" for record in records)
     session.flush.assert_called_once()
-    snapshot_query.update.assert_called_once()
 
 
 def test_stale_active_sessions_are_abandoned_in_a_bounded_batch(monkeypatch):
@@ -351,7 +344,7 @@ def test_stale_active_sessions_are_abandoned_in_a_bounded_batch(monkeypatch):
     query.limit.assert_called_once_with(500)
 
 
-def test_completed_cleanup_releases_only_orphan_snapshot_candidates(monkeypatch):
+def test_completed_cleanup_soft_deletes_selected_sessions(monkeypatch):
     record = SimpleNamespace(
         tenant_id="tenant-a",
         catalog_snapshot_id="digest",
@@ -362,18 +355,8 @@ def test_completed_cleanup_releases_only_orphan_snapshot_candidates(monkeypatch)
     for method_name in ("filter", "order_by", "with_for_update", "limit"):
         getattr(session_query, method_name).return_value = session_query
     session_query.all.return_value = [record]
-    live_reference_query = MagicMock()
-    live_reference_query.filter.return_value = live_reference_query
-    live_reference_query.exists.return_value = True
-    snapshot_query = MagicMock()
-    snapshot_query.filter.return_value = snapshot_query
-    snapshot_query.update.return_value = 1
     session = MagicMock()
-    session.query.side_effect = [
-        session_query,
-        live_reference_query,
-        snapshot_query,
-    ]
+    session.query.return_value = session_query
     monkeypatch.setattr(
         nl2agent_session_db,
         "get_db_session",
@@ -388,7 +371,6 @@ def test_completed_cleanup_releases_only_orphan_snapshot_candidates(monkeypatch)
     assert count == 1
     assert record.delete_flag == "Y"
     session.flush.assert_called_once()
-    snapshot_query.update.assert_called_once()
 
 
 def test_model_and_fresh_init_match_incremental_migration():
@@ -401,9 +383,8 @@ def test_model_and_fresh_init_match_incremental_migration():
     for sql in (session_migration, fresh_init):
         assert "nl2agent_session_t" in sql
         assert "workflow_state" in sql
-        assert "catalog_snapshot_id" in sql
-        assert "nl2agent_catalog_snapshot_t" in sql
-        assert "fk_nl2agent_session_catalog_snapshot" in sql
+        assert "session_catalogs" in sql
+        assert "nl2agent_installation_operation_t" in sql
         assert "workflow_revision" in sql
 
 
@@ -412,5 +393,6 @@ def test_nl2agent_migration_is_safe_to_reapply():
     session_migration = (
         root / "deploy/sql/migrations/v2.4.0_0722_add_nl2agent.sql"
     ).read_text(encoding="utf-8")
-    assert session_migration.count("CREATE TABLE IF NOT EXISTS") == 2
+    assert session_migration.count("CREATE TABLE nexent.nl2agent_") == 2
+    assert "DROP TABLE IF EXISTS nexent.nl2agent_catalog_snapshot_t" in session_migration
     assert "CREATE UNIQUE INDEX IF NOT EXISTS" in session_migration

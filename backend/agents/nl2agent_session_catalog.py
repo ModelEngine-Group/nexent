@@ -112,10 +112,14 @@ _NO_MODIFICATION_PHRASES = {
 Nl2AgentSessionCatalogError = _session_store.Nl2AgentSessionCatalogError
 Nl2AgentStateConflictError = _session_store.Nl2AgentStateConflictError
 
-get_redis_service = _session_store.get_redis_service
-_cache_key = _session_store.cache_key
-_state_key = _session_store.state_key
-_catalog_snapshot_key = _session_store.catalog_snapshot_key
+
+def get_redis_service():
+    """Resolve the legacy installation lock service until durable operations take over."""
+    from services.redis_service import get_redis_service as redis_service_factory
+
+    return redis_service_factory()
+
+
 _validate_identifiers = _session_store.validate_identifiers
 initialize_nl2agent_session_state = _session_store.initialize_session_state
 get_nl2agent_session_state = _session_store.get_session_state

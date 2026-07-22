@@ -1,10 +1,10 @@
-"""Database repository for durable NL2AGENT session snapshots."""
+"""PostgreSQL repository for authoritative NL2AGENT sessions."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, func, or_
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import func, or_
 
 from database.client import as_dict, get_db_session
 from database.db_models import (
@@ -15,53 +15,39 @@ from database.db_models import (
     ConversationRecord,
     ConversationSourceImage,
     ConversationSourceSearch,
-    Nl2AgentCatalogSnapshot,
     Nl2AgentSession,
     SkillInstance,
     ToolInstance,
 )
-from utils.nl2agent_catalog_snapshot import catalog_snapshot_id
 
 NL2AGENT_SESSION_ACTIVE = "active"
 NL2AGENT_SESSION_COMPLETED = "completed"
 NL2AGENT_SESSION_ABANDONED = "abandoned"
 
 
-def _delete_orphan_catalog_snapshots(session, records: List[Nl2AgentSession]) -> int:
-    """Soft-delete candidate snapshots that no live session still references."""
-    candidates = {(record.tenant_id, record.catalog_snapshot_id) for record in records}
-    if not candidates:
-        return 0
-    candidate_filter = or_(
-        *(
-            and_(
-                Nl2AgentCatalogSnapshot.tenant_id == tenant_id,
-                Nl2AgentCatalogSnapshot.snapshot_id == snapshot_id,
-            )
-            for tenant_id, snapshot_id in candidates
-        )
-    )
-    live_reference = (
-        session.query(Nl2AgentSession.session_id)
-        .filter(
-            Nl2AgentSession.tenant_id == Nl2AgentCatalogSnapshot.tenant_id,
-            Nl2AgentSession.catalog_snapshot_id == Nl2AgentCatalogSnapshot.snapshot_id,
-            Nl2AgentSession.delete_flag != "Y",
-        )
-        .exists()
-    )
-    return (
-        session.query(Nl2AgentCatalogSnapshot)
-        .filter(
-            candidate_filter,
-            ~live_reference,
-            Nl2AgentCatalogSnapshot.delete_flag != "Y",
-        )
-        .update(
-            {"delete_flag": "Y", "updated_by": "nl2agent_cleanup"},
-            synchronize_session=False,
-        )
-    )
+@dataclass(frozen=True)
+class Nl2AgentSessionIdentity:
+    """Complete immutable identity used for state reads and transitions."""
+
+    tenant_id: str
+    user_id: str
+    runner_agent_id: int
+    draft_agent_id: int
+    conversation_id: int
+
+
+def _identity_filters(identity: Nl2AgentSessionIdentity, *, status: Optional[str] = None):
+    filters = [
+        Nl2AgentSession.tenant_id == identity.tenant_id,
+        Nl2AgentSession.user_id == identity.user_id,
+        Nl2AgentSession.runner_agent_id == identity.runner_agent_id,
+        Nl2AgentSession.draft_agent_id == identity.draft_agent_id,
+        Nl2AgentSession.conversation_id == identity.conversation_id,
+        Nl2AgentSession.delete_flag != "Y",
+    ]
+    if status is not None:
+        filters.append(Nl2AgentSession.status == status)
+    return filters
 
 
 def create_nl2agent_session(
@@ -81,27 +67,6 @@ def create_nl2agent_session(
         get_db_session(db_session) if db_session is not None else get_db_session()
     )
     with session_context as session:
-        snapshot_id = catalog_snapshot_id(session_catalogs)
-        snapshot_insert = pg_insert(Nl2AgentCatalogSnapshot).values(
-            tenant_id=tenant_id,
-            snapshot_id=snapshot_id,
-            schema_version=1,
-            catalogs=session_catalogs,
-            created_by=user_id,
-            updated_by=user_id,
-            delete_flag="N",
-        )
-        session.execute(
-            snapshot_insert.on_conflict_do_update(
-                index_elements=["tenant_id", "snapshot_id"],
-                set_={
-                    "schema_version": snapshot_insert.excluded.schema_version,
-                    "catalogs": snapshot_insert.excluded.catalogs,
-                    "updated_by": user_id,
-                    "delete_flag": "N",
-                },
-            )
-        )
         record = Nl2AgentSession(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -111,7 +76,7 @@ def create_nl2agent_session(
             status=NL2AGENT_SESSION_ACTIVE,
             workflow_schema_version=workflow_schema_version,
             workflow_revision=int(workflow_state.get("revision", 0)),
-            catalog_snapshot_id=snapshot_id,
+            session_catalogs=session_catalogs,
             workflow_state=workflow_state,
             created_by=user_id,
             updated_by=user_id,
@@ -121,11 +86,27 @@ def create_nl2agent_session(
         return as_dict(record)
 
 
-def get_nl2agent_session_snapshot(
-    tenant_id: str,
-    draft_agent_id: int,
+def get_nl2agent_session_snapshot_by_identity(
+    identity: Nl2AgentSessionIdentity,
+    *,
+    status: str = NL2AGENT_SESSION_ACTIVE,
+    db_session=None,
 ) -> Optional[Dict[str, Any]]:
-    """Load a session together with its shared immutable catalog payload."""
+    """Load an authoritative session only when its complete identity matches."""
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
+        record = session.query(Nl2AgentSession).filter(*_identity_filters(identity, status=status)).first()
+        if record is None:
+            return None
+        result = as_dict(record)
+        result["catalog_snapshot"] = result["session_catalogs"]
+        return result
+
+
+def get_nl2agent_session_snapshot(
+    tenant_id: str, draft_agent_id: int
+) -> Optional[Dict[str, Any]]:
+    """Compatibility lookup used while callers migrate to complete identities."""
     with get_db_session() as session:
         record = (
             session.query(Nl2AgentSession)
@@ -138,19 +119,8 @@ def get_nl2agent_session_snapshot(
         )
         if record is None:
             return None
-        snapshot = (
-            session.query(Nl2AgentCatalogSnapshot)
-            .filter(
-                Nl2AgentCatalogSnapshot.tenant_id == tenant_id,
-                Nl2AgentCatalogSnapshot.snapshot_id == record.catalog_snapshot_id,
-                Nl2AgentCatalogSnapshot.delete_flag != "Y",
-            )
-            .first()
-        )
-        if snapshot is None:
-            return None
         result = as_dict(record)
-        result["catalog_snapshot"] = as_dict(snapshot)["catalogs"]
+        result["catalog_snapshot"] = result["session_catalogs"]
         return result
 
 
@@ -208,7 +178,6 @@ def delete_nl2agent_session_by_agent(
         record.delete_flag = "Y"
         record.updated_by = user_id
         session.flush()
-        _delete_orphan_catalog_snapshots(session, [record])
         return True
 
 
@@ -309,6 +278,39 @@ def update_nl2agent_workflow_state(
         return updated == 1
 
 
+def update_nl2agent_workflow_state_by_identity(
+    *,
+    identity: Nl2AgentSessionIdentity,
+    expected_revision: int,
+    workflow_schema_version: int,
+    workflow_state: Dict[str, Any],
+    db_session=None,
+) -> bool:
+    """CAS-update one active workflow using its complete session identity."""
+    next_revision = int(workflow_state.get("revision", -1))
+    if next_revision != expected_revision + 1:
+        raise ValueError("workflow_state revision must advance exactly once")
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
+        updated = (
+            session.query(Nl2AgentSession)
+            .filter(
+                *_identity_filters(identity, status=NL2AGENT_SESSION_ACTIVE),
+                Nl2AgentSession.workflow_revision == expected_revision,
+            )
+            .update(
+                {
+                    "workflow_schema_version": workflow_schema_version,
+                    "workflow_revision": next_revision,
+                    "workflow_state": workflow_state,
+                    "updated_by": identity.user_id,
+                },
+                synchronize_session=False,
+            )
+        )
+        return updated == 1
+
+
 def cleanup_abandoned_nl2agent_sessions(
     *,
     abandoned_before: datetime,
@@ -379,7 +381,6 @@ def cleanup_abandoned_nl2agent_sessions(
             record.delete_flag = "Y"
             record.updated_by = "nl2agent_cleanup"
         session.flush()
-        _delete_orphan_catalog_snapshots(session, records)
         return len(records)
 
 
@@ -410,7 +411,7 @@ def abandon_stale_active_nl2agent_sessions(
 def cleanup_completed_nl2agent_sessions(
     *, completed_before: datetime, limit: int
 ) -> int:
-    """Prune completed workflow rows and release unreferenced catalog snapshots."""
+    """Prune a bounded batch of completed workflow rows."""
     bounded_limit = max(1, min(500, int(limit)))
     with get_db_session() as session:
         records = (
@@ -431,7 +432,6 @@ def cleanup_completed_nl2agent_sessions(
             record.delete_flag = "Y"
             record.updated_by = "nl2agent_cleanup"
         session.flush()
-        _delete_orphan_catalog_snapshots(session, records)
         return len(records)
 
 

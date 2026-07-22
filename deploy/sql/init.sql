@@ -4,19 +4,6 @@ CREATE SCHEMA IF NOT EXISTS nexent;
 -- 2. Switch to the Schema (subsequent operations default to this Schema)
 SET search_path TO nexent;
 
-CREATE TABLE IF NOT EXISTS "nl2agent_catalog_snapshot_t" (
-  "tenant_id" varchar(100) NOT NULL,
-  "snapshot_id" varchar(64) NOT NULL,
-  "schema_version" int4 NOT NULL DEFAULT 1,
-  "catalogs" jsonb NOT NULL,
-  "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
-  "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
-  "created_by" varchar(100),
-  "updated_by" varchar(100),
-  "delete_flag" varchar(1) DEFAULT 'N',
-  CONSTRAINT "nl2agent_catalog_snapshot_t_pk" PRIMARY KEY ("tenant_id", "snapshot_id")
-);
-
 CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
   "session_id" BIGSERIAL PRIMARY KEY,
   "tenant_id" varchar(100) NOT NULL,
@@ -27,25 +14,54 @@ CREATE TABLE IF NOT EXISTS "nl2agent_session_t" (
   "status" varchar(20) NOT NULL DEFAULT 'active',
   "workflow_schema_version" int4 NOT NULL,
   "workflow_revision" int4 NOT NULL DEFAULT 0,
-  "catalog_snapshot_id" varchar(64) NOT NULL,
+  "session_catalogs" jsonb NOT NULL,
   "workflow_state" jsonb NOT NULL,
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "created_by" varchar(100),
   "updated_by" varchar(100),
   "delete_flag" varchar(1) DEFAULT 'N',
-  CONSTRAINT "fk_nl2agent_session_catalog_snapshot"
-    FOREIGN KEY ("tenant_id", "catalog_snapshot_id")
-    REFERENCES "nl2agent_catalog_snapshot_t" ("tenant_id", "snapshot_id"),
   CONSTRAINT "uq_nl2agent_session_tenant_draft" UNIQUE ("tenant_id", "draft_agent_id"),
   CONSTRAINT "uq_nl2agent_session_tenant_conversation" UNIQUE ("tenant_id", "conversation_id"),
-  CONSTRAINT "ck_nl2agent_session_status" CHECK ("status" IN ('active', 'completed', 'abandoned'))
+  CONSTRAINT "ck_nl2agent_session_status" CHECK ("status" IN ('active', 'completed', 'abandoned')),
+  CONSTRAINT "ck_nl2agent_session_revision_matches"
+    CHECK (("workflow_state" ->> 'revision')::int4 = "workflow_revision")
 );
 CREATE INDEX IF NOT EXISTS "idx_nl2agent_session_owner_status"
 ON "nl2agent_session_t" ("tenant_id", "user_id", "status");
 CREATE INDEX IF NOT EXISTS "idx_nl2agent_session_status_update"
 ON "nl2agent_session_t" ("status", "update_time");
-COMMENT ON TABLE "nl2agent_session_t" IS 'Durable NL2AGENT workflow session snapshots';
+COMMENT ON TABLE "nl2agent_session_t" IS 'Authoritative NL2AGENT workflow and immutable catalog state';
+
+CREATE TABLE IF NOT EXISTS "nl2agent_installation_operation_t" (
+  "operation_id" varchar(64) PRIMARY KEY,
+  "tenant_id" varchar(100) NOT NULL,
+  "user_id" varchar(100) NOT NULL,
+  "runner_agent_id" int4 NOT NULL,
+  "draft_agent_id" int4 NOT NULL,
+  "conversation_id" int4 NOT NULL,
+  "installation_key" varchar(255) NOT NULL,
+  "request_fingerprint" varchar(64) NOT NULL,
+  "resource_type" varchar(20) NOT NULL,
+  "status" varchar(20) NOT NULL DEFAULT 'pending',
+  "checkpoint" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "attempt" int4 NOT NULL DEFAULT 0,
+  "lease_owner" varchar(100),
+  "lease_expires_at" timestamp(0),
+  "result" jsonb,
+  "error" jsonb,
+  "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
+  "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
+  "created_by" varchar(100),
+  "updated_by" varchar(100),
+  "delete_flag" varchar(1) DEFAULT 'N',
+  CONSTRAINT "uq_nl2agent_installation_operation_key"
+    UNIQUE ("tenant_id", "draft_agent_id", "installation_key"),
+  CONSTRAINT "ck_nl2agent_installation_operation_status"
+    CHECK ("status" IN ('pending', 'running', 'completed', 'failed'))
+);
+CREATE INDEX IF NOT EXISTS "idx_nl2agent_installation_operation_lease"
+ON "nl2agent_installation_operation_t" ("status", "lease_expires_at");
 
 CREATE TABLE IF NOT EXISTS "conversation_message_t" (
   "message_id" SERIAL,

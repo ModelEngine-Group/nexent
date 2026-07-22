@@ -1,178 +1,28 @@
-from __future__ import annotations
-
-import hashlib
 from pathlib import Path
-from typing import Any
-
-import pytest
-
-from deploy.common.run_local_sql_migrations import (
-    MIGRATION_ID,
-    MigrationConfig,
-    run_migrations,
-)
 
 
-class FakeCursor:
-    def __init__(
-        self,
-        fetchone_results: list[Any],
-        fetchall_result: list[tuple[Any, ...]] | None = None,
-    ):
-        self.executions: list[tuple[str, Any]] = []
-        self._fetchone_results = iter(fetchone_results)
-        self._fetchall_result = fetchall_result or []
-        self.closed = False
-
-    def execute(self, query: str, parameters: Any = None) -> None:
-        self.executions.append((query, parameters))
-
-    def fetchone(self) -> Any:
-        return next(self._fetchone_results)
-
-    def fetchall(self) -> list[tuple[Any, ...]]:
-        return self._fetchall_result
-
-    def close(self) -> None:
-        self.closed = True
+ROOT = Path(__file__).resolve().parents[2]
 
 
-class FakeConnection:
-    def __init__(self, cursor: FakeCursor):
-        self._cursor = cursor
-        self.autocommit = False
-        self.closed = False
-
-    def cursor(self) -> FakeCursor:
-        return self._cursor
-
-    def close(self) -> None:
-        self.closed = True
+def test_standard_sql_migration_runner_is_the_only_local_runner() -> None:
+    assert not (ROOT / "deploy/common/run_local_sql_migrations.py").exists()
+    runner = (ROOT / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
+    assert "pg_advisory_lock" in runner
+    assert "schema_migrations" in runner
 
 
-def _config(tmp_path: Path, migration_names: list[str]) -> MigrationConfig:
-    init_file = tmp_path / "init.sql"
-    init_file.write_text("CREATE SCHEMA IF NOT EXISTS nexent;", encoding="utf-8")
-    migration_dir = tmp_path / "migrations"
-    migration_dir.mkdir()
-    for migration_name in migration_names:
-        (migration_dir / migration_name).write_text(
-            f"SELECT '{migration_name}';",
-            encoding="utf-8",
-        )
-    return MigrationConfig(
-        init_file=init_file,
-        migration_dir=migration_dir,
-        migration_table="nexent.schema_migrations",
-        app_version="v-test",
-        connection_kwargs={"host": "database"},
-    )
+def test_nl2agent_migration_rebuilds_authoritative_schema() -> None:
+    migration = (
+        ROOT / "deploy/sql/migrations/v2.4.0_0722_add_nl2agent.sql"
+    ).read_text(encoding="utf-8")
+    assert "DROP TABLE IF EXISTS nexent.nl2agent_catalog_snapshot_t" in migration
+    assert "session_catalogs JSONB NOT NULL" in migration
+    assert "nl2agent_installation_operation_t" in migration
+    assert "conversation_record_t" in migration
 
 
-def _executed_sql(cursor: FakeCursor) -> list[str]:
-    return [query for query, _ in cursor.executions]
-
-
-def _init_record_status(cursor: FakeCursor) -> str:
-    records = [
-        parameters
-        for query, parameters in cursor.executions
-        if "INSERT INTO" in query
-        and parameters is not None
-        and parameters[0] == "__init.sql"
-    ]
-    assert len(records) == 1
-    return records[0][2]
-
-
-def test_run_migrations_applies_files_in_natural_order_and_validates(
-    tmp_path: Path,
-) -> None:
-    config = _config(tmp_path, ["v2_10.sql", "v2_2.sql"])
-    cursor = FakeCursor([(True,), None, None, ("ready",)])
-    connection = FakeConnection(cursor)
-    connect_calls: list[dict[str, Any]] = []
-
-    def connect(**kwargs: Any) -> FakeConnection:
-        connect_calls.append(kwargs)
-        return connection
-
-    run_migrations(config, connect=connect)
-
-    statements = _executed_sql(cursor)
-    migration_statements = [
-        statement for statement in statements if statement.startswith("SELECT 'v2_")
-    ]
-    assert config.init_file.read_text(encoding="utf-8") in statements
-    assert _init_record_status(cursor) == "applied"
-    assert migration_statements == ["SELECT 'v2_2.sql';", "SELECT 'v2_10.sql';"]
-    assert any("information_schema.columns" in statement for statement in statements)
-    validation_calls = [
-        parameters
-        for statement, parameters in cursor.executions
-        if "information_schema.columns" in statement
-    ]
-    assert validation_calls == [(MIGRATION_ID,)]
-    assert connect_calls == [{"host": "database"}]
-    assert connection.autocommit is True
-    assert cursor.closed is True
-    assert connection.closed is True
-    assert "pg_advisory_unlock" in statements[-1]
-
-
-def test_run_migrations_skips_matching_checksum(tmp_path: Path) -> None:
-    config = _config(tmp_path, ["v1.sql"])
-    migration = config.migration_dir / "v1.sql"
-    checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
-    cursor = FakeCursor([(True,), (checksum,), ("ready",)])
-    connection = FakeConnection(cursor)
-
-    run_migrations(config, connect=lambda **_: connection)
-
-    assert migration.read_text(encoding="utf-8") not in _executed_sql(cursor)
-
-
-def test_run_migrations_baselines_init_for_existing_database(tmp_path: Path) -> None:
-    config = _config(tmp_path, ["v1.sql"])
-    cursor = FakeCursor([(False,), None, ("ready",)])
-    connection = FakeConnection(cursor)
-
-    run_migrations(config, connect=lambda **_: connection)
-
-    statements = _executed_sql(cursor)
-    assert config.init_file.read_text(encoding="utf-8") not in statements
-    assert config.migration_dir.joinpath("v1.sql").read_text(encoding="utf-8") in statements
-    assert _init_record_status(cursor) == "baselined"
-
-
-def test_run_migrations_reports_active_sessions_without_runner(tmp_path: Path) -> None:
-    config = _config(tmp_path, ["v1.sql"])
-    cursor = FakeCursor(
-        [(True,), None, ("active_session_without_runner",)],
-        fetchall_result=[("tenant-a", 2)],
-    )
-    connection = FakeConnection(cursor)
-
-    with pytest.raises(
-        RuntimeError,
-        match=r"active_session_without_runner \(tenant-a: 2\)",
-    ):
-        run_migrations(config, connect=lambda **_: connection)
-
-    assert cursor.closed is True
-    assert connection.closed is True
-    assert "pg_advisory_unlock" in _executed_sql(cursor)[-1]
-
-
-def test_run_migrations_rejects_invalid_migration_table(tmp_path: Path) -> None:
-    config = _config(tmp_path, [])
-    invalid_config = MigrationConfig(
-        init_file=config.init_file,
-        migration_dir=config.migration_dir,
-        migration_table="nexent.schema_migrations;DROP TABLE users",
-        app_version=config.app_version,
-        connection_kwargs=config.connection_kwargs,
-    )
-
-    with pytest.raises(ValueError, match="valid PostgreSQL identifiers"):
-        run_migrations(invalid_config, connect=lambda **_: None)
+def test_fresh_schema_matches_nl2agent_migration_shape() -> None:
+    init_sql = (ROOT / "deploy/sql/init.sql").read_text(encoding="utf-8")
+    assert '"session_catalogs" jsonb NOT NULL' in init_sql
+    assert '"nl2agent_installation_operation_t"' in init_sql
+    assert 'CREATE TABLE IF NOT EXISTS "nl2agent_catalog_snapshot_t"' not in init_sql

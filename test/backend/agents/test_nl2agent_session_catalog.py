@@ -18,11 +18,6 @@ def fake_redis(monkeypatch):
         "get_redis_service",
         MagicMock(return_value=MagicMock(client=client)),
     )
-    monkeypatch.setattr(
-        session_store,
-        "get_redis_service",
-        MagicMock(return_value=MagicMock(client=client)),
-    )
     initial_state = catalog_module.initialize_nl2agent_session_state(
         "tenant_1", 202, conversation_id=902
     )
@@ -31,9 +26,8 @@ def fake_redis(monkeypatch):
         "draft_agent_id": 202,
         "status": "active",
         "workflow_revision": 0,
-        "catalog_snapshot_id": "test-catalog",
         "workflow_state": initial_state,
-        "catalog_snapshot": _catalogs(),
+        "session_catalogs": _catalogs(),
     }
 
     def load_durable_session(tenant_id, draft_agent_id):
@@ -64,7 +58,7 @@ def fake_redis(monkeypatch):
 
     def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
         if tenant_id == "tenant_1" and draft_agent_id == 202:
-            durable_snapshot["catalog_snapshot"] = deepcopy(catalogs)
+            durable_snapshot["session_catalogs"] = deepcopy(catalogs)
         return cache_catalogs(tenant_id, draft_agent_id, catalogs)
 
     monkeypatch.setattr(
@@ -153,22 +147,8 @@ def _prepare_final_review():
     )
 
 
-def test_catalogs_round_trip_through_shared_redis(fake_redis, monkeypatch):
+def test_catalogs_round_trip_through_authoritative_session(fake_redis):
     catalog_module.set_nl2agent_session_catalogs("tenant_1", 202, _catalogs())
-
-    # A newly created service facade simulates a separate runtime worker while
-    # retaining the same shared Redis storage.
-    monkeypatch.setattr(
-        catalog_module,
-        "get_redis_service",
-        MagicMock(return_value=MagicMock(client=fake_redis)),
-    )
-    monkeypatch.setattr(
-        session_store,
-        "get_redis_service",
-        MagicMock(return_value=MagicMock(client=fake_redis)),
-    )
-
     assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == _catalogs()
 
 
@@ -213,7 +193,7 @@ def test_search_projection_hides_installed_mcp_and_marks_installed_skill(
     assert catalog_module.get_nl2agent_session_catalogs("tenant_1", 202) == catalogs
 
 
-def test_missing_catalogs_raise_contextual_error(fake_redis, caplog, monkeypatch):
+def test_missing_catalogs_raise_contextual_error(fake_redis, monkeypatch):
     monkeypatch.setattr(
         session_store, "load_durable_session", MagicMock(return_value=None)
     )
@@ -223,21 +203,16 @@ def test_missing_catalogs_raise_contextual_error(fake_redis, caplog, monkeypatch
     ):
         catalog_module.get_nl2agent_session_catalogs("tenant_1", 202)
 
-    assert "NL2AGENT catalogs are missing" in caplog.text
-
-
-def test_malformed_catalogs_raise_contextual_error(fake_redis, caplog):
-    key = catalog_module._cache_key("tenant_1", 202)
-    fake_redis.set(key, json.dumps({"tool_catalog": "not-a-list"}))
+def test_malformed_catalogs_are_rejected_from_database(fake_redis, monkeypatch):
+    snapshot = session_store.load_durable_session("tenant_1", 202)
+    snapshot["session_catalogs"] = {"tool_catalog": "not-a-list"}
+    monkeypatch.setattr(session_store, "load_durable_session", MagicMock(return_value=snapshot))
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
-        match="tenant=tenant_1, draft_agent_id=202",
+        match="field 'tool_catalog' is malformed",
     ):
         catalog_module.get_nl2agent_session_catalogs("tenant_1", 202)
-
-    assert "Malformed NL2AGENT catalogs" in caplog.text
-
 
 def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(
     fake_redis,
