@@ -41,7 +41,6 @@ from database.conversation_db import (
 )
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
-from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -439,10 +438,6 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
-
-        # Defensive cleanup: release the ContextManager associated with this conversation
-        # to avoid memory leaks in edge cases
-        agent_run_manager.clear_conversation_context_manager(conversation_id)
 
         return True
     except Exception as e:

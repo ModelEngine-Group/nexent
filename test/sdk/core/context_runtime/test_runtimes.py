@@ -6,6 +6,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[4] / "sdk" / "nexent"
 _BOOTSTRAP_MODULES = (
@@ -100,8 +102,11 @@ class _ContextManager:
         chars_per_token = 1.5
         max_observation_length = 0
         token_threshold = 1024
+        context_window_tokens = 4096
 
     config = _Config()
+    hard_input_budget_tokens = 3584
+    processing_mode = "adaptive_compact"
 
     def __init__(self):
         self.calls = []
@@ -127,6 +132,15 @@ class _ContextManager:
     def get_step_compression_stats(self):
         return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}
 
+    def get_all_compression_stats(self):
+        return {"calls": 1, "records": ["record"]}
+
+    def get_token_counts(self):
+        return {"uncompressed": 1200, "compressed": 900}
+
+    def consume_history_summary_event(self):
+        return None
+
     def render_memory_messages(self, memory):
         return []
 
@@ -138,6 +152,9 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         item = types.SimpleNamespace(type="system_prompt")
         runtime = managed_module.ManagedContextRuntime(manager, items=[item])
         memory = _Memory()
+
+        with pytest.raises(AttributeError):
+            runtime.context_manager = _ContextManager()
 
         runtime.prepare_run(memory=memory, fallback_system_prompt="fallback")
         final = runtime.prepare_step(
@@ -165,6 +182,12 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         assert evidence.model_call_count == 2
         assert evidence.loop_status == "completed"
         assert runtime.finalize_evidence(status="error") is evidence
+        assert runtime.token_threshold == 1024
+        assert runtime.context_window_tokens == 4096
+        assert runtime.hard_input_budget_tokens == 3584
+        assert runtime.processing_mode == "adaptive_compact"
+        assert runtime.token_counts() == {"uncompressed": 1200, "compressed": 900}
+        assert runtime.global_compression_stats() == {"calls": 1, "records": ["record"]}
     finally:
         _restore(snapshot)
 

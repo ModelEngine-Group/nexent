@@ -420,9 +420,6 @@ class CoreAgent(CodeAgent):
         # The factory injects exactly one independent runtime.  CoreAgent has
         # no legacy/managed fallback branch and cannot assemble context itself.
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
-        self.context_manager: Any = getattr(
-            self.context_runtime, "context_manager", None
-        )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -673,9 +670,7 @@ Additional Args:
         # is already the compressed payload, so use the ContextManager's raw
         # memory token count when compression produced one. When compression is
         # disabled, the final input size is the correct zero-savings baseline.
-        uncompressed_tokens = None
-        if self.context_manager is not None:
-            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
         if uncompressed_tokens:
             self._last_uncompressed_est = uncompressed_tokens
         else:

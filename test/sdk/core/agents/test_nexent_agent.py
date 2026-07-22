@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from dataclasses import dataclass
@@ -1490,6 +1491,42 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
         "test_agent", ProcessType.FINAL_ANSWER, " content")
+
+
+def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
+    """TOKEN_COUNT exposes the stable model window and keeps the compression threshold."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    context_manager = MagicMock()
+    context_manager.config.token_threshold = 24576
+    context_manager.config.context_window_tokens = 32768
+    context_manager.hard_input_budget_tokens = 28672
+    context_manager.processing_mode = "adaptive_compact"
+    mock_core_agent.context_runtime = MagicMock(
+        context_manager=context_manager,
+        token_threshold=24576,
+        context_window_tokens=32768,
+        hard_input_budget_tokens=28672,
+        processing_mode="adaptive_compact",
+    )
+
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.5)
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_action_step.output = "Final answer"
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    token_payloads = [
+        json.loads(call.args[2])
+        for call in mock_core_agent.observer.add_message.call_args_list
+        if len(call.args) >= 3 and call.args[1] == ProcessType.TOKEN_COUNT
+    ]
+    assert token_payloads[0]["context_window_tokens"] == 32768
+    assert token_payloads[0]["token_threshold"] == 24576
 
 
 def test_agent_run_with_observer_writes_aggregate_context_metrics(nexent_agent_instance, mock_core_agent):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import inspect
 import json
@@ -6,7 +8,7 @@ import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
@@ -18,6 +20,9 @@ from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+
+if TYPE_CHECKING:
+    from .context import ContextItemInput
 
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
@@ -393,7 +398,12 @@ class NexentAgent:
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
-    def create_single_agent(self, agent_config: AgentConfig):
+    def create_single_agent(
+        self,
+        agent_config: AgentConfig,
+        *,
+        context_items_override: Sequence["ContextItemInput"] | None = None,
+    ) -> CoreAgent:
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
 
@@ -459,9 +469,14 @@ class NexentAgent:
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
             )
+            context_items = (
+                list(context_items_override)
+                if context_items_override is not None
+                else (getattr(agent_config, "context_items", None) or [])
+            )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                items=getattr(agent_config, "context_items", None) or [],
+                items=context_items,
             )
 
             # Create the agent
@@ -565,15 +580,15 @@ class NexentAgent:
                             ).get("estimated_input_tokens")
 
                         token_threshold = None
+                        context_window_tokens = None
                         hard_input_budget_tokens = None
                         context_processing_mode = None
-                        if (
-                            hasattr(self.agent, "context_manager")
-                            and self.agent.context_manager is not None
-                        ):
-                            token_threshold = self.agent.context_manager.config.token_threshold
-                            hard_input_budget_tokens = self.agent.context_manager.hard_input_budget_tokens
-                            context_processing_mode = self.agent.context_manager.processing_mode
+                        context_runtime = getattr(self.agent, "context_runtime", None)
+                        if context_runtime is not None:
+                            token_threshold = context_runtime.token_threshold
+                            context_window_tokens = context_runtime.context_window_tokens
+                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
                             "step_number": step_log.step_number,
@@ -583,6 +598,7 @@ class NexentAgent:
                             "total_output_tokens": total_output_tokens,
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
+                            "context_window_tokens": context_window_tokens,
                             "hard_input_budget_tokens": hard_input_budget_tokens,
                             "context_processing_mode": context_processing_mode,
                             "output_finish_reason": getattr(
@@ -715,8 +731,9 @@ class NexentAgent:
             f"est_raw_i={total_raw:>{w_raw}}  save={total_save_str:>{w_save}} | "
             f"hit={hit_total_str:>{w_hit}}"
         )
-        if self.agent.context_manager:
-            lines.append(f"Context Manager Global: {self.agent.context_manager.get_all_compression_stats()}")
+        context_runtime = getattr(self.agent, "context_runtime", None)
+        if context_runtime is not None:
+            lines.append(f"Context Manager Global: {context_runtime.global_compression_stats()}")
 
         lines.append(
             "-----"

@@ -667,6 +667,9 @@ class TestMemoryContext:
 class TestAgentRunInfo:
     """Tests for AgentRunInfo Pydantic model."""
 
+    def test_agent_run_info_does_not_own_context_manager(self):
+        assert "context_manager" not in agent_model_module.AgentRunInfo.model_fields
+
     def test_agent_run_info_creation(self):
         """Test AgentRunInfo creation with all fields."""
         observer = MessageObserver()

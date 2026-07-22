@@ -110,6 +110,12 @@ class ContextRuntime(Protocol):
     def compression_stats(self) -> dict[str, object]:
         """Return this step's compression metrics in the common shape."""
 
+    def global_compression_stats(self) -> dict[str, object]:
+        """Return compression metrics accumulated by this runtime."""
+
+    def token_counts(self) -> dict[str, int | None]:
+        """Return the latest raw and rendered context token counts."""
+
     def consume_history_summary_event(self) -> dict[str, object] | None:
         """Return a newly-created history checkpoint once, if present."""
 
@@ -120,6 +126,18 @@ class ContextRuntime(Protocol):
     @property
     def token_threshold(self) -> int | None:
         """Configured threshold, if the active path has one."""
+
+    @property
+    def context_window_tokens(self) -> int | None:
+        """Stable model context-window capacity for this runtime."""
+
+    @property
+    def hard_input_budget_tokens(self) -> int | None:
+        """Effective hard input budget for this runtime."""
+
+    @property
+    def processing_mode(self) -> str | None:
+        """Resolved context-processing policy mode."""
 
 
 class UnconfiguredContextRuntime:
@@ -164,6 +182,12 @@ class UnconfiguredContextRuntime:
     def compression_stats(self) -> dict[str, object]:
         return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}
 
+    def global_compression_stats(self) -> dict[str, object]:
+        return {"calls": 0, "records": []}
+
+    def token_counts(self) -> dict[str, int | None]:
+        return {"uncompressed": None, "compressed": None}
+
     def consume_history_summary_event(self) -> dict[str, object] | None:
         return None
 
@@ -173,4 +197,16 @@ class UnconfiguredContextRuntime:
 
     @property
     def token_threshold(self) -> int | None:
+        return None
+
+    @property
+    def context_window_tokens(self) -> int | None:
+        return None
+
+    @property
+    def hard_input_budget_tokens(self) -> int | None:
+        return None
+
+    @property
+    def processing_mode(self) -> str | None:
         return None

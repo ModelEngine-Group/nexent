@@ -10,6 +10,10 @@ from .policy import PolicyLayers
 class ContextManagerConfig:
     """Configuration for context-history compression."""
     token_threshold: int = 10000
+    # Stable, model-level combined input/output context capacity. Unlike the
+    # compression threshold and request budgets, this value is intended for
+    # user-facing context-window usage displays.
+    context_window_tokens: int = 10000
     soft_input_budget_tokens: int = 0
     hard_input_budget_tokens: int = 0
     keep_recent_steps: int = 4

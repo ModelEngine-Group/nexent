@@ -1,6 +1,5 @@
 import threading
-from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import Mock, MagicMock, call
+from unittest.mock import Mock
 from backend.agents.agent_run_manager import AgentRunManager, agent_run_manager
 
 
@@ -313,41 +312,9 @@ class TestAgentRunManager:
         assert retrieved_info == mock_run_info2
         assert retrieved_info != mock_run_info1
 
-    def test_context_manager_is_run_scoped(self, mocker):
-        """Concurrent runs never reuse mutable context state, even for one conversation."""
-        context_manager_class = mocker.patch(
-            "nexent.core.agents.context.ContextManager",
-            side_effect=[MagicMock(name="first"), MagicMock(name="second")],
-        )
-        first_config = MagicMock(name="first_config")
-        second_config = MagicMock(name="second_config")
-
-        first = self.manager.create_context_manager(123, first_config, 10)
-        second = self.manager.create_context_manager(123, second_config, 20)
-
-        assert first is not second
-        assert context_manager_class.call_args_list == [
-            call(config=first_config, max_steps=10),
-            call(config=second_config, max_steps=20),
-        ]
-
-    def test_context_manager_has_no_cross_run_cache(self):
+    def test_context_manager_lifecycle_is_not_owned_by_run_manager(self):
+        """AgentRunManager tracks executions but never constructs mutable context state."""
+        assert not hasattr(self.manager, "create_context_manager")
+        assert not hasattr(self.manager, "clear_conversation_context_manager")
         assert not hasattr(self.manager, "_conversation_context_managers")
         assert not hasattr(self.manager, "_conversation_run_counts")
-
-    def test_concurrent_context_manager_creation_is_isolated(self, mocker):
-        context_manager_class = mocker.patch(
-            "nexent.core.agents.context.ContextManager",
-            side_effect=lambda **_kwargs: MagicMock(),
-        )
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            managers = list(
-                executor.map(
-                    lambda _: self.manager.create_context_manager(123, MagicMock(), 10),
-                    range(8),
-                )
-            )
-
-        assert context_manager_class.call_count == 8
-        assert len({id(manager) for manager in managers}) == 8

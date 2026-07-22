@@ -314,10 +314,6 @@ class AgentRunInfo(BaseModel):
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
-    context_manager: Optional[Any] = Field(
-        description="Run-scoped ContextManager created from authorized context input.",
-        default=None
-    )
     context_input: Optional[Any] = Field(
         description="Immutable run-scoped context snapshot supplied by the application boundary.",
         default=None,

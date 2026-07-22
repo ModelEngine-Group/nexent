@@ -1,6 +1,7 @@
 """Focused factory tests for ContextRuntime selection in NexentAgent."""
 from __future__ import annotations
 
+import types
 from threading import Event
 from unittest.mock import MagicMock, patch
 
@@ -98,3 +99,62 @@ def test_create_single_agent_defaults_to_managed_runtime_without_config():
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
     assert runtime.context_manager.config.policy_layers is not None
+
+
+def test_create_single_agent_preserves_explicit_empty_authorized_snapshot():
+    factory = _factory()
+    stale_item = ContextItemInput(
+        id="system:stale",
+        type="system",
+        content={"text": "must not be restored"},
+    )
+    config = AgentConfig(
+        name="agent",
+        description="desc",
+        model_name="main",
+        tools=[],
+        context_items=[stale_item],
+    )
+    captured = {}
+
+    def fake_core_agent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+        factory.create_single_agent(config, context_items_override=())
+
+    assert captured["context_runtime"].items == []
+
+
+def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
+    factory = _factory()
+    child_a = AgentConfig(name="child-a", description="a", model_name="main", tools=[])
+    child_b = AgentConfig(name="child-b", description="b", model_name="main", tools=[])
+    root = AgentConfig(
+        name="root",
+        description="root",
+        model_name="main",
+        tools=[],
+        managed_agents=[child_a, child_b],
+    )
+    created_agents = []
+
+    def fake_core_agent(**kwargs):
+        agent = types.SimpleNamespace(
+            context_runtime=kwargs["context_runtime"],
+            stop_event=None,
+        )
+        created_agents.append(agent)
+        return agent
+
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+        main_agent = factory.create_single_agent(root)
+
+    managers = [agent.context_runtime.context_manager for agent in created_agents]
+    assert len(managers) == 3
+    assert len({id(manager) for manager in managers}) == 3
+    assert main_agent is created_agents[-1]
+    assert all(not hasattr(agent, "context_manager") for agent in created_agents)

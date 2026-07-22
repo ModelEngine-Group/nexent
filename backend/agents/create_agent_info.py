@@ -928,6 +928,13 @@ async def create_agent_config(
         hard_input_budget_tokens = 0
         context_token_threshold = input_budget
 
+    context_window_tokens = (
+        resolved_capacity_snapshot.context_window_tokens
+        if resolved_capacity_snapshot is not None
+        and resolved_capacity_snapshot.context_window_tokens is not None
+        else input_budget
+    )
+
     logger.info(
         "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
         agent_id,
@@ -987,6 +994,7 @@ async def create_agent_config(
     )
     cm_config = ContextManagerConfig(
         token_threshold=context_token_threshold,
+        context_window_tokens=context_window_tokens,
         soft_input_budget_tokens=soft_input_budget_tokens,
         hard_input_budget_tokens=hard_input_budget_tokens,
         policy_layers=policy_layers,

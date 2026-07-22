@@ -73,30 +73,6 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
         logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
 
 
-def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo) -> None:
-    """Mount the run-scoped ContextManager into the active runtime.
-
-    W3 made ``agent.context_runtime`` the execution authority for context
-    assembly.  ``agent.context_manager`` is kept only as a compatibility and
-    observability alias, so mounting a conversation-level ContextManager must
-    update the managed runtime first and then mirror the alias.
-    """
-    context_manager = getattr(agent_run_info, "context_manager", None)
-    if context_manager is None:
-        return
-
-    context_runtime = getattr(agent, "context_runtime", None)
-    if context_runtime is None or context_runtime.context_manager is None:
-        raise RuntimeError(
-            "Conversation-level ContextManager requires an active managed context runtime"
-        )
-
-    context_runtime.context_manager = context_manager
-    context_items = _get_authorized_context_items(agent_run_info)
-    context_runtime.replace_items(context_items or [])
-    agent.context_manager = context_manager
-
-
 def _detect_transport(url: str) -> str:
     """
     Auto-detect MCP transport type based on URL format.
@@ -174,10 +150,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event
             )
-            agent = nexent.create_single_agent(agent_run_info.agent_config)
+            agent = nexent.create_single_agent(
+                agent_run_info.agent_config,
+                context_items_override=_get_authorized_context_items(agent_run_info),
+            )
             nexent.set_agent(agent)
-
-            _mount_conversation_context_manager(agent, agent_run_info)
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             nexent.agent_run_with_observer(
@@ -194,10 +171,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     stop_event=agent_run_info.stop_event,
                     mcp_tool_collection=tool_collection
                 )
-                agent = nexent.create_single_agent(agent_run_info.agent_config)
+                agent = nexent.create_single_agent(
+                    agent_run_info.agent_config,
+                    context_items_override=_get_authorized_context_items(agent_run_info),
+                )
                 nexent.set_agent(agent)
-
-                _mount_conversation_context_manager(agent, agent_run_info)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 nexent.agent_run_with_observer(

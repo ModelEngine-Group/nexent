@@ -4296,6 +4296,7 @@ async def test_prepare_agent_run(
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
+    mock_agent_run_manager.create_context_manager.assert_not_called()
     assert mock_run_info.context_input.items == ()
 
 

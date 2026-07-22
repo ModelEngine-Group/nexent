@@ -1743,6 +1743,7 @@ class TestRunStreamRealExecution:
         }
         runtime.chars_per_token = 1.5
         runtime.token_threshold = token_threshold
+        runtime.token_counts.return_value = {"uncompressed": None, "compressed": None}
         runtime.consume_history_summary_event.return_value = None
         return runtime
 
@@ -1969,7 +1970,6 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
-        agent.context_manager = None
         agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
@@ -2001,9 +2001,6 @@ class TestRunStreamRealExecution:
         agent = object.__new__(CoreAgent)
         agent.step_metrics = []
         agent._last_uncompressed_est = 110
-        agent.context_manager = MagicMock()
-        agent.context_manager.config.token_threshold = 4096
-        agent.context_manager.config.chars_per_token = 1.5
         agent.context_runtime = self._context_runtime_mock(
             calls=1,
             input_tokens=80,
@@ -2033,8 +2030,8 @@ class TestRunStreamRealExecution:
             token_threshold=4096,
         )
 
-    def test_step_stream_uses_context_manager_for_uncompressed_est(self):
-        """_step_stream pulls _last_uncompressed_est from ContextManager.get_token_counts()."""
+    def test_step_stream_uses_context_runtime_for_uncompressed_est(self):
+        """_step_stream pulls the raw estimate through the runtime contract."""
         module = self._load_core_agent_in_isolation()
         CoreAgent = module.CoreAgent
 
@@ -2050,12 +2047,13 @@ class TestRunStreamRealExecution:
 
         agent.context_runtime = self._context_runtime_mock()
         agent.context_runtime.chars_per_token = 1.0
+        agent.context_runtime.token_counts.return_value = {
+            "uncompressed": 5000,
+            "compressed": 1000,
+        }
         mock_context = MagicMock()
         mock_context.messages = [MagicMock()]
         agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
-
-        agent.context_manager = MagicMock()
-        agent.context_manager.get_token_counts.return_value = {"last_uncompressed": 5000}
 
         agent.model = MagicMock()
         response = MagicMock()
@@ -2076,8 +2074,8 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
-    def test_step_stream_falls_back_without_context_manager(self):
-        """_step_stream falls back to msg_token_count when context_manager is None."""
+    def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
+        """_step_stream estimates messages when the runtime has no raw sample."""
         module = self._load_core_agent_in_isolation()
         CoreAgent = module.CoreAgent
 
@@ -2097,8 +2095,6 @@ class TestRunStreamRealExecution:
         mock_context.messages = [MagicMock()]
         agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
 
-        agent.context_manager = None
-
         agent.model = MagicMock()
         response = MagicMock()
         response.content = "ok"
@@ -2116,7 +2112,7 @@ class TestRunStreamRealExecution:
         except (StopIteration, ValueError):
             pass
 
-        # When context_manager is None, falls back to msg_token_count
+        # When the runtime has no raw count, fall back to msg_token_count.
         assert agent._last_uncompressed_est != 5000
 
     def test_run_stream_stop_event_path_real_execution(self):
@@ -2330,7 +2326,6 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
-        agent.context_manager = None
         agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 

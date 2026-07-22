@@ -1,12 +1,9 @@
 import logging
 import threading
-from typing import TYPE_CHECKING, Dict, Union
+from typing import Dict, Union
 
 from nexent.core.agents.agent_model import AgentRunInfo
 from services.runtime_state_service import runtime_state_service
-
-if TYPE_CHECKING:
-    from nexent.core.agents.context import ContextManager, ContextManagerConfig
 
 logger = logging.getLogger("agent_run_manager")
 
@@ -73,29 +70,6 @@ class AgentRunManager:
                 f"agent run stopped, user_id: {user_id}, conversation_id: {conversation_id}")
             return True
         return remote_signal_set
-
-    def create_context_manager(
-        self,
-        conversation_id: Union[int, str],
-        config: "ContextManagerConfig",
-        max_steps: int
-    ) -> "ContextManager":
-        """Create a ContextManager isolated to one agent run."""
-        from nexent.core.agents.context import ContextManager
-
-        logger.info(
-            "Created run-scoped ContextManager for conversation_id: %s",
-            conversation_id,
-        )
-        return ContextManager(config=config, max_steps=max_steps)
-
-    def clear_conversation_context_manager(self, conversation_id: Union[int, str]):
-        """Compatibility no-op because ContextManagers are run-scoped."""
-        logger.debug(
-            "No cached ContextManager to clear for conversation_id: %s",
-            conversation_id,
-        )
-
 
 # create singleton instance
 agent_run_manager = AgentRunManager()

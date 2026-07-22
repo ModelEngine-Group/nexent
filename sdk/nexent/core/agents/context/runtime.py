@@ -29,10 +29,15 @@ class ManagedContextRuntime:
         context_manager: ContextManager,
         items: Sequence[ContextItemCandidate] | None = None,
     ) -> None:
-        self.context_manager = context_manager
+        self._context_manager = context_manager
         self.items = list(items or ())
         self._run_context: ManagedRunContext | None = None
         self._evidence = ContextEvidenceCollector()
+
+    @property
+    def context_manager(self) -> ContextManager:
+        """Return the manager permanently bound to this runtime."""
+        return self._context_manager
 
     def replace_items(self, items: Sequence[ContextItemCandidate] | None) -> None:
         """Replace this runtime's run-local fine-grained item snapshot."""
@@ -105,6 +110,12 @@ class ManagedContextRuntime:
     def compression_stats(self) -> dict[str, object]:
         return self.context_manager.get_step_compression_stats()
 
+    def global_compression_stats(self) -> dict[str, object]:
+        return self.context_manager.get_all_compression_stats()
+
+    def token_counts(self) -> dict[str, int | None]:
+        return self.context_manager.get_token_counts()
+
     def consume_history_summary_event(self) -> dict[str, object] | None:
         return self.context_manager.consume_history_summary_event()
 
@@ -118,3 +129,15 @@ class ManagedContextRuntime:
     @property
     def token_threshold(self) -> int | None:
         return self.context_manager.config.token_threshold
+
+    @property
+    def context_window_tokens(self) -> int | None:
+        return self.context_manager.config.context_window_tokens
+
+    @property
+    def hard_input_budget_tokens(self) -> int | None:
+        return self.context_manager.hard_input_budget_tokens
+
+    @property
+    def processing_mode(self) -> str | None:
+        return self.context_manager.processing_mode

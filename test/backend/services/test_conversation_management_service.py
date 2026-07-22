@@ -59,7 +59,6 @@ sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
 # Stub backend.agents.agent_run_manager to avoid importing the real module
 agent_run_manager_mod = types.ModuleType("backend.agents.agent_run_manager")
 mock_agent_run_manager = MagicMock()
-mock_agent_run_manager.clear_conversation_context_manager = MagicMock()
 agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
 agent_run_manager_mod.AgentRunManager = object
 sys.modules["backend.agents"] = types.ModuleType("backend.agents")
@@ -1234,9 +1233,8 @@ class TestRenameConversationService(unittest.TestCase):
 class TestDeleteConversationService(unittest.TestCase):
     """Test delete_conversation_service function."""
 
-    @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_not_found_raises(self, mock_delete, mock_mgr):
+    def test_delete_not_found_raises(self, mock_delete):
         """Should raise exception when conversation not found."""
         mock_delete.return_value = False
         from backend.services.conversation_management_service import delete_conversation_service
@@ -1245,21 +1243,18 @@ class TestDeleteConversationService(unittest.TestCase):
             delete_conversation_service(123, "user-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
-    @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_clears_context_manager(self, mock_delete, mock_mgr):
-        """Should call clear_conversation_context_manager after successful delete."""
+    def test_delete_succeeds_without_runtime_context_cleanup(self, mock_delete):
+        """Run-scoped ContextManagers require no conversation deletion cleanup."""
         mock_delete.return_value = True
         from backend.services.conversation_management_service import delete_conversation_service
 
         result = delete_conversation_service(123, "user-1")
 
         self.assertTrue(result)
-        mock_mgr.clear_conversation_context_manager.assert_called_once_with(123)
 
-    @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_exception(self, mock_delete, mock_mgr):
+    def test_delete_exception(self, mock_delete):
         """Should re-raise exception from database layer."""
         mock_delete.side_effect = Exception("DB error")
         from backend.services.conversation_management_service import delete_conversation_service

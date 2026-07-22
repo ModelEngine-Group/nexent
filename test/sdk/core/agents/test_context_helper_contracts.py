@@ -104,6 +104,11 @@ def test_context_contract_defaults_and_unconfigured_runtime_guards():
     assert runtime.consume_history_summary_event() is None
     assert runtime.chars_per_token == pytest.approx(1.5)
     assert runtime.token_threshold is None
+    assert runtime.context_window_tokens is None
+    assert runtime.hard_input_budget_tokens is None
+    assert runtime.processing_mode is None
+    assert runtime.token_counts() == {"uncompressed": None, "compressed": None}
+    assert runtime.global_compression_stats() == {"calls": 0, "records": []}
 
     guarded_calls = [
         lambda: runtime.replace_items([]),
