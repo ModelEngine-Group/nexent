@@ -59,6 +59,41 @@ class AppException(Exception):
         return ERROR_CODE_HTTP_STATUS.get(self.error_code, 500)
 
 
+class Nl2AgentDraftNotFoundError(AppException):
+    """Raised when a tenant cannot resolve the requested NL2AGENT draft."""
+
+    def __init__(self, message: str = "NL2AGENT draft agent not found."):
+        super().__init__(ErrorCode.AGENTSPACE_NL2AGENT_DRAFT_NOT_FOUND, message)
+
+
+class Nl2AgentWorkflowConflictError(AppException):
+    """Raised when an action is not valid for the current workflow stage."""
+
+    def __init__(self, message: str):
+        super().__init__(ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT, message)
+
+
+class Nl2AgentStaleCardError(AppException):
+    """Raised when a card receipt no longer belongs to the active stage."""
+
+    def __init__(self, message: str = "The NL2AGENT card delivery receipt is stale."):
+        super().__init__(ErrorCode.AGENTSPACE_NL2AGENT_STALE_CARD, message)
+
+
+class Nl2AgentStateConflictError(AppException):
+    """Raised when the Redis state CAS retry budget is exhausted."""
+
+    def __init__(self, message: str):
+        super().__init__(ErrorCode.AGENTSPACE_NL2AGENT_STATE_CONFLICT, message)
+
+
+class Nl2AgentCatalogUnavailableError(AppException):
+    """Raised when the session catalog cannot be loaded or persisted."""
+
+    def __init__(self, message: str):
+        super().__init__(ErrorCode.AGENTSPACE_NL2AGENT_CATALOG_UNAVAILABLE, message)
+
+
 def raise_error(error_code: ErrorCode, message: str = None, details: dict = None):
     """Raise an AppException with the given error code."""
     raise AppException(error_code, message, details)
@@ -79,6 +114,24 @@ def raise_error(error_code: ErrorCode, message: str = None, details: dict = None
 
 class AgentRunException(Exception):
     """Exception raised when agent run fails."""
+
+    pass
+
+
+class Nl2AgentValidationError(AgentRunException):
+    """Raised when an NL2AGENT request or proposed configuration is invalid."""
+
+    pass
+
+
+class Nl2AgentOperationError(AgentRunException):
+    """Raised when an internal NL2AGENT persistence operation fails."""
+
+    pass
+
+
+class Nl2AgentExternalServiceError(AgentRunException):
+    """Raised when an external NL2AGENT installation or connection fails."""
 
     pass
 

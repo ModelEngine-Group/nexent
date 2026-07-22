@@ -1,0 +1,326 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexent.dev/contracts/nl2agent-card.schema.json",
+  "title": "NL2AGENT card payloads",
+  "$defs": {
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "batchIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "requirements_summary": {
+      "type": "object",
+      "required": [
+        "goal",
+        "audience_or_scenario",
+        "primary_input",
+        "expected_output",
+        "key_constraints"
+      ],
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "goal": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "audience_or_scenario": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "primary_input": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "expected_output": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "key_constraints": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "additionalProperties": false
+    },
+    "model_selection": {
+      "type": "object",
+      "properties": { "agent_id": { "$ref": "#/$defs/positiveInteger" } },
+      "additionalProperties": false
+    },
+    "localTool": {
+      "type": "object",
+      "required": ["tool_id", "name"],
+      "properties": {
+        "tool_id": { "$ref": "#/$defs/positiveInteger" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "labels": { "$ref": "#/$defs/stringArray" },
+        "source": { "type": "string" },
+        "category": { "type": "string" },
+        "usage": { "type": "string" },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "localSkill": {
+      "type": "object",
+      "required": ["skill_id", "name"],
+      "properties": {
+        "skill_id": { "$ref": "#/$defs/positiveInteger" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/$defs/stringArray" },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "local_resources": {
+      "type": "object",
+      "required": ["recommendation_batch_id", "tools", "skills"],
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "recommendation_batch_id": { "$ref": "#/$defs/batchIdentifier" },
+        "tools": { "type": "array", "items": { "$ref": "#/$defs/localTool" } },
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/localSkill" } }
+      },
+      "additionalProperties": false
+    },
+    "mcpField": {
+      "type": "object",
+      "required": ["key", "name", "type", "required", "secret"],
+      "properties": {
+        "key": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "enum": ["text", "number", "url", "json"] },
+        "required": { "type": "boolean" },
+        "secret": { "type": "boolean" },
+        "default": { "type": ["string", "number", "boolean", "null"] },
+        "placeholder": { "type": "string" },
+        "choices": { "$ref": "#/$defs/stringArray" },
+        "category": { "type": "string" },
+        "argument_type": { "enum": ["named", "positional"] },
+        "argument_name": { "type": ["string", "null"] },
+        "repeated": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "mcpInstallOption": {
+      "type": "object",
+      "required": [
+        "option_id",
+        "type",
+        "label",
+        "requires_configuration",
+        "fields",
+        "supported",
+        "status"
+      ],
+      "properties": {
+        "option_id": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "enum": ["remote", "container", "unsupported"] },
+        "transport": { "type": ["string", "null"] },
+        "server_url_template": { "type": ["string", "null"] },
+        "requires_configuration": { "type": "boolean" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "status": {
+          "enum": ["ready", "configuration_required", "unsupported"]
+        },
+        "supported": { "type": "boolean" },
+        "unsupported_reason": { "type": "string" },
+        "package_identifier": { "type": ["string", "null"] },
+        "registry_type": { "type": ["string", "null"] },
+        "runtime_hint": { "type": ["string", "null"] },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/mcpField" } }
+      },
+      "additionalProperties": false
+    },
+    "mcpItem": {
+      "type": "object",
+      "required": ["recommendation_id", "name", "install_options"],
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "recommendation_batch_id": { "$ref": "#/$defs/batchIdentifier" },
+        "recommendation_id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/$defs/stringArray" },
+        "source": { "enum": ["registry", "community"] },
+        "transport": { "type": ["string", "null"] },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" },
+        "install_options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/mcpInstallOption" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "web_mcp": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["recommendation_batch_id", "items"],
+          "properties": {
+            "agent_id": { "$ref": "#/$defs/positiveInteger" },
+            "recommendation_batch_id": { "$ref": "#/$defs/batchIdentifier" },
+            "items": { "type": "array", "items": { "$ref": "#/$defs/mcpItem" } }
+          },
+          "additionalProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/mcpItem" },
+            { "required": ["recommendation_batch_id"] }
+          ]
+        }
+      ]
+    },
+    "skillItem": {
+      "type": "object",
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "recommendation_batch_id": { "$ref": "#/$defs/batchIdentifier" },
+        "skill_id": { "$ref": "#/$defs/positiveInteger" },
+        "skill_name": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/$defs/stringArray" },
+        "source": { "type": "string" },
+        "status": { "type": "string" },
+        "score": { "$ref": "#/$defs/score" },
+        "reason": { "type": "string" }
+      },
+      "allOf": [
+        { "anyOf": [{ "required": ["name"] }, { "required": ["skill_name"] }] },
+        {
+          "anyOf": [
+            { "required": ["skill_id"] },
+            { "required": ["skill_name"] }
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "web_skill": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["recommendation_batch_id", "items"],
+          "properties": {
+            "agent_id": { "$ref": "#/$defs/positiveInteger" },
+            "recommendation_batch_id": { "$ref": "#/$defs/batchIdentifier" },
+            "items": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/skillItem" }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/skillItem" },
+            { "required": ["recommendation_batch_id"] }
+          ]
+        }
+      ]
+    },
+    "agent_identity": {
+      "type": "object",
+      "required": ["display_name"],
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 50 }
+      },
+      "additionalProperties": false
+    },
+    "final_review": {
+      "type": "object",
+      "required": ["business_description", "duty_prompt", "greeting_message"],
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/positiveInteger" },
+        "description": { "type": "string", "maxLength": 500 },
+        "business_description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "duty_prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "constraint_prompt": { "type": "string", "maxLength": 4000 },
+        "few_shots_prompt": { "type": "string", "maxLength": 8000 },
+        "greeting_message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "example_questions": {
+          "type": "array",
+          "maxItems": 6,
+          "items": { "type": "string" }
+        },
+        "max_steps": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "requested_output_tokens": { "type": "integer", "minimum": 1 },
+        "provide_run_summary": { "type": "boolean" },
+        "verification_config": {
+          "type": "object",
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "step_verification_enabled": { "type": "boolean" },
+            "final_verification_enabled": { "type": "boolean" },
+            "llm_verification_enabled": { "type": "boolean" },
+            "max_final_rounds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "strictness": {
+              "type": "string",
+              "enum": ["lenient", "balanced", "strict"]
+            },
+            "fail_policy": {
+              "type": "string",
+              "enum": ["repair_then_controlled_summary", "warn"]
+            },
+            "pass_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "critical_events": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "tool_precheck",
+                  "tool_result",
+                  "retrieval",
+                  "code_execution",
+                  "handoff",
+                  "final_answer"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "enable_context_manager": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

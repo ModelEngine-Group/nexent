@@ -1,0 +1,3977 @@
+{
+  "components": {
+    "schemas": {
+      "CardDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Key"
+          },
+          "card_type": {
+            "enum": [
+              "requirements_summary",
+              "model_selection",
+              "local_resources",
+              "web_mcp",
+              "web_skill",
+              "agent_identity",
+              "final_review"
+            ],
+            "title": "Card Type",
+            "type": "string"
+          },
+          "message_id": {
+            "minimum": 1.0,
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "retry_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "rendered",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "card_type",
+          "status"
+        ],
+        "title": "CardDelivery",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Nl2AgentApplyLocalResourcesRequest": {
+        "additionalProperties": false,
+        "description": "Request body for bulk-binding local tools and skills to a draft agent.",
+        "properties": {
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "tool_config_values": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxProperties": 100,
+            "title": "Tool Config Values",
+            "type": "object"
+          },
+          "tool_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommendation_batch_id"
+        ],
+        "title": "Nl2AgentApplyLocalResourcesRequest",
+        "type": "object"
+      },
+      "Nl2AgentApplyLocalResourcesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bound_skill_count": {
+            "title": "Bound Skill Count",
+            "type": "integer"
+          },
+          "bound_tool_count": {
+            "title": "Bound Tool Count",
+            "type": "integer"
+          },
+          "chat_injection_text": {
+            "title": "Chat Injection Text",
+            "type": "string"
+          },
+          "recommendation_batch_id": {
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "status": {
+            "const": "applied",
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommendation_batch_id",
+          "status",
+          "bound_tool_count",
+          "bound_skill_count",
+          "tool_ids",
+          "skill_ids",
+          "chat_injection_text"
+        ],
+        "title": "Nl2AgentApplyLocalResourcesResponse",
+        "type": "object"
+      },
+      "Nl2AgentCardDeliveryRequest": {
+        "additionalProperties": false,
+        "description": "Report final-message rendering success or failure for one NL2AGENT card.",
+        "properties": {
+          "card_key": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The recommendation_batch_id for local or online resource cards; omit for all other card types.",
+            "title": "Card Key"
+          },
+          "card_type": {
+            "enum": [
+              "requirements_summary",
+              "model_selection",
+              "local_resources",
+              "web_mcp",
+              "web_skill",
+              "agent_identity",
+              "final_review"
+            ],
+            "title": "Card Type",
+            "type": "string"
+          },
+          "message_id": {
+            "minimum": 1.0,
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "truncated_fence",
+                  "invalid_json",
+                  "invalid_schema",
+                  "missing_card"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "rendered",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "card_type",
+          "status"
+        ],
+        "title": "Nl2AgentCardDeliveryRequest",
+        "type": "object"
+      },
+      "Nl2AgentCardDeliveryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "auto_retry_allowed": {
+            "title": "Auto Retry Allowed",
+            "type": "boolean"
+          },
+          "card_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Key"
+          },
+          "card_type": {
+            "enum": [
+              "requirements_summary",
+              "model_selection",
+              "local_resources",
+              "web_mcp",
+              "web_skill",
+              "agent_identity",
+              "final_review"
+            ],
+            "title": "Card Type",
+            "type": "string"
+          },
+          "chat_injection_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Injection Text"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "retry_count": {
+            "default": 0,
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "rendered",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "message_id",
+          "card_type",
+          "status",
+          "auto_retry_allowed"
+        ],
+        "title": "Nl2AgentCardDeliveryResponse",
+        "type": "object"
+      },
+      "Nl2AgentDiscoveredTool": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_id": {
+            "title": "Tool Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tool_id",
+          "name"
+        ],
+        "title": "Nl2AgentDiscoveredTool",
+        "type": "object"
+      },
+      "Nl2AgentFinalizeRequest": {
+        "additionalProperties": false,
+        "description": "Unsaved descriptive, prompt, and runtime fields for draft publication.",
+        "properties": {
+          "business_description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Business Description",
+            "type": "string"
+          },
+          "constraint_prompt": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraint Prompt"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "duty_prompt": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Duty Prompt",
+            "type": "string"
+          },
+          "enable_context_manager": {
+            "default": true,
+            "title": "Enable Context Manager",
+            "type": "boolean"
+          },
+          "example_questions": {
+            "items": {
+              "maxLength": 500,
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Example Questions",
+            "type": "array"
+          },
+          "few_shots_prompt": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Few Shots Prompt"
+          },
+          "greeting_message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Greeting Message",
+            "type": "string"
+          },
+          "max_steps": {
+            "anyOf": [
+              {
+                "maximum": 30.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Steps"
+          },
+          "provide_run_summary": {
+            "default": false,
+            "title": "Provide Run Summary",
+            "type": "boolean"
+          },
+          "requested_output_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Output Tokens"
+          },
+          "verification_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Config"
+          }
+        },
+        "required": [
+          "business_description",
+          "duty_prompt",
+          "greeting_message"
+        ],
+        "title": "Nl2AgentFinalizeRequest",
+        "type": "object"
+      },
+      "Nl2AgentFinalizeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "status": {
+            "const": "draft_ready",
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id",
+          "status",
+          "name",
+          "display_name",
+          "tool_ids",
+          "skill_ids"
+        ],
+        "title": "Nl2AgentFinalizeResponse",
+        "type": "object"
+      },
+      "Nl2AgentIdentityRequest": {
+        "additionalProperties": false,
+        "description": "Persist the user-confirmed display name for an NL2AGENT draft.",
+        "properties": {
+          "display_name": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "Nl2AgentIdentityRequest",
+        "type": "object"
+      },
+      "Nl2AgentIdentityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "chat_injection_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Injection Text"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "identity_confirmed": {
+            "title": "Identity Confirmed",
+            "type": "boolean"
+          },
+          "internal_name": {
+            "title": "Internal Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "display_name",
+          "internal_name",
+          "identity_confirmed"
+        ],
+        "title": "Nl2AgentIdentityResponse",
+        "type": "object"
+      },
+      "Nl2AgentInstallWebSkillRequest": {
+        "additionalProperties": false,
+        "description": "Request body for installing a single official/web skill into the tenant.",
+        "properties": {
+          "config_values": {
+            "additionalProperties": true,
+            "maxProperties": 100,
+            "title": "Config Values",
+            "type": "object"
+          },
+          "skill_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Id"
+          },
+          "skill_name": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Name"
+          }
+        },
+        "title": "Nl2AgentInstallWebSkillRequest",
+        "type": "object"
+      },
+      "Nl2AgentInvalidReference": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "enum": [
+              "not_found",
+              "not_llm",
+              "unavailable",
+              "name_missing",
+              "primary_not_in_runtime_models"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "reference_id": {
+            "title": "Reference Id",
+            "type": "integer"
+          },
+          "reference_type": {
+            "enum": [
+              "model",
+              "tool",
+              "skill"
+            ],
+            "title": "Reference Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference_type",
+          "reference_id",
+          "reason"
+        ],
+        "title": "Nl2AgentInvalidReference",
+        "type": "object"
+      },
+      "Nl2AgentLocalRecommendationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Skill Ids",
+            "type": "array"
+          },
+          "applied_tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Tool Ids",
+            "type": "array"
+          },
+          "recommendation_batch_id": {
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "recommendations_ready",
+              "applying",
+              "applied",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          },
+          "tool_parameter_schemas": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Nl2AgentToolParameterSchema"
+              },
+              "type": "array"
+            },
+            "title": "Tool Parameter Schemas",
+            "type": "object"
+          }
+        },
+        "required": [
+          "recommendation_batch_id",
+          "status",
+          "tool_ids",
+          "skill_ids",
+          "applied_tool_ids",
+          "applied_skill_ids",
+          "tool_parameter_schemas"
+        ],
+        "title": "Nl2AgentLocalRecommendationResponse",
+        "type": "object"
+      },
+      "Nl2AgentLocalSkipResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Skill Ids",
+            "type": "array"
+          },
+          "applied_tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Applied Tool Ids",
+            "type": "array"
+          },
+          "chat_injection_text": {
+            "title": "Chat Injection Text",
+            "type": "string"
+          },
+          "recommendation_batch_id": {
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "status": {
+            "const": "skipped",
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommendation_batch_id",
+          "status",
+          "tool_ids",
+          "skill_ids",
+          "applied_tool_ids",
+          "applied_skill_ids",
+          "chat_injection_text"
+        ],
+        "title": "Nl2AgentLocalSkipResponse",
+        "type": "object"
+      },
+      "Nl2AgentMcpBindToolsRequest": {
+        "additionalProperties": false,
+        "description": "Bind selected tools from an installed MCP to an NL2AGENT draft.",
+        "properties": {
+          "tool_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "title": "Nl2AgentMcpBindToolsRequest",
+        "type": "object"
+      },
+      "Nl2AgentMcpBindToolsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "bound_tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Bound Tool Ids",
+            "type": "array"
+          },
+          "mcp_id": {
+            "title": "Mcp Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_id",
+          "mcp_id",
+          "bound_tool_ids"
+        ],
+        "title": "Nl2AgentMcpBindToolsResponse",
+        "type": "object"
+      },
+      "Nl2AgentMcpInstallRequest": {
+        "additionalProperties": false,
+        "description": "Install a recommended MCP using user-confirmed configuration.",
+        "properties": {
+          "config_values": {
+            "additionalProperties": true,
+            "maxProperties": 100,
+            "title": "Config Values",
+            "type": "object"
+          },
+          "option_id": {
+            "default": "remote",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Option Id",
+            "type": "string"
+          },
+          "recommendation_id": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Recommendation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommendation_id"
+        ],
+        "title": "Nl2AgentMcpInstallRequest",
+        "type": "object"
+      },
+      "Nl2AgentMcpInstallResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "mcp_id": {
+            "title": "Mcp Id",
+            "type": "integer"
+          },
+          "status": {
+            "const": "connected",
+            "title": "Status",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentDiscoveredTool"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id",
+          "mcp_id",
+          "status",
+          "tools"
+        ],
+        "title": "Nl2AgentMcpInstallResponse",
+        "type": "object"
+      },
+      "Nl2AgentMcpSkipToolsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "mcp_id": {
+            "title": "Mcp Id",
+            "type": "integer"
+          },
+          "status": {
+            "const": "binding_skipped",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "mcp_id",
+          "status"
+        ],
+        "title": "Nl2AgentMcpSkipToolsResponse",
+        "type": "object"
+      },
+      "Nl2AgentMcpWorkflowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bound_tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Bound Tool Ids",
+            "type": "array"
+          },
+          "discovered_tool_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Discovered Tool Ids",
+            "type": "array"
+          },
+          "discovered_tools": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentDiscoveredTool"
+            },
+            "title": "Discovered Tools",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "installation_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Key"
+          },
+          "mcp_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcp Id"
+          },
+          "option_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Option Id"
+          },
+          "recommendation_id": {
+            "title": "Recommendation Id",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "configuration_required",
+                  "installing",
+                  "connected",
+                  "tools_bound",
+                  "binding_skipped",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "recommendation_id"
+        ],
+        "title": "Nl2AgentMcpWorkflowResponse",
+        "type": "object"
+      },
+      "Nl2AgentModelSelectionRequest": {
+        "additionalProperties": false,
+        "description": "Persist the ordered LLM selection for an NL2AGENT draft.",
+        "properties": {
+          "fallback_model_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 4,
+            "title": "Fallback Model Ids",
+            "type": "array"
+          },
+          "primary_model_id": {
+            "minimum": 1.0,
+            "title": "Primary Model Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "primary_model_id"
+        ],
+        "title": "Nl2AgentModelSelectionRequest",
+        "type": "object"
+      },
+      "Nl2AgentModelSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "chat_injection_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Injection Text"
+          },
+          "fallback_model_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Fallback Model Ids",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentModelSummary"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "primary_model_id": {
+            "title": "Primary Model Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_id",
+          "primary_model_id",
+          "fallback_model_ids",
+          "models"
+        ],
+        "title": "Nl2AgentModelSelectionResponse",
+        "type": "object"
+      },
+      "Nl2AgentModelSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id",
+          "display_name"
+        ],
+        "title": "Nl2AgentModelSummary",
+        "type": "object"
+      },
+      "Nl2AgentOnlineConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "chat_injection_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Injection Text"
+          },
+          "completed_batch_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Completed Batch Ids",
+            "type": "array"
+          },
+          "online_configuration_confirmed": {
+            "title": "Online Configuration Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent_id",
+          "online_configuration_confirmed",
+          "completed_batch_ids"
+        ],
+        "title": "Nl2AgentOnlineConfigurationResponse",
+        "type": "object"
+      },
+      "Nl2AgentOnlineRecommendationBatchRequest": {
+        "additionalProperties": false,
+        "description": "Register a rendered MCP or web-Skill recommendation batch.",
+        "properties": {
+          "item_keys": {
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Item Keys",
+            "type": "array"
+          },
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "resource_type": {
+            "enum": [
+              "mcp",
+              "skill"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommendation_batch_id",
+          "resource_type"
+        ],
+        "title": "Nl2AgentOnlineRecommendationBatchRequest",
+        "type": "object"
+      },
+      "Nl2AgentOnlineRecommendationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "item_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Item Keys",
+            "type": "array"
+          },
+          "recommendation_batch_id": {
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "resource_type": {
+            "enum": [
+              "mcp",
+              "skill"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "recommendations_ready",
+              "completed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommendation_batch_id",
+          "resource_type",
+          "item_keys",
+          "status"
+        ],
+        "title": "Nl2AgentOnlineRecommendationResponse",
+        "type": "object"
+      },
+      "Nl2AgentPersistedModel": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "primary",
+              "fallback"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model_id",
+          "role",
+          "valid"
+        ],
+        "title": "Nl2AgentPersistedModel",
+        "type": "object"
+      },
+      "Nl2AgentRecommendationBatchRequest": {
+        "additionalProperties": false,
+        "description": "Register a local-resource recommendation card rendered by the client.",
+        "properties": {
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "tool_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommendation_batch_id"
+        ],
+        "title": "Nl2AgentRecommendationBatchRequest",
+        "type": "object"
+      },
+      "Nl2AgentRecommendationSkipRequest": {
+        "additionalProperties": false,
+        "description": "Explicitly skip one rendered local-resource recommendation batch.",
+        "properties": {
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommendation_batch_id"
+        ],
+        "title": "Nl2AgentRecommendationSkipRequest",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsConfirmRequest": {
+        "additionalProperties": false,
+        "description": "Confirm the currently registered NL2AGENT requirements summary.",
+        "properties": {
+          "fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint"
+        ],
+        "title": "Nl2AgentRequirementsConfirmRequest",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsConfirmationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "chat_injection_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Injection Text"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "status": {
+            "const": "confirmed",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "status",
+          "fingerprint"
+        ],
+        "title": "Nl2AgentRequirementsConfirmationResponse",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsData": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_or_scenario": {
+            "title": "Audience Or Scenario",
+            "type": "string"
+          },
+          "expected_output": {
+            "title": "Expected Output",
+            "type": "string"
+          },
+          "goal": {
+            "title": "Goal",
+            "type": "string"
+          },
+          "key_constraints": {
+            "title": "Key Constraints",
+            "type": "string"
+          },
+          "primary_input": {
+            "title": "Primary Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "goal",
+          "audience_or_scenario",
+          "primary_input",
+          "expected_output",
+          "key_constraints"
+        ],
+        "title": "Nl2AgentRequirementsData",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsRegistrationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "is_current": {
+            "title": "Is Current",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "collecting",
+              "awaiting_confirmation",
+              "confirmed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/Nl2AgentRequirementsData"
+          }
+        },
+        "required": [
+          "agent_id",
+          "status",
+          "summary",
+          "fingerprint",
+          "is_current"
+        ],
+        "title": "Nl2AgentRequirementsRegistrationResponse",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsReviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "fingerprint": {
+            "default": "",
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "status": {
+            "default": "collecting",
+            "enum": [
+              "collecting",
+              "awaiting_confirmation",
+              "confirmed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Nl2AgentRequirementsData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "Nl2AgentRequirementsReviewResponse",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsSummaryRequest": {
+        "additionalProperties": false,
+        "description": "Register the read-only requirements summary rendered by NL2AGENT.",
+        "properties": {
+          "audience_or_scenario": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Audience Or Scenario",
+            "type": "string"
+          },
+          "expected_output": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Expected Output",
+            "type": "string"
+          },
+          "goal": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "key_constraints": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Key Constraints",
+            "type": "string"
+          },
+          "primary_input": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Primary Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "goal",
+          "audience_or_scenario",
+          "primary_input",
+          "expected_output",
+          "key_constraints"
+        ],
+        "title": "Nl2AgentRequirementsSummaryRequest",
+        "type": "object"
+      },
+      "Nl2AgentSessionListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "Nl2AgentSessionListResponse",
+        "type": "object"
+      },
+      "Nl2AgentSessionStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "integer"
+          },
+          "draft_agent_id": {
+            "title": "Draft Agent Id",
+            "type": "integer"
+          },
+          "draft_name": {
+            "title": "Draft Name",
+            "type": "string"
+          },
+          "nl2agent_agent_id": {
+            "title": "Nl2Agent Agent Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nl2agent_agent_id",
+          "draft_agent_id",
+          "conversation_id",
+          "draft_name"
+        ],
+        "title": "Nl2AgentSessionStartResponse",
+        "type": "object"
+      },
+      "Nl2AgentSessionStateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "business_logic_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Logic Model Id"
+          },
+          "current_stage": {
+            "enum": [
+              "revision_routing",
+              "requirements_collecting",
+              "requirements_confirmation",
+              "model_selection",
+              "local_resource_search",
+              "local_resource_review",
+              "online_resource_search",
+              "online_resource_review",
+              "agent_identity",
+              "final_review"
+            ],
+            "title": "Current Stage",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "expected_card_types": {
+            "items": {
+              "enum": [
+                "requirements_summary",
+                "model_selection",
+                "local_resources",
+                "web_mcp",
+                "web_skill",
+                "agent_identity",
+                "final_review"
+              ],
+              "type": "string"
+            },
+            "title": "Expected Card Types",
+            "type": "array"
+          },
+          "identity_confirmed": {
+            "title": "Identity Confirmed",
+            "type": "boolean"
+          },
+          "internal_name": {
+            "title": "Internal Name",
+            "type": "string"
+          },
+          "invalid_references": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentInvalidReference"
+            },
+            "title": "Invalid References",
+            "type": "array"
+          },
+          "local_tool_parameter_schemas": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "$ref": "#/components/schemas/Nl2AgentToolParameterSchema"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "title": "Local Tool Parameter Schemas",
+            "type": "object"
+          },
+          "model_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Model Ids",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentPersistedModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "resource_review": {
+            "$ref": "#/components/schemas/Nl2AgentWorkflowStateResponse"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "session_status": {
+            "enum": [
+              "active",
+              "completed"
+            ],
+            "title": "Session Status",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentSkillSummary"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentToolSummary"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id",
+          "session_status",
+          "schema_version",
+          "revision",
+          "current_stage",
+          "expected_card_types",
+          "allowed_actions",
+          "internal_name",
+          "identity_confirmed",
+          "model_ids",
+          "models",
+          "tools",
+          "skills",
+          "invalid_references",
+          "resource_review"
+        ],
+        "title": "Nl2AgentSessionStateResponse",
+        "type": "object"
+      },
+      "Nl2AgentSessionSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "integer"
+          },
+          "create_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create Time"
+          },
+          "draft_agent_id": {
+            "title": "Draft Agent Id",
+            "type": "integer"
+          },
+          "nl2agent_agent_id": {
+            "title": "Nl2Agent Agent Id",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "completed",
+              "abandoned"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "update_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Time"
+          }
+        },
+        "required": [
+          "nl2agent_agent_id",
+          "draft_agent_id",
+          "conversation_id",
+          "status"
+        ],
+        "title": "Nl2AgentSessionSummaryResponse",
+        "type": "object"
+      },
+      "Nl2AgentSkillParameterSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "default": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "depends_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
+          },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
+          "description_zh": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Zh"
+          },
+          "isSecret": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issecret"
+          },
+          "is_secret": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Secret"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "optional": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Optional"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "Nl2AgentSkillParameterSchema",
+        "type": "object"
+      },
+      "Nl2AgentSkillSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "local",
+              "online"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id",
+          "name",
+          "source",
+          "origin"
+        ],
+        "title": "Nl2AgentSkillSummary",
+        "type": "object"
+      },
+      "Nl2AgentToolConfigurationField": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "default": false,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "Nl2AgentToolConfigurationField",
+        "type": "object"
+      },
+      "Nl2AgentToolParameterSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "default": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "isSecret": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issecret"
+          },
+          "is_secret": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Secret"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "optional": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Optional"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "Nl2AgentToolParameterSchema",
+        "type": "object"
+      },
+      "Nl2AgentToolSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Nl2AgentToolConfigurationField"
+            },
+            "title": "Configuration",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "local",
+              "online"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "parameter_schema": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentToolParameterSchema"
+            },
+            "title": "Parameter Schema",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "tool_id": {
+            "title": "Tool Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tool_id",
+          "name",
+          "source",
+          "origin"
+        ],
+        "title": "Nl2AgentToolSummary",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "config_schemas": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentSkillParameterSchema"
+            },
+            "title": "Config Schemas",
+            "type": "array"
+          },
+          "config_values": {
+            "additionalProperties": true,
+            "title": "Config Values",
+            "type": "object"
+          },
+          "skill_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Id"
+          },
+          "skill_name": {
+            "title": "Skill Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_name"
+        ],
+        "title": "Nl2AgentWebSkillConfigurationResponse",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillInstallResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bound": {
+            "title": "Bound",
+            "type": "boolean"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "installed_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Installed Ids",
+            "type": "array"
+          },
+          "installed_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Names"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "integer"
+          },
+          "skill_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Name"
+          }
+        },
+        "required": [
+          "skill_id",
+          "installed",
+          "bound",
+          "installed_ids"
+        ],
+        "title": "Nl2AgentWebSkillInstallResponse",
+        "type": "object"
+      },
+      "Nl2AgentWorkflowStateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "card_delivery": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CardDelivery"
+            },
+            "propertyNames": {
+              "enum": [
+                "requirements_summary",
+                "model_selection",
+                "local_resources",
+                "web_mcp",
+                "web_skill",
+                "agent_identity",
+                "final_review"
+              ]
+            },
+            "title": "Card Delivery",
+            "type": "object"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "integer"
+          },
+          "identity_confirmed": {
+            "default": false,
+            "title": "Identity Confirmed",
+            "type": "boolean"
+          },
+          "mcp_workflows": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Nl2AgentMcpWorkflowResponse"
+            },
+            "title": "Mcp Workflows",
+            "type": "object"
+          },
+          "model_selection_confirmed": {
+            "default": false,
+            "title": "Model Selection Confirmed",
+            "type": "boolean"
+          },
+          "online_configuration_confirmed": {
+            "default": false,
+            "title": "Online Configuration Confirmed",
+            "type": "boolean"
+          },
+          "online_recommendation_batches": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OnlineRecommendationBatch"
+            },
+            "title": "Online Recommendation Batches",
+            "type": "object"
+          },
+          "recommendation_batches": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RecommendationBatch"
+            },
+            "title": "Recommendation Batches",
+            "type": "object"
+          },
+          "requirements_review": {
+            "$ref": "#/components/schemas/Nl2AgentRequirementsReviewResponse"
+          },
+          "revision": {
+            "default": 0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "revision_mode": {
+            "default": false,
+            "title": "Revision Mode",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "trusted_search_batches": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TrustedSearchBatch"
+            },
+            "title": "Trusted Search Batches",
+            "type": "object"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "requirements_review",
+          "mcp_workflows"
+        ],
+        "title": "Nl2AgentWorkflowStateResponse",
+        "type": "object"
+      },
+      "OnlineRecommendationBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "item_keys": {
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Item Keys",
+            "type": "array"
+          },
+          "resource_type": {
+            "enum": [
+              "mcp",
+              "skill"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "recommendations_ready",
+              "completed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type",
+          "status"
+        ],
+        "title": "OnlineRecommendationBatch",
+        "type": "object"
+      },
+      "RecommendationBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_skill_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Applied Skill Ids",
+            "type": "array"
+          },
+          "applied_tool_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Applied Tool Ids",
+            "type": "array"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "skill_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "recommendations_ready",
+              "applying",
+              "applied",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RecommendationBatch",
+        "type": "object"
+      },
+      "TrustedSearchBatch": {
+        "additionalProperties": false,
+        "description": "Backend-recorded proof that an SDK search produced one result batch.",
+        "properties": {
+          "item_keys": {
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Item Keys",
+            "type": "array"
+          },
+          "resource_type": {
+            "enum": [
+              "local",
+              "mcp",
+              "skill"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "skill_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Skill Ids",
+            "type": "array"
+          },
+          "tool_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Tool Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "TrustedSearchBatch",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Runtime APIs",
+    "title": "Nexent Runtime API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/nl2agent/session/by-agent/{draft_agent_id}": {
+      "get": {
+        "description": "Resolve an optional owned session for the Agent configuration page.",
+        "operationId": "resolve_session_by_agent_api_nl2agent_session_by_agent__draft_agent_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_agent_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Resolve Session By Agent Api Nl2Agent Session By Agent  Draft Agent Id  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Session By Agent Api"
+      }
+    },
+    "/nl2agent/session/by-conversation/{conversation_id}": {
+      "get": {
+        "description": "Resolve an optional owned session after browser state is lost.",
+        "operationId": "resolve_session_api_nl2agent_session_by_conversation__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Resolve Session Api Nl2Agent Session By Conversation  Conversation Id  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Session Api"
+      }
+    },
+    "/nl2agent/session/start": {
+      "post": {
+        "description": "Start a new NL2AGENT session: creates a draft agent and a conversation.\n\nReturns ``{\"agent_id\": int, \"conversation_id\": int, \"draft_name\": str}``.\nThe frontend then opens the chat page with the NL2AGENT default agent_id\nand this conversation_id.",
+        "operationId": "start_session_api_nl2agent_session_start_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Session Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/abandon": {
+      "post": {
+        "description": "Explicitly end one owned draft session without deleting it immediately.",
+        "operationId": "abandon_session_api_nl2agent_session__agent_id__abandon_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abandon Session Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/apply-local-resources": {
+      "post": {
+        "description": "Bulk-bind local tools and skills to the draft agent.",
+        "operationId": "apply_local_resources_api_nl2agent_session__agent_id__apply_local_resources_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentApplyLocalResourcesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentApplyLocalResourcesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Local Resources Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/card-delivery": {
+      "post": {
+        "operationId": "report_card_delivery_api_nl2agent_session__agent_id__card_delivery_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentCardDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentCardDeliveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Card Delivery Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/finalize": {
+      "post": {
+        "description": "Finalize the draft agent by generating its full prompt set.",
+        "operationId": "finalize_agent_api_nl2agent_session__agent_id__finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentFinalizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentFinalizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalize Agent Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/identity": {
+      "put": {
+        "operationId": "save_agent_identity_api_nl2agent_session__agent_id__identity_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentIdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentIdentityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Agent Identity Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/install-web-skill": {
+      "post": {
+        "description": "Install a single official/web skill and bind it to the draft agent.",
+        "operationId": "install_web_skill_api_nl2agent_session__agent_id__install_web_skill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentInstallWebSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentWebSkillInstallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Web Skill Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/local-resources/register": {
+      "post": {
+        "operationId": "register_local_resources_api_nl2agent_session__agent_id__local_resources_register_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentRecommendationBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentLocalRecommendationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Local Resources Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/local-resources/skip": {
+      "post": {
+        "operationId": "skip_local_resources_api_nl2agent_session__agent_id__local_resources_skip_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentRecommendationSkipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentLocalSkipResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip Local Resources Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/mcp/install": {
+      "post": {
+        "operationId": "install_recommended_mcp_api_nl2agent_session__agent_id__mcp_install_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentMcpInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentMcpInstallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Recommended Mcp Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/mcp/{mcp_id}/bind-tools": {
+      "post": {
+        "operationId": "bind_mcp_tools_api_nl2agent_session__agent_id__mcp__mcp_id__bind_tools_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "mcp_id",
+            "required": true,
+            "schema": {
+              "title": "Mcp Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentMcpBindToolsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentMcpBindToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bind Mcp Tools Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/mcp/{mcp_id}/skip-tools": {
+      "post": {
+        "operationId": "skip_mcp_tools_api_nl2agent_session__agent_id__mcp__mcp_id__skip_tools_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "mcp_id",
+            "required": true,
+            "schema": {
+              "title": "Mcp Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentMcpSkipToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip Mcp Tools Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/models": {
+      "put": {
+        "operationId": "select_models_api_nl2agent_session__agent_id__models_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentModelSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentModelSelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select Models Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/online-configuration/complete": {
+      "post": {
+        "operationId": "complete_online_configuration_api_nl2agent_session__agent_id__online_configuration_complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentOnlineConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Online Configuration Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/online-recommendations/register": {
+      "post": {
+        "operationId": "register_online_recommendations_api_nl2agent_session__agent_id__online_recommendations_register_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentOnlineRecommendationBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentOnlineRecommendationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Online Recommendations Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/requirements/confirm": {
+      "post": {
+        "operationId": "confirm_requirements_api_nl2agent_session__agent_id__requirements_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentRequirementsConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentRequirementsConfirmationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Requirements Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/requirements/register": {
+      "post": {
+        "operationId": "register_requirements_api_nl2agent_session__agent_id__requirements_register_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nl2AgentRequirementsSummaryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentRequirementsRegistrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Requirements Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/resume": {
+      "post": {
+        "description": "Resume a final-review NL2AGENT session in targeted editing mode.",
+        "operationId": "resume_session_api_nl2agent_session__agent_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Session Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/state": {
+      "get": {
+        "operationId": "get_session_state_api_nl2agent_session__agent_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session State Api"
+      }
+    },
+    "/nl2agent/session/{agent_id}/web-skill/configuration": {
+      "get": {
+        "description": "Return authoritative configuration metadata for one trusted Skill.",
+        "operationId": "get_web_skill_configuration_api_nl2agent_session__agent_id__web_skill_configuration_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill Name"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentWebSkillConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Web Skill Configuration Api"
+      }
+    },
+    "/nl2agent/sessions": {
+      "get": {
+        "description": "List the current user's active NL2AGENT sessions.",
+        "operationId": "list_sessions_api_nl2agent_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nl2AgentSessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions Api"
+      }
+    }
+  }
+}

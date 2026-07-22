@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import BigInteger, Boolean, Column, ForeignKeyConstraint, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -576,7 +576,15 @@ class AgentInfo(TableBase):
     Information table for agents
     """
     __tablename__ = "ag_tenant_agent_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "uq_nl2agent_builder_tenant_active",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("name = 'nl2agent' AND delete_flag <> 'Y'"),
+        ),
+        {"schema": SCHEMA},
+    )
 
     agent_id = Column(Integer, Sequence(
         "ag_tenant_agent_t_agent_id_seq", schema=SCHEMA), nullable=False, primary_key=True, autoincrement=True, doc="ID")
@@ -624,6 +632,72 @@ class AgentInfo(TableBase):
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
+
+
+class Nl2AgentCatalogSnapshot(TableBase):
+    """Tenant-scoped immutable provider catalog snapshot."""
+
+    __tablename__ = "nl2agent_catalog_snapshot_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id = Column(String(100), primary_key=True, nullable=False, doc="Tenant ID")
+    snapshot_id = Column(String(64), primary_key=True, nullable=False, doc="Content digest")
+    schema_version = Column(Integer, nullable=False, default=1, doc="Catalog schema version")
+    catalogs = Column(JSONB, nullable=False, doc="Immutable provider catalog payload")
+
+
+class Nl2AgentSession(TableBase):
+    """Durable workflow snapshot for one NL2AGENT draft session."""
+
+    __tablename__ = "nl2agent_session_t"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "catalog_snapshot_id"],
+            [
+                f"{SCHEMA}.nl2agent_catalog_snapshot_t.tenant_id",
+                f"{SCHEMA}.nl2agent_catalog_snapshot_t.snapshot_id",
+            ],
+            name="fk_nl2agent_session_catalog_snapshot",
+        ),
+        UniqueConstraint(
+            "tenant_id", "draft_agent_id", name="uq_nl2agent_session_tenant_draft"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "conversation_id",
+            name="uq_nl2agent_session_tenant_conversation",
+        ),
+        Index(
+            "idx_nl2agent_session_owner_status",
+            "tenant_id",
+            "user_id",
+            "status",
+        ),
+        Index(
+            "idx_nl2agent_session_status_update",
+            "status",
+            "update_time",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    session_id = Column(
+        BigInteger,
+        Sequence("nl2agent_session_t_session_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Session ID",
+    )
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="Owning user ID")
+    runner_agent_id = Column(Integer, nullable=False, doc="NL2AGENT runner agent ID")
+    draft_agent_id = Column(Integer, nullable=False, doc="Draft agent ID")
+    conversation_id = Column(Integer, nullable=False, doc="Conversation ID")
+    status = Column(String(20), nullable=False, default="active", doc="Session lifecycle status")
+    workflow_schema_version = Column(Integer, nullable=False, doc="Workflow payload schema version")
+    workflow_revision = Column(Integer, nullable=False, default=0, doc="Workflow optimistic-lock revision")
+    catalog_snapshot_id = Column(String(64), nullable=False, doc="Immutable catalog snapshot digest")
+    workflow_state = Column(JSONB, nullable=False, doc="Authoritative workflow state snapshot")
 
 
 class PromptTemplate(TableBase):
