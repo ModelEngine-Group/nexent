@@ -550,6 +550,8 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     # flow self-contained without requiring a live DB.
     with patch("backend.services.agent_service.skill_db.get_valid_skill_ids",
                return_value={1}):
+        # Mock check_agent_availability - agent is available
+        mock_check_availability.return_value = (True, [])
         # Execute
         result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 

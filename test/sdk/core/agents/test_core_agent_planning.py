@@ -256,6 +256,8 @@ class _VerificationResult:
 
 verification_mod.VerificationController = _VerificationController
 verification_mod.VerificationResult = _VerificationResult
+verification_mod.render_guardrail_refusal = lambda decision, messages: ""
+verification_mod.render_tool_input_refusal = lambda decision, messages, tool_name: ""
 
 # monitor stub
 monitor_mod = _sdk_pkg("sdk.nexent.monitor")
