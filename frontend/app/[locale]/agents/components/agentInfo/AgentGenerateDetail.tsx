@@ -788,7 +788,11 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("businessLogic.config.template.label")}:
                       </span>
-                      <Form.Item name="promptTemplateId" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <Form.Item
+                        name="promptTemplateId"
+                        className="mb-0"
+                        style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}
+                      >
                         <Select
                           onChange={handlePromptTemplateChange}
                           loading={loadingPromptTemplates}
@@ -825,7 +829,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("model.type.llm")}:
                       </span>
-                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}>
                         <Select
                           onChange={handleModelChange}
                           loading={loadingModels}

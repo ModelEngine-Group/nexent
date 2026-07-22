@@ -108,16 +108,6 @@ def _create_stub_module(name: str, **attrs):
     return module
 
 
-def _create_stub_component_class(name: str):
-    class StubComponent:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-            self.component_type = name.lower().replace("component", "")
-    StubComponent.__name__ = name
-    return StubComponent
-
-
 # Configure required constants via shared bootstrap env
 consts_const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const.MINIO_ACCESS_KEY = "test_access_key"
@@ -140,7 +130,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
 utils_mock.context_utils = MagicMock()
-utils_mock.context_utils.build_context_components = MagicMock(return_value=[])
+utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
@@ -190,19 +180,24 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     AgentRunInfo=MagicMock(),
     AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
-    ContextComponent=_create_stub_component_class("ContextComponent"),
-    ToolsComponent=_create_stub_component_class("ToolsComponent"),
-    SkillsComponent=_create_stub_component_class("SkillsComponent"),
-    MemoryComponent=_create_stub_component_class("MemoryComponent"),
-    KnowledgeBaseComponent=_create_stub_component_class("KnowledgeBaseComponent"),
-    ManagedAgentsComponent=_create_stub_component_class("ManagedAgentsComponent"),
-    ExternalAgentsComponent=_create_stub_component_class("ExternalAgentsComponent"),
-    SystemPromptComponent=_create_stub_component_class("SystemPromptComponent"),
 )
 sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     "nexent.core.agents.agent_context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
+)
+sys.modules['nexent.core.agents.context'] = _create_stub_module(
+    "nexent.core.agents.context",
+    ContextManager=MagicMock(),
+    ContextManagerConfig=MagicMock(),
+    ContextProcessingMode=types.SimpleNamespace(
+        PASSTHROUGH="passthrough",
+        ADAPTIVE_COMPACT="adaptive_compact",
+    ),
+    PolicyLayers=types.SimpleNamespace(model_validate=lambda value: value),
+    resolve_policy=lambda layers: types.SimpleNamespace(
+        processing_mode=(layers.get("request") or {}).get("processing_mode", "passthrough")
+    ),
 )
 sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
     "nexent.core.agents.summary_config",
@@ -392,6 +387,43 @@ smolagents_tools_module = _create_stub_module("smolagents.tools", Tool=MagicMock
 smolagents_module.tools = smolagents_tools_module
 sys.modules['smolagents'] = smolagents_module
 sys.modules['smolagents.tools'] = smolagents_tools_module
+
+# Mock utils package (referenced by create_agent_info.py)
+_utils_pkg = types.ModuleType("utils")
+_utils_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "utils")]
+sys.modules["utils"] = _utils_pkg
+
+# Mock all utils submodules that create_agent_info.py imports
+_redis_utils_mod = _create_stub_module("utils.redis_utils")
+_redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
+sys.modules["utils.redis_utils"] = _redis_utils_mod
+setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
+
+_model_name_utils_mod = _create_stub_module("utils.model_name_utils")
+_model_name_utils_mod.add_repo_to_name = lambda name, repo=None, **kwargs: name
+sys.modules["utils.model_name_utils"] = _model_name_utils_mod
+setattr(_utils_pkg, "model_name_utils", _model_name_utils_mod)
+
+_prompt_template_utils_mod = _create_stub_module("utils.prompt_template_utils")
+_prompt_template_utils_mod.get_agent_prompt_template = MagicMock(return_value="")
+sys.modules["utils.prompt_template_utils"] = _prompt_template_utils_mod
+setattr(_utils_pkg, "prompt_template_utils", _prompt_template_utils_mod)
+
+_config_utils_mod = _create_stub_module("utils.config_utils")
+_config_utils_mod.tenant_config_manager = MagicMock()
+_config_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
+sys.modules["utils.config_utils"] = _config_utils_mod
+setattr(_utils_pkg, "config_utils", _config_utils_mod)
+
+_context_utils_mod = _create_stub_module("utils.context_utils")
+_context_utils_mod.build_context_inputs = MagicMock(return_value=[])
+sys.modules["utils.context_utils"] = _context_utils_mod
+setattr(_utils_pkg, "context_utils", _context_utils_mod)
+
+_langchain_utils_mod = _create_stub_module("utils.langchain_utils")
+_langchain_utils_mod.discover_langchain_modules = MagicMock(return_value=[])
+sys.modules["utils.langchain_utils"] = _langchain_utils_mod
+setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
 # Ensure real backend.agents.create_agent_info is available and uses our stubs
 backend_pkg = sys.modules.get("backend")
@@ -1131,7 +1163,7 @@ class TestCreateToolConfigList:
             # Verify that call uses tenant_id and first index_name
             mock_embedding.assert_called_once_with("tenant_1", "idx_a")
             mock_rerank.assert_called_once_with(tenant_id="tenant_1", model_name="gte-rerank-v2")
-            mock_get_knowledge_map.assert_called_once_with(["idx_a"])
+            mock_get_knowledge_map.assert_called_once_with(["idx_a"], tenant_id="tenant_1")
 
             # Verify metadata contains required fields
             assert "vdb_core" in mock_tool_instance.metadata
@@ -1779,7 +1811,6 @@ class TestCreateAgentConfig:
         self,
         *,
         enable_context_manager: bool,
-        template: str,
         prepared_prompt: str,
         components: Optional[List[Mock]] = None,
     ):
@@ -1791,7 +1822,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
+                patch('backend.agents.create_agent_info.build_context_inputs') as mock_build_components, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
                 patch(
@@ -1809,7 +1840,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": False,
                 "enable_context_manager": enable_context_manager,
             }
-            mock_get_template.return_value = {"system_prompt": template}
+            mock_get_template.return_value = {}
             mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
             mock_build_memory.return_value = Mock(
                 user_config=Mock(memory_switch=False),
@@ -1822,7 +1853,7 @@ class TestCreateAgentConfig:
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
             return {
                 "build_components": mock_build_components,
@@ -1831,23 +1862,22 @@ class TestCreateAgentConfig:
             }
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_managed_path_uses_raw_components_not_legacy_prompt(self):
-        """Managed path should build components and avoid rendering legacy system prompt."""
+    async def test_create_agent_config_uses_raw_components(self):
+        """Agent configuration should always delegate stable context assembly to the SDK."""
         mock_tool_config.reset_mock()
         mock_tool_config.side_effect = None
         components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=True,
-            template="legacy {{duty}}",
             prepared_prompt="",
             components=components,
         )
 
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
-        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == ""
-        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
+        assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
+        assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
@@ -1866,7 +1896,6 @@ class TestCreateAgentConfig:
         ):
             mocks = await self._run_context_manager_case(
                 enable_context_manager=True,
-                template="legacy {{duty}}",
                 prepared_prompt="",
             )
 
@@ -1880,20 +1909,22 @@ class TestCreateAgentConfig:
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
-        """Legacy path should render the Jinja prompt and not build managed components."""
+    async def test_create_agent_config_disabled_compression_still_builds_components(self):
+        """Disabling compression must not restore a second context assembly path."""
         mock_tool_config.reset_mock()
         mock_tool_config.side_effect = None
+        components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=False,
-            template="{{duty}} | {{constraint}}",
-            prepared_prompt="rendered",
+            prepared_prompt="",
+            components=components,
         )
 
-        mocks["build_components"].assert_not_called()
-        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
-        assert mocks["agent_config"].call_args.kwargs["context_components"] == []
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+        mocks["build_components"].assert_called_once()
+        assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
+        assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
+        assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
@@ -1957,10 +1988,11 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY,
+                context_items=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
-                verification_config=ANY
+                verification_config=ANY,
+                enable_planning=ANY
             )
             # Verify parallel_executor ToolConfig call was made
             pe_calls = [
@@ -2040,10 +2072,11 @@ class TestCreateAgentConfig:
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
-                    context_components=ANY,
+                    context_items=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
-                    verification_config=ANY
+                    verification_config=ANY,
+                    enable_planning=ANY
                 )
 
     @pytest.mark.asyncio
@@ -2302,10 +2335,11 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY,
+                context_items=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
-                verification_config=ANY
+                verification_config=ANY,
+                enable_planning=ANY
             )
 
     @pytest.mark.asyncio
@@ -2783,7 +2817,9 @@ class TestCreateAgentConfig:
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
             mock_prepare_templates.assert_called_once()
-            assert mock_prepare_templates.call_args[1]["system_prompt"] == "**idx_a**: AAA\n\n"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ] == "**idx_a**: AAA\n\n"
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
@@ -2892,13 +2928,15 @@ class TestCreateAgentConfig:
             # because we're using the mapping from tool.metadata
             mock_get_knowledge_name_map.assert_not_called()
 
-            # Verify the system prompt uses the display names from metadata
+            # Verify the SDK context component uses display names from metadata.
             mock_prepare_templates.assert_called_once()
-            system_prompt = mock_prepare_templates.call_args[1]["system_prompt"]
-            assert "**Custom Name 1**" in system_prompt
-            assert "**Custom Name 2**" in system_prompt
-            assert "idx1" not in system_prompt
-            assert "idx2" not in system_prompt
+            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ]
+            assert "**Custom Name 1**" in knowledge_summary
+            assert "**Custom Name 2**" in knowledge_summary
+            assert "idx1" not in knowledge_summary
+            assert "idx2" not in knowledge_summary
 
     @pytest.mark.asyncio
     async def test_create_agent_config_metadata_without_index_name_to_display_map(self):
@@ -2992,9 +3030,11 @@ class TestCreateAgentConfig:
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
             mock_prepare_templates.assert_called_once()
-            system_prompt = mock_prepare_templates.call_args[1]["system_prompt"]
-            assert "**idx1**" in system_prompt
-            assert "**idx2**" in system_prompt
+            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ]
+            assert "**idx1**" in knowledge_summary
+            assert "**idx2**" in knowledge_summary
 
     @pytest.mark.parametrize(
         "language,expected_message",
@@ -3071,7 +3111,9 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            assert mock_prepare_templates.call_args[1]["system_prompt"] == expected_message
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ] == expected_message
 
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_error(self):
@@ -3476,7 +3518,8 @@ class TestCreateAgentRunInfo:
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None
+                safe_input_budget_snapshot=None,
+                redis_client=ANY
             )
 
             # Verify that other functions were called correctly
@@ -3492,6 +3535,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
+                enable_planning=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -4029,6 +4073,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=False,
                 version_no=1,
                 tool_params=None,
+                enable_planning=ANY,
             )
 
     @pytest.mark.asyncio
@@ -4076,6 +4121,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Debug mode uses draft version 0
                 tool_params=None,
+                enable_planning=ANY,
             )
 
     @pytest.mark.asyncio
@@ -4129,6 +4175,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
                 tool_params=None,
+                enable_planning=ANY,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
@@ -4435,10 +4482,10 @@ class TestPreparePromptTemplates:
 
             mock_get_template.return_value = {"test": "template"}
 
-            result = await prepare_prompt_templates(True, "test system prompt", "zh")
+            result = await prepare_prompt_templates(True, "zh")
 
             mock_get_template.assert_called_once_with(True, "zh")
-            assert result["system_prompt"] == "test system prompt"
+            assert result["system_prompt"] == ""
             assert result["test"] == "template"
 
     @pytest.mark.asyncio
@@ -4448,25 +4495,25 @@ class TestPreparePromptTemplates:
 
             mock_get_template.return_value = {"test": "template"}
 
-            result = await prepare_prompt_templates(False, "test system prompt", "en")
+            result = await prepare_prompt_templates(False, "en")
 
             mock_get_template.assert_called_once_with(False, "en")
-            assert result["system_prompt"] == "test system prompt"
+            assert result["system_prompt"] == ""
             assert result["test"] == "template"
 
     @pytest.mark.asyncio
-    async def test_prepare_prompt_templates_overwrites_existing_system_prompt(self):
-        """Latest rendered system prompt should replace the template default."""
+    async def test_prepare_prompt_templates_clears_existing_system_prompt(self):
+        """Template files cannot introduce a second stable-context source."""
         with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
             mock_get_template.return_value = {
                 "system_prompt": "stale prompt",
                 "user_prompt": "keep me",
             }
 
-            result = await prepare_prompt_templates(False, "fresh system prompt", "en")
+            result = await prepare_prompt_templates(False, "en")
 
             assert result == {
-                "system_prompt": "fresh system prompt",
+                "system_prompt": "",
                 "user_prompt": "keep me",
             }
 
@@ -4836,7 +4883,10 @@ class TestCreateToolConfigListWithDisplayNameMap:
 
             assert len(result) == 1
             # Verify get_knowledge_name_map_by_index_names was called
-            mock_get_knowledge_map.assert_called_once_with(["idx1", "idx2"])
+            mock_get_knowledge_map.assert_called_once_with(
+                ["idx1", "idx2"],
+                tenant_id="tenant_1",
+            )
             # Verify display_name_to_index_map contains reversed mapping
             assert result[0].metadata["display_name_to_index_map"] == {
                 "Knowledge Base 1": "idx1",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Spin } from "antd";
@@ -24,7 +24,9 @@ import log from "@/lib/logger";
 import {
   isCancelableRepositoryStatus,
   isTakeDownableRepositoryStatus,
+  findRepositoryInfoById,
   pickReviewDisplayRepositoryInfo,
+  resolveReviewModalMode,
 } from "@/lib/agentRepositoryMine";
 import {
   isNewAgentPaddingItem,
@@ -46,6 +48,11 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "others",
 ];
 
+export interface ReviewDeepLinkTarget {
+  agentRepositoryId: number;
+  agentId: number;
+}
+
 interface MineAgentsViewProps {
   agents: MyEditableAgentListItem[];
   counts: MyEditableAgentOwnershipCounts;
@@ -62,6 +69,10 @@ interface MineAgentsViewProps {
   isFetching: boolean;
   onRetry: () => void;
   onViewDetail: (agentId: number, versionNo: number) => void;
+  reviewDeepLink?: ReviewDeepLinkTarget | null;
+  deepLinkFallbackAgent?: MyEditableAgentItem | null;
+  deepLinkFallbackLoading?: boolean;
+  onReviewDeepLinkConsumed?: () => void;
 }
 
 export function MineAgentsView({
@@ -80,6 +91,10 @@ export function MineAgentsView({
   isFetching,
   onRetry,
   onViewDetail,
+  reviewDeepLink = null,
+  deepLinkFallbackAgent = null,
+  deepLinkFallbackLoading = false,
+  onReviewDeepLinkConsumed,
 }: MineAgentsViewProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -103,6 +118,7 @@ export function MineAgentsView({
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const consumedDeepLinkRef = useRef<number | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
@@ -245,11 +261,80 @@ export function MineAgentsView({
     if (!repositoryInfo) {
       return;
     }
+    openReviewModal(agent, repositoryInfo, mode);
+  };
+
+  const openReviewModal = (
+    agent: MyEditableAgentItem,
+    repositoryInfo: MyAgentRepositoryInfoItem,
+    mode: "review" | "reviewUpdate"
+  ) => {
     setReviewModalAgent(agent);
     setReviewModalInfo(repositoryInfo);
     setReviewModalMode(mode);
     setReviewModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!reviewDeepLink) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+
+    if (consumedDeepLinkRef.current === reviewDeepLink.agentRepositoryId) {
+      return;
+    }
+
+    const listStillLoading = isLoading;
+    const fallbackStillLoading = deepLinkFallbackLoading;
+    if (listStillLoading && fallbackStillLoading) {
+      return;
+    }
+
+    const agentFromList = agents.find(
+      (item): item is MyEditableAgentItem =>
+        !isNewAgentPaddingItem(item) && item.agent_id === reviewDeepLink.agentId
+    );
+    const agent = agentFromList ?? deepLinkFallbackAgent;
+
+    if (!agent) {
+      if (listStillLoading || fallbackStillLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    const repositoryInfo = findRepositoryInfoById(
+      agent.repository_info ?? [],
+      reviewDeepLink.agentRepositoryId
+    );
+
+    if (!repositoryInfo) {
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    openReviewModal(
+      agent,
+      repositoryInfo,
+      resolveReviewModalMode(agent, repositoryInfo)
+    );
+    consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+    onReviewDeepLinkConsumed?.();
+  }, [
+    agents,
+    deepLinkFallbackAgent,
+    deepLinkFallbackLoading,
+    isLoading,
+    onReviewDeepLinkConsumed,
+    reviewDeepLink,
+    t,
+  ]);
 
   const handleSetNotShared = async () => {
     if (!reviewModalInfo) {

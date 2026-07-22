@@ -682,4 +682,3 @@ async def list_published_agents_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
 
-

@@ -180,9 +180,19 @@ const HomeContent: FC<{
     activeThread?.remoteId ??
     activeThreadId;
 
+  const shouldRestoreAgentRef = useRef(true);
+  const previousActiveThreadIdRef = useRef(activeThreadId);
+
+  useEffect(() => {
+    if (previousActiveThreadIdRef.current !== activeThreadId && activeThreadId) {
+      shouldRestoreAgentRef.current = true;
+    }
+    previousActiveThreadIdRef.current = activeThreadId;
+  }, [activeThreadId]);
+
   // Resolve the selected conversation's agent from thread metadata.
   useEffect(() => {
-    if (!activeThreadId || agents.length === 0) return;
+    if (!shouldRestoreAgentRef.current || !activeThreadId || agents.length === 0) return;
 
     const agentId = activeAgentId;
     if (agentId === undefined || agentId === null) return;
@@ -243,6 +253,19 @@ const HomeContent: FC<{
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
+  const handleThreadBack = useCallback(() => {
+    shouldRestoreAgentRef.current = false;
+    onBack();
+  }, [onBack]);
+
+  const handleAgentSelectedFromLanding = useCallback(
+    (agent: Agent) => {
+      shouldRestoreAgentRef.current = true;
+      onAgentSelected(agent);
+    },
+    [onAgentSelected],
+  );
+
   // Conditional rendering must happen after all hooks
   if (!ready) {
     return (
@@ -265,8 +288,8 @@ const HomeContent: FC<{
           generatedTitle={activeThreadId ? generatedTitles.get(activeThreadId) : undefined}
           isLoadingAgents={isLoadingAgents}
           selectedAgent={selectedAgent}
-          onAgentSelected={onAgentSelected}
-          onBack={onBack}
+          onAgentSelected={handleAgentSelectedFromLanding}
+          onBack={handleThreadBack}
         />
       </div>
     </div>

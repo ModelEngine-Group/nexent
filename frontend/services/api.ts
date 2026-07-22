@@ -11,6 +11,7 @@ import type {
   SkillRepositoryListingListParams,
 } from "@/types/skillRepository";
 import type { MarketAgentListParams } from "@/types/market";
+import type { NotificationListParams } from "@/types/notification";
 
 const API_BASE_URL = "/api";
 
@@ -502,6 +503,9 @@ export const API_ENDPOINTS = {
       if (params?.new_agent_padding) {
         queryParams.append("new_agent_padding", "true");
       }
+      if (params?.agent_id != null) {
+        queryParams.append("agent_id", String(params.agent_id));
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
@@ -641,6 +645,23 @@ export const API_ENDPOINTS = {
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
+  },
+  notifications: {
+    list: (params?: NotificationListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.only_unread) {
+        queryParams.append("only_unread", "true");
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/notifications${queryString ? `?${queryString}` : ""}`;
+    },
+    markRead: `${API_BASE_URL}/notifications/read`,
   },
 };
 
