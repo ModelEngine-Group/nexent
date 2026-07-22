@@ -111,11 +111,43 @@ const languages = [
   "nl2agent-finalize",
 ] as const;
 
+type Nl2AgentFenceLanguage = (typeof languages)[number];
+
+// @assistant-ui/react-markdown 0.14.x extracts fenced languages with `\w+`,
+// which truncates every canonical `nl2agent-*` tag to `nl2agent`. Feed it a
+// word-only alias and restore the canonical language before card validation.
+const languageAliases = Object.fromEntries(
+  languages.map((language) => [language, language.replaceAll("-", "")])
+) as Record<Nl2AgentFenceLanguage, string>;
+
+const languageByAlias = Object.fromEntries(
+  Object.entries(languageAliases).map(([language, alias]) => [alias, language])
+) as Record<string, Nl2AgentFenceLanguage>;
+
+export const preprocessNl2AgentFences = (content: string): string =>
+  content.replace(
+    /^([ \t]*)(`{3,}|~{3,})(nl2agent-[\w-]+)([^\S\r\n]*)$/gm,
+    (line, indentation, marker, language, trailing) => {
+      const alias = languageAliases[language as Nl2AgentFenceLanguage];
+      return alias ? `${indentation}${marker}${alias}${trailing}` : line;
+    }
+  );
+
+const HiddenCodeHeader = () => null;
+
 export const nl2AgentComponentsByLanguage = Object.fromEntries(
-  languages.map((language) => [
-    language,
-    { SyntaxHighlighter: Nl2AgentFenceRenderer },
-  ])
+  Object.entries(languageByAlias).map(([alias, language]) => {
+    const CanonicalNl2AgentFenceRenderer = (props: SyntaxHighlighterProps) => (
+      <Nl2AgentFenceRenderer {...props} language={language} />
+    );
+    return [
+      alias,
+      {
+        SyntaxHighlighter: CanonicalNl2AgentFenceRenderer,
+        CodeHeader: HiddenCodeHeader,
+      },
+    ];
+  })
 );
 
 export const Nl2AgentMessageLifecycle = () => {

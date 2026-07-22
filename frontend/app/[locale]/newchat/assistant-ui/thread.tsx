@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FC } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { MarkdownText } from "../ui/markdown-text";
+import { VerificationStatus } from "../ui/verification-status";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer } from "./composer";
@@ -61,6 +62,7 @@ import {
 import {
   getAgentRunTime,
   skillFileUploadsRegistry,
+  type VerificationPresentation,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
 import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
@@ -527,7 +529,16 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "group-source":
                 return <SourceGroupButton indices={part.indices} />;
               case "text": {
-                const textPart = part as typeof part & { isError?: boolean };
+                const textPart = part as typeof part & {
+                  isError?: boolean;
+                  isVerification?: boolean;
+                  verification?: VerificationPresentation;
+                };
+                if (textPart.isVerification && textPart.verification) {
+                  return (
+                    <VerificationStatus verification={textPart.verification} />
+                  );
+                }
                 if (textPart.isError) {
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">

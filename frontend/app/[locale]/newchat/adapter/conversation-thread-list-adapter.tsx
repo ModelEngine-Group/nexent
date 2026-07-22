@@ -28,6 +28,7 @@ import type { AttachmentType } from "../utils/attachment-type";
 import {
   attachSearchContentToTool,
   attachSearchImageToTool,
+  buildVerificationPart,
   buildToolCallPart,
   conversationSourcesRegistry,
   isReasoningChunkType,
@@ -470,6 +471,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (part.content) {
               content.push({ type: "text", text: part.content, isError: true });
             }
+            continue;
+          }
+
+          if (part.type === "verification") {
+            flushReasoning();
+            content.push(buildVerificationPart(part.content));
             continue;
           }
 

@@ -26,7 +26,10 @@ import {
   conversationSourcesRegistry,
   type SearchSource,
 } from "../adapter/remote-chat-model-adapter";
-import { nl2AgentComponentsByLanguage } from "@/components/nl2agent/Nl2AgentFenceRenderer";
+import {
+  nl2AgentComponentsByLanguage,
+  preprocessNl2AgentFences,
+} from "@/components/nl2agent/Nl2AgentFenceRenderer";
 
 /**
  * Looks up a SearchSource from either registry by citekey (e.g. "b1" or "1").
@@ -176,6 +179,7 @@ const MarkdownTextImpl = () => {
       className="aui-md"
       components={defaultComponents}
       componentsByLanguage={nl2AgentComponentsByLanguage}
+      preprocess={preprocessNl2AgentFences}
     />
   );
 };

@@ -25,6 +25,85 @@ interface SseChunk {
 // assistant-ui valid part types referenced by this adapter
 type AssistantPartType = "text" | "reasoning" | "tool-call" | "source";
 
+export interface VerificationPresentation {
+  phase: string;
+  event: string;
+  severity: string;
+  score?: number;
+  message: string;
+  passed?: boolean;
+}
+
+/**
+ * Converts the backend verification JSON envelope into display data. The
+ * backend intentionally serializes this payload so it can also be persisted;
+ * showing that transport JSON directly in chat is never useful to the user.
+ */
+export function parseVerificationPresentation(
+  content: unknown
+): VerificationPresentation {
+  let payload: Record<string, unknown> = {};
+  if (typeof content === "string") {
+    try {
+      const parsed = JSON.parse(content) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        payload = parsed as Record<string, unknown>;
+      } else {
+        return {
+          phase: "start",
+          event: "verification",
+          severity: "info",
+          message: content,
+        };
+      }
+    } catch {
+      return {
+        phase: "start",
+        event: "verification",
+        severity: "info",
+        message: content,
+      };
+    }
+  } else if (
+    content &&
+    typeof content === "object" &&
+    !Array.isArray(content)
+  ) {
+    payload = content as Record<string, unknown>;
+  }
+
+  const phase = typeof payload.phase === "string" ? payload.phase : "start";
+  const messageCandidates = [
+    payload.message,
+    payload.user_visible_note,
+    payload.repair_instruction,
+  ];
+  const message =
+    messageCandidates.find(
+      (candidate): candidate is string =>
+        typeof candidate === "string" && candidate.trim().length > 0
+    ) ?? (phase === "final_pass" ? "最终自检通过" : "正在进行自检");
+
+  return {
+    phase,
+    event: typeof payload.event === "string" ? payload.event : "verification",
+    severity: typeof payload.severity === "string" ? payload.severity : "info",
+    score: typeof payload.score === "number" ? payload.score : undefined,
+    message,
+    passed: typeof payload.passed === "boolean" ? payload.passed : undefined,
+  };
+}
+
+export function buildVerificationPart(content: unknown) {
+  const verification = parseVerificationPresentation(content);
+  return {
+    type: "text" as const,
+    text: verification.message,
+    isVerification: true,
+    verification,
+  };
+}
+
 // Per-step token count data (parsed from the backend `token_count` chunk).
 // Exported so `conversation-thread-list-adapter` can build the same shape from
 // persisted `token_count` units when restoring a historical conversation, and
@@ -1007,11 +1086,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               currentReasoningPart = null;
             }
 
-            contentParts.push({
-              type: "text",
-              text: chunk.content,
-              ...(chunk.type === "error" && { isError: true }),
-            });
+            contentParts.push(
+              chunk.type === "verification"
+                ? buildVerificationPart(chunk.content)
+                : {
+                    type: "text",
+                    text: chunk.content,
+                    ...(chunk.type === "error" && { isError: true }),
+                  }
+            );
             yield buildStreamResult(contentParts);
           } else if (partType === "source") {
             // search_content chunk: accumulate for global display and attach to
@@ -1143,11 +1226,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 contentParts.push(currentReasoningPart);
                 currentReasoningPart = null;
               }
-              contentParts.push({
-                type: "text",
-                text: chunk.content,
-                ...(chunk.type === "error" && { isError: true }),
-              });
+              contentParts.push(
+                chunk.type === "verification"
+                  ? buildVerificationPart(chunk.content)
+                  : {
+                      type: "text",
+                      text: chunk.content,
+                      ...(chunk.type === "error" && { isError: true }),
+                    }
+              );
               yield buildStreamResult(contentParts);
             } else if (partType === "source") {
               if (currentReasoningPart) {
