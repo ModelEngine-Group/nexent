@@ -114,6 +114,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_automation_proposal_owner
     ON nexent.agent_automation_proposal_t (tenant_id, user_id, status)
     WHERE delete_flag = 'N';
 
+DELETE FROM nexent.role_permission_t
+WHERE role_permission_id BETWEEN 1512 AND 1517;
+
 -- Keep each permission in the ID range assigned to its role.
 INSERT INTO nexent.role_permission_t (
     role_permission_id,
