@@ -73,11 +73,23 @@ def _executed_sql(cursor: FakeCursor) -> list[str]:
     return [query for query, _ in cursor.executions]
 
 
+def _init_record_status(cursor: FakeCursor) -> str:
+    records = [
+        parameters
+        for query, parameters in cursor.executions
+        if "INSERT INTO" in query
+        and parameters is not None
+        and parameters[0] == "__init.sql"
+    ]
+    assert len(records) == 1
+    return records[0][2]
+
+
 def test_run_migrations_applies_files_in_natural_order_and_validates(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path, ["v2_10.sql", "v2_2.sql"])
-    cursor = FakeCursor([None, None, ("ready",)])
+    cursor = FakeCursor([(True,), None, None, ("ready",)])
     connection = FakeConnection(cursor)
     connect_calls: list[dict[str, Any]] = []
 
@@ -91,6 +103,8 @@ def test_run_migrations_applies_files_in_natural_order_and_validates(
     migration_statements = [
         statement for statement in statements if statement.startswith("SELECT 'v2_")
     ]
+    assert config.init_file.read_text(encoding="utf-8") in statements
+    assert _init_record_status(cursor) == "applied"
     assert migration_statements == ["SELECT 'v2_2.sql';", "SELECT 'v2_10.sql';"]
     assert any("information_schema.columns" in statement for statement in statements)
     validation_calls = [
@@ -110,7 +124,7 @@ def test_run_migrations_skips_matching_checksum(tmp_path: Path) -> None:
     config = _config(tmp_path, ["v1.sql"])
     migration = config.migration_dir / "v1.sql"
     checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
-    cursor = FakeCursor([(checksum,), ("ready",)])
+    cursor = FakeCursor([(True,), (checksum,), ("ready",)])
     connection = FakeConnection(cursor)
 
     run_migrations(config, connect=lambda **_: connection)
@@ -118,10 +132,23 @@ def test_run_migrations_skips_matching_checksum(tmp_path: Path) -> None:
     assert migration.read_text(encoding="utf-8") not in _executed_sql(cursor)
 
 
+def test_run_migrations_baselines_init_for_existing_database(tmp_path: Path) -> None:
+    config = _config(tmp_path, ["v1.sql"])
+    cursor = FakeCursor([(False,), None, ("ready",)])
+    connection = FakeConnection(cursor)
+
+    run_migrations(config, connect=lambda **_: connection)
+
+    statements = _executed_sql(cursor)
+    assert config.init_file.read_text(encoding="utf-8") not in statements
+    assert config.migration_dir.joinpath("v1.sql").read_text(encoding="utf-8") in statements
+    assert _init_record_status(cursor) == "baselined"
+
+
 def test_run_migrations_reports_active_sessions_without_runner(tmp_path: Path) -> None:
     config = _config(tmp_path, ["v1.sql"])
     cursor = FakeCursor(
-        [None, ("active_session_without_runner",)],
+        [(True,), None, ("active_session_without_runner",)],
         fetchall_result=[("tenant-a", 2)],
     )
     connection = FakeConnection(cursor)

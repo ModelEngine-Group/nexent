@@ -98,6 +98,7 @@ def _record_migration(
     *,
     migration_id: str,
     checksum: str,
+    status: str = "applied",
     app_version: str,
     source_file: Path,
 ) -> None:
@@ -105,7 +106,7 @@ def _record_migration(
         f"""
 INSERT INTO {qualified_table}
   (migration_id, checksum, status, app_version, source_file)
-VALUES (%s, %s, 'applied', %s, %s)
+VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (migration_id) DO UPDATE SET
   checksum = EXCLUDED.checksum,
   status = EXCLUDED.status,
@@ -113,7 +114,7 @@ ON CONFLICT (migration_id) DO UPDATE SET
   app_version = EXCLUDED.app_version,
   source_file = EXCLUDED.source_file;
 """,
-        (migration_id, checksum, app_version, str(source_file)),
+        (migration_id, checksum, status, app_version, str(source_file)),
     )
 
 
@@ -194,12 +195,21 @@ def run_migrations(
         )
         cursor.execute(f"SET search_path TO {search_path};")
 
-        cursor.execute(config.init_file.read_text(encoding="utf-8"))
+        cursor.execute(
+            "SELECT to_regclass('nexent.conversation_message_t') IS NULL;"
+        )
+        is_fresh_database = cursor.fetchone()[0]
+        init_status = "applied" if is_fresh_database else "baselined"
+        init_action = "apply" if is_fresh_database else "baseline"
+        print(f"[local-sql-migrations] {init_action} __init.sql")
+        if is_fresh_database:
+            cursor.execute(config.init_file.read_text(encoding="utf-8"))
         _record_migration(
             cursor,
             qualified_table,
             migration_id="__init.sql",
             checksum=_checksum(config.init_file),
+            status=init_status,
             app_version=config.app_version,
             source_file=config.init_file,
         )

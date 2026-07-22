@@ -186,10 +186,20 @@ SQL
   app_version_escaped="$(escape_sql_literal "$APP_VERSION_VALUE")"
 
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
+SELECT CASE
+  WHEN to_regclass('nexent.conversation_message_t') IS NULL THEN 'true'
+  ELSE 'false'
+END AS nexent_schema_is_fresh \gset
+\if :nexent_schema_is_fresh
 \echo [sql-migrations] apply __init.sql
 \i '$init_file_escaped'
+\set init_migration_status 'applied'
+\else
+\echo [sql-migrations] baseline __init.sql
+\set init_migration_status 'baselined'
+\endif
 INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
-VALUES ('__init.sql', '$(escape_sql_literal "$init_checksum")', 'applied', '$app_version_escaped', '$init_file_escaped')
+VALUES ('__init.sql', '$(escape_sql_literal "$init_checksum")', :'init_migration_status', '$app_version_escaped', '$init_file_escaped')
 ON CONFLICT (migration_id) DO UPDATE SET
   checksum = EXCLUDED.checksum,
   status = EXCLUDED.status,
