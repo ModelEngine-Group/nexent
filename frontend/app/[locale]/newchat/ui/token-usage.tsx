@@ -149,6 +149,9 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
 
   const latestStep = steps[steps.length - 1];
   const tokenThreshold = latestStep.tokenThreshold;
+
+  if (tokenThreshold === null) return null;
+
   const stepCount = steps.length;
 
   // Calculate total tokens used (sum of step_input_tokens + step_output_tokens for all steps)

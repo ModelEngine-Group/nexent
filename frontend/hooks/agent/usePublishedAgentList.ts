@@ -6,13 +6,11 @@ import { Agent } from "@/types/agentConfig";
 interface UsePublishedAgentListOptions {
 	page?: number;
 	pageSize?: number;
-	excludeAgentId?: number | null;
 }
 
 export function usePublishedAgentList({
 	page = 1,
 	pageSize = Number.MAX_SAFE_INTEGER,
-	excludeAgentId = null,
 }: UsePublishedAgentListOptions = {}) {
 	const queryClient = useQueryClient();
 	const [search, setSearch] = useState("");
@@ -33,47 +31,34 @@ export function usePublishedAgentList({
 
 	const agents = query.data ?? [];
 
+	const availableAgents = useMemo(() => {
+		return agents.filter((a) => a.is_available !== false);
+	}, [agents]);
+
+	const availableMainAgents = useMemo(() => {
+		return agents.filter((agent) => agent.is_available !== false && agent.is_main_agent !== false);
+	}, [agents]);
+
 	const filteredAgents = useMemo(() => {
 		const trimmedSearch = search.trim();
-		const searchFiltered = (() => {
-			if (!trimmedSearch) {
-				return agents;
-			}
-			const searchLower = trimmedSearch.toLowerCase();
-			return agents.filter((agent) => {
-				const name = agent.name?.toLowerCase() || "";
-				const displayName = agent.display_name?.toLowerCase() || "";
-				const description = agent.description?.toLowerCase() || "";
-				const author = agent.author?.toLowerCase() || "";
-				return (
-					name.includes(searchLower) ||
-					displayName.includes(searchLower) ||
-					description.includes(searchLower) ||
-					author.includes(searchLower)
-				);
-			});
-		})();
-
-		if (excludeAgentId === null || excludeAgentId === undefined) {
-			return searchFiltered;
+		if (!trimmedSearch) {
+			return availableMainAgents;
 		}
-		return searchFiltered.filter((agent) => {
-			const id = (agent as unknown as { agent_id?: number }).agent_id;
-			return id !== excludeAgentId;
+
+		const searchLower = trimmedSearch.toLowerCase();
+		return availableMainAgents.filter((agent) => {
+			const name = agent.name?.toLowerCase() || "";
+			const displayName = agent.display_name?.toLowerCase() || "";
+			const description = agent.description?.toLowerCase() || "";
+			const author = agent.author?.toLowerCase() || "";
+			return (
+				name.includes(searchLower) ||
+				displayName.includes(searchLower) ||
+				description.includes(searchLower) ||
+				author.includes(searchLower)
+			);
 		});
-	}, [agents, search, excludeAgentId]);
-
-	const excludedAgent = useMemo(() => {
-		if (excludeAgentId === null || excludeAgentId === undefined) {
-			return null;
-		}
-		return (
-			agents.find((agent) => {
-				const id = (agent as unknown as { agent_id?: number }).agent_id;
-				return id === excludeAgentId;
-			}) ?? null
-		);
-	}, [agents, excludeAgentId]);
+	}, [availableMainAgents, search]);
 
 	const totalPages = useMemo(() => {
 		return Math.max(1, Math.ceil(filteredAgents.length / pageSize));
@@ -84,10 +69,6 @@ export function usePublishedAgentList({
 		return filteredAgents.slice(startIndex, startIndex + pageSize);
 	}, [filteredAgents, page, pageSize]);
 
-	const availableAgents = useMemo(() => {
-		return agents.filter((a) => a.is_available !== false);
-	}, [agents]);
-
 	const updateSearch = useCallback((value: string) => {
 		setSearch(value);
 	}, []);
@@ -96,9 +77,9 @@ export function usePublishedAgentList({
 		...query,
 		agents,
 		availableAgents,
+		availableMainAgents,
 		paginatedAgents,
 		filteredAgents,
-		excludedAgent,
 		page,
 		totalPages,
 		pageSize,

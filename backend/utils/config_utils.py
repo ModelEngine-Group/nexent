@@ -18,6 +18,7 @@ logger = logging.getLogger("config_utils")
 
 
 CONTEXT_SOFT_LIMIT_RATIO_KEY = "context.soft_limit_ratio"
+CONTEXT_POLICY_KEY = "context.policy"
 
 
 def safe_value(value):
@@ -148,6 +149,24 @@ class TenantConfigManager:
                 f"{CONTEXT_SOFT_LIMIT_RATIO_KEY} must be a decimal in (0, 1], "
                 f"got {raw_ratio!r}"
             ) from exc
+
+    def get_context_policy(self, tenant_id: str | None = None) -> dict[str, Any] | None:
+        """Return the tenant's optional JSON context policy without caching it."""
+        if tenant_id is None:
+            logger.warning("No tenant_id specified when getting context policy")
+            return None
+        raw_policy = self.load_config(tenant_id).get(CONTEXT_POLICY_KEY)
+        if raw_policy in (None, ""):
+            return None
+        if isinstance(raw_policy, dict):
+            return raw_policy
+        try:
+            parsed = json.loads(raw_policy)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{CONTEXT_POLICY_KEY} must be a JSON object") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{CONTEXT_POLICY_KEY} must be a JSON object")
+        return parsed
 
     def set_single_config(self, user_id: str | None = None, tenant_id: str | None = None, key: str | None = None,
                           value: str | None = None, ):

@@ -114,31 +114,24 @@ CREATE INDEX IF NOT EXISTS idx_agent_automation_proposal_owner
     ON nexent.agent_automation_proposal_t (tenant_id, user_id, status)
     WHERE delete_flag = 'N';
 
--- The menu schema was introduced by v2.2.2_0622_update_left_nav_menu.sql.
--- Synchronize the sequence because that migration inserted explicit IDs.
-SELECT setval(
-    pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id'),
-    COALESCE(MAX(role_permission_id), 0) + 1,
-    false
-)
-FROM nexent.role_permission_t;
+DELETE FROM nexent.role_permission_t
+WHERE role_permission_id BETWEEN 1512 AND 1517;
 
+-- Keep each permission in the ID range assigned to its role.
 INSERT INTO nexent.role_permission_t (
+    role_permission_id,
     user_role,
     permission_category,
     permission_type,
     permission_subtype,
     parent_key
 )
-SELECT role_name, 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL
-FROM unnest(ARRAY['SU', 'ADMIN', 'DEV', 'USER', 'SPEED', 'ASSET_OWNER']) AS roles(role_name)
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM nexent.role_permission_t existing
-    WHERE existing.user_role = roles.role_name
-      AND existing.permission_category = 'VISIBILITY'
-      AND existing.permission_type = 'LEFT_NAV_MENU'
-      AND existing.permission_subtype = '/agent-tasks'
-);
+VALUES
+    (1115, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL),
+    (1214, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL),
+    (1306, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL),
+    (1414, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL),
+    (1513, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-tasks', NULL)
+ON CONFLICT (role_permission_id) DO NOTHING;
 
 COMMIT;

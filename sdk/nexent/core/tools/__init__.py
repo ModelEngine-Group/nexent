@@ -26,6 +26,7 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
     "MySqlTool",
@@ -58,4 +59,6 @@ __all__ = [
     "AnalyzeVideoTool",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "CreatePlanTool",
+    "UpdatePlanStepTool",
 ]
