@@ -100,26 +100,32 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --is-mainland)
       IS_MAINLAND="$2"
+      K8S_IS_MAINLAND_EXPLICIT="true"
       shift 2
       ;;
     --version)
       APP_VERSION="$2"
+      K8S_APP_VERSION_EXPLICIT="true"
       shift 2
       ;;
     --deployment-version)
       DEPLOYMENT_VERSION="$2"
+      K8S_DEPLOYMENT_VERSION_EXPLICIT="true"
       shift 2
       ;;
     --persistence-mode)
       PERSISTENCE_MODE="$2"
+      K8S_PERSISTENCE_MODE_EXPLICIT="true"
       shift 2
       ;;
     --storage-class|--storageclass|--storage-class-name|--sc)
       STORAGE_CLASS_NAME="$2"
+      K8S_STORAGE_CLASS_NAME_EXPLICIT="true"
       shift 2
       ;;
     --local-path)
       LOCAL_PATH="$2"
+      K8S_LOCAL_PATH_EXPLICIT="true"
       shift 2
       ;;
     --local-node-name)
@@ -128,6 +134,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --existing-claim-prefix)
       EXISTING_CLAIM_PREFIX="$2"
+      K8S_EXISTING_CLAIM_PREFIX_EXPLICIT="true"
       shift 2
       ;;
     --wait-timeout)
@@ -144,7 +151,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$SCRIPT_DIR"
-deployment_source_root_env "$PROJECT_ROOT" "$PROJECT_ROOT/docker" || exit 1
+if [ "$COMMAND" != "help" ]; then
+    deployment_source_root_env "$PROJECT_ROOT" "$PROJECT_ROOT/docker" || exit 1
+fi
 
 # Helper function to sanitize input (remove Windows CR)
 sanitize_input() {
@@ -153,6 +162,8 @@ sanitize_input() {
 }
 
 apply_deployment_common_config() {
+    load_deploy_options
+
     if [ -z "$APP_VERSION" ]; then
         APP_VERSION=$(get_app_version)
     fi
@@ -213,7 +224,7 @@ render_one_persistence_values() {
     printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
     printf '    storageClassName: "%s"\n' "$storage_class"
     printf '    accessModes:\n'
-    printf '      - ReadWriteOnce\n'
+    printf '      - ReadWriteMany\n'
     printf '    localPath: "%s/%s"\n' "$LOCAL_PATH" "$component"
     printf '    existingClaim: "%s"\n' "$(persistence_existing_claim "$component")"
     printf '  storage:\n'
@@ -234,7 +245,7 @@ render_monitoring_persistence_values() {
     printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
     printf '    storageClassName: "%s"\n' "$storage_class"
     printf '    accessModes:\n'
-    printf '      - ReadWriteOnce\n'
+    printf '      - ReadWriteMany\n'
     printf '    localPath: "%s"\n' "$LOCAL_PATH"
     printf '    existingClaimPrefix: "%s"\n' "$EXISTING_CLAIM_PREFIX"
   } >> "$output_file"
@@ -252,7 +263,7 @@ render_shared_storage_persistence_values() {
     printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
     printf '    storageClassName: "%s"\n' "$storage_class"
     printf '    accessModes:\n'
-    printf '      - ReadWriteOnce\n'
+    printf '      - ReadWriteMany\n'
     printf '    workspace:\n'
     printf '      size: "10Gi"\n'
     printf '      localPath: "/var/lib/nexent"\n'
@@ -496,6 +507,7 @@ render_k8s_runtime_config_values() {
     printf '      sslVerify: %s\n' "$(yaml_quote "$(env_or_default OAUTH_SSL_VERIFY "true")")"
     printf '      caBundle: %s\n' "$(yaml_quote "$(env_or_default OAUTH_CA_BUNDLE "")")"
     printf '      callbackBaseUrl: %s\n' "$(yaml_quote "$(env_or_default OAUTH_CALLBACK_BASE_URL "http://localhost:30000")")"
+    printf '      loginMode: %s\n' "$(yaml_quote "$(env_or_default OAUTH_LOGIN_MODE "button")")"
     echo "    cas:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default CAS_ENABLED "false")")"
     printf '      serverUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_SERVER_URL "")")"
@@ -541,17 +553,92 @@ get_app_version() {
 
 # Persist deployment options to file
 persist_deploy_options() {
+  deployment_persist_local_config "$DEPLOY_OPTIONS_FILE"
   {
-    echo "APP_VERSION=\"${APP_VERSION}\""
-    echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
-    echo "DEPLOYMENT_VERSION=\"${VERSION_CHOICE_SAVED}\""
-  } > "$DEPLOY_OPTIONS_FILE"
+    printf 'k8s:\n'
+    printf '  appVersion: %s\n' "$(yaml_quote "$APP_VERSION")"
+    printf '  isMainland: %s\n' "$(yaml_quote "$IS_MAINLAND_SAVED")"
+    printf '  deploymentVersion: %s\n' "$(yaml_quote "$VERSION_CHOICE_SAVED")"
+    printf '  persistenceMode: %s\n' "$(yaml_quote "$PERSISTENCE_MODE")"
+    printf '  storageClassName: %s\n' "$(yaml_quote "$STORAGE_CLASS_NAME")"
+    printf '  localPath: %s\n' "$(yaml_quote "$LOCAL_PATH")"
+    printf '  existingClaimPrefix: %s\n' "$(yaml_quote "$EXISTING_CLAIM_PREFIX")"
+  } >> "$DEPLOY_OPTIONS_FILE"
+}
+
+deploy_options_unquote() {
+  local value
+  value="$(deployment_trim "$1")"
+  value="${value%$'\r'}"
+  value="${value%%#*}"
+  value="$(deployment_trim "$value")"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf '%s' "$value"
+}
+
+apply_loaded_deploy_option() {
+  local key="$1"
+  local value="$2"
+  case "$key" in
+    APP_VERSION|appVersion)
+      [ -n "${K8S_APP_VERSION_EXPLICIT:-}" ] || APP_VERSION="$value"
+      ;;
+    IS_MAINLAND|isMainland)
+      [ -n "${K8S_IS_MAINLAND_EXPLICIT:-}" ] || IS_MAINLAND="$value"
+      ;;
+    DEPLOYMENT_VERSION|deploymentVersion)
+      [ -n "${K8S_DEPLOYMENT_VERSION_EXPLICIT:-}" ] || DEPLOYMENT_VERSION="$value"
+      ;;
+    PERSISTENCE_MODE|persistenceMode)
+      [ -n "${K8S_PERSISTENCE_MODE_EXPLICIT:-}" ] || PERSISTENCE_MODE="$value"
+      ;;
+    STORAGE_CLASS_NAME|storageClassName)
+      [ -n "${K8S_STORAGE_CLASS_NAME_EXPLICIT:-}" ] || STORAGE_CLASS_NAME="$value"
+      ;;
+    LOCAL_PATH|localPath)
+      [ -n "${K8S_LOCAL_PATH_EXPLICIT:-}" ] || LOCAL_PATH="$value"
+      ;;
+    EXISTING_CLAIM_PREFIX|existingClaimPrefix)
+      [ -n "${K8S_EXISTING_CLAIM_PREFIX_EXPLICIT:-}" ] || EXISTING_CLAIM_PREFIX="$value"
+      ;;
+  esac
 }
 
 # Load deployment options from file if exists
 load_deploy_options() {
+  local line trimmed key value in_k8s_section
   if [ -f "$DEPLOY_OPTIONS_FILE" ]; then
-    source "$DEPLOY_OPTIONS_FILE"
+    in_k8s_section="false"
+    while IFS= read -r line || [ -n "$line" ]; do
+      trimmed="$(deployment_trim "${line%%#*}")"
+      [ -z "$trimmed" ] && continue
+
+      if [[ "$trimmed" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="$(deploy_options_unquote "${BASH_REMATCH[2]}")"
+        apply_loaded_deploy_option "$key" "$value"
+        continue
+      fi
+
+      if [[ "$trimmed" =~ ^k8s:[[:space:]]*$ ]]; then
+        in_k8s_section="true"
+        continue
+      fi
+
+      if [[ "$line" =~ ^[A-Za-z][A-Za-z0-9_]*:[[:space:]]* ]]; then
+        in_k8s_section="false"
+        continue
+      fi
+
+      if [ "$in_k8s_section" = "true" ] && [[ "$line" =~ ^[[:space:]]+([A-Za-z][A-Za-z0-9_]*):[[:space:]]*(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="$(deploy_options_unquote "${BASH_REMATCH[2]}")"
+        apply_loaded_deploy_option "$key" "$value"
+      fi
+    done < "$DEPLOY_OPTIONS_FILE"
   fi
 }
 
@@ -930,7 +1017,7 @@ apply() {
 
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
-    deployment_persist_local_config
+    persist_deploy_options
 
     # Step 2: Render generated values with image tags from selected environment
     update_values_yaml
@@ -1201,7 +1288,6 @@ apply() {
 
     # Save deployment options for future use
     persist_deploy_options
-    deployment_persist_local_config
 
     # Step 11: Pull MCP image after persisting deployment options
     pull_mcp_image
@@ -1232,6 +1318,7 @@ print_usage() {
         echo "  --components LIST          要部署的组件"
         echo "  --port-policy POLICY       development 或 production"
         echo "  --image-source SOURCE      general、mainland 或 local-latest"
+        echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
         echo "  --is-mainland Y|N          兼容旧参数，映射为 mainland/general 镜像源"
         echo "  --version VERSION          指定应用版本（未设置时自动从 const.py 检测）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
@@ -1259,6 +1346,7 @@ print_usage() {
     echo "  --components LIST          Components to deploy"
     echo "  --port-policy POLICY       development or production"
     echo "  --image-source SOURCE      general, mainland, or local-latest"
+    echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
     echo "  --is-mainland Y|N          Legacy alias for image source mainland/general"
     echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"

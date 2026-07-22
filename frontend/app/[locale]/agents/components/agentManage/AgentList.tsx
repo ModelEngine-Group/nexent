@@ -256,6 +256,7 @@ export default function AgentList({
         model_ids: modelIdsForCopy,
         max_steps: detail.max_step,
         requested_output_tokens: detail.requested_output_tokens ?? null,
+        is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,
@@ -348,8 +349,9 @@ export default function AgentList({
           setCurrentAgent(null);
         }
 
-        // Refresh agent list
+        // Refresh agent lists
         queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
       },
       onError: () => {
         message.error(t("businessLogic.config.error.agentDeleteFailed"));

@@ -120,6 +120,10 @@ sys.modules['backend.database.agent_version_db'] = agent_version_db_mock
 
 # Mock database.model_management_db
 model_management_db_mock = MagicMock()
+# Default pass-through behavior for get_valid_model_ids
+model_management_db_mock.get_valid_model_ids = MagicMock(
+    side_effect=lambda model_ids, tenant_id: model_ids
+)
 sys.modules['database.model_management_db'] = model_management_db_mock
 sys.modules['backend.database.model_management_db'] = model_management_db_mock
 
@@ -1605,6 +1609,7 @@ def test_list_published_agents_impl_success(monkeypatch):
                 "name": "Test Agent",
                 "model_ids": [1],
                 "description": "Test",
+                "is_main_agent": False,
             },
             [{"tool_id": 1, "enabled": True}],
             [],
@@ -1626,6 +1631,7 @@ def test_list_published_agents_impl_success(monkeypatch):
     assert result[0]["name"] == "Test Agent"
     assert result[0]["model_ids"] == [1]
     assert result[0]["model_names"] == ["Test Model"]
+    assert result[0]["is_main_agent"] is False
 
 
 def test_list_published_agents_impl_no_published_version(monkeypatch):
@@ -3190,3 +3196,181 @@ def test_list_published_agents_impl_model_ids_empty(monkeypatch):
     assert result[0]["model_names"] == []
     assert result[0]["model_name"] is None
     assert result[0]["is_available"] is False
+
+
+# ============================================================================
+# Tests for get_valid_model_ids integration in list_published_agents_impl
+# ============================================================================
+
+
+def test_list_published_agents_impl_filters_deleted_models(monkeypatch):
+    """Test that list_published_agents_impl filters out deleted models from model_ids.
+
+    This test verifies that:
+    1. get_valid_model_ids is called to filter deleted models
+    2. The filtered model_ids are used for availability check and model name resolution
+    3. The returned model_ids only contain valid (non-deleted) models
+    """
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+                "author": "Author",
+                "is_new": False,
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+    agent_service_mock.query_group_ids_by_user = MagicMock(return_value=[1, 2])
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [1, 2, 3],  # Original model_ids including deleted ones
+                "description": "Test",
+            },
+            [{"tool_id": 1, "enabled": True}],
+            [],
+        )
+    )
+
+    # Mock get_valid_model_ids to filter out model_id=2 (deleted)
+    agent_version_service_module.get_valid_model_ids = MagicMock(return_value=[1, 3])
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(True, [])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+
+    # Mock model info for valid models
+    def get_model_side_effect(model_id, tenant_id=None):
+        if model_id == 1:
+            return {"display_name": "Model 1", "model_id": 1}
+        elif model_id == 3:
+            return {"display_name": "Model 3", "model_id": 3}
+        return None
+    agent_service_mock.get_model_by_model_id = MagicMock(side_effect=get_model_side_effect)
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    # Verify get_valid_model_ids was called
+    agent_version_service_module.get_valid_model_ids.assert_called_once_with([1, 2, 3], "tenant1")
+
+    # Verify result contains only valid model_ids
+    assert len(result) == 1
+    assert result[0]["model_ids"] == [1, 3]
+    assert result[0]["model_names"] == ["Model 1", "Model 3"]
+    assert result[0]["model_name"] == "Model 1"
+
+
+def test_list_published_agents_impl_all_models_deleted(monkeypatch):
+    """Test that list_published_agents_impl handles when all models are deleted."""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [1, 2, 3],
+                "description": "Test",
+            },
+            [],
+            [],
+        )
+    )
+
+    # All models were deleted
+    agent_version_service_module.get_valid_model_ids = MagicMock(return_value=[])
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(True, [])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+    agent_service_mock.get_model_by_model_id = MagicMock(return_value=None)
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    assert len(result) == 1
+    assert result[0]["model_ids"] == []
+    assert result[0]["model_names"] == []
+    assert result[0]["model_name"] is None
+
+
+def test_list_published_agents_impl_empty_model_ids(monkeypatch):
+    """Test that list_published_agents_impl handles empty model_ids."""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [],  # Empty model_ids
+                "description": "Test",
+            },
+            [],
+            [],
+        )
+    )
+
+    # get_valid_model_ids should be called with empty list
+    agent_version_service_module.get_valid_model_ids = MagicMock(return_value=[])
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(True, [])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+    agent_service_mock.get_model_by_model_id = MagicMock(return_value=None)
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    agent_version_service_module.get_valid_model_ids.assert_called_once_with([], "tenant1")
+    assert result[0]["model_ids"] == []
+    assert result[0]["model_names"] == []

@@ -1,24 +1,29 @@
-import json
+from __future__ import annotations
+
 import functools
 import inspect
+import json
 import logging
 import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
-
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
-from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
+from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+
+if TYPE_CHECKING:
+    from .context import ContextItemInput
+
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -142,14 +147,17 @@ class NexentAgent:
     def __init__(self, observer: MessageObserver,
                  model_config_list: List[ModelConfig],
                  stop_event: Event,
-                 mcp_tool_collection=None):
+                 mcp_tool_collection=None,
+                 redis_client=None):
         """
         init the agent create factory
 
         Args:
-            mcp_tool_collection:
-            observer:
-            model_config_list:
+            observer: MessageObserver instance
+            model_config_list: List of model configurations
+            stop_event: Threading event for stop control
+            mcp_tool_collection: Optional MCP tool collection
+            redis_client: Redis client for plan persistence
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -158,6 +166,7 @@ class NexentAgent:
         self.model_config_list = model_config_list
         self.stop_event = stop_event
         self.mcp_tool_collection = mcp_tool_collection
+        self.redis_client = redis_client
 
         self.agent = None
 
@@ -205,9 +214,7 @@ class NexentAgent:
                 # `document_paths` is intentionally hidden from the LLM and only
                 # populated via tool_params from the northbound interface.
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer",
-                                                 "rerank_model", "display_name_to_index_map",
-                                                 "document_paths"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -232,6 +239,17 @@ class NexentAgent:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
                                    if k not in ["observer", "rerank_model"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
+            elif class_name == "RAGFlowSearchTool":
+                # RAGFlowSearchTool does not accept rerank/rerank_model_name as
+                # init params — RAGFlow handles reranking internally via its API.
+                # The rerank_model attribute is set post-init for display and
+                # observability purposes only (e.g., showing model info in the UI).
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model", "rerank", "rerank_model_name"]}
                 tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
@@ -329,6 +347,7 @@ class NexentAgent:
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
+                observer=self.observer,
             )
             from nexent.core.tools.run_skill_script_tool import run_skill_script
             return run_skill_script
@@ -365,6 +384,12 @@ class NexentAgent:
             )
             from nexent.core.tools.read_skill_config_tool import read_skill_config
             return read_skill_config
+        elif class_name == "CreatePlanTool":
+            from nexent.core.tools.plan_tools import CreatePlanTool
+            return CreatePlanTool()
+        elif class_name == "UpdatePlanStepTool":
+            from nexent.core.tools.plan_tools import UpdatePlanStepTool
+            return UpdatePlanStepTool()
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -390,7 +415,12 @@ class NexentAgent:
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
-    def create_single_agent(self, agent_config: AgentConfig):
+    def create_single_agent(
+        self,
+        agent_config: AgentConfig,
+        *,
+        context_items_override: Sequence["ContextItemInput"] | None = None,
+    ) -> CoreAgent:
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
 
@@ -444,25 +474,27 @@ class NexentAgent:
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Choose one context runtime at construction time.  The managed and
-            # legacy implementations do not call one another after this point.
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config and ctx_config.enabled:
-                from .agent_context import ContextManager
-                from ..context_runtime.managed.runtime import ManagedContextRuntime
+            # ContextManager is the only production context assembly path.
+            # ContextPolicy controls whether adaptive compaction is active.
+            from .context import ContextManager, ContextManagerConfig, ManagedContextRuntime
 
-                context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps,
-                )
-                context_runtime = ManagedContextRuntime(
-                    context_manager,
-                    components=getattr(agent_config, 'context_components', None) or [],
-                )
-            else:
-                from ..context_runtime.legacy.runtime import LegacyContextRuntime
-
-                context_runtime = LegacyContextRuntime()
+            ctx_config = (
+                getattr(agent_config, "context_manager_config", None)
+                or ContextManagerConfig()
+            )
+            context_manager = ContextManager(
+                config=ctx_config,
+                max_steps=agent_config.max_steps,
+            )
+            context_items = (
+                list(context_items_override)
+                if context_items_override is not None
+                else (getattr(agent_config, "context_items", None) or [])
+            )
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                items=context_items,
+            )
 
             # Create the agent
             agent = CoreAgent(
@@ -473,14 +505,31 @@ class NexentAgent:
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
-                verification_config=agent_config.verification_config,
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
                 context_runtime=context_runtime,
+                enable_planning=agent_config.enable_planning,
+                redis_client=self.redis_client,
             )
             agent.stop_event = self.stop_event
+
+            # Wire plan tool deps if the plan tools are present in agent_config.tools.
+            # CoreAgent already knows enable_planning (set above); use that to gate wiring.
+            if agent.enable_planning:
+                if (create_plan := agent.tools.get("create_plan")) is not None:
+                    create_plan.observer = agent.observer
+                    create_plan.plan_repo = agent.plan_repo
+                    create_plan._on_plan_created = agent._on_plan_created
+                    create_plan._get_conversation_id = agent._get_conversation_id
+                    create_plan._get_user_id = agent._get_user_id
+                if (update_step := agent.tools.get("update_plan_step")) is not None:
+                    update_step.observer = agent.observer
+                    update_step.plan_repo = agent.plan_repo
+                    update_step._on_step_updated = agent._on_step_updated
+                    update_step._get_conversation_id = agent._get_conversation_id
+                    update_step._get_user_id = agent._get_user_id
 
             return agent
         except Exception as e:
@@ -540,6 +589,14 @@ class NexentAgent:
                         # Add content to observer
                         if not isinstance(step_log, ActionStep):
                             continue
+
+                        # Real tool-call chunks are emitted by CoreAgent
+                        # (_emit_real_tool_chunks_from_code) right after the
+                        # PARSE chunk, so we deliberately skip re-emitting them
+                        # here to avoid duplicating the synthetic
+                        # ``python_interpreter`` ToolCall that smolagents
+                        # stamps on every action step.
+
                         # Emit token stats after each action step
                         step_duration = getattr(step_log.timing, "duration", None)
                         step_input = None
@@ -557,11 +614,15 @@ class NexentAgent:
                             ).get("estimated_input_tokens")
 
                         token_threshold = None
-                        if (
-                            hasattr(self.agent, "context_manager")
-                            and self.agent.context_manager is not None
-                        ):
-                            token_threshold = self.agent.context_manager.config.token_threshold
+                        context_window_tokens = None
+                        hard_input_budget_tokens = None
+                        context_processing_mode = None
+                        context_runtime = getattr(self.agent, "context_runtime", None)
+                        if context_runtime is not None:
+                            token_threshold = context_runtime.token_threshold
+                            context_window_tokens = context_runtime.context_window_tokens
+                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
                             "step_number": step_log.step_number,
@@ -571,6 +632,14 @@ class NexentAgent:
                             "total_output_tokens": total_output_tokens,
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
+                            "context_window_tokens": context_window_tokens,
+                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "context_processing_mode": context_processing_mode,
+                            "output_finish_reason": getattr(
+                                getattr(self.agent, "model", None),
+                                "last_finish_reason",
+                                None,
+                            ),
                         }
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
@@ -696,8 +765,9 @@ class NexentAgent:
             f"est_raw_i={total_raw:>{w_raw}}  save={total_save_str:>{w_save}} | "
             f"hit={hit_total_str:>{w_hit}}"
         )
-        if self.agent.context_manager:
-            lines.append(f"Context Manager Global: {self.agent.context_manager.get_all_compression_stats()}")
+        context_runtime = getattr(self.agent, "context_runtime", None)
+        if context_runtime is not None:
+            lines.append(f"Context Manager Global: {context_runtime.global_compression_stats()}")
 
         lines.append(
             "-----"

@@ -11,7 +11,12 @@ from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
+    NORTHBOUND_RATE_LIMIT_ENABLED,
+    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+)
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
@@ -25,6 +30,7 @@ from services.agent_service import (
     stop_agent_tasks,
     get_agent_id_by_name
 )
+from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
 from services.conversation_management_service import (
     save_conversation_user,
@@ -234,10 +240,8 @@ def _normalize_northbound_attachments(
 # In-memory idempotency and rate limit placeholders
 # -----------------------------
 _IDEMPOTENCY_RUNNING: Dict[str, float] = {}
-_IDEMPOTENCY_TTL_SECONDS_DEFAULT = 10 * 60
 _IDEMPOTENCY_LOCK = asyncio.Lock()
 
-_RATE_LIMIT_PER_MINUTE = 120  # simple default quota per tenant per minute
 _RATE_STATE: Dict[str, Dict[str, int]] = {}
 _RATE_LOCK = asyncio.Lock()
 
@@ -252,10 +256,21 @@ def _minute_bucket(ts: Optional[float] = None) -> str:
 
 
 async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
+    ttl = ttl_seconds or NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
+    if runtime_state_service.enabled:
+        try:
+            acquired = await runtime_state_service.acquire_idempotency_async(key, ttl)
+        except Exception:
+            logger.exception("Northbound idempotency Redis operation failed")
+            raise LimitExceededError("Idempotency service is unavailable. Please try again later.")
+        if not acquired:
+            raise LimitExceededError("Duplicate request is still running, please wait.")
+        return
+
     async with _IDEMPOTENCY_LOCK:
         # purge expired
         now = _now_seconds()
-        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > (ttl_seconds or _IDEMPOTENCY_TTL_SECONDS_DEFAULT)]
+        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > ttl]
         for k in expired:
             _IDEMPOTENCY_RUNNING.pop(k, None)
         if key in _IDEMPOTENCY_RUNNING:
@@ -264,6 +279,13 @@ async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None
 
 
 async def idempotency_end(key: str) -> None:
+    if runtime_state_service.enabled:
+        try:
+            await runtime_state_service.release_idempotency_async(key)
+        except Exception as exc:
+            logger.warning("Northbound idempotency release failed: %s", exc)
+        return
+
     async with _IDEMPOTENCY_LOCK:
         _IDEMPOTENCY_RUNNING.pop(key, None)
 
@@ -274,11 +296,27 @@ async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
 
 
 async def check_and_consume_rate_limit(tenant_id: str) -> None:
+    if not NORTHBOUND_RATE_LIMIT_ENABLED:
+        return
+
+    if runtime_state_service.enabled:
+        try:
+            await runtime_state_service.consume_rate_limit_async(
+                tenant_id=tenant_id,
+                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+            )
+            return
+        except ValueError:
+            raise LimitExceededError("Query rate exceeded limit. Please try again later")
+        except Exception:
+            logger.exception("Northbound rate limit Redis operation failed")
+            raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
+
     bucket = _minute_bucket()
     async with _RATE_LOCK:
         state = _RATE_STATE.setdefault(tenant_id, {})
         count = state.get(bucket, 0)
-        if count >= _RATE_LIMIT_PER_MINUTE:
+        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
             raise LimitExceededError("Query rate exceeded limit. Please try again later")
         state[bucket] = count + 1
         # cleanup old buckets, keep only current
@@ -371,8 +409,8 @@ async def start_streaming_chat(
         except Exception as e:
             raise Exception(f"Failed to persist user message: {str(e)}")
 
-    except LimitExceededError as _:
-        raise LimitExceededError("Query rate exceeded limit. Please try again later.")
+    except LimitExceededError as exc:
+        raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except Exception as e:
@@ -404,10 +442,29 @@ async def start_streaming_chat(
         except Exception as e:
             logger.warning(f"Failed to log token usage: {str(e)}")
 
-    # Attach request id header and conversation_id (internal id)
-    response.headers["X-Request-Id"] = ctx.request_id
-    response.headers["conversation_id"] = str(conversation_id)
-    return response
+    async def _stream_with_conversation_id():
+        async for chunk in response.body_iterator:
+            yield chunk
+
+        # 流结束后追加一段 SSE JSON
+        payload = {
+            "type": "conversation_id",
+            "conversation_id": conversation_id,
+        }
+
+        yield (
+            f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        )
+
+    wrapped = StreamingResponse(
+        _stream_with_conversation_id(),
+        media_type=response.media_type or "text/event-stream",
+        headers=dict(response.headers),
+    )
+
+    wrapped.headers["X-Request-Id"] = ctx.request_id
+    wrapped.headers["conversation_id"] = str(conversation_id)
+    return wrapped
 
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -532,27 +589,60 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
         raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {str(e)}")
 
 
+async def _get_visible_published_agents(ctx: NorthboundContext) -> list[dict]:
+    """Return published agents visible to the northbound caller."""
+    agent_info_list = await list_published_agents_impl(
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+    )
+    if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
+        agent_info_list.extend(await list_published_agents_impl(
+            tenant_id=ASSET_OWNER_TENANT_ID,
+            user_id=ctx.user_id,
+        ))
+    return agent_info_list
+
+
 async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
-        agent_info_list = await list_published_agents_impl(
-            tenant_id=ctx.tenant_id,
-            user_id=ctx.user_id,
-        )
-        # Match the same scope as /agent/published_list: non-asset-owner tenants
-        # also get the asset owner's published agents merged in.
-        if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
-            asset_agent_list = await list_published_agents_impl(
-                tenant_id=ASSET_OWNER_TENANT_ID,
-                user_id=ctx.user_id,
-            )
-            agent_info_list.extend(asset_agent_list)
-        # Remove internal information that partner don't need
+        agent_info_list = await _get_visible_published_agents(ctx)
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
         raise Exception(f"Failed to get agent info list for tenant {ctx.tenant_id}: {str(e)}")
+
+
+async def get_agent_info_by_name_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return one visible published agent selected by its exact agent name."""
+    if not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    try:
+        agent_info_list = await _get_visible_published_agents(ctx)
+        agent_info = next(
+            (
+                item for item in agent_info_list
+                if item.get("name") == agent_name
+            ),
+            None,
+        )
+        if agent_info is None:
+            raise LookupError(f"Published agent not found: {agent_name}")
+
+        result = dict(agent_info)
+        result.pop("agent_id", None)
+        return {"message": "success", "data": result, "requestId": ctx.request_id}
+    except (ValueError, LookupError):
+        raise
+    except Exception as e:
+        raise Exception(
+            f"Failed to get agent info for agent_name {agent_name} in tenant {ctx.tenant_id}: {str(e)}"
+        )
 
 
 async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:

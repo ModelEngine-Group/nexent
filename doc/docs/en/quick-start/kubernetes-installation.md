@@ -202,7 +202,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, `manifest.yaml`, and `checksums.txt`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or generated Helm values. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+The package includes image tar files, `load-images.sh`, `push-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, `manifest.yaml`, and `checksums.txt`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or generated Helm values. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
 On the target host, the package root `deploy.sh` uses saved `deploy.options` when present, otherwise built-in defaults, and does not open the TUI by default. Add `--config` to open the interactive configuration UI. If the package was built with a custom version, component set, port policy, or image source, pass the same options during deployment or use `--config` to select them interactively. On a single-node Docker-backed cluster, you can load and deploy directly:
 
@@ -211,7 +211,13 @@ cd offline-package
 bash deploy.sh --load-images k8s
 ```
 
-For multi-node clusters, load the images on every node that may run Nexent Pods, or push the loaded images to an internal registry and deploy with matching image settings.
+For multi-node clusters, load the images on every node that may run Nexent Pods, or push the packaged images to an internal registry and deploy with matching image settings:
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent k8s
+```
+
+When `--push-images` is used without a prefix, `deploy.sh` prompts for the image registry prefix first. `push-images.sh` then prompts for the registry username and password before pushing.
 
 ## 🔧 Deployment Commands
 
@@ -325,7 +331,8 @@ helm upgrade --install nexent nexent \
   --set nexent-supabase-db.enabled=true \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
-  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret
+  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
+  --set nexent-common.config.oauth.loginMode=force
 ```
 
 Configurable OAuth values:
@@ -343,6 +350,9 @@ Configurable OAuth values:
 | `nexent-common.config.oauth.wechatClientSecret` | `WECHAT_OAUTH_APP_SECRET` | WeChat App Secret |
 | `nexent-common.config.oauth.sslVerify` | `OAUTH_SSL_VERIFY` | Whether to verify provider TLS certificates |
 | `nexent-common.config.oauth.caBundle` | `OAUTH_CA_BUNDLE` | Custom CA bundle path |
+| `nexent-common.config.oauth.loginMode` | `OAUTH_LOGIN_MODE` | `disabled`, `button`, or `force` |
+
+`loginMode` defaults to `button`. In `force` mode, OAuth is disabled when no provider is available, while multiple providers fall back to login buttons. CAS `force` mode takes precedence over OAuth auto login.
 
 Provider callback URLs:
 

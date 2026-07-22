@@ -17,6 +17,12 @@ _PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
 
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
+OWNER_MANAGE_ROUTE = "/owner-manage"
+
+_ASSET_OWNER_FEATURE_NAV_ROUTES = frozenset({
+    ASSET_OWNER_RESOURCES_ROUTE,  # legacy
+    OWNER_MANAGE_ROUTE,           # current SU page
+})
 
 
 def is_asset_owner_enabled() -> bool:
@@ -33,10 +39,10 @@ def require_asset_owner_enabled() -> None:
 def filter_accessible_routes_for_asset_owner_feature(
     accessible_routes: List[str],
 ) -> List[str]:
-    """Remove asset-owner nav route when the ASSET_OWNER feature flag is disabled."""
+    """Remove asset-owner nav routes when the ASSET_OWNER feature flag is disabled."""
     if ENABLE_ASSET_OWNER_ROLE:
         return accessible_routes
-    return [r for r in accessible_routes if r != ASSET_OWNER_RESOURCES_ROUTE]
+    return [r for r in accessible_routes if r not in _ASSET_OWNER_FEATURE_NAV_ROUTES]
 
 
 def can_view_skill(caller_tenant_id: Optional[str], skill_tenant_id: Optional[str]) -> bool:

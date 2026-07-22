@@ -8,6 +8,7 @@ export interface AgentDetailModalData {
   name: string;
   display_name?: string | null;
   description?: string | null;
+  author?: string | null;
   icon?: string | null;
   status?: AgentRepositoryListingStatus;
   version_label?: string | null;
@@ -41,6 +42,7 @@ export function mapRepositoryListingDetail(
     name: detail.name,
     display_name: detail.display_name,
     description: detail.description,
+    author: detail.author,
     icon: detail.icon,
     status: detail.status,
     version_label: detail.version_label,
@@ -63,6 +65,7 @@ export function mapAgentVersionDetail(
     name: detail.name,
     display_name: detail.display_name,
     description: detail.description,
+    author: detail.author,
     model_name: detail.model_name,
     duty_prompt: detail.duty_prompt,
     version_label: versionMeta?.version_name ?? null,

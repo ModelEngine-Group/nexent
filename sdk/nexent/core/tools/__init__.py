@@ -6,6 +6,7 @@ from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
+from .ragflow_search_tool import RAGFlowSearchTool
 from .aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
@@ -25,9 +26,11 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .run_skill_script_tool import run_skill_script
 from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
+from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
 from .scheduled_task_tool import ScheduledTaskTool
+from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
     "MySqlTool",
@@ -39,6 +42,7 @@ __all__ = [
     "DataMateSearchTool",
     "IdataSearchTool",
     "HaotianSearchTool",
+    "RAGFlowSearchTool",
     "AidpSearchTool",
     "SendEmailTool",
     "GetEmailTool",
@@ -51,6 +55,7 @@ __all__ = [
     "DeleteDirectoryTool",
     "MoveItemTool",
     "ListDirectoryTool",
+    "ParallelExecutorTool",
     "TerminalTool",
     "AnalyzeTextFileTool",
     "AnalyzeImageTool",
@@ -62,4 +67,6 @@ __all__ = [
     "StoreMemoryTool",
     "SearchMemoryTool",
     "ScheduledTaskTool",
+    "CreatePlanTool",
+    "UpdatePlanStepTool",
 ]

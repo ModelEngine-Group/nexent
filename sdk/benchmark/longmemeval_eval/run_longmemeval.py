@@ -65,7 +65,7 @@ from agent_runner import (
     ContextManagerConfig,
 )
 from nexent.core.agents.agent_model import AgentHistory
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 
 from dataset import load_dialogues, LongMemEvalDialogue, LongMemEvalSession
 from eval_utils import judge_answer, judge_configured
@@ -267,7 +267,7 @@ async def run_probes(items, history: list[AgentHistory], args) -> tuple[list[dic
     main-LLM input/output tokens across all probes (compression is disabled
     in this arm so no compression cost is incurred here).
     """
-    disabled_cm = ContextManagerConfig(enabled=False, token_threshold=10 ** 9)
+    disabled_cm = ContextManagerConfig(token_threshold=10 ** 9)
     concurrency = max(1, args.probe_concurrency)
     sem = asyncio.Semaphore(concurrency)
 
@@ -462,11 +462,9 @@ async def run_dialogue(dialogue: LongMemEvalDialogue, args) -> dict:
     compressed_data = None
     if not args.skip_compressed:
         cm_config = ContextManagerConfig(
-            enabled=True,
             token_threshold=args.token_threshold,
-            keep_recent_pairs=args.keep_recent_pairs,
             keep_recent_steps=args.keep_recent_steps,
-            max_observation_length=args.max_observation_length,
+            policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
         )
         # Override with multi-topic schema if requested
         if args.summary_schema == "multi_topic":

@@ -161,6 +161,27 @@ PRODUCTION_HELM_CONTENT="$(cat "$PRODUCTION_HELM_VALUES")"
 assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    northbound:\n      type: "NodePort"\n      nodePort: 30013' "production k8s should expose northbound as NodePort"
 assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "production k8s should expose web as NodePort"
 
+unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
+unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
+unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
+deployment_prepare_config --components infrastructure,application --port-policy development --image-source local-latest --image-registry-prefix https://registry.local/nexent/ --app-version latest
+assert_eq "registry.local/nexent" "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" "image registry prefix should be normalized"
+deployment_apply_image_source
+assert_eq "registry.local/nexent/nexent/nexent:latest" "$NEXENT_IMAGE" "image registry prefix should be applied to local latest backend image"
+PREFIXED_DOCKER_ENV="$TMP_DIR/prefixed-docker.env"
+deployment_render_docker_env "$PREFIXED_DOCKER_ENV"
+assert_contains "$(cat "$PREFIXED_DOCKER_ENV")" 'NEXENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent/"' "docker env should expose registry prefix for monitoring compose images"
+PREFIXED_HELM_VALUES="$TMP_DIR/prefixed-generated-values.yaml"
+deployment_render_helm_values "$PREFIXED_HELM_VALUES"
+PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
+assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" $'  initImage:\n    repository: "registry.local/nexent/postgres"\n    tag: "15-alpine"\n    pullPolicy: "IfNotPresent"' "helm values should use prefixed supabase auth init image"
+assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
+unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
+unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
+unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
+
 deployment_prepare_config --components supabase --port-policy development --app-version latest
 assert_eq "infrastructure,supabase" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
 if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-web"* ]]; then
@@ -355,6 +376,8 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deploymen
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-env" "openssh deployment should include env rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase auth deployment should include supabase secret rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" ".Values.initImage.repository" "supabase auth init container should use configurable image repository"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "image: postgres:15-alpine" "supabase auth init container should not hardcode postgres image"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-env" "supabase auth deployment should not use full env rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase db deployment should include supabase secret rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-sql" "supabase db deployment should keep SQL rollout annotation"
@@ -435,11 +458,20 @@ assert_contains "$MONITORING_HELM_CONTENT" 'configFile: "otel-collector-langsmit
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER" "Basic stale"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL" ""
 deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider langfuse --app-version latest
 deployment_prepare_monitoring_env docker
 EXPECTED_LANGFUSE_AUTH_HEADER="Basic $(printf "%s:%s" "pk-test" "sk-test" | base64 | tr -d '\n')"
 assert_eq "$EXPECTED_LANGFUSE_AUTH_HEADER" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER")" "monitoring.env should refresh derived Langfuse OTLP auth header"
 assert_eq "../assets/monitoring/otel-collector-langfuse-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record Docker collector config file"
+assert_eq "http://localhost:3001" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "empty monitoring dashboard URL should use the selected provider default"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL" "https://monitor.example.com/grafana"
+deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider grafana --app-version latest
+deployment_prepare_monitoring_env docker
+assert_eq "https://monitor.example.com/grafana" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "explicit monitoring dashboard URL should be preserved"
+deployment_prepare_config --components infrastructure,application --monitoring-provider grafana --app-version latest
+deployment_prepare_monitoring_env docker
+assert_eq "" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "disabled monitoring should clear dashboard URL"
 while IFS='=' read -r key _; do
   [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
   unset "$key"
@@ -629,6 +661,7 @@ assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
+DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
 deployment_persist_local_config "$LOCAL_CONFIG"
 if grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY' "$LOCAL_CONFIG"; then
   echo "FAIL: persisted local config should not contain secret-looking fields"
@@ -640,6 +673,28 @@ if grep -q 'registryProfile' "$LOCAL_CONFIG"; then
 fi
 if grep -q 'appVersion' "$LOCAL_CONFIG"; then
   echo "FAIL: persisted local config should not contain appVersion"
+  exit 1
+fi
+assert_contains "$(cat "$LOCAL_CONFIG")" 'imageRegistryPrefix: "registry.local/nexent"' "persisted local config should include image registry prefix"
+
+DEPLOY_OPTIONS_FILE="$TMP_DIR/deploy.options"
+deployment_init_defaults
+assert_eq "$TMP_DIR/deploy.options" "$DEPLOYMENT_LOCAL_CONFIG_PATH" "default local config should use deploy.options"
+unset DEPLOY_OPTIONS_FILE
+
+K8S_DEPLOY_OPTIONS_BLOCK="$(awk '/persist_deploy_options\(\) {/,/^}/' "$SCRIPT_DIR/../k8s/deploy.sh")"
+K8S_DEPLOY_HEADER="$(sed -n '1,60p' "$SCRIPT_DIR/../k8s/deploy.sh")"
+assert_contains "$K8S_DEPLOY_HEADER" 'DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"' "k8s deploy config should use deploy.options"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'deployment_persist_local_config "$DEPLOY_OPTIONS_FILE"' "k8s deploy options should include shared local config"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "printf 'k8s:\\n'" "k8s deploy options should include a k8s section"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "persistenceMode:" "k8s deploy options should persist persistence mode"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "storageClassName:" "k8s deploy options should persist storage class"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "localPath:" "k8s deploy options should persist local path"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" "existingClaimPrefix:" "k8s deploy options should persist existing claim prefix"
+assert_not_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'LOCAL_NODE_NAME=' "k8s deploy options should not persist deprecated local node name"
+assert_not_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'K8S_WAIT_TIMEOUT_SECONDS=' "k8s deploy options should not persist one-time wait timeout"
+if echo "$K8S_DEPLOY_OPTIONS_BLOCK" | grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY'; then
+  echo "FAIL: k8s deploy options should not persist secret-looking fields"
   exit 1
 fi
 

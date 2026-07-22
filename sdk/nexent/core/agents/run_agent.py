@@ -14,8 +14,26 @@ from ...monitor import (
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
 
+
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+def _get_authorized_context_items(agent_run_info: AgentRunInfo):
+    """Return the run snapshot, falling back for direct SDK callers."""
+    context_input = getattr(agent_run_info, "context_input", None)
+    if context_input is not None:
+        return tuple(context_input.items)
+    return getattr(agent_run_info.agent_config, "context_items", None)
+
+
+def _get_authorized_history(agent_run_info: AgentRunInfo):
+    """Return the run snapshot, falling back for direct SDK callers."""
+    context_input = getattr(agent_run_info, "context_input", None)
+    if context_input is not None:
+        # Historical runs are ContextItems. AgentMemory is reserved for this run.
+        return []
+    return agent_run_info.history
 
 
 def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
@@ -53,36 +71,6 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
         )
     except Exception:
         logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
-
-
-def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo) -> None:
-    """Mount the reusable conversation-level ContextManager into the active runtime.
-
-    W3 made ``agent.context_runtime`` the execution authority for context
-    assembly.  ``agent.context_manager`` is kept only as a compatibility and
-    observability alias, so mounting a conversation-level ContextManager must
-    update the managed runtime first and then mirror the alias.
-    """
-    context_manager = getattr(agent_run_info, "context_manager", None)
-    if context_manager is None:
-        return
-
-    context_runtime = getattr(agent, "context_runtime", None)
-    if getattr(context_runtime, "context_manager", None) is None:
-        raise RuntimeError(
-            "Conversation-level ContextManager requires an active managed context runtime"
-        )
-
-    context_runtime.context_manager = context_manager
-    context_components = getattr(agent_run_info.agent_config, "context_components", None)
-    replace_runtime_components = getattr(context_runtime, "replace_components", None)
-    if callable(replace_runtime_components):
-        replace_runtime_components(context_components or [])
-    else:
-        raise RuntimeError(
-            "Managed context runtime does not support run-local component replacement"
-        )
-    agent.context_manager = context_manager
 
 
 def _detect_transport(url: str) -> str:
@@ -160,14 +148,16 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent = NexentAgent(
                 observer=agent_run_info.observer,
                 model_config_list=agent_run_info.model_config_list,
-                stop_event=agent_run_info.stop_event
+                stop_event=agent_run_info.stop_event,
+                redis_client=agent_run_info.redis_client,
             )
-            agent = nexent.create_single_agent(agent_run_info.agent_config)
+            agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
+                agent_run_info.agent_config,
+                context_items_override=_get_authorized_context_items(agent_run_info),
+            )
             nexent.set_agent(agent)
 
-            _mount_conversation_context_manager(agent, agent_run_info)
-
-            nexent.add_history_to_agent(agent_run_info.history)
+            nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             nexent.agent_run_with_observer(
                 query=agent_run_info.query, reset=False)
         else:
@@ -180,14 +170,16 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
                     stop_event=agent_run_info.stop_event,
-                    mcp_tool_collection=tool_collection
+                    mcp_tool_collection=tool_collection,
+                    redis_client=agent_run_info.redis_client,
                 )
-                agent = nexent.create_single_agent(agent_run_info.agent_config)
+                agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
+                    agent_run_info.agent_config,
+                    context_items_override=_get_authorized_context_items(agent_run_info),
+                )
                 nexent.set_agent(agent)
 
-                _mount_conversation_context_manager(agent, agent_run_info)
-
-                nexent.add_history_to_agent(agent_run_info.history)
+                nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 nexent.agent_run_with_observer(
                     query=agent_run_info.query, reset=False)
 

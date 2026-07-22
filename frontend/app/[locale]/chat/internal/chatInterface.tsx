@@ -15,10 +15,21 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
 import {
+  analyzeAutomationMessage,
+  canAnalyzeAutomationMessage,
+  createPreparingAutomationMessage,
+  getAutomationConversationIds,
+  hydrateAutomationProposalMessages,
+  resolveAutomationProposalMessage,
+  resolvePreparingMessageAsAgentReply,
+} from "@/features/agentAutomation/chatAdapter";
+import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
+import {
   storageService,
   convertImageUrlToApiUrl,
 } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -39,6 +50,7 @@ import {
   ApiConversationDetail,
   HistoryItem,
 } from "@/types/chat";
+import type { Agent } from "@/types/agentConfig";
 import { ChatMessageType } from "@/types/chat";
 import {
   handleStreamResponse,
@@ -140,6 +152,10 @@ export function ChatInterface() {
 
   // Use conversation management hook
   const conversationManagement = useConversationManagement();
+  const linkedConversationHandledRef = useRef(false);
+  const handleDialogClickRef = useRef<
+    (dialog: ConversationListItem) => Promise<void>
+  >(async () => undefined);
 
   // Use model list hook for model selection
   const { models: availableModels } = useModelList();
@@ -190,6 +206,9 @@ export function ChatInterface() {
   const [completedConversations, setCompletedConversations] = useState<
     Set<number>
   >(new Set());
+  const [automationConversationIds, setAutomationConversationIds] = useState<
+    Set<number>
+  >(new Set());
 
   // Ensure right sidebar is closed by default
   const [showRightPanel, setShowRightPanel] = useState(false);
@@ -216,25 +235,111 @@ export function ChatInterface() {
   const [agentModelIds, setAgentModelIds] = useState<number[]>([]);
   const [agentModelNames, setAgentModelNames] = useState<string[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+  const { agents: publishedAgents = [] } = usePublishedAgentList() as {
+    agents: Agent[];
+  };
+
+  const loadAutomationConversationIds = useCallback(async () => {
+    try {
+      setAutomationConversationIds(await getAutomationConversationIds());
+    } catch (error) {
+      log.warn("Failed to load automation task markers", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAutomationConversationIds();
+    window.addEventListener(
+      "automationListUpdated",
+      loadAutomationConversationIds
+    );
+    return () => {
+      window.removeEventListener(
+        "automationListUpdated",
+        loadAutomationConversationIds
+      );
+    };
+  }, [loadAutomationConversationIds]);
 
   useEffect(() => {
     sessionMessagesRef.current = sessionMessages;
   }, [sessionMessages]);
 
-  const handleAgentSelectWithGreeting = (
-    agentId: string | null,
-    greeting?: string,
-    exampleQuestions?: string[],
-    modelIds?: number[],
-    modelNames?: string[]
-  ) => {
-    setSelectedAgentId(agentId);
-    setAgentGreeting(greeting || null);
-    setAgentExampleQuestions(exampleQuestions || []);
-    setAgentModelIds(modelIds || []);
-    setAgentModelNames(modelNames || []);
-    setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
-  };
+  const handleAgentSelectWithGreeting = useCallback(
+    (
+      agentId: string | null,
+      greeting?: string,
+      exampleQuestions?: string[],
+      modelIds?: number[],
+      modelNames?: string[]
+    ) => {
+      setSelectedAgentId(agentId);
+      setAgentGreeting(greeting || null);
+      setAgentExampleQuestions(exampleQuestions || []);
+      setAgentModelIds(modelIds || []);
+      setAgentModelNames(modelNames || []);
+      setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
+    },
+    []
+  );
+
+  const restoreConversationAgent = useCallback(
+    (agentId?: number | string | null) => {
+      if (agentId === undefined || agentId === null) {
+        handleAgentSelectWithGreeting(null);
+        return;
+      }
+
+      const normalizedAgentId = String(agentId);
+      const agent = publishedAgents.find(
+        (item) => item.id === normalizedAgentId
+      );
+
+      if (!agent && publishedAgents.length === 0) {
+        setSelectedAgentId(normalizedAgentId);
+        setAgentGreeting(null);
+        setAgentExampleQuestions([]);
+        setAgentModelIds([]);
+        setAgentModelNames([]);
+        setSelectedModelId(null);
+        return;
+      }
+
+      if (!agent || agent.is_available === false) {
+        handleAgentSelectWithGreeting(null);
+        return;
+      }
+
+      handleAgentSelectWithGreeting(
+        normalizedAgentId,
+        agent.greeting_message,
+        agent.example_questions,
+        agent.model_ids,
+        agent.model_names
+      );
+    },
+    [handleAgentSelectWithGreeting, publishedAgents]
+  );
+
+  useEffect(() => {
+    if (!selectedAgentId || publishedAgents.length === 0) {
+      return;
+    }
+
+    const agent = publishedAgents.find((item) => item.id === selectedAgentId);
+    if (!agent || agent.is_available === false) {
+      handleAgentSelectWithGreeting(null);
+      return;
+    }
+
+    setAgentGreeting(agent.greeting_message || null);
+    setAgentExampleQuestions(agent.example_questions || []);
+    setAgentModelIds(agent.model_ids || []);
+    setAgentModelNames(agent.model_names || []);
+    setSelectedModelId(
+      agent.model_ids && agent.model_ids.length > 0 ? agent.model_ids[0] : null
+    );
+  }, [handleAgentSelectWithGreeting, publishedAgents, selectedAgentId]);
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
@@ -442,7 +547,7 @@ export function ChatInterface() {
     if (!input.trim() && attachments.length === 0) return; // Allow sending attachments only, without text content
 
     // Flag to track if we should reset button states in finally block
-    let shouldResetButtonStates = true;
+    const shouldResetButtonStates = true;
 
     // Ensure right sidebar doesn't auto-expand when sending new message
     setSelectedMessageId(undefined);
@@ -453,7 +558,10 @@ export function ChatInterface() {
     const userMessageContent = input.trim();
 
     // Get current conversation ID (null when new conversation)
-    let currentConversationId = conversationManagement.selectedConversationId;
+    const currentConversationId = conversationManagement.selectedConversationId;
+    const selectedAgentIdForRun = selectedAgentId;
+    const agentIdForRun =
+      selectedAgentIdForRun !== null ? Number(selectedAgentIdForRun) : null;
     let cid: number | null = null; // set after guard, used in try/catch/finally
 
     // Prepare attachment information
@@ -508,8 +616,11 @@ export function ChatInterface() {
       role: MESSAGE_ROLES.USER,
       content: userMessageContent,
       timestamp: new Date(),
+      isComplete: true,
+      steps: [],
       attachments:
         messageAttachments.length > 0 ? messageAttachments : undefined,
+      images: [],
     };
 
     // Clear input box and attachments
@@ -526,6 +637,17 @@ export function ChatInterface() {
       isComplete: false,
       steps: [],
     };
+    const shouldAnalyzeAutomation = canAnalyzeAutomationMessage(
+      attachments.length,
+      agentIdForRun,
+      userMessageContent
+    );
+    const preparingAutomationMessage = shouldAnalyzeAutomation
+      ? createPreparingAutomationMessage(
+          assistantMessageId,
+          initialAssistantMessage.timestamp
+        )
+      : null;
 
     // Send message and scroll to bottom
     setShouldScrollToBottom(true);
@@ -536,15 +658,110 @@ export function ChatInterface() {
     // Create independent AbortController for current conversation
     const currentController = new AbortController();
 
+    // Render the user message before automation intent analysis or the normal
+    // Agent request starts. New conversations use the existing placeholder and
+    // migrate to the backend-created conversation ID later.
+    const placeholderId = -1;
+    const id = currentConversationId ?? placeholderId;
+    cid = id;
+    setSessionMessages((prev) => ({
+      ...prev,
+      [id]: [
+        ...(prev[id] || []),
+        userMessage,
+        ...(preparingAutomationMessage ? [preparingAutomationMessage] : []),
+      ],
+    }));
+
     try {
-      // For new conversations, the backend will auto-create the conversation and emit
-      // a conversation_created SSE event with the real conversation_id. Until that
-      // happens, store messages under a placeholder key (-1) so the UI can render them.
-      // Once the SSE event arrives, the onConversationCreated callback migrates the
-      // session messages from -1 to the real conversation_id.
-      const placeholderId = -1;
-      const id = currentConversationId ?? placeholderId;
-      cid = id;
+      // Handle scheduled requests as chat commands before a normal Agent run.
+      // This prevents a recurring command from executing once immediately.
+      if (shouldAnalyzeAutomation) {
+        try {
+          const proposal = await analyzeAutomationMessage({
+            conversationId: currentConversationId ?? undefined,
+            agentId: agentIdForRun,
+            message: userMessageContent,
+            modelId: selectedModelId,
+          });
+          if (proposal?.proposal_id && proposal.task) {
+            const proposalConversationId =
+              proposal.conversation_id ?? currentConversationId;
+            if (!proposalConversationId) {
+              throw new Error("Automation proposal is missing conversation_id");
+            }
+            cid = proposalConversationId;
+            setSessionMessages((prev) => {
+              const optimisticMessages = prev[id] || [];
+              const proposalMessages =
+                proposalConversationId === id
+                  ? optimisticMessages
+                  : [
+                      ...(prev[proposalConversationId] || []),
+                      ...optimisticMessages,
+                    ];
+              const nextMessages = resolveAutomationProposalMessage(
+                proposalMessages,
+                assistantMessageId,
+                proposal
+              );
+              const nextState = {
+                ...prev,
+                [proposalConversationId]: nextMessages,
+              };
+              if (proposalConversationId !== id) {
+                delete nextState[id];
+              }
+              return nextState;
+            });
+            conversationManagement.setSelectedConversationId(
+              proposalConversationId
+            );
+            const conversationTitle =
+              proposal.task.title || t("chatInterface.newConversation");
+            conversationManagement.setConversationTitle(conversationTitle);
+            if (currentConversationId == null) {
+              conversationManagement.prependConversation(
+                proposalConversationId,
+                conversationTitle,
+                agentIdForRun
+              );
+            } else {
+              conversationManagement.updateConversationAgentId(
+                proposalConversationId,
+                agentIdForRun
+              );
+            }
+            setShouldScrollToBottom(true);
+            return;
+          }
+        } catch (error) {
+          log.warn("Failed to handle automation chat command", error);
+          const errorMessage = getAutomationErrorMessage(
+            error,
+            t,
+            "agentAutomation.proposal.createFailed"
+          );
+          message.error(errorMessage);
+          setSessionMessages((prev) => {
+            const existingMessages = prev[id] || [];
+            const nextMessages = existingMessages.filter(
+              (item) =>
+                item.id !== userMessageId && item.id !== assistantMessageId
+            );
+            if (nextMessages.length === existingMessages.length) return prev;
+            const nextState = { ...prev };
+            if (nextMessages.length > 0) {
+              nextState[id] = nextMessages;
+            } else {
+              delete nextState[id];
+            }
+            return nextState;
+          });
+          setInput(userMessageContent);
+          return;
+        }
+      }
 
       // Register controller and streaming state for this conversation
       conversationControllersRef.current.set(id, currentController);
@@ -554,40 +771,29 @@ export function ChatInterface() {
         return newSet;
       });
 
-      // Now add messages after conversation is created/confirmed
-      // 1. When sending user message, complete ChatMessageType fields
-      setSessionMessages((prev) => ({
-        ...prev,
-        [id]: [
-          ...(prev[id] || []),
-          {
-            ...userMessage,
-            id: userMessage.id || uuidv4(),
-            timestamp: userMessage.timestamp || new Date(),
-            isComplete: userMessage.isComplete ?? true,
-            steps: userMessage.steps || [],
-            attachments: userMessage.attachments || [],
-            images: userMessage.images || [],
-          },
-        ],
-      }));
-
-      // 2. When adding AI reply message, complete ChatMessageType fields
-      setSessionMessages((prev) => ({
-        ...prev,
-        [id]: [
-          ...(prev[id] || []),
-          {
-            ...initialAssistantMessage,
-            id: initialAssistantMessage.id || uuidv4(),
-            timestamp: initialAssistantMessage.timestamp || new Date(),
-            isComplete: initialAssistantMessage.isComplete ?? false,
-            steps: initialAssistantMessage.steps || [],
-            attachments: initialAssistantMessage.attachments || [],
-            images: initialAssistantMessage.images || [],
-          },
-        ],
-      }));
+      // Reuse the automation-analysis placeholder for a normal Agent reply, so
+      // chat only swaps message state and does not own automation UI details.
+      setSessionMessages((prev) => {
+        const assistantMessage = {
+          ...initialAssistantMessage,
+          id: initialAssistantMessage.id || uuidv4(),
+          timestamp: initialAssistantMessage.timestamp || new Date(),
+          isComplete: initialAssistantMessage.isComplete ?? false,
+          steps: initialAssistantMessage.steps || [],
+          attachments: initialAssistantMessage.attachments || [],
+          images: initialAssistantMessage.images || [],
+        };
+        return {
+          ...prev,
+          [id]: shouldAnalyzeAutomation
+            ? resolvePreparingMessageAsAgentReply(
+                prev[id] || [],
+                assistantMessageId,
+                assistantMessage
+              )
+            : [...(prev[id] || []), assistantMessage],
+        };
+      });
 
       // If there are attachment files, skip preprocessing (no API call, no UI prompts)
       let finalQuery = userMessage.content;
@@ -611,54 +817,55 @@ export function ChatInterface() {
       }
 
       // Send request to backend API, add signal parameter
-      const runAgentParams: any = {
-        query: finalQuery, // Use preprocessed query or original query
-        history: currentMessages
-          .filter((msg) => msg.id !== userMessage.id)
-          .map((msg) => {
-            const historyItem: HistoryItem = {
-              role: msg.role,
-              content:
-                msg.role === ROLE_ASSISTANT
-                  ? msg.finalAnswer?.trim() || msg.content || ""
-                  : msg.content || "",
-            };
-            // Include attachment info for historical messages so the agent
-            // can reference files from previous turns
-            if (msg.attachments && msg.attachments.length > 0) {
-              historyItem.minio_files = msg.attachments.map((attachment) => ({
-                object_name: attachment.object_name || "",
-                name: attachment.name,
-                type: attachment.type,
-                size: attachment.size,
-                url: attachment.url || "",
-                presigned_url: attachment.presigned_url || "",
-                description: attachment.description || "",
-              }));
-            }
-            return historyItem;
-          }),
-        minio_files:
-          messageAttachments.length > 0
-            ? messageAttachments.map((attachment) => {
-                // Get file description
-                let description = "";
-                if (attachment.name in fileDescriptionsMap) {
-                  description = fileDescriptionsMap[attachment.name];
-                }
-
-                return {
-                  object_name: objectNames[attachment.name] || "",
+      const runAgentParams: Parameters<typeof conversationService.runAgent>[0] =
+        {
+          query: finalQuery, // Use preprocessed query or original query
+          history: currentMessages
+            .filter((msg) => msg.id !== userMessage.id)
+            .map((msg) => {
+              const historyItem: HistoryItem = {
+                role: msg.role,
+                content:
+                  msg.role === ROLE_ASSISTANT
+                    ? msg.finalAnswer?.trim() || msg.content || ""
+                    : msg.content || "",
+              };
+              // Include attachment info for historical messages so the agent
+              // can reference files from previous turns
+              if (msg.attachments && msg.attachments.length > 0) {
+                historyItem.minio_files = msg.attachments.map((attachment) => ({
+                  object_name: attachment.object_name || "",
                   name: attachment.name,
                   type: attachment.type,
                   size: attachment.size,
-                  url: uploadedFileUrls[attachment.name] || attachment.url,
-                  presigned_url: presignedUrls[attachment.name] || "",
-                  description: description,
-                };
-              })
-            : undefined, // Use complete attachment object structure
-      };
+                  url: attachment.url || "",
+                  presigned_url: attachment.presigned_url || "",
+                  description: attachment.description || "",
+                }));
+              }
+              return historyItem;
+            }),
+          minio_files:
+            messageAttachments.length > 0
+              ? messageAttachments.map((attachment) => {
+                  // Get file description
+                  let description = "";
+                  if (attachment.name in fileDescriptionsMap) {
+                    description = fileDescriptionsMap[attachment.name];
+                  }
+
+                  return {
+                    object_name: objectNames[attachment.name] || "",
+                    name: attachment.name,
+                    type: attachment.type,
+                    size: attachment.size,
+                    url: uploadedFileUrls[attachment.name] || attachment.url,
+                    presigned_url: presignedUrls[attachment.name] || "",
+                    description: description,
+                  };
+                })
+              : undefined, // Use complete attachment object structure
+        };
 
       // Only include conversation_id for existing conversations; omit for new ones
       // so backend can auto-create the conversation and emit conversation_created.
@@ -667,8 +874,8 @@ export function ChatInterface() {
       }
 
       // Only add agent_id if it's not null
-      if (selectedAgentId !== null) {
-        runAgentParams.agent_id = Number(selectedAgentId);
+      if (agentIdForRun !== null) {
+        runAgentParams.agent_id = agentIdForRun;
       }
 
       // Add selected model_id for agent run
@@ -680,6 +887,13 @@ export function ChatInterface() {
         runAgentParams,
         currentController.signal
       );
+
+      if (currentConversationId != null) {
+        conversationManagement.updateConversationAgentId(
+          currentConversationId,
+          agentIdForRun
+        );
+      }
 
       if (!reader) throw new Error("Response body is null");
 
@@ -697,7 +911,7 @@ export function ChatInterface() {
             const realId = resolvedTargetConversationId;
             // If the target is the placeholder, also pull existing messages from
             // any real conversation_id we have migrated to.
-            let prevArr = prev[realId] || [];
+            const prevArr = prev[realId] || [];
             let nextArr: ChatMessageType[];
             if (typeof valueOrUpdater === "function") {
               nextArr = (
@@ -776,7 +990,10 @@ export function ChatInterface() {
               };
             });
             conversationControllersRef.current.delete(id);
-            conversationControllersRef.current.set(conversationId, currentController);
+            conversationControllersRef.current.set(
+              conversationId,
+              currentController
+            );
             // Clear the old timeout (which was bound to the placeholder key);
             // the active stream's resetTimeout() will re-create one as new chunks arrive.
             const oldTimeout = conversationTimeoutsRef.current.get(id);
@@ -793,12 +1010,15 @@ export function ChatInterface() {
             cid = conversationId;
           }
           conversationManagement.setSelectedConversationId(conversationId);
-          conversationManagement.setConversationTitle(t("chatInterface.newConversation"));
+          conversationManagement.setConversationTitle(
+            t("chatInterface.newConversation")
+          );
           // Add the new conversation to the sidebar immediately so users see it
           // appear in the conversation list during streaming (not only after stream ends)
           conversationManagement.prependConversation(
             conversationId,
-            t("chatInterface.newConversation")
+            t("chatInterface.newConversation"),
+            agentIdForRun
           );
         },
         false, // isDebug: false for normal chat mode
@@ -855,7 +1075,10 @@ export function ChatInterface() {
             );
           }
         } catch (error) {
-          log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
+          log.error(
+            t("chatInterface.refreshDialogListFailedButContinue"),
+            error
+          );
         }
       }
 
@@ -967,10 +1190,13 @@ export function ChatInterface() {
     setAttachments([]);
     setFileUrls({});
 
-    // Clear URL parameters
+    // Clear parameters that belong to the previous conversation.
     const url = new URL(window.location.href);
-    if (url.searchParams.has("q")) {
-      url.searchParams.delete("q");
+    const hasConversationParameters =
+      url.searchParams.has("q") || url.searchParams.has("conversation_id");
+    url.searchParams.delete("q");
+    url.searchParams.delete("conversation_id");
+    if (hasConversationParameters) {
       window.history.replaceState({}, "", url.toString());
     }
 
@@ -1010,7 +1236,6 @@ export function ChatInterface() {
     });
   };
 
-
   // Helper to create a session messages updater for a specific conversation
   const createSessionMessagesUpdater = useCallback(
     (targetConversationId: number) => {
@@ -1019,9 +1244,11 @@ export function ChatInterface() {
           const prevArr = prev[targetConversationId] || [];
           const nextArr =
             typeof valueOrUpdater === "function"
-              ? (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(
-                  prevArr
-                )
+              ? (
+                  valueOrUpdater as (
+                    prev: ChatMessageType[]
+                  ) => ChatMessageType[]
+                )(prevArr)
               : valueOrUpdater;
           return {
             ...prev,
@@ -1163,6 +1390,13 @@ export function ChatInterface() {
 
     // Use conversation management hook
     conversationManagement.handleConversationSelect(dialog);
+    const conversationUrl = new URL(window.location.href);
+    conversationUrl.searchParams.set(
+      "conversation_id",
+      String(dialog.conversation_id)
+    );
+    window.history.replaceState({}, "", conversationUrl.toString());
+    restoreConversationAgent(dialog.agent_id ?? null);
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
 
@@ -1226,8 +1460,13 @@ export function ChatInterface() {
 
           if (data.code === 0 && data.data && data.data.length > 0) {
             const conversationData = data.data[0] as ApiConversationDetail;
-            const formattedMessages =
-              formatConversationMessagesFromResponse(conversationData, t);
+            restoreConversationAgent(
+              conversationData.agent_id ?? dialog.agent_id ?? null
+            );
+            const formattedMessages = await hydrateAutomationProposalMessages(
+              formatConversationMessagesFromResponse(conversationData, t),
+              dialog.conversation_id
+            );
 
             // Update message array
             setSessionMessages((prev) => ({
@@ -1241,14 +1480,18 @@ export function ChatInterface() {
             );
 
             // Check if this conversation has an in-progress streaming message
-            const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
-            if (streamingMessage && streamingMessage.status === 'streaming') {
+            const streamingMessage = (
+              conversationData as ApiConversationDetail & {
+                streaming_message?: StreamingMessage;
+              }
+            ).streaming_message;
+            if (streamingMessage && streamingMessage.status === "streaming") {
               // Resume streaming - wait for state to update first
               setTimeout(() => {
                 resumeStreamingConversation(
-                dialog.conversation_id,
-                streamingMessage
-              );
+                  dialog.conversation_id,
+                  streamingMessage
+                );
               }, 100);
             }
 
@@ -1346,8 +1589,13 @@ export function ChatInterface() {
 
         if (data.code === 0 && data.data && data.data.length > 0) {
           const conversationData = data.data[0] as ApiConversationDetail;
-          const formattedMessages =
-            formatConversationMessagesFromResponse(conversationData, t);
+          restoreConversationAgent(
+            conversationData.agent_id ?? dialog.agent_id ?? null
+          );
+          const formattedMessages = await hydrateAutomationProposalMessages(
+            formatConversationMessagesFromResponse(conversationData, t),
+            dialog.conversation_id
+          );
 
           // Update message array
           setSessionMessages((prev) => ({
@@ -1361,9 +1609,11 @@ export function ChatInterface() {
           );
 
           // Check if this conversation has an in-progress streaming message
-          const streamingMessage = (conversationData as any).streaming_message as
-            | StreamingMessage
-            | undefined;
+          const streamingMessage = (
+            conversationData as ApiConversationDetail & {
+              streaming_message?: StreamingMessage;
+            }
+          ).streaming_message;
           if (streamingMessage && streamingMessage.status === "streaming") {
             // Resume streaming - wait for state to update first
             setTimeout(() => {
@@ -1413,6 +1663,46 @@ export function ChatInterface() {
       }
     }
   };
+  handleDialogClickRef.current = handleDialogClick;
+
+  useEffect(() => {
+    if (
+      linkedConversationHandledRef.current ||
+      conversationManagement.conversationListQuery.isLoading
+    ) {
+      return;
+    }
+
+    const rawConversationId = new URL(window.location.href).searchParams.get(
+      "conversation_id"
+    );
+    const conversationId = Number(rawConversationId);
+    if (
+      !rawConversationId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      linkedConversationHandledRef.current = true;
+      return;
+    }
+
+    const linkedConversation = conversationManagement.conversationList.find(
+      (conversation) => conversation.conversation_id === conversationId
+    );
+    if (linkedConversation) {
+      linkedConversationHandledRef.current = true;
+      void handleDialogClickRef.current(linkedConversation);
+      return;
+    }
+
+    if (conversationManagement.conversationListQuery.isFetched) {
+      linkedConversationHandledRef.current = true;
+    }
+  }, [
+    conversationManagement.conversationList,
+    conversationManagement.conversationListQuery.isFetched,
+    conversationManagement.conversationListQuery.isLoading,
+  ]);
 
   // Add function to asynchronously load attachment URLs
   const loadAttachmentUrls = async (
@@ -1860,6 +2150,7 @@ export function ChatInterface() {
         completedConversations={completedConversations}
         conversationManagement={conversationManagement}
         onConversationSelect={handleDialogClick}
+        automationConversationIds={automationConversationIds}
       />
 
       <Layout className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -1870,6 +2161,12 @@ export function ChatInterface() {
               onRename={handleTitleRename}
               onShareClick={toggleShareMode}
               isShareMode={isShareMode}
+              hasAutomation={
+                conversationManagement.selectedConversationId !== null &&
+                automationConversationIds.has(
+                  conversationManagement.selectedConversationId
+                )
+              }
             />
 
             {isShareMode && (

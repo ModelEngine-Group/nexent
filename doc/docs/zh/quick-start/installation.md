@@ -186,7 +186,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+包目录会包含 `images/*.tar`、`load-images.sh`、`push-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
 
 在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择：
 
@@ -194,6 +194,14 @@ bash deploy/offline/build_offline_package.sh \
 cd offline-package
 bash deploy.sh --load-images docker
 ```
+
+如果需要先推送到内部镜像仓库并使用该前缀部署：
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
+```
+
+启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀；随后 `push-images.sh` 在推送前询问仓库账号和密码。
 
 ## 🔌 端口映射
 
@@ -301,6 +309,11 @@ WECHAT_OAUTH_APP_SECRET=
 # 访问 OAuth provider 时的 TLS 校验
 OAUTH_SSL_VERIFY=true
 OAUTH_CA_BUNDLE=
+
+# disabled: 隐藏 OAuth 登录入口并禁用自动跳转
+# button: 显示已配置的 OAuth 登录按钮
+# force: 恰好配置一个 Provider 时，未登录用户自动跳转
+OAUTH_LOGIN_MODE=button
 ```
 
 Provider 启用规则：
@@ -313,6 +326,8 @@ Provider 启用规则：
 | WeChat | `ENABLE_WECHAT_OAUTH=true`、`WECHAT_OAUTH_APP_ID`、`WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 本地默认回调示例为 `http://localhost:3000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，例如 `https://nexent.example.com/api/user/oauth/callback?provider=github`，并在 OAuth provider 控制台中登记相同地址。
+
+`OAUTH_LOGIN_MODE` 支持 `disabled`、`button`、`force`，默认为 `button`。`force` 模式下，恰好有一个 Provider 满足启用条件时，未登录访问 Nexent 会直接跳转到该 Provider；没有可用 Provider 时禁用 OAuth，多个 Provider 时回退到登录按钮。若同时配置了 CAS `force` 模式，CAS 优先。
 
 ### CAS 登录配置
 

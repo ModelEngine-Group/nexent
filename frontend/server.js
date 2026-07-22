@@ -33,7 +33,25 @@ const SHARE_BASE_URL =
   process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 const PORT = 3000;
 
-const proxy = createProxyServer();
+function parseTimeout(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const PROXY_TIMEOUT_MS = parseTimeout(process.env.PROXY_TIMEOUT_MS, 10 * 60 * 1000);
+const PROXY_WS_TIMEOUT_MS = parseTimeout(
+  process.env.PROXY_WS_TIMEOUT_MS,
+  PROXY_TIMEOUT_MS
+);
+const SSE_PROXY_TIMEOUT_MS = parseTimeout(
+  process.env.SSE_PROXY_TIMEOUT_MS,
+  PROXY_TIMEOUT_MS
+);
+
+const proxy = createProxyServer({
+  proxyTimeout: PROXY_TIMEOUT_MS,
+  timeout: PROXY_TIMEOUT_MS,
+});
 
 // ============================================================================
 // Cookie configuration
@@ -184,11 +202,8 @@ function collectRequestBody(req) {
  * If no refresh_token cookie exists, return 401 immediately.
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
-  if (
-    pathname === "/api/user/refresh_token" ) {
-    const refreshToken =
-    cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ;
+  if (pathname === "/api/user/refresh_token") {
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
@@ -221,12 +236,17 @@ function forwardAuthRequest(req, res, targetUrl) {
 
   collectRequestBody(req)
     .then((rawBody) => {
-      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+      const body = prepareAuthRequestBody(
+        req.parsedPathname,
+        rawBody,
+        cookies,
+        res
+      );
 
-    // If body is null, prepareAuthRequestBody already sent the error response
-    if (body === null) {
-      return;
-    }
+      // If body is null, prepareAuthRequestBody already sent the error response
+      if (body === null) {
+        return;
+      }
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
@@ -459,15 +479,21 @@ app.prepare().then(() => {
         const isRuntime =
           pathname.startsWith("/api/agent/run") ||
           pathname.startsWith("/api/agent/stop") ||
+          pathname.startsWith("/api/agent/automations") ||
           pathname.startsWith("/api/conversation/") ||
           pathname.startsWith("/api/share/") ||
           pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
           pathname.startsWith("/api/file/preprocess");
         if (isRuntime) {
+          const runtimeProxyTimeout = pathname.startsWith("/api/agent/run")
+            ? SSE_PROXY_TIMEOUT_MS
+            : PROXY_TIMEOUT_MS;
           proxy.web(req, res, {
             target: RUNTIME_HTTP_BACKEND,
             changeOrigin: true,
+            proxyTimeout: runtimeProxyTimeout,
+            timeout: runtimeProxyTimeout,
           });
         } else if (
           pathname === "/api/skills/create" ||
@@ -476,9 +502,16 @@ app.prepare().then(() => {
           proxy.web(req, res, {
             target: RUNTIME_HTTP_BACKEND,
             changeOrigin: true,
+            proxyTimeout: PROXY_TIMEOUT_MS,
+            timeout: PROXY_TIMEOUT_MS,
           });
         } else {
-          proxy.web(req, res, { target: HTTP_BACKEND, changeOrigin: true });
+          proxy.web(req, res, {
+            target: HTTP_BACKEND,
+            changeOrigin: true,
+            proxyTimeout: PROXY_TIMEOUT_MS,
+            timeout: PROXY_TIMEOUT_MS,
+          });
         }
       }
     } else {
@@ -495,7 +528,12 @@ app.prepare().then(() => {
         req,
         socket,
         head,
-        { target: WS_BACKEND, changeOrigin: true },
+        {
+          target: WS_BACKEND,
+          changeOrigin: true,
+          proxyTimeout: PROXY_WS_TIMEOUT_MS,
+          timeout: PROXY_WS_TIMEOUT_MS,
+        },
         (err) => {
           console.error("[Proxy] WebSocket Proxy Error:", err);
           socket.destroy();

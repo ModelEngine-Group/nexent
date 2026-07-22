@@ -23,8 +23,8 @@ spec:
     spec:
       initContainers:
         - name: init-db
-          image: postgres:15-alpine
-          imagePullPolicy: IfNotPresent
+          image: "{{ .Values.initImage.repository }}:{{ .Values.initImage.tag }}"
+          imagePullPolicy: {{ .Values.initImage.pullPolicy }}
           env:
             - name: DB_HOST
               value: {{ .Values.config.postgresHost | quote }}

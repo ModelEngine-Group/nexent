@@ -10,15 +10,18 @@ class ToolSign(Enum):
     LINKUP_SEARCH = "c"       # Linkup search tool identifier
     TAVILY_SEARCH = "d"  # Tavily search tool identifier
     DATAMATE_SEARCH = "e"  # DataMate search tool identifier
+    FILE_OPERATION = "f"      # File operation tool identifier
     DIFY_SEARCH = "g"  # Dify search tool identifier
     IDATA_SEARCH = "h"  # iData search tool identifier
     HAOTIAN_SEARCH = "i"  # Haotian search tool identifier
+    RAGFLOW_SEARCH = "k"  # RAGFlow search tool identifier
     AIDP_SEARCH = "j"  # AIDP search tool identifier
-    FILE_OPERATION = "f"      # File operation tool identifier
+    MEMORY_OPERATION = "n"      # Memory operation tool identifier
+    SKILL_OPERATION = "s"     # Skill script / file tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
+    PLAN_OPERATION = "p"       # Plan / step-state tool identifier (v1.4)
     DATABASE_OPERATION = "z"  # Database operation tool identifier
-    MEMORY_OPERATION = "n"      # Memory operation tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -31,6 +34,7 @@ TOOL_SIGN_MAPPING = {
     "dify_search": ToolSign.DIFY_SEARCH.value,
     "idata_search": ToolSign.IDATA_SEARCH.value,
     "haotian_search": ToolSign.HAOTIAN_SEARCH.value,
+    "ragflow_search": ToolSign.RAGFLOW_SEARCH.value,
     "aidp_search": ToolSign.AIDP_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
@@ -51,6 +55,9 @@ class ToolCategory(Enum):
     TERMINAL = "terminal"
     MULTIMODAL = "multimodal"
     DATABASE = "database"
+    MEMORY = "memory"
+    SKILL = "skill"
+    PLANNING = "planning"
 
 
 @dataclass

@@ -151,6 +151,9 @@ export default function SkillManagement({
         const result = await deleteSkill(skill.name);
         if (result.success) {
           message.success(t("skillManagement.delete.success"));
+          const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+          const updatedSkills = currentSkills.filter((s) => s.skill_id !== skill.skill_id);
+          updateSkills(updatedSkills);
           invalidate();
         } else {
           message.error(result.message || t("skillManagement.delete.failed"));

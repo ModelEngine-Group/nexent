@@ -31,7 +31,7 @@ from database.agent_version_db import (
     STATUS_DISABLED,
     STATUS_ARCHIVED,
 )
-from database.model_management_db import get_model_by_model_id
+from database.model_management_db import get_model_by_model_id, get_valid_model_ids
 from utils.str_utils import convert_string_to_list
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 
@@ -899,6 +899,11 @@ async def list_published_agents_impl(
             # Add current version info
             agent_info['current_version_no'] = current_version_no
 
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent_info.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent_info["model_ids"] = valid_model_ids
+
             # Check agent availability using the shared function
             _, unavailable_reasons = check_agent_availability(
                 agent_id=agent_id,
@@ -957,6 +962,7 @@ async def list_published_agents_impl(
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),
+                "is_main_agent": agent.get("is_main_agent", True),
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),

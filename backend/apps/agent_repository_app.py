@@ -26,10 +26,6 @@ agent_repository_router = APIRouter(prefix="/repository/agent")
 async def list_agent_repository_listings_api(
     status: Optional[str] = Query(None, description="Filter by listing status"),
     agent_id: Optional[int] = Query(None, description="Filter by source agent ID"),
-    category_id: Optional[int] = Query(
-        None,
-        description="Filter by marketplace category ID",
-    ),
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[
         int, Query(ge=1, le=100, description="Page size from 1 to 100")
@@ -46,7 +42,6 @@ async def list_agent_repository_listings_api(
             tenant_id,
             status=status,
             agent_id=agent_id,
-            category_id=category_id,
             page=page,
             page_size=page_size,
             search=search,
@@ -81,6 +76,10 @@ async def list_my_editable_agents_api(
         False,
         description="Reserve first slot on page 1 for create-agent placeholder",
     ),
+    agent_id: Optional[int] = Query(
+        None,
+        description="Filter to a single agent by agent_id",
+    ),
     authorization: str = Header(None),
 ):
     """List editable draft agents for the current user with repository listing info."""
@@ -94,6 +93,7 @@ async def list_my_editable_agents_api(
             page_size=page_size,
             search=search,
             new_agent_padding=new_agent_padding,
+            agent_id=agent_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
@@ -145,6 +145,16 @@ async def update_agent_repository_status_api(
             "rejected (审核驳回) / shared (已共享)"
         ),
     ),
+    notify_content: Optional[str] = Body(
+        None,
+        embed=True,
+        description="Optional reviewer message for approve/reject notification",
+    ),
+    content: Optional[str] = Body(
+        None,
+        embed=True,
+        description="Review opinion or resubmit note",
+    ),
     authorization: str = Header(None),
 ):
     """Update marketplace repository listing status (share, unshare, approve, reject)."""
@@ -155,6 +165,8 @@ async def update_agent_repository_status_api(
             status=status,
             user_id=user_id,
             tenant_id=tenant_id,
+            notify_content=notify_content,
+            content=content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:

@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from dataclasses import dataclass
@@ -86,7 +87,7 @@ mock_openai_model_class = MagicMock(return_value=mock_openai_model)
 
 
 class _TestCoreAgent:
-    pass
+    enable_planning = False  # v1.4: CoreAgent.__init__ reads this attribute.
 
 
 mock_core_agent_class = _TestCoreAgent
@@ -139,6 +140,7 @@ mock_sdk_module = types.ModuleType("sdk")
 mock_sdk_nexent_module = types.ModuleType("sdk.nexent")
 mock_sdk_nexent_core_module = types.ModuleType("sdk.nexent.core")
 mock_sdk_nexent_core_agents_module = types.ModuleType("sdk.nexent.core.agents")
+mock_sdk_nexent_core_tools_module = types.ModuleType("sdk.nexent.core.tools")
 mock_sdk_nexent_core_utils_module = types.ModuleType("sdk.nexent.core.utils")
 mock_sdk_nexent_core_utils_observer_module = types.ModuleType(
     "sdk.nexent.core.utils.observer"
@@ -154,29 +156,44 @@ mock_sdk_nexent_monitor_monitoring_module = types.ModuleType("sdk.nexent.monitor
 mock_sdk_nexent_monitor_monitoring_module.record_model_call = MagicMock()
 
 
-class _MockLegacyContextRuntime:
-    context_manager = None
-
-
 class _MockManagedContextRuntime:
-    def __init__(self, context_manager):
+    def __init__(self, context_manager, items=None):
         self.context_manager = context_manager
+        self.items = list(items or [])
+
+
+class _MockContextManager:
+    def __init__(self, config, max_steps):
+        self.config = config
+        self.max_steps = max_steps
+
+
+class _MockContextManagerConfig:
+    def __init__(self, enabled=False, **kwargs):
+        self.enabled = enabled
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
 mock_sdk_context_runtime_module.__path__ = []
-mock_sdk_context_runtime_legacy_module = types.ModuleType("sdk.nexent.core.context_runtime.legacy")
-mock_sdk_context_runtime_legacy_module.__path__ = []
-mock_sdk_context_runtime_legacy_runtime_module = types.ModuleType(
-    "sdk.nexent.core.context_runtime.legacy.runtime"
-)
-mock_sdk_context_runtime_legacy_runtime_module.LegacyContextRuntime = _MockLegacyContextRuntime
 mock_sdk_context_runtime_managed_module = types.ModuleType("sdk.nexent.core.context_runtime.managed")
 mock_sdk_context_runtime_managed_module.__path__ = []
 mock_sdk_context_runtime_managed_runtime_module = types.ModuleType(
     "sdk.nexent.core.context_runtime.managed.runtime"
 )
 mock_sdk_context_runtime_managed_runtime_module.ManagedContextRuntime = _MockManagedContextRuntime
+mock_sdk_agent_context_module = types.ModuleType("sdk.nexent.core.agents.agent_context")
+mock_sdk_agent_context_module.ContextManager = _MockContextManager
+mock_sdk_summary_config_module = types.ModuleType("sdk.nexent.core.agents.summary_config")
+mock_sdk_summary_config_module.ContextManagerConfig = _MockContextManagerConfig
+mock_sdk_agent_context_domain_module = types.ModuleType("sdk.nexent.core.agents.context")
+mock_sdk_agent_context_domain_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents" / "context")
+]
+mock_sdk_agent_context_domain_module.ContextManager = _MockContextManager
+mock_sdk_agent_context_domain_module.ContextManagerConfig = _MockContextManagerConfig
+mock_sdk_agent_context_domain_module.ManagedContextRuntime = _MockManagedContextRuntime
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -184,6 +201,9 @@ mock_sdk_nexent_core_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core")]
 mock_sdk_nexent_core_agents_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents")
+]
+mock_sdk_nexent_core_tools_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")
 ]
 mock_sdk_nexent_core_utils_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core" / "utils")]
@@ -290,11 +310,13 @@ module_mocks = {
     "sdk.nexent": mock_sdk_nexent_module,
     "sdk.nexent.core": mock_sdk_nexent_core_module,
     "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
+    "sdk.nexent.core.tools": mock_sdk_nexent_core_tools_module,
     "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
-    "sdk.nexent.core.context_runtime.legacy": mock_sdk_context_runtime_legacy_module,
-    "sdk.nexent.core.context_runtime.legacy.runtime": mock_sdk_context_runtime_legacy_runtime_module,
     "sdk.nexent.core.context_runtime.managed": mock_sdk_context_runtime_managed_module,
     "sdk.nexent.core.context_runtime.managed.runtime": mock_sdk_context_runtime_managed_runtime_module,
+    "sdk.nexent.core.agents.agent_context": mock_sdk_agent_context_module,
+    "sdk.nexent.core.agents.context": mock_sdk_agent_context_domain_module,
+    "sdk.nexent.core.agents.summary_config": mock_sdk_summary_config_module,
     "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
     "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
@@ -351,17 +373,16 @@ sys.modules.setdefault("sdk", mock_sdk_module)
 sys.modules.setdefault("sdk.nexent", mock_sdk_nexent_module)
 sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
 sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
+sys.modules.setdefault("sdk.nexent.core.tools", mock_sdk_nexent_core_tools_module)
 sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
-sys.modules.setdefault("sdk.nexent.core.context_runtime.legacy", mock_sdk_context_runtime_legacy_module)
-sys.modules.setdefault(
-    "sdk.nexent.core.context_runtime.legacy.runtime",
-    mock_sdk_context_runtime_legacy_runtime_module,
-)
 sys.modules.setdefault("sdk.nexent.core.context_runtime.managed", mock_sdk_context_runtime_managed_module)
 sys.modules.setdefault(
     "sdk.nexent.core.context_runtime.managed.runtime",
     mock_sdk_context_runtime_managed_runtime_module,
 )
+sys.modules.setdefault("sdk.nexent.core.agents.agent_context", mock_sdk_agent_context_module)
+sys.modules.setdefault("sdk.nexent.core.agents.summary_config", mock_sdk_summary_config_module)
+sys.modules.setdefault("sdk.nexent.core.agents.context", mock_sdk_agent_context_domain_module)
 
 
 # ----------------------------------------------------------------------------
@@ -1472,6 +1493,42 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "test_agent", ProcessType.FINAL_ANSWER, " content")
 
 
+def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
+    """TOKEN_COUNT exposes the stable model window and keeps the compression threshold."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    context_manager = MagicMock()
+    context_manager.config.token_threshold = 24576
+    context_manager.config.context_window_tokens = 32768
+    context_manager.hard_input_budget_tokens = 28672
+    context_manager.processing_mode = "adaptive_compact"
+    mock_core_agent.context_runtime = MagicMock(
+        context_manager=context_manager,
+        token_threshold=24576,
+        context_window_tokens=32768,
+        hard_input_budget_tokens=28672,
+        processing_mode="adaptive_compact",
+    )
+
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.5)
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_action_step.output = "Final answer"
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    token_payloads = [
+        json.loads(call.args[2])
+        for call in mock_core_agent.observer.add_message.call_args_list
+        if len(call.args) >= 3 and call.args[1] == ProcessType.TOKEN_COUNT
+    ]
+    assert token_payloads[0]["context_window_tokens"] == 32768
+    assert token_payloads[0]["token_threshold"] == 24576
+
+
 def test_agent_run_with_observer_writes_aggregate_context_metrics(nexent_agent_instance, mock_core_agent):
     """Agent run completion writes aggregate context metrics to the top-level span."""
     class _SpanContext:
@@ -2548,6 +2605,95 @@ class TestCreateLocalToolDify:
         assert result == mock_tool_instance
         assert mock_tool_instance.observer == nexent_agent_instance.observer
         assert mock_tool_instance.rerank_model == "rerank_instance"
+
+
+class TestCreateLocalToolRAGFlow:
+    """Tests for create_local_tool with RAGFlowSearchTool."""
+
+    def test_create_local_tool_ragflow_search_success(self, nexent_agent_instance):
+        """Test successful RAGFlowSearchTool creation filters out unsupported params."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="RAGFlowSearchTool",
+            name="ragflow_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={
+                "server_url": "http://localhost:9380",
+                "api_key": "ragflow-key",
+                "dataset_ids": '["ds1"]',
+                "observer": "should_be_filtered",
+                "rerank_model": "should_be_filtered",
+                "rerank": True,
+                "rerank_model_name": "should_be_filtered",
+            },
+            source="local",
+            metadata={"rerank_model": "rerank_display_instance"}
+        )
+
+        original_value = nexent_agent.__dict__.get("RAGFlowSearchTool")
+        nexent_agent.__dict__["RAGFlowSearchTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["RAGFlowSearchTool"] = original_value
+            elif "RAGFlowSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["RAGFlowSearchTool"]
+
+        # Verify filtered params are NOT passed to __init__
+        call_kwargs = mock_tool_class.call_args[1]
+        assert "observer" not in call_kwargs
+        assert "rerank_model" not in call_kwargs
+        assert "rerank" not in call_kwargs
+        assert "rerank_model_name" not in call_kwargs
+        # Verify valid params ARE passed
+        assert call_kwargs["server_url"] == "http://localhost:9380"
+        assert call_kwargs["api_key"] == "ragflow-key"
+        assert call_kwargs["dataset_ids"] == '["ds1"]'
+
+        # Verify observer is set post-init
+        assert result == mock_tool_instance
+        assert mock_tool_instance.observer == nexent_agent_instance.observer
+        # Verify rerank_model is set from metadata for display purposes
+        assert mock_tool_instance.rerank_model == "rerank_display_instance"
+
+    def test_create_local_tool_ragflow_search_without_metadata(self, nexent_agent_instance):
+        """Test RAGFlowSearchTool creation when metadata is None or empty."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="RAGFlowSearchTool",
+            name="ragflow_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"server_url": "http://localhost:9380", "api_key": "key"},
+            source="local",
+            metadata=None,
+        )
+
+        original_value = nexent_agent.__dict__.get("RAGFlowSearchTool")
+        nexent_agent.__dict__["RAGFlowSearchTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["RAGFlowSearchTool"] = original_value
+            elif "RAGFlowSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["RAGFlowSearchTool"]
+
+        assert result == mock_tool_instance
+        assert mock_tool_instance.observer == nexent_agent_instance.observer
+        assert mock_tool_instance.rerank_model is None
 
 
 class TestCreateLocalToolAnalyze:

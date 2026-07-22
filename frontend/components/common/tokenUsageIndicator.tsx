@@ -2,7 +2,7 @@
 
 import React from "react";
 import { TokenMetrics } from "@/types/chat";
-import { Tooltip } from "antd"
+import { Tooltip } from "antd";
 
 interface TokenUsageIndicatorProps {
   latestMetrics: TokenMetrics | null;
@@ -13,22 +13,33 @@ function formatNumber(n: number): string {
   return String(n);
 }
 
-export function TokenUsageIndicator({ latestMetrics }: TokenUsageIndicatorProps) {
+export function TokenUsageIndicator({
+  latestMetrics,
+}: TokenUsageIndicatorProps) {
   // Matches backend _TOKEN_THRESHOLD_LEGACY_FALLBACK; shown only when the
   // backend stream does not carry a real token_threshold (rare once W2 ships).
   // Sized for the typical 32K-context band shared by most production LLMs.
   const DEFAULT_THRESHOLD = 32768;
 
-  const estimated_context_tokens = latestMetrics?.estimated_context_tokens ?? null;
+  const estimated_context_tokens =
+    latestMetrics?.estimated_context_tokens ?? null;
   const token_threshold = latestMetrics?.token_threshold ?? null;
+  const hardInputBudget = latestMetrics?.hard_input_budget_tokens ?? null;
+  const processingMode = latestMetrics?.context_processing_mode ?? null;
+  const outputFinishReason = latestMetrics?.output_finish_reason ?? null;
   const total_output_tokens = latestMetrics?.total_output_tokens ?? 0;
 
-  // Compute fill ratio — prefer real estimated context, fall back to step input
-  const contextTokens = estimated_context_tokens ?? latestMetrics?.step_input_tokens ?? 0;
-  const threshold = token_threshold ?? DEFAULT_THRESHOLD;
-  const ratio = latestMetrics ? (threshold > 0 ? Math.min(contextTokens / threshold, 1) : 0) : 0;
-  const pct = Math.round(ratio * 100);
-  const isDefaultThreshold = token_threshold === null || token_threshold === undefined;
+  // Prefer provider-reported input usage; fall back to the pre-call estimate.
+  const contextTokens =
+    latestMetrics?.step_input_tokens ?? estimated_context_tokens ?? 0;
+  const threshold = hardInputBudget ?? token_threshold ?? DEFAULT_THRESHOLD;
+  const usageRatio =
+    latestMetrics && threshold > 0 ? contextTokens / threshold : 0;
+  const ratio = Math.min(usageRatio, 1);
+  const pct = Math.round(usageRatio * 100);
+  const isDefaultThreshold =
+    hardInputBudget === null &&
+    (token_threshold === null || token_threshold === undefined);
 
   // SVG ring parameters
   const size = 28;
@@ -46,15 +57,42 @@ export function TokenUsageIndicator({ latestMetrics }: TokenUsageIndicatorProps)
       <div className="flex justify-between gap-4">
         <span className="text-gray-300">Context</span>
         <span className="text-white">
-          {formatNumber(contextTokens)} / {formatNumber(threshold)}{isDefaultThreshold ? "*" : ""} ({pct}%)
+          {formatNumber(contextTokens)} / {formatNumber(threshold)}
+          {isDefaultThreshold ? "*" : ""} ({pct}%)
         </span>
       </div>
+      {outputFinishReason !== null && (
+        <div className="flex justify-between gap-4">
+          <span className="text-gray-300">Output stopped by</span>
+          <span
+            className={
+              outputFinishReason === "length" ? "text-red-300" : "text-white"
+            }
+          >
+            {outputFinishReason}
+          </span>
+        </div>
+      )}
+      {hardInputBudget !== null && token_threshold !== null && (
+        <div className="flex justify-between gap-4">
+          <span className="text-gray-300">Compression starts at</span>
+          <span className="text-white">{formatNumber(token_threshold)}</span>
+        </div>
+      )}
+      {processingMode !== null && (
+        <div className="flex justify-between gap-4">
+          <span className="text-gray-300">Policy</span>
+          <span className="text-white">{processingMode}</span>
+        </div>
+      )}
       {isDefaultThreshold && (
         <div className="text-gray-400 text-xs">* estimated limit</div>
       )}
       <div className="flex justify-between gap-4">
         <span className="text-gray-300">Output</span>
-        <span className="text-white">{formatNumber(total_output_tokens)} tokens</span>
+        <span className="text-white">
+          {formatNumber(total_output_tokens)} tokens
+        </span>
       </div>
     </div>
   ) : (
@@ -89,7 +127,9 @@ export function TokenUsageIndicator({ latestMetrics }: TokenUsageIndicatorProps)
               strokeDasharray={circumference}
               strokeDashoffset={strokeDashoffset}
               strokeLinecap="round"
-              style={{ transition: "stroke-dashoffset 0.4s ease, stroke 0.4s ease" }}
+              style={{
+                transition: "stroke-dashoffset 0.4s ease, stroke 0.4s ease",
+              }}
             />
           )}
         </svg>

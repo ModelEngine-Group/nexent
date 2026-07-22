@@ -14,12 +14,13 @@ from consts.agent_repository import (
 )
 from consts.exceptions import UnauthorizedError
 from consts.model import AgentRepositorySnapshot
+from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 from database.agent_db import search_agent_info_by_agent_id
 from database.agent_version_db import search_version_by_version_no
 from database.agent_repository_db import (
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
-    get_agent_repository_by_id_and_publisher,
+    get_agent_repository_by_id,
     increment_agent_repository_downloads,
     insert_agent_repository_record,
     list_agent_repository_by_agent_ids,
@@ -36,6 +37,11 @@ from services.agent_service import (
     import_agent_impl,
     import_agent_with_skills_impl,
     list_all_agent_info_impl,
+)
+from services.notification_service import (
+    create_repository_pending_review_notification,
+    create_repository_review_notification,
+    deactivate_notifications,
 )
 from services.repository_import_precheck import build_repository_import_precheck
 
@@ -91,12 +97,12 @@ def _to_summary_item(
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "status": record.get("status"),
-        "category_id": record.get("category_id"),
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count") or 0,
         "version_label": record.get("version_name"),
         "icon": record.get("icon"),
         "downloads": downloads,
+        "content": record.get("content"),
     }
 
 
@@ -119,13 +125,11 @@ def _matches_repository_listing_search_filter(record: dict, search: str) -> bool
         return True
     name = str(record.get("display_name") or record.get("name") or "").lower()
     description = str(record.get("description") or "").lower()
-    author = str(record.get("author") or "").lower()
     tags = record.get("tags") or []
     tag_text = " ".join(str(tag).lower() for tag in tags if isinstance(tag, str))
     return (
         query in name
         or query in description
-        or query in author
         or query in tag_text
     )
 
@@ -135,7 +139,6 @@ def list_agent_repository_listings_impl(
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
-    category_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
@@ -150,7 +153,6 @@ def list_agent_repository_listings_impl(
         publisher_tenant_id=tenant_id,
         status=status,
         agent_id=agent_id,
-        category_id=category_id,
     )
     if search and search.strip():
         records = [
@@ -225,10 +227,6 @@ def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
             f"icon must be at most {_MAX_LISTING_ICON_LENGTH} characters"
         )
 
-    category_id = repository_data.get("category_id")
-    if category_id is None or not isinstance(category_id, int):
-        raise ValueError("category_id is required and must be an integer")
-
     tags = repository_data.get("tags")
     if tags is None:
         raise ValueError("tags is required for marketplace listing submission")
@@ -273,6 +271,7 @@ def _to_repository_info_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "version_no": record.get("version_no"),
         "version_label": record.get("version_name"),
         "create_time": _serialize_created_at(record.get("create_time")),
+        "content": record.get("content"),
     }
 
 
@@ -355,6 +354,7 @@ async def list_my_editable_agents_impl(
     page_size: int = 10,
     search: Optional[str] = None,
     new_agent_padding: bool = False,
+    agent_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """List visible draft agents for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -375,10 +375,10 @@ async def list_my_editable_agents_impl(
 
     filtered_agents = []
     for agent in all_agents:
-        agent_id = agent.get("agent_id")
-        if agent_id is None:
+        current_agent_id = agent.get("agent_id")
+        if current_agent_id is None:
             continue
-        meta = meta_by_id.get(int(agent_id), {})
+        meta = meta_by_id.get(int(current_agent_id), {})
         if not _matches_mine_ownership_filter(
             meta.get("created_by"),
             user_id,
@@ -394,10 +394,18 @@ async def list_my_editable_agents_impl(
             if _matches_mine_search_filter(agent, search)
         ]
 
+    if agent_id is not None:
+        filtered_agents = [
+            (agent, meta)
+            for agent, meta in filtered_agents
+            if agent.get("agent_id") is not None and int(agent["agent_id"]) == agent_id
+        ]
+
     include_padding = (
         new_agent_padding
         and normalized_ownership == OWNERSHIP_ALL
         and not (search and search.strip())
+        and agent_id is None
     )
     paged_entries, total = _paginate_mine_agents_with_optional_padding(
         filtered_agents,
@@ -419,10 +427,10 @@ async def list_my_editable_agents_impl(
             publisher_tenant_id=tenant_id,
         )
         for record in repository_records:
-            agent_id = record.get("agent_id")
-            if agent_id is None:
+            record_agent_id = record.get("agent_id")
+            if record_agent_id is None:
                 continue
-            repository_by_agent_id.setdefault(int(agent_id), []).append(
+            repository_by_agent_id.setdefault(int(record_agent_id), []).append(
                 _to_repository_info_item(record)
             )
 
@@ -434,7 +442,7 @@ async def list_my_editable_agents_impl(
             items.append({"new_agent_padding": True})
             continue
         agent, meta = entry
-        agent_id = int(agent["agent_id"])
+        entry_agent_id = int(agent["agent_id"])
         items.append(
             {
                 "agent_id": agent.get("agent_id"),
@@ -446,8 +454,8 @@ async def list_my_editable_agents_impl(
                     meta.get("version_create_time")
                 ),
                 "permission": agent.get("permission"),
-                "downloads": download_totals.get(agent_id, 0),
-                "repository_info": repository_by_agent_id.get(agent_id, []),
+                "downloads": download_totals.get(entry_agent_id, 0),
+                "repository_info": repository_by_agent_id.get(entry_agent_id, []),
             }
         )
 
@@ -529,7 +537,7 @@ def get_agent_repository_listing_detail_impl(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """Load a repository listing and return a detail payload for the UI."""
-    record = get_agent_repository_by_id_and_publisher(
+    record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
     )
@@ -650,6 +658,8 @@ def update_agent_repository_status_impl(
     status: str,
     user_id: str,
     tenant_id: str,
+    notify_content: Optional[str] = None,
+    content: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update a repository listing status by primary key."""
     if status not in VALID_REPOSITORY_STATUSES:
@@ -658,7 +668,7 @@ def update_agent_repository_status_impl(
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
 
-    record = get_agent_repository_by_id_and_publisher(
+    record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
     )
@@ -697,6 +707,7 @@ def update_agent_repository_status_impl(
             else None
         ),
         submitted_by=submitted_by,
+        content=content,
     )
     if rows_affected == 0:
         raise ValueError("Repository listing not found")
@@ -708,13 +719,63 @@ def update_agent_repository_status_impl(
         publisher_tenant_id=tenant_id,
     )
 
-    updated = get_agent_repository_by_id_and_publisher(
+    updated = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
     )
     if not updated:
         raise ValueError("Failed to load repository listing after update")
+
+    _handle_review_status_notifications(
+        current_status=current_status,
+        new_status=status,
+        updated=updated,
+        agent_repository_id=agent_repository_id,
+        user_id=user_id,
+        content=content,
+        notify_content=notify_content,
+    )
+
     return _to_summary_item(updated)
+
+
+def _handle_review_status_notifications(
+    *,
+    current_status: str,
+    new_status: str,
+    updated: Dict[str, Any],
+    agent_repository_id: int,
+    user_id: str,
+    content: Optional[str] = None,
+    notify_content: Optional[str] = None,
+) -> None:
+    """Send review-result notification and deactivate pending-review notification."""
+    if current_status != new_status and new_status in (STATUS_SHARED, STATUS_REJECTED):
+        details: Dict[str, Any] = {
+            "name": updated.get("display_name") or updated.get("name"),
+            "agent_repository_id": agent_repository_id,
+            "agent_id": updated.get("agent_id"),
+        }
+        review_reason = content or notify_content
+        if review_reason:
+            details["content"] = review_reason
+        create_repository_review_notification(
+            resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+            review_status=new_status,
+            receiver_user_id=updated["publisher_user_id"],
+            details=details,
+            tenant_id=updated.get("publisher_tenant_id"),
+            unique_id=agent_repository_id,
+            created_by=user_id,
+        )
+
+    if current_status == STATUS_PENDING_REVIEW:
+        deactivate_notifications(
+            event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+            resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+            unique_id=agent_repository_id,
+            updated_by=user_id,
+        )
 
 
 def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -728,7 +789,6 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "description": record.get("description"),
         "author": record.get("author"),
         "submitted_by": record.get("submitted_by"),
-        "category_id": record.get("category_id"),
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count"),
         "version_label": record.get("version_name"),
@@ -739,6 +799,7 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "publisher_tenant_id": record.get("publisher_tenant_id"),
         "created_at": record.get("create_time"),
         "updated_at": record.get("update_time"),
+        "content": record.get("content"),
     }
 
 
@@ -850,7 +911,7 @@ async def _build_repository_data_from_agent(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "category_id", "tool_count"):
+        for key in ("icon", "downloads", "tool_count", "content"):
             if key in card_fields and card_fields[key] is not None:
                 repository_data[key] = card_fields[key]
         if "tags" in card_fields and card_fields["tags"] is not None:
@@ -873,7 +934,7 @@ async def create_agent_repository_listing_impl(
     then inserts or updates the marketplace table.
 
     When a listing for the same agent version already exists, its status is
-    updated to pending_review along with icon, tags, and category when provided.
+    updated to pending_review along with icon and tags when provided.
     """
     if version_no < 0:
         raise ValueError("version_no must be >= 0")
@@ -885,6 +946,7 @@ async def create_agent_repository_listing_impl(
         version_no,
         card_fields=card_fields,
     )
+    repository_data["content"] = (card_fields or {}).get("content") or ""
     _validate_create_payload(repository_data)
 
     existing = get_agent_repository_by_agent_id(
@@ -901,8 +963,11 @@ async def create_agent_repository_listing_impl(
         is_updated = False
     else:
         repository_id = int(existing["agent_repository_id"])
-        updates: Dict[str, Any] = {"status": STATUS_PENDING_REVIEW}
-        for key in ("icon", "tags", "category_id", "tool_count"):
+        updates: Dict[str, Any] = {
+            "status": STATUS_PENDING_REVIEW,
+            "content": repository_data["content"],
+        }
+        for key in ("icon", "tags", "tool_count"):
             if key in repository_data:
                 updates[key] = repository_data[key]
         affected = update_agent_repository_by_id(
@@ -915,7 +980,7 @@ async def create_agent_repository_listing_impl(
             raise ValueError("Failed to update repository listing")
         is_updated = True
 
-    record = get_agent_repository_by_id_and_publisher(
+    record = get_agent_repository_by_id(
         repository_id,
         tenant_id,
     )
@@ -927,6 +992,18 @@ async def create_agent_repository_listing_impl(
         status=repository_data["status"],
         publisher_tenant_id=tenant_id,
     )
+    create_repository_pending_review_notification(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        tenant_id=tenant_id,
+        unique_id=repository_id,
+        details={
+            "name": record.get("display_name") or record.get("name"),
+            "agent_repository_id": repository_id,
+            "agent_id": record.get("agent_id"),
+            "content": record.get("content") or "",
+        },
+        created_by=user_id,
+    )
     return _to_detail_item(record, is_updated=is_updated)
 
 
@@ -935,7 +1012,7 @@ def check_repository_import_precheck_impl(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """Check whether the current tenant can import a shared repository listing."""
-    record = get_agent_repository_by_id_and_publisher(
+    record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
     )
@@ -970,7 +1047,7 @@ async def import_agent_from_repository_impl(
     authorization: str,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
-    record = get_agent_repository_by_id_and_publisher(
+    record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
     )

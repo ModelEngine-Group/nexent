@@ -20,11 +20,7 @@ Nexent 是一个基于 **Harness Engineering** 原则打造的零代码智能体
 
 > ⭐ 在您开始使用前，请您顺手在 [GitHub](https://github.com/ModelEngine-Group/nexent) 为我们点个 Star，您的支持是我们前进的动力！
 
-## 方式一：使用官方体验环境
-
-无需安装，直接访问我们的 **[在线体验环境](http://60.204.251.153:3000/zh)**，快速体验 Nexent 的强大功能。
-
-## 方式二：自行部署
+## 自行部署
 
 如果需要在本地或私有环境中部署 Nexent，我们提供两种部署方式：
 
@@ -56,7 +52,7 @@ Docker 与 Kubernetes 统一使用 `deploy/env/.env` 作为运行配置文件；
 
 Docker 卸载入口为 `bash uninstall.sh docker`，默认交互确认是否删除持久化数据；也可以通过 `--delete-volumes true|false` 控制，或使用 `bash uninstall.sh docker delete-all` 同时删除容器和持久化数据。
 
-离线镜像包可通过 `bash build.sh --package --target docker --compress true` 或 `bash deploy/offline/build_offline_package.sh --target docker --compress true` 构建。包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、部署脚本、SQL 文件、`manifest.yaml` 和 `checksums.txt`。包内部署会复用已保存的 `deploy.options` 或内置默认值，默认不进入 TUI；添加 `--config` 可交互配置。在目标机器上使用 `bash deploy.sh --load-images docker ...` 加载镜像并部署。
+离线镜像包可通过 `bash build.sh --package --target docker --compress true` 或 `bash deploy/offline/build_offline_package.sh --target docker --compress true` 构建。包内包含镜像 tar、`load-images.sh`、`push-images.sh`、根目录部署/卸载入口、部署脚本、SQL 文件、`manifest.yaml` 和 `checksums.txt`。包内部署会复用已保存的 `deploy.options` 或内置默认值，默认不进入 TUI；添加 `--config` 可交互配置。在目标机器上使用 `bash deploy.sh --load-images docker ...` 加载镜像并部署，或使用 `bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker ...` 推送到内部仓库并使用该镜像前缀部署。启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀，随后 `push-images.sh` 询问仓库账号和密码。
 
 详细部署指南请参考 [Docker 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/installation.html)。
 
@@ -74,7 +70,7 @@ Kubernetes 真实实现为 `bash deploy/k8s/deploy.sh`。它会读取同一个`d
 
 根目录卸载入口为 `bash uninstall.sh docker ...` 或 `bash uninstall.sh k8s ...`，具体实现仍分别在 `deploy/docker/uninstall.sh` 和 `deploy/k8s/uninstall.sh`。
 
-Kubernetes 离线包使用同一个构建脚本，传入 `--target k8s` 或 `--target all`。部署前需要在每个需要运行 Pod 的节点上执行 `load-images.sh`，或将镜像推送到集群可访问的内部镜像仓库，再使用与打包时一致的版本和镜像源参数部署。
+Kubernetes 离线包使用同一个构建脚本，传入 `--target k8s` 或 `--target all`。部署前需要在每个需要运行 Pod 的节点上执行 `load-images.sh`，或使用 `--push-images --image-registry-prefix registry.example.com/nexent` 将镜像推送到集群可访问的内部镜像仓库，再使用与打包时一致的版本、镜像源和镜像仓库前缀部署。
 
 详细部署指南请参考 [Kubernetes 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/kubernetes-installation.html)。
 

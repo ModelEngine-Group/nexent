@@ -27,7 +27,8 @@ const INITIAL_FILTERS: MyCommunityMcpFilters = {
  * a single row lives in {@link usePublishedServiceDetailEdit} inside the detail modal.
  */
 export function useMyCommunityMcp(enabled: boolean) {
-  const [filters, setFilters] = useState<MyCommunityMcpFilters>(INITIAL_FILTERS);
+  const [filters, setFilters] =
+    useState<MyCommunityMcpFilters>(INITIAL_FILTERS);
 
   const query = useQuery({
     queryKey: [...MCP_TOOLS_QUERY_KEYS.myCommunity],
@@ -101,5 +102,6 @@ export function useMyCommunityMcp(enabled: boolean) {
     updateFilter,
     search: filters.search,
     setSearch: (value: string) => updateFilter("search", value),
+    refetch: query.refetch,
   };
 }

@@ -202,7 +202,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`deploy/env/.env.example`、`deploy/env/monitoring.env.example`、`manifest.yaml` 和 `checksums.txt`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或生成的 Helm values。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+包内包含镜像 tar、`load-images.sh`、`push-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`deploy/env/.env.example`、`deploy/env/monitoring.env.example`、`manifest.yaml` 和 `checksums.txt`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或生成的 Helm values。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
 
 在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
 
@@ -211,7 +211,13 @@ cd offline-package
 bash deploy.sh --load-images k8s
 ```
 
-多节点集群需要在每个可能运行 Nexent Pod 的节点上加载镜像，或将镜像推送到集群可访问的内部镜像仓库，再使用匹配的镜像参数部署。
+多节点集群需要在每个可能运行 Nexent Pod 的节点上加载镜像，或将镜像推送到集群可访问的内部镜像仓库，再使用匹配的镜像参数部署：
+
+```bash
+bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent k8s
+```
+
+启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀；随后 `push-images.sh` 在推送前询问仓库账号和密码。
 
 ## 🔧 部署命令
 
@@ -328,7 +334,8 @@ helm upgrade --install nexent nexent \
   --set nexent-supabase-db.enabled=true \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
-  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret
+  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
+  --set nexent-common.config.oauth.loginMode=force
 ```
 
 可配置的 OAuth values：
@@ -346,6 +353,9 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.oauth.wechatClientSecret` | `WECHAT_OAUTH_APP_SECRET` | WeChat App Secret |
 | `nexent-common.config.oauth.sslVerify` | `OAUTH_SSL_VERIFY` | 访问 OAuth provider 时是否校验证书 |
 | `nexent-common.config.oauth.caBundle` | `OAUTH_CA_BUNDLE` | 自定义 CA bundle 路径 |
+| `nexent-common.config.oauth.loginMode` | `OAUTH_LOGIN_MODE` | `disabled`、`button` 或 `force` |
+
+`loginMode` 默认为 `button`。`force` 模式下，没有可用 Provider 时禁用 OAuth，同时启用多个 Provider 时回退到登录按钮；CAS `force` 模式优先于 OAuth 自动登录。
 
 Provider 回调地址：
 

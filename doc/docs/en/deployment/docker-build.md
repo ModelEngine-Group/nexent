@@ -263,3 +263,5 @@ bash deploy.sh --load-images docker \
   --components infrastructure,application,data-process,supabase \
   --image-source local-latest
 ```
+
+To push the packaged images to an internal registry during offline deployment, replace `--load-images` with `--push-images --image-registry-prefix registry.example.com/nexent`. If the prefix is omitted, the wrapper prompts for it before `push-images.sh` asks for the registry username and password. The deployment config will use the same registry prefix for Docker Compose image references.

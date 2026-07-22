@@ -17,7 +17,9 @@ import type {
   AidpKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse,
 } from "@/types/agentConfig";
+import type { QuotaStatusResponse } from "@/types/quota";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { emitQuotaUsageChanged } from "@/lib/quotaEvents";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -148,6 +150,65 @@ class KnowledgeBaseService {
       return difyKnowledgeBases;
     } catch (error) {
       log.error("Failed to get Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get RAGFlow knowledge bases as KnowledgeBase array
+  async getRagflowKnowledgeBases(
+    ragflowApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const url = new URL(API_ENDPOINTS.ragflow.datasets, globalThis.location.origin);
+      url.searchParams.set("ragflow_api_base", ragflowApiBase);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage = result.message || "Failed to fetch RAGFlow datasets";
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      const datasets: KnowledgeBase[] = (result.data || []).map((ds: any) => {
+        const stats = ds.stats || {};
+        return {
+          id: ds.id || ds.dataset_id || "",
+          name: ds.name || ds.dataset_name || "Unnamed",
+          display_name: ds.name || ds.dataset_name || "Unnamed",
+          description: ds.description || "",
+          documentCount: stats.doc_count || ds.doc_count || 0,
+          chunkCount: stats.chunk_count || ds.chunk_count || 0,
+          createdAt: ds.create_time || ds.create_date || null,
+          updatedAt: ds.update_time || ds.update_date || null,
+          embeddingModel: ds.embedding_model || "unknown",
+          knowledge_sources: "ragflow",
+          ingroup_permission: "",
+          group_ids: [],
+          store_size: "",
+          process_source: "RAGFlow",
+          avatar: "",
+          chunkNum: 0,
+          language: "",
+          nickname: "",
+          parserId: "",
+          permission: "",
+          tokenNum: 0,
+          source: "ragflow",
+          tenant_id: "",
+        };
+      });
+
+      return datasets;
+    } catch (error) {
+      log.error("Failed to get RAGFlow knowledge bases:", error);
       throw error;
     }
   }
@@ -888,6 +949,7 @@ class KnowledgeBaseService {
         group_ids?: number[];
         is_multimodal?: boolean;
         preserve_source_file?: boolean;
+        quota_limit_bytes?: number | null;
       } = {
         name: params.name,
         description: params.description || "",
@@ -904,6 +966,9 @@ class KnowledgeBaseService {
       }
       if (params.preserve_source_file !== undefined) {
         requestBody.preserve_source_file = params.preserve_source_file;
+      }
+      if (params.quota_limit_bytes !== undefined) {
+        requestBody.quota_limit_bytes = params.quota_limit_bytes;
       }
 
       const response = await fetch(
@@ -962,6 +1027,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete knowledge base");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete knowledge base:", error);
       throw error;
@@ -1042,7 +1108,7 @@ class KnowledgeBaseService {
     files: File[],
     chunkingStrategy?: string,
     modelId?: number
-  ): Promise<void> {
+  ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
       // Create FormData object
       const formData = new FormData();
@@ -1121,7 +1187,8 @@ class KnowledgeBaseService {
 
       // Handle successful response (201)
       if (processResponse.status === 201) {
-        return;
+        emitQuotaUsageChanged();
+        return { quota_status: uploadResult?.quota_status };
       }
 
       throw new Error("Unknown response status during processing");
@@ -1149,6 +1216,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete document");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete document:", error);
       throw error;
