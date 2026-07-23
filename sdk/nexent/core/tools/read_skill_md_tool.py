@@ -179,17 +179,13 @@ class ReadSkillMdTool:
             return f"[Error] Failed to read '{file_path}': {e}"
 
 
-# Global instance for tool execution
-_skill_md_tool = None
-
-
 def get_read_skill_md_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
 ) -> ReadSkillMdTool:
-    """Get or create the skill md tool instance.
+    """Create a new skill md tool instance.
 
     Args:
         local_skills_dir: Path to local skills storage.
@@ -197,10 +193,7 @@ def get_read_skill_md_tool(
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
     """
-    global _skill_md_tool
-    if _skill_md_tool is None:
-        _skill_md_tool = ReadSkillMdTool(local_skills_dir, agent_id, tenant_id, version_no)
-    return _skill_md_tool
+    return ReadSkillMdTool(local_skills_dir, agent_id, tenant_id, version_no)
 
 
 @tool
@@ -243,6 +236,6 @@ def read_skill_md(skill_name: str, additional_files: Optional[list[str]] = None)
         read_skill_md("")  # reads SKILL.md from root
         read_skill_md("", ["my-file.txt"])  # reads my-file.txt from root
     """
-    tool_instance = get_read_skill_md_tool()
+    tool_instance = read_skill_md._tool_instance
     files = additional_files or []
     return tool_instance.execute(skill_name, *files)

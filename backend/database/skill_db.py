@@ -79,6 +79,26 @@ def query_skill_instances_by_agent_id(agent_id: int, tenant_id: str, version_no:
         return [as_dict(skill_instance) for skill_instance in skill_instances]
 
 
+def get_valid_skill_ids(tenant_id: str, skill_ids: List[int]) -> set:
+    """Return skill IDs that still exist in ag_skill_info_t and are not soft-deleted.
+    Used as a fallback check when skill instances may reference deleted skills.
+    Args:
+        tenant_id: Tenant ID for filtering.
+        skill_ids: Candidate skill IDs to validate.
+    Returns:
+        Set of valid (non-deleted) skill IDs.
+    """
+    if not skill_ids:
+        return set()
+    with get_db_session() as session:
+        rows = session.query(SkillInfo.skill_id).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.skill_id.in_(skill_ids),
+            SkillInfo.delete_flag != 'Y',
+        ).all()
+        return {row[0] for row in rows}
+
+
 def query_enabled_skill_instances(agent_id: int, tenant_id: str, version_no: int = 0):
     """Query enabled SkillInstance in the database."""
     with get_db_session() as session:

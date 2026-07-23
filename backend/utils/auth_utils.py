@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import jwt
 from fastapi import Request
-from supabase import create_client
+from supabase import ClientOptions, create_client
 
 from consts.const import (
     ASSET_OWNER_ROLE,
@@ -252,7 +252,14 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
 def get_supabase_client():
     """Get Supabase client instance with regular key (user-context operations)."""
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        return create_client(
+            SUPABASE_URL,
+            SUPABASE_KEY,
+            options=ClientOptions(
+                auto_refresh_token=False,
+                persist_session=False,
+            ),
+        )
     except Exception as e:
         logging.error(f"Failed to create Supabase client: {str(e)}")
         return None
@@ -261,7 +268,14 @@ def get_supabase_client():
 def get_supabase_admin_client():
     """Get Supabase client instance with service role key for admin operations."""
     try:
-        return create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
+        return create_client(
+            SUPABASE_URL,
+            SUPABASE_KEY,
+            options=ClientOptions(
+                auto_refresh_token=False,
+                persist_session=False,
+            ),
+        )
     except Exception as e:
         logging.error(f"Failed to create Supabase admin client: {str(e)}")
         return None

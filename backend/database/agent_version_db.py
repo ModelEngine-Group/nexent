@@ -508,7 +508,6 @@ def get_next_version_no(
         max_version = session.query(func.max(AgentInfo.version_no)).filter(
             AgentInfo.agent_id == agent_id,
             AgentInfo.tenant_id == tenant_id,
-            AgentInfo.delete_flag == 'N',
         ).scalar()
         return (max_version or 0) + 1
 

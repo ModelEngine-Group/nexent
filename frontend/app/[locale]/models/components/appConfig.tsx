@@ -360,6 +360,7 @@ export const AppConfigSection: React.FC = () => {
                     size="large"
                     status={appNameError ? "error" : ""}
                     style={appNameError ? { borderColor: "#ff4d4f" } : {}}
+                    disabled
                   />
                 </div>
                 <div className="mb-1">
@@ -376,6 +377,7 @@ export const AppConfigSection: React.FC = () => {
                     className="text-md rounded-md"
                     autoSize={{ minRows: 15 }}
                     size="large"
+                    disabled
                   />
                 </div>
               </div>

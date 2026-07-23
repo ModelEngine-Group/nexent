@@ -6,6 +6,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Plus, FileInput, Settings, ChevronDown, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -46,6 +47,8 @@ export default function AgentSelectorHeader({
   onCloseVersionManagePanel,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
+  const router = useRouter();
+  const pathname = usePathname();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const checkUnsavedChanges = useSaveGuard();
@@ -411,7 +414,18 @@ export default function AgentSelectorHeader({
     try {
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
+        // Mark that user manually selected an agent (to prevent URL auto-load from overriding)
+        sessionStorage.setItem("agent_manual_select", "true");
+
         setCurrentAgent(result.data);
+
+        // Clear agent_id from URL to prevent auto-reloading on next switch
+        // Use window.location for reliable URL manipulation
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("agent_id")) {
+          url.searchParams.delete("agent_id");
+          router.replace(url.pathname + url.search);
+        }
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
