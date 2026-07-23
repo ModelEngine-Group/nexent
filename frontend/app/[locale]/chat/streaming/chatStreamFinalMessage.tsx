@@ -317,7 +317,7 @@ function ChatStreamFinalMessageInner({
         {/* Assistant message part - show final answer or content */}
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
-            <div className="bg-white rounded-lg w-full -mt-2">
+            <div className="bg-white rounded-lg w-full mt-2">
               {/* Max steps warning - show when message is complete and has maxStepsInfo */}
               {message.isComplete &&
                 message.steps &&

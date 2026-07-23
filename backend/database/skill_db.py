@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import update as sa_update
+from sqlalchemy import or_, update as sa_update
 
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
@@ -79,6 +79,34 @@ def query_skill_instances_by_agent_id(agent_id: int, tenant_id: str, version_no:
             SkillInstance.delete_flag != 'Y')
         skill_instances = query.all()
         return [as_dict(skill_instance) for skill_instance in skill_instances]
+
+
+def get_valid_skill_ids(tenant_id: str, skill_ids: List[int]) -> set:
+    """Return skill IDs that still exist in ag_skill_info_t and are not soft-deleted.
+
+    Checks both tenant-scoped skills and global (tenant_id IS NULL) skills.
+
+    Used as a fallback check when skill instances may reference deleted skills.
+
+    Args:
+        tenant_id: Tenant ID for filtering tenant-scoped skills.
+        skill_ids: Candidate skill IDs to validate.
+
+    Returns:
+        Set of valid (non-deleted) skill IDs.
+    """
+    if not skill_ids:
+        return set()
+    with get_db_session() as session:
+        rows = session.query(SkillInfo.skill_id).filter(
+            SkillInfo.skill_id.in_(skill_ids),
+            SkillInfo.delete_flag != 'Y',
+            or_(
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.tenant_id.is_(None),
+            ),
+        ).all()
+        return {row[0] for row in rows}
 
 
 def query_enabled_skill_instances(agent_id: int, tenant_id: str, version_no: int = 0):

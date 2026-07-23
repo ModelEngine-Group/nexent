@@ -18,16 +18,19 @@ from database.conversation_db import (
     delete_conversation,
     get_conversation,
     get_conversation_history,
+    get_historical_context,
     get_conversation_list,
-    get_latest_assistant_message,
+    get_latest_assistant_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message_id,
-    get_last_unit_for_message,
+    get_latest_user_message_id,
+    get_last_unit_for_message,  # noqa: F401 - service boundary re-export
     get_message_id_by_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    save_history_summary,
     update_conversation_agent_id,
     update_conversation_message_content,
     update_conversation_message_status,
@@ -36,10 +39,8 @@ from database.conversation_db import (
     update_message_unit_content,
     update_message_unit_status,
 )
-from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
-from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -130,6 +131,43 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         user_id=user_id,
         unit_status=unit_status,
     )
+
+
+def persist_history_summary_candidate(
+    conversation_id: int, candidate: Any, user_id: str, tenant_id: str,
+) -> int:
+    """Backend persistence boundary injected into the SDK context runtime."""
+    def field(name: str, default: Any = None) -> Any:
+        return candidate.get(name, default) if isinstance(candidate, dict) \
+            else getattr(candidate, name, default)
+
+    return save_history_summary(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        summary=field("summary"),
+        covered_through_message_id=field("covered_through_message_id"),
+        previous_summary_unit_id=field("previous_summary_unit_id"),
+        trigger=field("trigger"),
+    )
+
+
+def load_historical_context(
+    conversation_id: int, current_user_message_id: int,
+    user_id: str, tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Load only the authorized checkpoint and completed turns needed by SDK."""
+    return get_historical_context(
+        conversation_id=conversation_id,
+        current_user_message_id=current_user_message_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
+def get_current_run_user_message_id(conversation_id: int, user_id: str) -> Optional[int]:
+    """Resolve the persisted boundary for the run that was just saved."""
+    return get_latest_user_message_id(conversation_id, user_id)
 
 
 def update_message_status(message_id: int, status: str, user_id: str) -> None:
@@ -326,6 +364,19 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         raise Exception(str(e))
 
 
+def get_conversation_service(
+    conversation_id: int,
+    user_id: str,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a conversation only within the requesting user and tenant scope."""
+    return get_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
 def update_conversation_agent_id_service(conversation_id: int, agent_id: int, user_id: str) -> bool:
     """
     Update the latest agent associated with a conversation.
@@ -387,10 +438,6 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
-
-        # Defensive cleanup: release the ContextManager associated with this conversation
-        # to avoid memory leaks in edge cases
-        agent_run_manager.clear_conversation_context_manager(conversation_id)
 
         return True
     except Exception as e:
@@ -525,6 +572,27 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     unit_id = unit.get('unit_id')
                     unit_type = unit.get('unit_type')
                     unit_content = unit.get('unit_content')
+
+                    if unit_type == 'history_summary':
+                        try:
+                            summary_payload = json.loads(unit_content)
+                            covered_message_id = int(
+                                summary_payload['covered_through_message_id'])
+                        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                            logger.warning(
+                                "Skipping invalid history summary unit_id=%s",
+                                unit_id,
+                            )
+                            continue
+                        if covered_message_id != int(message_id):
+                            logger.warning(
+                                "Skipping misplaced history summary unit_id=%s "
+                                "message_id=%s coverage=%s",
+                                unit_id,
+                                message_id,
+                                covered_message_id,
+                            )
+                            continue
 
                     if unit_type == 'search_content_placeholder' and unit_id:
                         placeholder_content = {
@@ -816,7 +884,7 @@ def save_skill_files_to_conversation(
                 conversation_id,
             )
         return success
-    except Exception as exc:
+    except Exception:
         logging.exception(
             "[skill-file] failed to persist skill file uploads for conversation=%s",
             conversation_id,

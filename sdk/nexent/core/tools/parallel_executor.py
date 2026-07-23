@@ -6,6 +6,8 @@ from smolagents.tools import Tool
 
 class ParallelExecutorTool(Tool):
     name = "parallel_executor"
+    category = None
+    tool_sign = None
     description = (
         "Execute multiple independent agent/tool calls in parallel. "
         "Each task is a 2-tuple (callable, kwargs_dict) or a 3-tuple "

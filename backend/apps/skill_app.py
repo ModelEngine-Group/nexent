@@ -206,6 +206,7 @@ async def create_skill_from_file(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+
         service = SkillService(tenant_id=tenant_id)
         content = await file.read()
 

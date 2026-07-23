@@ -7,6 +7,16 @@ from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
 
+def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Validate a partial request/agent policy while preserving its layer shape."""
+    if value is None:
+        return None
+    from nexent.core.agents.context import PolicyLayers, resolve_policy
+
+    resolve_policy(PolicyLayers(request=value))
+    return value
+
+
 class ModelConnectStatusEnum(Enum):
     """Enum class for model connection status"""
     NOT_DETECTED = "not_detected"
@@ -316,6 +326,19 @@ class AgentRequest(BaseModel):
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
+    context_policy: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional request-scoped context policy override",
+    )
+
+    @field_validator("context_policy")
+    @classmethod
+    def validate_context_policy(cls, value):
+        return _validated_context_policy(value)
+    enable_plan: Optional[bool] = Field(
+        default=False,
+        description="Whether to enable the planning phase before execution"
+    )
 
 
 class MessageUnit(BaseModel):
@@ -567,6 +590,8 @@ class AgentInfoRequest(BaseModel):
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
+    context_policy: Optional[Dict[str, Any]] = None
+
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
     version_no: int = 0
@@ -577,6 +602,11 @@ class AgentInfoRequest(BaseModel):
         if value is None:
             return None
         return AgentVerificationConfig.model_validate(value).model_dump()
+
+    @field_validator("context_policy")
+    @classmethod
+    def validate_context_policy(cls, value):
+        return _validated_context_policy(value)
 
 
 class AgentIDRequest(BaseModel):
@@ -654,6 +684,7 @@ class ExportAndImportAgentInfo(BaseModel):
     is_main_agent: bool = True
     provide_run_summary: bool
     verification_config: Optional[Dict[str, Any]] = None
+    context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
     few_shots_prompt: Optional[str] = None
@@ -667,6 +698,11 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+
+    @field_validator("context_policy")
+    @classmethod
+    def validate_context_policy(cls, value):
+        return _validated_context_policy(value)
 
     class Config:
         arbitrary_types_allowed = True
@@ -721,6 +757,9 @@ class AgentRepositoryListingCreateRequest(BaseModel):
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
     tool_count: Optional[int] = Field(
         None, ge=0, description="Total tool count across all agents in the bundle"
+    )
+    content: Optional[str] = Field(
+        None, description="Listing note when submitting for review"
     )
 
 

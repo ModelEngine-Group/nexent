@@ -1355,30 +1355,29 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               },
               pre: ({ children }: any) => <>{children}</>,
               // Code blocks and inline code
-              code({ node, inline, className, children, ...props }: any) {
+              code({ node, className, children, ...props }: any) {
                 try {
-                  const match = /language-(\w+)/.exec(className || "");
+                  const match = /language-([\w-]+)/.exec(className || "");
                   const raw = Array.isArray(children)
                     ? children.join("")
                     : children ?? "";
                   const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
-                  if (match && match[1]) {
-                    // Check if it's a Mermaid diagram
+                  const isCodeBlock = node?.position?.start?.line !== node?.position?.end?.line;
+
+                  if (match?.[1] && isCodeBlock) {
                     if (match[1] === "mermaid") {
                       if (!enableMultimodal) {
-                      return renderCodeFallback(codeContent);
+                        return renderCodeFallback(codeContent);
                       }
                       return <Diagram code={codeContent} className="my-4" showToggle={showDiagramToggle} />;
                     }
-                    if (!inline) {
-                      return <CodeBlock codeContent={codeContent} language={match[1]} />;
-                    }
+                    return <CodeBlock codeContent={codeContent} language={match[1]} />;
                   }
-                } catch (error) {
-                  // Handle error silently
+                } catch {
+                  // Fall back to the default code renderer.
                 }
                 return (
-                  <code className="markdown-code" {...props}>
+                  <code className={`markdown-code ${className || ""}`} {...props}>
                     <TextWrapper>{children}</TextWrapper>
                   </code>
                 );

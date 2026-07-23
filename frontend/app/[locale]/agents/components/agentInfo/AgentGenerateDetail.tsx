@@ -45,6 +45,8 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
+import GuardrailConfigContent from "./GuardrailConfigContent";
+import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
@@ -122,6 +124,8 @@ export default function AgentGenerateDetail({}) {
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
   const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [advancedSettingsTab, setAdvancedSettingsTab] = useState<"basic" | "guardrail">("basic");
+  const guardrailContentRef = useRef<GuardrailConfigContentRef>(null);
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
   useEffect(() => {
@@ -490,6 +494,7 @@ export default function AgentGenerateDetail({}) {
       isMainAgent: editedAgent.is_main_agent ?? true,
       verificationEnabled: editedAgent.verification_config?.enabled ?? false,
     });
+    setAdvancedSettingsTab("basic");
     setAdvancedSettingsOpen(true);
   };
 
@@ -500,9 +505,12 @@ export default function AgentGenerateDetail({}) {
     );
     const ingroupPermission =
       values.ingroup_permission ?? editedAgent.ingroup_permission ?? "READ_ONLY";
+    // Commit guardrail draft from the ref
+    const guardrailDraft = guardrailContentRef.current?.getDraft();
     const verificationConfig = {
       ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
       enabled: values.verificationEnabled,
+      ...(guardrailDraft ? { guardrail_config: guardrailDraft } : {}),
     };
 
     updateAgentConfig({
@@ -780,7 +788,11 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("businessLogic.config.template.label")}:
                       </span>
-                      <Form.Item name="promptTemplateId" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <Form.Item
+                        name="promptTemplateId"
+                        className="mb-0"
+                        style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}
+                      >
                         <Select
                           onChange={handlePromptTemplateChange}
                           loading={loadingPromptTemplates}
@@ -817,7 +829,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("model.type.llm")}:
                       </span>
-                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}>
                         <Select
                           onChange={handleModelChange}
                           loading={loadingModels}
@@ -1150,7 +1162,39 @@ export default function AgentGenerateDetail({}) {
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         okButtonProps={{ disabled: !editable || isGenerating }}
+        width={760}
+        styles={{ body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 8 } }}
       >
+        {/* Tab bar — pill style */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+          {[
+            { key: "basic" as const, label: t("agent.advancedSettings.tab.basic") || "Basic settings" },
+            { key: "guardrail" as const, label: t("agent.guardrail.summaryTitle") || "Guardrail" },
+          ].map((tab) => {
+            const active = advancedSettingsTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setAdvancedSettingsTab(tab.key)}
+                style={{
+                  padding: "6px 18px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: active ? "#fff" : "#5F5E5A",
+                  background: active ? "#185FA5" : "#F1EFE8",
+                  border: "none",
+                  borderRadius: 20,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: advancedSettingsTab === "basic" ? "block" : "none" }}>
         <Form form={advancedSettingsForm} layout="vertical" disabled={!editable || isGenerating}>
           <Row gutter={16}>
             <Col span={12}>
@@ -1280,6 +1324,23 @@ export default function AgentGenerateDetail({}) {
             </Col>
           </Row>
         </Form>
+        </div>
+
+        {/* Guardrail tab content */}
+        <div style={{ display: advancedSettingsTab === "guardrail" ? "block" : "none" }}>
+          <GuardrailConfigContent
+            ref={guardrailContentRef}
+            config={
+              (editedAgent.verification_config?.guardrail_config) || {
+                enabled: false,
+                rules: [],
+                default_action: "pass",
+              }
+            }
+            llmModels={availableLlmModels}
+            defaultModelId={selectedMainAgentModel?.id}
+          />
+        </div>
       </Modal>
 
       {/* Expand Edit Modal */}

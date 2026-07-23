@@ -12,9 +12,11 @@ import { useLanguageSwitch } from "@/lib/language";
 import React, { useEffect, useState } from "react";
 import { Flex, Layout } from "antd";
 import { ChatTopNavContent } from "./ChatTopNavContent";
+import { NotificationBell } from "./NotificationBell";
 import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
 import { monitoringService } from "@/services/monitoringService";
+import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/hooks/useNotifications";
 import type { MonitoringStatus } from "@/types/monitoring";
 import { USER_ROLES } from "@/const/auth";
 
@@ -35,6 +37,15 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
     useState<MonitoringStatus | null>(null);
   const canViewMonitoringDashboard =
     isSpeedMode || user?.role === USER_ROLES.SU;
+
+  const showNotificationBell = !isSpeedMode && !!user;
+  const {
+    unreadCount,
+    items,
+    isLoading: isNotificationsLoading,
+  } = useNotifications(showNotificationBell);
+  const markNotificationReadMutation = useMarkNotificationRead();
+  const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
 
   useEffect(() => {
     if (!canViewMonitoringDashboard) {
@@ -167,6 +178,21 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
           </Flex>
         </a>
       </Dropdown>
+
+      {showNotificationBell && (
+        <NotificationBell
+          unreadCount={unreadCount}
+          items={items}
+          isLoading={isNotificationsLoading}
+          isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+          onMarkRead={async (receiverId) => {
+            await markNotificationReadMutation.mutateAsync(receiverId);
+          }}
+          onMarkAllRead={async () => {
+            await markAllNotificationsReadMutation.mutateAsync();
+          }}
+        />
+      )}
 
       {/* User status - only shown in full version */}
       {!isSpeedMode && (

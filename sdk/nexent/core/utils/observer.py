@@ -19,6 +19,7 @@ class ProcessType(Enum):
     ERROR = "error"  # error field
     OTHER = "other"  # temporary other fields
     TOKEN_COUNT = "token_count"  # record the number of tokens used in each step
+    HISTORY_SUMMARY = "history_summary"  # newly-created context compression checkpoint
 
     SEARCH_CONTENT = "search_content"  # search content in tool
     PICTURE_WEB = "picture_web"  # record the image after联网搜索
@@ -29,6 +30,8 @@ class ProcessType(Enum):
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
     VERIFICATION = "verification"  # layered ReAct self-verification status
+    PLAN = "plan"  # structured plan JSON for planning feature
+    PLAN_STEP_UPDATE = "plan_step_update"  # single plan step status update
 
 
 # message transformer base class
@@ -136,14 +139,17 @@ class MessageObserver:
             ProcessType.OTHER: default_transformer,
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
+            ProcessType.HISTORY_SUMMARY: default_transformer,
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
             ProcessType.SKILL_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
+            ProcessType.VERIFICATION: default_transformer,
             ProcessType.MAX_STEPS_REACHED: default_transformer,
-            ProcessType.VERIFICATION: default_transformer
+            ProcessType.PLAN: default_transformer,
+            ProcessType.PLAN_STEP_UPDATE: default_transformer
         }
 
     def add_model_new_token(self, new_token):
