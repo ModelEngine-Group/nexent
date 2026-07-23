@@ -10,6 +10,10 @@ import type { ThreadMessage } from "@assistant-ui/react";
 
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
+import {
+  envelopeFromMessageMetadata,
+  type StructuredNl2AgentCardEnvelope,
+} from "@/lib/chat/nl2agentCardEvent";
 import { parseNl2AgentActionContext } from "@/lib/chat/nl2agentContinuation";
 import log from "@/lib/logger";
 
@@ -344,6 +348,45 @@ function parseSseChunk(line: string): SseChunk | null {
   }
 }
 
+interface Nl2AgentMessagePayload {
+  message_id: number;
+  message_content: string;
+  message_type: "nl2agent_card";
+  message_metadata: Record<string, unknown>;
+  envelope: StructuredNl2AgentCardEnvelope;
+}
+
+function parseNl2AgentMessagePayload(
+  content: unknown
+): Nl2AgentMessagePayload | undefined {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return;
+  const payload = content as Record<string, unknown>;
+  const messageId = Number(payload.message_id);
+  const envelope = envelopeFromMessageMetadata(
+    payload.message_type,
+    payload.message_metadata
+  );
+  if (
+    !Number.isInteger(messageId) ||
+    messageId <= 0 ||
+    typeof payload.message_content !== "string" ||
+    payload.message_type !== "nl2agent_card" ||
+    !payload.message_metadata ||
+    typeof payload.message_metadata !== "object" ||
+    Array.isArray(payload.message_metadata) ||
+    !envelope
+  ) {
+    return;
+  }
+  return {
+    message_id: messageId,
+    message_content: payload.message_content,
+    message_type: "nl2agent_card",
+    message_metadata: payload.message_metadata as Record<string, unknown>,
+    envelope,
+  };
+}
+
 /**
  * Extracts the agent run start time from an agent_new_run content string.
  * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS]` to the task text.
@@ -427,6 +470,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "card":
     case "skill_files":
     case "memory_search":
+    case "nl2agent_message":
       return null;
     default:
       return "text";
@@ -941,6 +985,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     let messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     let persistedMessageId: number | undefined;
+    let nl2agentCardEnvelope: StructuredNl2AgentCardEnvelope | undefined;
     const buildStreamResult = (
       content: any[],
       timing?: NonNullable<ChatModelRunResult["metadata"]>["timing"]
@@ -948,7 +993,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       content,
       metadata: {
         ...(timing ? { timing } : {}),
-        custom: persistedMessageId === undefined ? {} : { persistedMessageId },
+        custom: {
+          ...(persistedMessageId === undefined ? {} : { persistedMessageId }),
+          ...(nl2agentCardEnvelope ? { nl2agentCardEnvelope } : {}),
+        },
       },
     });
 
@@ -980,6 +1028,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               persistedMessageId = persistedId;
               messageId = String(persistedId);
             }
+            continue;
+          }
+          if (chunk.type === "nl2agent_message") {
+            const message = parseNl2AgentMessagePayload(chunk.content);
+            if (!message) {
+              log.error("[ChatModelAdapter] Invalid nl2agent_message event");
+              continue;
+            }
+            persistedMessageId = message.message_id;
+            messageId = String(message.message_id);
+            nl2agentCardEnvelope = message.envelope;
+            contentParts.splice(0, contentParts.length, {
+              type: "text",
+              text: message.message_content,
+              nl2agentCardEnvelope: message.envelope,
+            });
+            yield buildStreamResult(contentParts);
             continue;
           }
 
@@ -1178,6 +1243,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (Number.isInteger(persistedId) && persistedId > 0) {
               persistedMessageId = persistedId;
               messageId = String(persistedId);
+            }
+          } else if (chunk.type === "nl2agent_message") {
+            const message = parseNl2AgentMessagePayload(chunk.content);
+            if (message) {
+              persistedMessageId = message.message_id;
+              messageId = String(message.message_id);
+              nl2agentCardEnvelope = message.envelope;
+              contentParts.splice(0, contentParts.length, {
+                type: "text",
+                text: message.message_content,
+                nl2agentCardEnvelope: message.envelope,
+              });
+              yield buildStreamResult(contentParts);
+            } else {
+              log.error("[ChatModelAdapter] Invalid nl2agent_message event");
             }
           } else if (chunk.type === "execution_logs") {
             const attached = attachExecutionLogsToTool(contentParts, chunk);

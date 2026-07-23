@@ -324,12 +324,10 @@ async def test_finalize_requires_both_online_catalogs(
         resource_type=registered_resource_type,
         item_keys=[],
     )
-    nl2agent_session_catalog.register_online_recommendation_batch(
+    _present_recommendation_batch(
         "tenant_1",
         202,
         f"online_{registered_resource_type}",
-        registered_resource_type,
-        [],
     )
     nl2agent_session_catalog.confirm_agent_identity("tenant_1", 202)
 
@@ -431,7 +429,6 @@ async def test_save_agent_identity_persists_display_name_and_confirmation(monkey
         "display_name": "Document Helper",
         "internal_name": "document_helper",
         "identity_confirmed": True,
-        "chat_injection_text": nl2agent_runtime_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
     assert update.call_args.kwargs["agent_info"].display_name == "Document Helper"
     assert update.call_args.kwargs["db_session"] is db_session
@@ -563,7 +560,7 @@ async def test_save_agent_identity_rejects_whitespace(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_online_recommendation_registration_and_completion(monkeypatch):
+async def test_presented_online_recommendations_can_be_completed(monkeypatch):
     monkeypatch.setattr(
         nl2agent_runtime_service,
         "_get_owned_draft",
@@ -579,10 +576,7 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
         resource_type="skill",
         item_keys=["skill:7"],
     )
-    registered = await nl2agent_runtime_service.register_online_resource_recommendations(
-        202, "online_1", "skill", ["skill:7"], "tenant_1", "user_1"
-    )
-    assert registered["status"] == "recommendations_ready"
+    _present_recommendation_batch("tenant_1", 202, "online_1")
     nl2agent_session_catalog._record_trusted_search_batch(
         "tenant_1",
         202,
@@ -590,10 +584,7 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
         resource_type="mcp",
         item_keys=[],
     )
-    mcp_registered = await nl2agent_runtime_service.register_online_resource_recommendations(
-        202, "online_mcp", "mcp", [], "tenant_1", "user_1"
-    )
-    assert mcp_registered["status"] == "recommendations_ready"
+    _present_recommendation_batch("tenant_1", 202, "online_mcp")
 
     completed = await nl2agent_runtime_service.confirm_online_resource_configuration(
         202, "tenant_1", "user_1"
@@ -602,31 +593,11 @@ async def test_online_recommendation_registration_and_completion(monkeypatch):
         "agent_id": 202,
         "online_configuration_confirmed": True,
         "completed_batch_ids": ["online_1", "online_mcp"],
-        "chat_injection_text": nl2agent_runtime_service.NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
 
 @pytest.mark.asyncio
-async def test_online_recommendation_rejects_unproven_empty_batch(monkeypatch):
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "_get_owned_draft",
-        MagicMock(
-            return_value={"agent_id": 202, "name": "draft_test", "created_by": "user_1"}
-        ),
-    )
-
-    with pytest.raises(
-        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
-        match="trusted search result",
-    ):
-        await nl2agent_runtime_service.register_online_resource_recommendations(
-            202, "forged_empty", "mcp", [], "tenant_1", "user_1"
-        )
-
-
-@pytest.mark.asyncio
-async def test_local_skip_returns_automatic_continuation_text(monkeypatch):
+async def test_local_skip_returns_only_business_result(monkeypatch):
     monkeypatch.setattr(
         nl2agent_runtime_service,
         "_get_owned_draft",
@@ -641,9 +612,7 @@ async def test_local_skip_returns_automatic_continuation_text(monkeypatch):
     )
 
     assert result["status"] == "skipped"
-    assert (
-        result["chat_injection_text"] == nl2agent_runtime_service.NL2AGENT_CHAT_INJECTION_TEXT
-    )
+    assert "chat_injection_text" not in result
 
 
 @pytest.mark.asyncio

@@ -6,14 +6,50 @@ import pytest
 
 from utils.nl2agent_card_validation import (
     Nl2AgentCardValidationError,
-    message_contains_valid_card,
     parse_nl2agent_final_answer,
-    validate_nl2agent_final_answer,
 )
 
 
 def _fence(language: str, payload: object) -> str:
     return f"```{language}\n{json.dumps(payload)}\n```"
+
+
+def message_contains_valid_card(
+    content: str,
+    card_type: str,
+    draft_agent_id: int,
+    card_key: str | None,
+) -> bool:
+    try:
+        parsed = parse_nl2agent_final_answer(
+            content,
+            draft_agent_id=draft_agent_id,
+            workflow_revision=0,
+        )
+    except Nl2AgentCardValidationError:
+        return False
+    expected_key = card_key or card_type
+    return sum(
+        card.card_type == card_type and card.card_key == expected_key
+        for card in parsed.envelope.cards
+    ) == 1
+
+
+def validate_nl2agent_final_answer(
+    content,
+    draft_agent_id,
+    trusted_search_batch_provider=None,
+):
+    try:
+        parse_nl2agent_final_answer(
+            content,
+            draft_agent_id=draft_agent_id,
+            workflow_revision=0,
+            trusted_search_batch_provider=trusted_search_batch_provider,
+        )
+    except Nl2AgentCardValidationError as exc:
+        return exc.repair_instruction
+    return None
 
 
 @pytest.mark.parametrize(

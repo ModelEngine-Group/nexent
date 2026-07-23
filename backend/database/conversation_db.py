@@ -442,7 +442,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
 def create_nl2agent_assistant_message(
     *,
     conversation_id: int,
-    message_index: int,
+    message_index: Optional[int],
     display_text: str,
     envelope: Dict[str, Any],
     user_id: str,
@@ -452,6 +452,15 @@ def create_nl2agent_assistant_message(
     session_context = get_db_session(db_session) if db_session is not None else get_db_session()
     with session_context as session:
         conversation_id = int(conversation_id)
+        if message_index is None:
+            message_index = session.scalar(
+                select(
+                    func.coalesce(func.max(ConversationMessage.message_index), -1) + 1
+                ).where(
+                    ConversationMessage.conversation_id == conversation_id,
+                    ConversationMessage.delete_flag == "N",
+                )
+            )
         message_index = int(message_index)
         owner = session.execute(
             select(ConversationRecord.conversation_id).where(

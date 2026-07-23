@@ -57,27 +57,6 @@ const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
 
 const isBrowserEnvironment = typeof window !== "undefined";
 
-const NL2AGENT_CARD_LABELS: Record<string, string> = {
-  "nl2agent-requirements-summary": "Requirements summary",
-  "nl2agent-model-selection": "Model selection",
-  "nl2agent-local-resources": "Local resources",
-  "nl2agent-web-mcp": "Online MCP recommendation",
-  "nl2agent-web-mcps": "Online MCP recommendations",
-  "nl2agent-web-skill": "Online skill recommendation",
-  "nl2agent-web-skills": "Online skill recommendations",
-  "nl2agent-agent-identity": "Agent identity",
-  "nl2agent-finalize": "Final agent configuration",
-};
-
-const renderNl2AgentReadonlySummary = (language: string) => (
-  <div className="my-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-    <div className="font-medium">{NL2AGENT_CARD_LABELS[language]}</div>
-    <div className="mt-1 text-xs text-blue-600">
-      This configuration card is read-only in chat history and shared views.
-    </div>
-  </div>
-);
-
 const flattenTextContent = (value: React.ReactNode): string => {
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
@@ -1429,12 +1408,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     ? children.join("")
                     : (children ?? "");
                   const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
-                  const isCodeBlock = node?.position?.start?.line !== node?.position?.end?.line;
+                  const isCodeBlock =
+                    node?.position?.start?.line !== node?.position?.end?.line;
 
                   if (match?.[1] && isCodeBlock) {
-                    if (NL2AGENT_CARD_LABELS[match[1]]) {
-                      return renderNl2AgentReadonlySummary(match[1]);
-                    }
                     // Check if it's a Mermaid diagram
                     if (match[1] === "mermaid") {
                       if (!enableMultimodal) {
@@ -1448,13 +1425,21 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                         />
                       );
                     }
-                    return <CodeBlock codeContent={codeContent} language={match[1]} />;
+                    return (
+                      <CodeBlock
+                        codeContent={codeContent}
+                        language={match[1]}
+                      />
+                    );
                   }
                 } catch {
                   // Fall back to the default code renderer.
                 }
                 return (
-                  <code className={`markdown-code ${className || ""}`} {...props}>
+                  <code
+                    className={`markdown-code ${className || ""}`}
+                    {...props}
+                  >
                     <TextWrapper>{children}</TextWrapper>
                   </code>
                 );

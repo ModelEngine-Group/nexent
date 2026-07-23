@@ -127,19 +127,15 @@ class LocalResourceDependencies:
 
     get_owned_draft: Callable[[int, str], Dict[str, Any]]
     get_session_state: Callable[[str, int], Dict[str, Any]]
-    get_session_catalogs: Callable[[str, int], Dict[str, List[Dict[str, Any]]]]
     query_tools_by_ids: Callable[[List[int], str], List[Dict[str, Any]]]
     query_skills_by_ids: Callable[[List[int], str], List[Dict[str, Any]]]
     get_db_session: Callable[[], Any]
     bind_tool: Callable[..., Any]
     bind_skill: Callable[..., Any]
-    assert_trusted_batch: Callable[..., None]
-    register_batch: Callable[..., Dict[str, Any]]
     resolve_batch: Callable[..., Dict[str, Any]]
     reserve_batch_apply: Callable[..., Dict[str, Any]]
     complete_batch_apply: Callable[..., Dict[str, Any]]
     release_batch_apply: Callable[..., Dict[str, Any]]
-    continuation_text: str
 
 
 def _load_selected_records(
@@ -305,88 +301,6 @@ async def apply_local_resources(
         "bound_skill_count": len(selected_skill_ids),
         "tool_ids": selected_tool_ids,
         "skill_ids": selected_skill_ids,
-        "chat_injection_text": dependencies.continuation_text,
-    }
-
-async def register_local_recommendations(
-    dependencies: LocalResourceDependencies,
-    *,
-    agent_id: int,
-    recommendation_batch_id: str,
-    tool_ids: List[int],
-    skill_ids: List[int],
-    tenant_id: str,
-) -> Dict[str, Any]:
-    """Register a local-resource card after it is rendered."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
-    catalogs = dependencies.get_session_catalogs(tenant_id, agent_id)
-    catalog_tool_ids = {
-        int(item["tool_id"])
-        for item in catalogs["tool_catalog"]
-        if item.get("tool_id") is not None
-    }
-    catalog_skill_ids = {
-        int(item["skill_id"])
-        for item in catalogs["skill_catalog"]
-        if item.get("skill_id") is not None
-    }
-    unknown_tool_ids = sorted(set(map(int, tool_ids)) - catalog_tool_ids)
-    unknown_skill_ids = sorted(set(map(int, skill_ids)) - catalog_skill_ids)
-    if unknown_tool_ids or unknown_skill_ids:
-        raise Nl2AgentValidationError(
-            "Local recommendations contain resources outside this session catalog."
-        )
-    dependencies.assert_trusted_batch(
-        tenant_id,
-        agent_id,
-        recommendation_batch_id,
-        tool_ids,
-        skill_ids,
-    )
-    selected_tool_ids = list(dict.fromkeys(map(int, tool_ids)))
-    selected_skill_ids = list(dict.fromkeys(map(int, skill_ids)))
-    tool_records = (
-        dependencies.query_tools_by_ids(selected_tool_ids, tenant_id)
-        if selected_tool_ids
-        else []
-    )
-    tools_by_id = {int(item["tool_id"]): item for item in tool_records}
-    missing_tool_ids = [
-        tool_id for tool_id in selected_tool_ids if tool_id not in tools_by_id
-    ]
-    if missing_tool_ids:
-        raise AgentRunException(
-            "Local recommendations contain tools that no longer exist: "
-            + ", ".join(map(str, missing_tool_ids))
-        )
-    skill_records = (
-        dependencies.query_skills_by_ids(selected_skill_ids, tenant_id)
-        if selected_skill_ids
-        else []
-    )
-    existing_skill_ids = {int(item["skill_id"]) for item in skill_records}
-    missing_skill_ids = sorted(set(selected_skill_ids) - existing_skill_ids)
-    if missing_skill_ids:
-        raise AgentRunException(
-            "Local recommendations contain tenant skills that no longer exist: "
-            + ", ".join(map(str, missing_skill_ids))
-        )
-    batch = dependencies.register_batch(
-        tenant_id,
-        agent_id,
-        recommendation_batch_id,
-        selected_tool_ids,
-        selected_skill_ids,
-    )
-    return {
-        "recommendation_batch_id": recommendation_batch_id,
-        **batch,
-        "tool_parameter_schemas": {
-            str(tool_id): redact_tool_parameter_defaults(
-                tools_by_id[tool_id].get("params") or []
-            )
-            for tool_id in selected_tool_ids
-        },
     }
 
 
@@ -408,5 +322,4 @@ async def skip_local_recommendations(
     return {
         "recommendation_batch_id": recommendation_batch_id,
         **batch,
-        "chat_injection_text": dependencies.continuation_text,
     }

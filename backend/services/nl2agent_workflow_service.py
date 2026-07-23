@@ -8,56 +8,11 @@ from typing import Any, Callable, Dict, List, Optional
 from consts.exceptions import (
     AgentRunException,
     Nl2AgentOperationError,
-    Nl2AgentStaleCardError,
     Nl2AgentValidationError,
 )
 from consts.model import AgentInfoRequest
 
 logger = logging.getLogger(__name__)
-
-
-def _matches_registered_online_card(
-    state: Dict[str, Any], card_type: str, card_key: Optional[str]
-) -> bool:
-    """Allow either card from one dual-card message to acknowledge after registration."""
-    if card_type not in {"web_mcp", "web_skill"} or not card_key:
-        return False
-    batch = state.get("recommendations", {}).get(card_key) or {}
-    expected_resource_type = "mcp" if card_type == "web_mcp" else "skill"
-    return batch.get("resource_type") == expected_resource_type
-
-
-def _raise_stale_card(
-    *,
-    reason: str,
-    agent_id: int,
-    message_id: int,
-    card_type: str,
-    status: str,
-    card_key: Optional[str],
-    message: Optional[Dict[str, Any]] = None,
-    latest_message_id: Optional[int] = None,
-    expected_card_types: Optional[List[str]] = None,
-    error_message: Optional[str] = None,
-) -> None:
-    """Log a safe rejection reason while preserving the public stale-card error."""
-    logger.warning(
-        "Rejected NL2AGENT card delivery: stale_reason=%s agent_id=%s "
-        "message_id=%s card_type=%s status=%s has_card_key=%s "
-        "latest_message_id=%s message_status=%s message_conversation_id=%s "
-        "expected_card_types=%s",
-        reason,
-        agent_id,
-        message_id,
-        card_type,
-        status,
-        bool(card_key),
-        latest_message_id,
-        message.get("status") if message else None,
-        message.get("conversation_id") if message else None,
-        expected_card_types,
-    )
-    raise Nl2AgentStaleCardError(error_message or "The NL2AGENT card delivery receipt is stale.")
 
 
 @dataclass(frozen=True)
@@ -66,17 +21,9 @@ class WorkflowDependencies:
 
     get_owned_draft: Callable[..., Dict[str, Any]]
     get_readable_draft: Callable[..., tuple[Dict[str, Any], str]]
-    register_online_batch: Callable[..., Dict[str, Any]]
     get_session_state: Callable[..., Dict[str, Any]]
     summarize_workflow_state: Callable[[Dict[str, Any]], Dict[str, Any]]
-    get_message: Callable[..., Optional[Dict[str, Any]]]
-    get_completed_final_answer: Callable[[int], str]
-    get_latest_assistant_message_id: Callable[..., Optional[int]]
-    message_contains_valid_card: Callable[..., bool]
-    record_card_delivery: Callable[..., Dict[str, Any]]
     complete_online_configuration: Callable[..., List[str]]
-    register_requirements_summary: Callable[..., Dict[str, Any]]
-    confirm_requirements_summary: Callable[..., Dict[str, Any]]
     apply_requirements_revision_text: Callable[..., Dict[str, Any]]
     find_agent_info_by_agent_id: Callable[..., Optional[Dict[str, Any]]]
     query_enabled_tool_instances: Callable[..., List[Dict[str, Any]]]
@@ -97,153 +44,6 @@ class WorkflowDependencies:
     update_agent: Callable[..., Any]
     confirm_agent_identity: Callable[..., Any]
     runner_agent_name: str
-    continuation_text: str
-    card_retry_text: str
-
-
-async def register_online_resource_recommendations(
-    dependencies: WorkflowDependencies,
-    *,
-    agent_id: int,
-    recommendation_batch_id: str,
-    resource_type: str,
-    item_keys: List[str],
-    tenant_id: str,
-) -> Dict[str, Any]:
-    """Record one MCP or web-Skill result batch rendered by the frontend."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
-    batch = dependencies.register_online_batch(
-        tenant_id,
-        agent_id,
-        recommendation_batch_id,
-        resource_type,
-        item_keys,
-    )
-    return {"recommendation_batch_id": recommendation_batch_id, **batch}
-
-
-async def report_card_delivery(
-    dependencies: WorkflowDependencies,
-    *,
-    agent_id: int,
-    message_id: int,
-    card_type: str,
-    status: str,
-    card_key: Optional[str],
-    reason: Optional[str],
-    tenant_id: str,
-    user_id: str,
-) -> Dict[str, Any]:
-    """Record a receipt only for the latest persisted assistant message."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
-    state = dependencies.get_session_state(tenant_id, agent_id)
-    conversation_id = int(state["conversation_id"])
-    message = dependencies.get_message(message_id, user_id=user_id)
-    latest_message_id = dependencies.get_latest_assistant_message_id(
-        conversation_id,
-        user_id=user_id,
-    )
-    stale_reason = None
-    if not message:
-        stale_reason = "message_missing"
-    elif int(message.get("conversation_id") or 0) != conversation_id:
-        stale_reason = "conversation_mismatch"
-    elif message.get("message_role") != "assistant":
-        stale_reason = "role_mismatch"
-    elif message.get("status") != "completed":
-        stale_reason = "message_not_completed"
-    elif latest_message_id != message_id:
-        stale_reason = "message_not_latest"
-    if stale_reason:
-        _raise_stale_card(
-            reason=stale_reason,
-            agent_id=agent_id,
-            message_id=message_id,
-            card_type=card_type,
-            status=status,
-            card_key=card_key,
-            message=message,
-            latest_message_id=latest_message_id,
-        )
-    if status == "rendered":
-        parent_content = str(message.get("message_content") or "")
-        contains_valid_card = dependencies.message_contains_valid_card(
-            parent_content, card_type, agent_id, card_key
-        )
-        if not contains_valid_card:
-            recovered_content = dependencies.get_completed_final_answer(message_id)
-            contains_valid_card = bool(
-                recovered_content
-            ) and dependencies.message_contains_valid_card(
-                recovered_content, card_type, agent_id, card_key
-            )
-            if contains_valid_card:
-                logger.warning(
-                    "Validated NL2AGENT card delivery from completed message units "
-                    "after parent content mismatch: agent_id=%s message_id=%s card_type=%s",
-                    agent_id,
-                    message_id,
-                    card_type,
-                )
-        if not contains_valid_card:
-            _raise_stale_card(
-                reason="persisted_card_mismatch",
-                agent_id=agent_id,
-                message_id=message_id,
-                card_type=card_type,
-                status=status,
-                card_key=card_key,
-                message=message,
-                latest_message_id=latest_message_id,
-                error_message=(
-                    "The persisted assistant message does not contain the reported valid NL2AGENT card."
-                ),
-            )
-
-    summary = dependencies.summarize_workflow_state(state)
-    allowed_card_types = summary.get(
-        "allowed_card_types", summary["expected_card_types"]
-    )
-    if card_type not in allowed_card_types:
-        existing = state.get("card_delivery", {}).get(card_type) or {}
-        is_idempotent_receipt = (
-            existing.get("message_id") == message_id
-            and existing.get("status") == status
-            and existing.get("card_key") == card_key
-        )
-        if not is_idempotent_receipt and not _matches_registered_online_card(
-            state, card_type, card_key
-        ):
-            _raise_stale_card(
-                reason="card_not_expected",
-                agent_id=agent_id,
-                message_id=message_id,
-                card_type=card_type,
-                status=status,
-                card_key=card_key,
-                message=message,
-                latest_message_id=latest_message_id,
-                expected_card_types=list(allowed_card_types),
-            )
-
-    delivery = dependencies.record_card_delivery(
-        tenant_id,
-        agent_id,
-        message_id,
-        card_type,
-        status,
-        card_key,
-        reason,
-    )
-    retry_count = int(delivery.get("retry_count", 0))
-    response = {
-        "agent_id": agent_id,
-        **delivery,
-        "auto_retry_allowed": status == "failed" and retry_count <= 2,
-    }
-    if status == "failed":
-        response["chat_injection_text"] = dependencies.card_retry_text
-    return response
 
 
 async def confirm_online_resource_configuration(
@@ -262,29 +62,6 @@ async def confirm_online_resource_configuration(
         "agent_id": agent_id,
         "online_configuration_confirmed": True,
         "completed_batch_ids": completed_batch_ids,
-        "chat_injection_text": dependencies.continuation_text,
-    }
-
-async def register_requirements_review(
-    dependencies: WorkflowDependencies,
-    *,
-    agent_id: int,
-    summary: Dict[str, Any],
-    tenant_id: str,
-) -> Dict[str, Any]:
-    """Register the rendered five-field requirements summary for one draft."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
-    review = dependencies.register_requirements_summary(
-        tenant_id,
-        agent_id,
-        summary,
-    )
-    return {
-        "agent_id": agent_id,
-        "status": review["status"],
-        "summary": review["summary"],
-        "fingerprint": review["fingerprint"],
-        "is_current": review["is_current"],
     }
 
 
@@ -309,28 +86,6 @@ def process_requirements_revision_text(
         draft_agent_id,
         text,
     )
-
-
-async def confirm_requirements_review(
-    dependencies: WorkflowDependencies,
-    *,
-    agent_id: int,
-    fingerprint: str,
-    tenant_id: str,
-) -> Dict[str, Any]:
-    """Confirm the current registered requirements revision."""
-    dependencies.get_owned_draft(agent_id, tenant_id)
-    review = dependencies.confirm_requirements_summary(
-        tenant_id,
-        agent_id,
-        fingerprint,
-    )
-    return {
-        "agent_id": agent_id,
-        "status": review["status"],
-        "fingerprint": review["fingerprint"],
-        "chat_injection_text": dependencies.continuation_text,
-    }
 
 
 async def get_session_state(
@@ -525,5 +280,4 @@ async def save_agent_identity(
             tenant_id,
         ),
         "identity_confirmed": True,
-        "chat_injection_text": dependencies.continuation_text,
     }

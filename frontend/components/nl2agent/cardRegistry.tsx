@@ -2,7 +2,11 @@
 
 import React from "react";
 
-import type { components as Nl2AgentApiComponents } from "@/contracts/generated/nl2agent-api";
+import type {
+  StructuredNl2AgentCard,
+  StructuredNl2AgentCardEnvelope,
+  StructuredNl2AgentCardType,
+} from "@/lib/chat/nl2agentCardEvent";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import type {
   FinalReviewCardPayload,
@@ -22,19 +26,18 @@ import { WebMcpCard } from "./WebMcpCard";
 import type { WebMcpCardItem } from "./webMcpTypes";
 import { WebSkillCard } from "./WebSkillCard";
 
-type Schemas = Nl2AgentApiComponents["schemas"];
-export type StructuredNl2AgentCard = NonNullable<
-  Schemas["Nl2AgentCardEnvelope"]["cards"]
->[number];
-export type StructuredNl2AgentCardEnvelope = Schemas["Nl2AgentCardEnvelope"];
-export type StructuredNl2AgentCardType = StructuredNl2AgentCard["card_type"];
+export type {
+  StructuredNl2AgentCard,
+  StructuredNl2AgentCardEnvelope,
+  StructuredNl2AgentCardType,
+} from "@/lib/chat/nl2agentCardEvent";
 
 type StructuredCardRenderer = (
   card: StructuredNl2AgentCard,
   draftAgentId: number
 ) => React.ReactNode;
 
-const OnlineRecommendationGroup: React.FC<{
+export const OnlineRecommendationGroup: React.FC<{
   recommendationBatchId: string;
   resourceType: "mcp" | "skill";
   children: React.ReactNode;

@@ -43,8 +43,8 @@ const MASKED_SECRET_VALUE = "••••••••";
  * single "Apply All" button that bulk-binds the selected resources to the
  * draft agent.
  *
- * Rendered from a ```nl2agent-local-resources fenced JSON block in the
- * NL2AGENT's final answer.
+ * Rendered from a validated local-resources card in the persisted structured
+ * NL2AGENT message envelope.
  */
 export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   agentId,

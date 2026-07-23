@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 from agents import nl2agent_session_store as _session_store
 
 from agents.nl2agent_workflow import (
-    CardDelivery,
     McpWorkflow,
     RecommendationBatch,
     RequirementsReview,
@@ -33,17 +32,6 @@ _REQUIREMENTS_FIELDS = (
     "key_constraints",
 )
 _REQUIREMENTS_STATUSES = {"collecting", "awaiting_confirmation", "confirmed"}
-_CARD_DELIVERY_TYPES = {
-    "requirements_summary",
-    "model_selection",
-    "local_resources",
-    "web_mcp",
-    "web_skill",
-    "agent_identity",
-    "final_review",
-}
-
-
 def _ordered_unique(values, transform=lambda value: value):
     result = []
     seen = set()
@@ -54,13 +42,6 @@ def _ordered_unique(values, transform=lambda value: value):
         seen.add(normalized)
         result.append(normalized)
     return result
-_CARD_DELIVERY_STATUSES = {"rendered", "failed"}
-_CARD_DELIVERY_FAILURE_REASONS = {
-    "truncated_fence",
-    "invalid_json",
-    "invalid_schema",
-    "missing_card",
-}
 _CONFIRMATION_PHRASES = {
     "确认",
     "确认需求",
@@ -164,15 +145,11 @@ def assert_workflow_action_allowed(
 
 def _finish_revision(
     state: Nl2AgentWorkflowState,
-    *,
-    invalidate_final_review: bool = True,
 ) -> None:
-    """Leave edit routing and require a fresh final card after an action."""
+    """Leave edit routing after the requested business action is committed."""
     if not state.revision_mode:
         return
     state.revision_mode = False
-    if invalidate_final_review:
-        state.card_delivery.pop("final_review", None)
 
 
 def enter_revision_mode(
@@ -204,57 +181,6 @@ def _normalize_requirement_text(value: Any) -> str:
 def _requirements_fingerprint(summary: Dict[str, str]) -> str:
     payload = json.dumps(summary, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def register_requirements_summary(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    summary: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Register one rendered requirements summary for explicit card confirmation."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    normalized_summary = {
-        field_name: _normalize_requirement_text(summary.get(field_name))
-        for field_name in _REQUIREMENTS_FIELDS
-    }
-    missing_fields = [
-        field_name
-        for field_name, field_value in normalized_summary.items()
-        if not field_value
-    ]
-    if missing_fields:
-        raise Nl2AgentSessionCatalogError(
-            "Requirements summary fields cannot be empty: " + ", ".join(missing_fields)
-        )
-    fingerprint = _requirements_fingerprint(normalized_summary)
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        review = state.requirements_review
-        existing_fingerprint = review.fingerprint
-        is_current = False
-        if state.revision_mode:
-            review = RequirementsReview(
-                status="awaiting_confirmation",
-                summary=normalized_summary,
-                fingerprint=fingerprint,
-            )
-            state.requirements_review = review
-            is_current = True
-        elif not existing_fingerprint or (
-            review.status == "collecting" and existing_fingerprint != fingerprint
-        ):
-            review = RequirementsReview(
-                status="awaiting_confirmation",
-                summary=normalized_summary,
-                fingerprint=fingerprint,
-            )
-            state.requirements_review = review
-            is_current = True
-        elif existing_fingerprint == fingerprint and review.status != "collecting":
-            is_current = True
-        return {**review.model_dump(mode="json"), "is_current": is_current}
-
-    return _mutate_session_state(tenant, draft_id, mutate)
 
 
 def confirm_requirements_from_summary(
@@ -348,7 +274,6 @@ def apply_requirements_revision_text(
     def mutate(workflow: Nl2AgentWorkflowState) -> Dict[str, Any]:
         if workflow.requirements_review.status == "awaiting_confirmation":
             workflow.requirements_review.status = "collecting"
-            workflow.card_delivery.pop("requirements_summary", None)
         return {
             "intent": intent,
             **workflow.requirements_review.model_dump(mode="json"),
@@ -410,56 +335,6 @@ def set_model_selection_confirmed(
         return {"model_selection_confirmed": state.model_selection_confirmed}
 
     return _mutate_session_state(tenant, draft_id, mutate, db_session=db_session)
-
-
-def record_card_delivery(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    message_id: int,
-    card_type: str,
-    status: str,
-    card_key: Optional[str] = None,
-    reason: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Persist one final-message receipt without mutating business workflow state."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    if card_type not in _CARD_DELIVERY_TYPES:
-        raise Nl2AgentSessionCatalogError("Invalid NL2AGENT card type.")
-    if status not in _CARD_DELIVERY_STATUSES:
-        raise Nl2AgentSessionCatalogError("Invalid NL2AGENT card delivery status.")
-    if not isinstance(message_id, int) or message_id <= 0:
-        raise Nl2AgentSessionCatalogError("message_id must be a positive integer.")
-    if status == "failed" and reason not in _CARD_DELIVERY_FAILURE_REASONS:
-        raise Nl2AgentSessionCatalogError("Invalid NL2AGENT card failure reason.")
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        existing = state.card_delivery.get(card_type)
-        if (
-            existing is not None
-            and existing.message_id == message_id
-            and existing.status == status
-            and existing.card_key == card_key
-        ):
-            return existing.model_dump(mode="json")
-        retry_count = (
-            int(existing.retry_count) + 1
-            if status == "failed" and existing is not None
-            else int(status == "failed")
-        )
-        delivery = CardDelivery(
-            message_id=message_id,
-            card_type=card_type,
-            status=status,
-            card_key=card_key,
-            reason=reason if status == "failed" else None,
-            retry_count=retry_count,
-        )
-        state.card_delivery[card_type] = delivery
-        if card_type == "final_review" and status == "rendered":
-            _finish_revision(state, invalidate_final_review=False)
-        return delivery.model_dump(mode="json")
-
-    return _mutate_session_state(tenant, draft_id, mutate)
 
 
 def confirm_agent_identity(
@@ -582,49 +457,6 @@ def assert_mcp_workflows_resolved(tenant_id: str, draft_agent_id: int) -> None:
         )
 
 
-def register_online_recommendation_batch(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    recommendation_batch_id: str,
-    resource_type: str,
-    item_keys: List[str],
-) -> Dict[str, Any]:
-    """Idempotently record one rendered online recommendation batch."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    if resource_type not in {"mcp", "skill"}:
-        raise Nl2AgentSessionCatalogError("Invalid online resource type.")
-    if not recommendation_batch_id:
-        raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    normalized_keys = _ordered_unique(
-        (key for key in item_keys if str(key).strip()), lambda key: str(key).strip()
-    )
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        trusted = state.recommendations.get(recommendation_batch_id)
-        if (
-            trusted is None
-            or trusted.resource_type != resource_type
-            or trusted.item_keys != normalized_keys
-        ):
-            raise Nl2AgentSessionCatalogError(
-                "Online recommendation batch does not match a trusted search result."
-            )
-        if trusted.resource_type != resource_type or trusted.item_keys != normalized_keys:
-            raise Nl2AgentSessionCatalogError(
-                "Online recommendation batch contents do not match the registered card."
-            )
-        if trusted.status == "searched":
-            trusted.status = "presented"
-            state.online_configuration_confirmed = False
-        return {
-            "resource_type": trusted.resource_type,
-            "item_keys": list(trusted.item_keys),
-            "status": "completed" if trusted.status == "completed" else "recommendations_ready",
-        }
-
-    return _mutate_session_state(tenant, draft_id, mutate)
-
-
 def complete_online_configuration(
     tenant_id: Optional[str], draft_agent_id: Optional[int]
 ) -> List[str]:
@@ -686,63 +518,6 @@ def assert_online_configuration_complete(tenant_id: str, draft_agent_id: int) ->
     ):
         raise Nl2AgentSessionCatalogError(
             "Complete the online resource configuration before finalizing."
-        )
-
-
-def register_recommendation_batch(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    recommendation_batch_id: str,
-    tool_ids: List[int],
-    skill_ids: List[int],
-) -> Dict[str, Any]:
-    """Idempotently record that a recommendation card was rendered."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    if not recommendation_batch_id:
-        raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
-    normalized_tool_ids = _ordered_unique(tool_ids, int)
-    normalized_skill_ids = _ordered_unique(skill_ids, int)
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        trusted = state.recommendations.get(recommendation_batch_id)
-        if (
-            trusted is None
-            or trusted.resource_type != "local"
-            or trusted.tool_ids != normalized_tool_ids
-            or trusted.skill_ids != normalized_skill_ids
-        ):
-            raise Nl2AgentSessionCatalogError(
-                "Recommendation batch does not match a trusted search result."
-            )
-        if trusted.tool_ids != normalized_tool_ids or trusted.skill_ids != normalized_skill_ids:
-            raise Nl2AgentSessionCatalogError(
-                "Recommendation batch contents do not match the registered card."
-            )
-        if trusted.status == "searched":
-            trusted.status = "presented"
-        return _recommendation_batch_response(trusted)
-
-    return _mutate_session_state(tenant, draft_id, mutate)
-
-
-def assert_trusted_local_search_batch(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    recommendation_batch_id: str,
-    tool_ids: List[int],
-    skill_ids: List[int],
-) -> None:
-    """Validate a local card against the immutable server-recorded search result."""
-    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    trusted = state["recommendations"].get(recommendation_batch_id)
-    if (
-        trusted is None
-        or trusted.get("resource_type") != "local"
-        or trusted.get("tool_ids") != _ordered_unique(tool_ids, int)
-        or trusted.get("skill_ids") != _ordered_unique(skill_ids, int)
-    ):
-        raise Nl2AgentSessionCatalogError(
-            "Recommendation batch does not match a trusted search result."
         )
 
 

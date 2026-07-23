@@ -8,7 +8,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-WORKFLOW_SCHEMA_VERSION = 2
+WORKFLOW_SCHEMA_VERSION = 3
 MAX_WORKFLOW_COLLECTION_ITEMS = 100
 
 PositiveStrictInt = Annotated[int, Field(strict=True, ge=1)]
@@ -91,23 +91,12 @@ class McpWorkflow(BaseModel):
     error: Optional[str] = Field(default=None, max_length=1000)
 
 
-class CardDelivery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    message_id: int = Field(ge=1)
-    card_type: CardType
-    status: Literal["rendered", "failed"]
-    card_key: Optional[str] = None
-    reason: Optional[str] = None
-    retry_count: int = Field(default=0, ge=0)
-
-
 class Nl2AgentWorkflowState(BaseModel):
     """PostgreSQL-persisted workflow state. Old schemas are intentionally rejected."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[2] = WORKFLOW_SCHEMA_VERSION
+    schema_version: Literal[3] = WORKFLOW_SCHEMA_VERSION
     revision: int = Field(default=0, ge=0)
     revision_mode: bool = False
     conversation_id: PositiveStrictInt
@@ -121,9 +110,6 @@ class Nl2AgentWorkflowState(BaseModel):
         default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
     )
     online_configuration_confirmed: bool = False
-    card_delivery: Dict[CardType, CardDelivery] = Field(
-        default_factory=dict, max_length=7
-    )
 
     @field_validator("conversation_id")
     @classmethod
@@ -150,16 +136,14 @@ class WorkflowSummary(BaseModel):
     identity_confirmed: bool
 
 
-def _card_was_rendered(state: Nl2AgentWorkflowState, card_type: CardType) -> bool:
-    receipt = state.card_delivery.get(card_type)
-    return receipt is not None and receipt.status == "rendered"
-
-
 @dataclass(frozen=True)
 class _WorkflowFacts:
     local_status: Literal["missing", "pending", "complete"]
+    local_card_pending: bool
     mcp_registered: bool
     skill_registered: bool
+    mcp_card_pending: bool
+    skill_card_pending: bool
     unresolved_mcp_count: int
 
     @property
@@ -193,24 +177,25 @@ def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
     }
     return _WorkflowFacts(
         local_status=local_status,
+        local_card_pending=any(
+            batch.resource_type == "local" and batch.status == "searched"
+            for batch in state.recommendations.values()
+        ),
         mcp_registered="mcp" in online_types,
         skill_registered="skill" in online_types,
+        mcp_card_pending=any(
+            batch.resource_type == "mcp" and batch.status == "searched"
+            for batch in state.recommendations.values()
+        ),
+        skill_card_pending=any(
+            batch.resource_type == "skill" and batch.status == "searched"
+            for batch in state.recommendations.values()
+        ),
         unresolved_mcp_count=sum(
             workflow.status in {"installing", "connected"}
             for workflow in state.mcp_workflows.values()
         ),
     )
-
-
-def _unrendered_cards(
-    state: Nl2AgentWorkflowState,
-    *card_types: CardType,
-) -> List[CardType]:
-    return [
-        card_type
-        for card_type in card_types
-        if not _card_was_rendered(state, card_type)
-    ]
 
 
 def _select_stage(
@@ -255,15 +240,15 @@ def _select_stage(
     if requirements_status == "awaiting_confirmation":
         return _StageDecision(
             "requirements_confirmation",
-            _unrendered_cards(state, "requirements_summary"),
-            _unrendered_cards(state, "requirements_summary"),
+            [],
+            [],
             ["confirm_requirements", "revise_requirements"],
         )
     if not state.model_selection_confirmed:
         return _StageDecision(
             "model_selection",
-            _unrendered_cards(state, "model_selection"),
-            _unrendered_cards(state, "model_selection"),
+            ["model_selection"],
+            ["model_selection"],
             ["select_models"],
         )
     if facts.local_status == "missing":
@@ -274,10 +259,11 @@ def _select_stage(
             ["search_local_resources"],
         )
     if facts.local_status == "pending":
+        expected = ["local_resources"] if facts.local_card_pending else []
         return _StageDecision(
             "local_resource_review",
-            _unrendered_cards(state, "local_resources"),
-            _unrendered_cards(state, "local_resources"),
+            expected,
+            expected,
             ["apply_local_resources", "skip_local_resources"],
         )
     if not facts.all_online_registered:
@@ -296,23 +282,31 @@ def _select_stage(
         )
         return _StageDecision("online_resource_search", expected, expected, allowed)
     if not state.online_configuration_confirmed:
+        expected = [
+            card_type
+            for pending, card_type in (
+                (facts.mcp_card_pending, "web_mcp"),
+                (facts.skill_card_pending, "web_skill"),
+            )
+            if pending
+        ]
         return _StageDecision(
             "online_resource_review",
-            _unrendered_cards(state, "web_mcp", "web_skill"),
-            _unrendered_cards(state, "web_mcp", "web_skill"),
+            expected,
+            expected,
             ["configure_online_resources", "complete_online_configuration"],
         )
     if not state.identity_confirmed:
         return _StageDecision(
             "agent_identity",
-            _unrendered_cards(state, "agent_identity"),
-            _unrendered_cards(state, "agent_identity"),
+            ["agent_identity"],
+            ["agent_identity"],
             ["save_identity"],
         )
     return _StageDecision(
         "final_review",
-        _unrendered_cards(state, "final_review"),
-        _unrendered_cards(state, "final_review"),
+        ["final_review"],
+        ["final_review"],
         ["publish_agent"],
     )
 

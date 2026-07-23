@@ -183,37 +183,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
-    /** CardDelivery */
-    CardDelivery: {
-      /** Card Key */
-      card_key?: string | null;
-      /**
-       * Card Type
-       * @enum {string}
-       */
-      card_type:
-        | "requirements_summary"
-        | "model_selection"
-        | "local_resources"
-        | "web_mcp"
-        | "web_skill"
-        | "agent_identity"
-        | "final_review";
-      /** Message Id */
-      message_id: number;
-      /** Reason */
-      reason?: string | null;
-      /**
-       * Retry Count
-       * @default 0
-       */
-      retry_count?: number;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "rendered" | "failed";
-    };
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -1111,7 +1080,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: 2;
+      schema_version: 3;
       /**
        * Session Status
        * @enum {string}
@@ -1624,10 +1593,6 @@ export interface components {
     } & ((unknown | unknown) & (unknown | unknown));
     /** Nl2AgentWorkflowStateResponse */
     Nl2AgentWorkflowStateResponse: {
-      /** Card Delivery */
-      card_delivery?: {
-        [key: string]: components["schemas"]["CardDelivery"];
-      };
       /** Conversation Id */
       conversation_id: number;
       /**
@@ -1666,10 +1631,10 @@ export interface components {
       revision_mode?: boolean;
       /**
        * Schema Version
-       * @default 2
+       * @default 3
        * @constant
        */
-      schema_version?: 2;
+      schema_version?: 3;
     };
     /**
      * RecommendationBatch

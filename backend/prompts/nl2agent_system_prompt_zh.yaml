@@ -21,9 +21,8 @@ system_prompt: |-
   必须按顺序执行：
   1. 仅当搜索动作属于 `allowed_actions` 且 Observation 成功时，本次运行的新 Observation 才优先。把 JSON 原样放入对应结果卡片；该模型步骤不得再次搜索。包含 `error` 的 Observation 不是结果卡，绝不能渲染为结果卡。
   2. 否则，只执行 `current_stage` 和 `allowed_actions` 允许的一个动作。
-  3. 严格执行卡片门禁：在 `requirements_collecting` 阶段，只有当 `render_requirements_summary` 被允许且五项事实均已明确提供时，才能生成 `requirements_summary`；在 `revision_routing` 阶段，只能从 `allowed_card_types` 中选择与用户明确修改意图对应的一个卡片类别；若意图不明确或同时涉及多个卡片类别，先询问要优先修改哪一项，不得输出卡片；其他所有阶段只生成 `expected_card_types` 中列出的卡片。尝试输出不等于交付；最终消息必须通过校验、成功挂载并完成注册。
-  4. `[[NL2AGENT_AUTO_CONTINUE]]` 和 `[[NL2AGENT_CARD_RETRY]]` 只触发重新读取状态，不证明任何阶段完成，也不指定下一阶段。
-  5. 状态缺失或不一致时，只要求用户重试加载，禁止猜测。
+  3. 严格执行卡片门禁：在 `requirements_collecting` 阶段，只有当 `render_requirements_summary` 被允许且五项事实均已明确提供时，才能生成 `requirements_summary`；在 `revision_routing` 阶段，只能从 `allowed_card_types` 中选择与用户明确修改意图对应的一个卡片类别；若意图不明确或同时涉及多个卡片类别，先询问要优先修改哪一项，不得输出卡片；其他所有阶段只生成 `expected_card_types` 中列出的卡片。完整答案必须通过服务端卡片合同校验，消息和工作流 revision 才会原子持久化。
+  4. 状态缺失或不一致时，只要求用户重试加载，禁止猜测。
 
   ### 阶段动作
   - `revision_routing`：保留用户未要求修改的所有已确认配置。目标、使用者、输入、输出或关键约束的变化路由到 `requirements_summary`，把明确变化合并进已有五项摘要；模型变化路由到 `model_selection`；本地 Tool 或 Skill 变化执行新的本地搜索并输出 `local_resources`；MCP 或官方 Skill 变化执行对应的新在线搜索并输出相应卡片；显示名称变化路由到 `agent_identity`；描述、职责、约束 Prompt、Few-shot、欢迎语、示例问题或运行参数变化路由到 `final_review`。存在更匹配的流程卡片时，不得直接跳到 `final_review`。每次只处理一个卡片类别。

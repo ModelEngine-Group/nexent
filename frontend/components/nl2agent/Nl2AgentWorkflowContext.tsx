@@ -40,8 +40,6 @@ interface Nl2AgentWorkflowContextValue {
   refreshSessionState: () => Promise<void>;
   resumeSession: () => Promise<void>;
   resuming: boolean;
-  continuationError?: string;
-  retryContinuation: () => Promise<void>;
 }
 
 const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
@@ -58,7 +56,6 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   refreshSessionState: async () => {},
   resumeSession: async () => {},
   resuming: false,
-  retryContinuation: async () => {},
 });
 
 export const Nl2AgentWorkflowProvider: React.FC<{
@@ -94,11 +91,6 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   const [sessionStateLoading, setSessionStateLoading] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string>();
   const [resuming, setResuming] = useState(false);
-  const [retry, setRetry] = useState<{
-    request: Nl2AgentContinuationRequest;
-    error: string;
-    attempts: number;
-  }>();
   const continuingRef = useRef(false);
   const sessionRequestRef = useRef(0);
   const onContinueRef = useRef(onContinue);
@@ -109,7 +101,6 @@ export const Nl2AgentWorkflowProvider: React.FC<{
 
   useEffect(() => {
     setInputBlockers(new Set());
-    setRetry(undefined);
   }, [scopeKey]);
 
   const refreshSessionState = useCallback(async () => {
@@ -193,16 +184,6 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       setContinuing(true);
       try {
         await onContinueRef.current(request);
-        setRetry(undefined);
-      } catch (error) {
-        setRetry((current) => ({
-          request,
-          attempts: (current?.attempts ?? 0) + 1,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Unable to continue NL2AGENT.",
-        }));
       } finally {
         continuingRef.current = false;
         setContinuing(false);
@@ -217,9 +198,6 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     },
     [continueRequest]
   );
-  const retryContinuation = useCallback(async () => {
-    if (retry && retry.attempts < 2) await continueRequest(retry.request);
-  }, [continueRequest, retry]);
 
   const value = useMemo<Nl2AgentWorkflowContextValue>(
     () => ({
@@ -243,8 +221,6 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       refreshSessionState,
       resumeSession,
       resuming,
-      continuationError: retry?.error,
-      retryContinuation,
     }),
     [
       actionCount,
@@ -259,8 +235,6 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       refreshSessionState,
       resumeSession,
       resuming,
-      retry,
-      retryContinuation,
       scopedAgentId,
       sessionState,
       sessionStateError,

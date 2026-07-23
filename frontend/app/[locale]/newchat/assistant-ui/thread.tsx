@@ -70,12 +70,10 @@ import {
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
 import { parseNl2AgentActionContext } from "@/lib/chat/nl2agentContinuation";
-import { Nl2AgentMessageLifecycle } from "@/components/nl2agent/Nl2AgentFenceRenderer";
+import type { StructuredNl2AgentCardEnvelope } from "@/lib/chat/nl2agentCardEvent";
+import { renderStructuredNl2AgentEnvelope } from "@/components/nl2agent/cardRegistry";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
-import {
-  Nl2AgentContinuationError,
-  OnlineConfigurationBar,
-} from "@/components/nl2agent/OnlineConfigurationBar";
+import { OnlineConfigurationBar } from "@/components/nl2agent/OnlineConfigurationBar";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -268,7 +266,6 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
         >
           <ThreadScrollToBottom />
-          {embedded && <Nl2AgentContinuationError />}
           {embedded && <OnlineConfigurationBar agentId={workflow.agentId} />}
           <Composer
             models={models}
@@ -536,6 +533,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                   isError?: boolean;
                   isVerification?: boolean;
                   verification?: VerificationPresentation;
+                  nl2agentCardEnvelope?: StructuredNl2AgentCardEnvelope;
                 };
                 if (textPart.isVerification && textPart.verification) {
                   return (
@@ -547,6 +545,16 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
                       <span className="break-all">{textPart.text}</span>
+                    </div>
+                  );
+                }
+                if (textPart.nl2agentCardEnvelope) {
+                  return (
+                    <div className="space-y-3">
+                      {textPart.text.trim() ? <MarkdownText /> : null}
+                      {renderStructuredNl2AgentEnvelope(
+                        textPart.nl2agentCardEnvelope
+                      )}
                     </div>
                   );
                 }
@@ -574,7 +582,6 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
         <MessageError />
-        <Nl2AgentMessageLifecycle />
       </div>
 
       <div

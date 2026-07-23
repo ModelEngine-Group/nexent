@@ -7,7 +7,7 @@ import {
   getNl2AgentSessionState,
   getWebSkillConfiguration,
 } from "@/services/nl2agentService";
-import { OnlineRecommendationGroup } from "..";
+import { OnlineRecommendationGroup } from "../cardRegistry";
 import { ModelSelectionCard } from "../ModelSelectionCard";
 import { Nl2AgentWorkflowProvider } from "../Nl2AgentWorkflowContext";
 import { WebMcpCard } from "../WebMcpCard";
@@ -122,7 +122,6 @@ describe("persisted NL2AGENT card state", () => {
           }}
         />
         <OnlineRecommendationGroup
-          agentId={202}
           recommendationBatchId="skill_batch"
           resourceType="skill"
         >

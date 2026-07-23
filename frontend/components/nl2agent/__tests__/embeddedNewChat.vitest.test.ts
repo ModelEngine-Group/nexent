@@ -2,65 +2,58 @@ import type { ChatModelRunResult } from "@assistant-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  nl2AgentComponentsByLanguage,
-  preprocessNl2AgentFences,
-  resolveNl2AgentPersistedMessageId,
-} from "../Nl2AgentFenceRenderer";
+  envelopeFromMessageMetadata,
+  parseStructuredNl2AgentEnvelope,
+} from "@/lib/chat/nl2agentCardEvent";
 import { remoteChatModelAdapter } from "../../../app/[locale]/newchat/adapter/remote-chat-model-adapter";
 
-describe("embedded newchat NL2AGENT fence integration", () => {
+const envelope = {
+  schema_version: 1,
+  draft_agent_id: 202,
+  workflow_revision: 9,
+  cards: [
+    {
+      card_type: "model_selection",
+      card_key: "model_selection",
+      payload: { agent_id: 202 },
+    },
+  ],
+};
+
+describe("embedded newchat structured NL2AGENT events", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("routes every hyphenated card fence through a word-only language alias", () => {
-    const canonicalLanguages = [
-      "nl2agent-agent-identity",
-      "nl2agent-finalize",
-      "nl2agent-local-resources",
-      "nl2agent-model-selection",
-      "nl2agent-requirements-summary",
-      "nl2agent-web-mcp",
-      "nl2agent-web-mcps",
-      "nl2agent-web-skill",
-      "nl2agent-web-skills",
-    ];
-
-    for (const language of canonicalLanguages) {
-      const processed = preprocessNl2AgentFences(
-        `Before\n\`\`\`${language}\n{}\n\`\`\`\nAfter`
-      );
-      const alias = language.replaceAll("-", "");
-
-      expect(processed).toContain(`\`\`\`${alias}\n`);
-      expect(nl2AgentComponentsByLanguage[alias]).toBeDefined();
-    }
-  });
-
-  it("does not rewrite unknown or inline NL2AGENT text", () => {
-    const content =
-      "Use `nl2agent-finalize` here.\n```nl2agent-unknown\n{}\n```";
-
-    expect(preprocessNl2AgentFences(content)).toBe(content);
-  });
-
-  it("prefers persisted metadata over the assistant-ui runtime message ID", () => {
-    expect(resolveNl2AgentPersistedMessageId(4242, "aui-generated-id")).toBe(
-      4242
-    );
-    expect(resolveNl2AgentPersistedMessageId(undefined, "73")).toBe(73);
+  it("accepts only a scoped structured envelope from nl2agent_card metadata", () => {
+    expect(parseStructuredNl2AgentEnvelope(envelope)).toEqual(envelope);
     expect(
-      resolveNl2AgentPersistedMessageId(undefined, "aui-generated-id")
-    ).toBeUndefined();
+      envelopeFromMessageMetadata("nl2agent_card", {
+        nl2agent_card: envelope,
+      })
+    ).toEqual(envelope);
+    expect(
+      envelopeFromMessageMetadata("chat", { nl2agent_card: envelope })
+    ).toBe(undefined);
+    expect(
+      parseStructuredNl2AgentEnvelope({ ...envelope, schema_version: 2 })
+    ).toBe(undefined);
   });
 
-  it("carries the persisted assistant message ID in supported result metadata", async () => {
-    const stream = [
-      'data: {"type":"assistant_message_created","content":{"message_id":4242}}',
-      "",
-      'data: {"type":"final_answer","content":"Agent card ready"}',
-      "",
-    ].join("\n");
+  it("consumes one persisted nl2agent_message event without fence parsing", async () => {
+    const event = {
+      type: "nl2agent_message",
+      content: {
+        message_id: 4242,
+        conversation_id: 5,
+        message_index: 3,
+        message_content: "Choose the models for this agent.",
+        message_type: "nl2agent_card",
+        message_metadata: { nl2agent_card: envelope },
+        status: "completed",
+      },
+    };
+    const stream = `data: ${JSON.stringify(event)}\n\n`;
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -100,8 +93,14 @@ describe("embedded newchat NL2AGENT fence integration", () => {
     const finalUpdate = updates.at(-1);
     expect(finalUpdate?.metadata?.custom).toMatchObject({
       persistedMessageId: 4242,
+      nl2agentCardEnvelope: envelope,
     });
-    expect(finalUpdate?.metadata?.timing).toBeDefined();
-    expect(finalUpdate).not.toHaveProperty("messageId");
+    expect(finalUpdate?.content).toEqual([
+      expect.objectContaining({
+        type: "text",
+        text: "Choose the models for this agent.",
+        nl2agentCardEnvelope: envelope,
+      }),
+    ]);
   });
 });

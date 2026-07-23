@@ -1,65 +1,6 @@
 {
   "components": {
     "schemas": {
-      "CardDelivery": {
-        "additionalProperties": false,
-        "properties": {
-          "card_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Card Key"
-          },
-          "card_type": {
-            "enum": [
-              "requirements_summary",
-              "model_selection",
-              "local_resources",
-              "web_mcp",
-              "web_skill",
-              "agent_identity",
-              "final_review"
-            ],
-            "title": "Card Type",
-            "type": "string"
-          },
-          "message_id": {
-            "minimum": 1.0,
-            "title": "Message Id",
-            "type": "integer"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "retry_count": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Retry Count",
-            "type": "integer"
-          },
-          "status": {
-            "enum": ["rendered", "failed"],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": ["message_id", "card_type", "status"],
-        "title": "CardDelivery",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1919,7 +1860,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "const": 2,
+            "const": 3,
             "title": "Schema Version",
             "type": "integer"
           },
@@ -3018,24 +2959,6 @@
       "Nl2AgentWorkflowStateResponse": {
         "additionalProperties": false,
         "properties": {
-          "card_delivery": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/CardDelivery"
-            },
-            "propertyNames": {
-              "enum": [
-                "requirements_summary",
-                "model_selection",
-                "local_resources",
-                "web_mcp",
-                "web_skill",
-                "agent_identity",
-                "final_review"
-              ]
-            },
-            "title": "Card Delivery",
-            "type": "object"
-          },
           "conversation_id": {
             "title": "Conversation Id",
             "type": "integer"
@@ -3083,8 +3006,8 @@
             "type": "boolean"
           },
           "schema_version": {
-            "const": 2,
-            "default": 2,
+            "const": 3,
+            "default": 3,
             "title": "Schema Version",
             "type": "integer"
           }

@@ -21,6 +21,7 @@ import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
+import { envelopeFromMessageMetadata } from "@/lib/chat/nl2agentCardEvent";
 import {
   parseNl2AgentActionContext,
   type Nl2AgentActionContext,
@@ -289,6 +290,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // matches the id that assistant-ui later sets on the rendered message.
       const messageId = String(msg.message_id ?? `${remoteId}-${messageIndex}`);
       const nl2agentActionContext = restoreNl2AgentActionContext(msg);
+      const nl2agentCardEnvelope = envelopeFromMessageMetadata(
+        msg.message_type,
+        msg.message_metadata
+      );
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
@@ -359,7 +364,20 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           reasoningText = "";
         };
 
-        for (const [partIndex, part] of messageParts.entries()) {
+        if (nl2agentCardEnvelope) {
+          content.push({
+            type: "text",
+            text: messageParts
+              .filter((part) => part.type === "final_answer")
+              .map((part) => part.content)
+              .join(""),
+            nl2agentCardEnvelope,
+          });
+        }
+
+        for (const [partIndex, part] of nl2agentCardEnvelope
+          ? []
+          : messageParts.entries()) {
           // Note: do NOT early-return on `!part.content` at the top level —
           // `tool` items stored in the database have an empty `content` field
           // and only carry `tool_name` + `tool_arguments` (see the
@@ -613,6 +631,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         custom: {
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
           ...(nl2agentActionContext ? { nl2agentActionContext } : {}),
+          ...(nl2agentCardEnvelope ? { nl2agentCardEnvelope } : {}),
         },
       };
 

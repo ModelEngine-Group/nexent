@@ -205,11 +205,48 @@ _REQUIREMENTS_SUMMARY = {
 
 
 def _confirm_requirements(tenant_id="tenant_1", draft_agent_id=202):
-    review = nl2agent_session_catalog.register_requirements_summary(
-        tenant_id, draft_agent_id, _REQUIREMENTS_SUMMARY
+    nl2agent_session_catalog.confirm_requirements_from_summary(
+        tenant_id,
+        draft_agent_id,
+        _REQUIREMENTS_SUMMARY,
     )
-    nl2agent_session_catalog.confirm_requirements_summary(
-        tenant_id, draft_agent_id, review["fingerprint"]
+
+
+def _await_requirements_review(
+    tenant_id="tenant_1",
+    draft_agent_id=202,
+    summary=None,
+):
+    normalized = deepcopy(summary or _REQUIREMENTS_SUMMARY)
+
+    def mutate(state):
+        state.requirements_review.status = "awaiting_confirmation"
+        state.requirements_review.summary = normalized
+        state.requirements_review.fingerprint = (
+            nl2agent_session_catalog._requirements_fingerprint(normalized)
+        )
+        return state.requirements_review.model_dump(mode="json")
+
+    return nl2agent_session_catalog._mutate_session_state(
+        tenant_id,
+        draft_agent_id,
+        mutate,
+    )
+
+
+def _present_recommendation_batch(
+    tenant_id: str,
+    draft_agent_id: int,
+    recommendation_batch_id: str,
+):
+    def mutate(state):
+        state.recommendations[recommendation_batch_id].status = "presented"
+        return state.recommendations[recommendation_batch_id].model_dump(mode="json")
+
+    return nl2agent_session_catalog._mutate_session_state(
+        tenant_id,
+        draft_agent_id,
+        mutate,
     )
 
 
@@ -226,9 +263,7 @@ def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
         tool_ids=[],
         skill_ids=[],
     )
-    nl2agent_session_catalog.register_recommendation_batch(
-        tenant_id, draft_agent_id, "local_empty", [], []
-    )
+    _present_recommendation_batch(tenant_id, draft_agent_id, "local_empty")
     nl2agent_session_catalog.resolve_recommendation_batch(
         tenant_id, draft_agent_id, "local_empty", "skipped"
     )
@@ -239,9 +274,7 @@ def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
         resource_type="mcp",
         item_keys=[],
     )
-    nl2agent_session_catalog.register_online_recommendation_batch(
-        tenant_id, draft_agent_id, "online_mcp", "mcp", []
-    )
+    _present_recommendation_batch(tenant_id, draft_agent_id, "online_mcp")
     nl2agent_session_catalog._record_trusted_search_batch(
         tenant_id,
         draft_agent_id,
@@ -249,9 +282,7 @@ def _prepare_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
         resource_type="skill",
         item_keys=[],
     )
-    nl2agent_session_catalog.register_online_recommendation_batch(
-        tenant_id, draft_agent_id, "online_skill", "skill", []
-    )
+    _present_recommendation_batch(tenant_id, draft_agent_id, "online_skill")
 
 
 def _complete_required_online_review(tenant_id="tenant_1", draft_agent_id=202):
@@ -268,9 +299,7 @@ def _register_local_batch(batch_id, tool_ids, skill_ids):
         tool_ids=tool_ids,
         skill_ids=skill_ids,
     )
-    return nl2agent_session_catalog.register_recommendation_batch(
-        "tenant_1", 202, batch_id, tool_ids, skill_ids
-    )
+    return _present_recommendation_batch("tenant_1", 202, batch_id)
 
 
 def _complete_local_apply(batch_id, tool_ids, skill_ids):

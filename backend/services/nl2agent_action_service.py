@@ -374,11 +374,7 @@ async def dispatch_nl2agent_action(
             locale=locale,
             workflow_state=workflow_state,
         )
-        public_result = {
-            key: value
-            for key, value in dict(result or {}).items()
-            if key != "chat_injection_text"
-        }
+        public_result = dict(result or {})
         updated_session = dependencies.get_session(
             tenant_id,
             draft_agent_id,

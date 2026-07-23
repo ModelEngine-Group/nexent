@@ -4971,6 +4971,94 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test__stream_agent_chunks_emits_one_structured_nl2agent_message(monkeypatch):
+    agent_request = AgentRequest(
+        agent_id=101,
+        draft_agent_id=202,
+        conversation_id=999,
+        query="build an agent",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "hidden"})
+        yield json.dumps(
+            {
+                "type": "final_answer",
+                "content": (
+                    "Choose a model.\n```nl2agent-model-selection\n"
+                    '{"agent_id":202}\n```'
+                ),
+            }
+        )
+
+    persisted = {
+        "message_id": 4242,
+        "conversation_id": 999,
+        "message_index": 3,
+        "message_content": "Choose a model.",
+        "message_type": "nl2agent_card",
+        "message_metadata": {
+            "nl2agent_card": {
+                "schema_version": 1,
+                "draft_agent_id": 202,
+                "workflow_revision": 9,
+                "cards": [],
+            }
+        },
+        "status": "completed",
+    }
+    finalize = MagicMock(return_value=persisted)
+    message_service_module = types.ModuleType("services.nl2agent_message_service")
+    message_service_module.finalize_nl2agent_message = finalize
+    monkeypatch.setitem(
+        sys.modules,
+        "services.nl2agent_message_service",
+        message_service_module,
+    )
+    monkeypatch.setattr(
+        services_module,
+        "nl2agent_message_service",
+        message_service_module,
+        raising=False,
+    )
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+
+    channel = AsyncChannelMock()
+    run_info = types.SimpleNamespace(
+        stop_event=types.SimpleNamespace(is_set=MagicMock(return_value=False))
+    )
+    chunks = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request,
+            "user-1",
+            "tenant-1",
+            run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(chunks) == 1
+    event = json.loads(chunks[0].removeprefix("data: "))
+    assert event == {"type": "nl2agent_message", "content": persisted}
+    finalize.assert_called_once_with(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        runner_agent_id=101,
+        draft_agent_id=202,
+        conversation_id=999,
+        assistant_answer=(
+            "Choose a model.\n```nl2agent-model-selection\n"
+            '{"agent_id":202}\n```'
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test__stream_agent_chunks_does_not_persist_history_summary_event(monkeypatch):
     """The live summary event is streamed but its checkpoint is already persisted."""
     agent_request = AgentRequest(

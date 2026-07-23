@@ -179,20 +179,6 @@ def _load_nl2agent_workflow_state(
     return get_nl2agent_session_state(tenant_id, draft_agent_id)
 
 
-def _load_nl2agent_recommendations(
-    tenant_id: str,
-    draft_agent_id: int,
-) -> Dict[str, Dict[str, Any]]:
-    """Load the latest durable search proofs for final-answer validation."""
-    from .nl2agent_session_catalog import get_nl2agent_session_state
-
-    state = get_nl2agent_session_state(tenant_id, draft_agent_id)
-    batches = state.get("recommendations")
-    if not isinstance(batches, dict):
-        raise ValueError("NL2AGENT trusted search batches are malformed")
-    return batches
-
-
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
 # Keyed by model_id; cleared only on process restart.
@@ -1805,23 +1791,7 @@ async def create_agent_run_info(
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history)
 
-    final_answer_validator = None
-    if draft_agent_id is not None:
-        from utils.nl2agent_card_validation import validate_nl2agent_final_answer
-
-        final_answer_validator = partial(
-            validate_nl2agent_final_answer,
-            draft_agent_id=draft_agent_id,
-            trusted_search_batch_provider=partial(
-                _load_nl2agent_recommendations,
-                tenant_id,
-                draft_agent_id,
-            ),
-        )
-
     agent_run_info_kwargs = {}
-    if final_answer_validator is not None:
-        agent_run_info_kwargs["final_answer_validator"] = final_answer_validator
 
     agent_run_info = AgentRunInfo(
         query=final_query,

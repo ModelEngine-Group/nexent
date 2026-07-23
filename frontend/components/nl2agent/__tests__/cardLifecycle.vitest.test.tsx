@@ -179,7 +179,7 @@ describe("useNl2AgentCardLifecycle", () => {
     expect(result.current.workflow.busy).toBe(false);
   });
 
-  it("limits failed structured continuations to two attempts", async () => {
+  it("surfaces a failed structured continuation without hidden retries", async () => {
     const onContinue = vi.fn(async () => {
       throw new Error("continuation unavailable");
     });
@@ -188,23 +188,16 @@ describe("useNl2AgentCardLifecycle", () => {
     });
 
     await act(async () => {
-      await result.current.workflow.continueWithAction({
-        actionId: "action-1",
-        action: "save_identity",
-        displayText: "Saved",
-        workflowRevision: 19,
-      });
-    });
-    await act(async () => {
-      await result.current.workflow.retryContinuation();
-    });
-    await act(async () => {
-      await result.current.workflow.retryContinuation();
+      await expect(
+        result.current.workflow.continueWithAction({
+          actionId: "action-1",
+          action: "save_identity",
+          displayText: "Saved",
+          workflowRevision: 19,
+        })
+      ).rejects.toThrow("continuation unavailable");
     });
 
-    expect(onContinue).toHaveBeenCalledTimes(2);
-    expect(result.current.workflow.continuationError).toBe(
-      "continuation unavailable"
-    );
+    expect(onContinue).toHaveBeenCalledTimes(1);
   });
 });

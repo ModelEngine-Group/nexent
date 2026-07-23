@@ -17,9 +17,20 @@ def _snapshot(revision: int = 18):
     return {
         "workflow_revision": revision,
         "workflow_state": {
-            "schema_version": 2,
+            "schema_version": 3,
             "revision": revision,
             "conversation_id": 77,
+            "requirements_review": {
+                "status": "confirmed",
+                "summary": {
+                    "goal": "Build an agent",
+                    "audience_or_scenario": "Analysts",
+                    "primary_input": "Documents",
+                    "expected_output": "Reports",
+                    "key_constraints": "Preserve facts",
+                },
+                "fingerprint": "confirmed",
+            },
         },
     }
 
@@ -74,6 +85,50 @@ def test_finalize_message_persists_envelope_display_text_and_revision(monkeypatc
         ],
     }
     assert result["workflow_revision"] == 19
+
+
+def test_finalize_requirements_card_updates_review_in_same_cas(monkeypatch):
+    persisted = {}
+    snapshot = _snapshot()
+    snapshot["workflow_state"]["requirements_review"] = {
+        "status": "collecting",
+        "summary": None,
+        "fingerprint": "",
+    }
+    monkeypatch.setattr(service, "get_db_session", _transaction)
+    monkeypatch.setattr(
+        service,
+        "get_nl2agent_session_snapshot_by_identity",
+        lambda identity, db_session: snapshot,
+    )
+    monkeypatch.setattr(
+        service,
+        "update_nl2agent_workflow_state_by_identity",
+        lambda **kwargs: persisted.setdefault("state", kwargs["workflow_state"]) is not None,
+    )
+    monkeypatch.setattr(
+        service,
+        "create_nl2agent_assistant_message",
+        lambda **kwargs: {"message_id": 1, "unit_ids": [2]},
+    )
+
+    service.finalize_nl2agent_message(
+        tenant_id="tenant-a",
+        user_id="user-a",
+        runner_agent_id=9,
+        draft_agent_id=54,
+        conversation_id=77,
+        assistant_answer=(
+            "Review these requirements.\n"
+            "```nl2agent-requirements-summary\n"
+            '{"agent_id":54,"goal":"Build reports","audience_or_scenario":"Analysts",'
+            '"primary_input":"Documents","expected_output":"Reports",'
+            '"key_constraints":"Preserve facts"}\n```'
+        ),
+    )
+
+    assert persisted["state"]["requirements_review"]["status"] == "awaiting_confirmation"
+    assert persisted["state"]["requirements_review"]["fingerprint"]
 
 
 def test_finalize_message_rejects_stale_revision_before_writes(monkeypatch):

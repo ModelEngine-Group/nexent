@@ -154,7 +154,8 @@ const NameList: React.FC<{
  * Renders the proposal together with authoritative persisted draft state.
  * The user reviews the spec and clicks "Review & Publish" to finalize.
  *
- * Rendered from a ```nl2agent-finalize fenced JSON block emitted by NL2AGENT.
+ * Rendered from a validated final-review card in the persisted structured
+ * NL2AGENT message envelope.
  */
 export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const { t } = useTranslation("common");

@@ -903,6 +903,106 @@ async def regenerate_agent_name_batch_impl(
     return results
 
 
+def _nl2agent_message_event(message: Dict[str, Any]) -> str:
+    payload = {
+        "type": "nl2agent_message",
+        "content": {
+            key: message[key]
+            for key in (
+                "message_id",
+                "conversation_id",
+                "message_index",
+                "message_content",
+                "message_type",
+                "message_metadata",
+                "status",
+            )
+        },
+    }
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _stream_nl2agent_message(
+    *,
+    agent_request: "AgentRequest",
+    user_id: str,
+    tenant_id: str,
+    agent_run_info,
+    draft_agent_id: int,
+    channel: Optional[Any] = None,
+):
+    """Buffer one builder run and publish only its atomically persisted message."""
+    from services.nl2agent_message_service import finalize_nl2agent_message
+
+    if channel is None:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id,
+        )
+    cancel_poll_task = asyncio.create_task(
+        _poll_runtime_cancel_signal(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id,
+            stop_event=agent_run_info.stop_event,
+        )
+    )
+    terminal_status = "failed"
+    final_answer_parts: list[str] = []
+    try:
+        async for raw_chunk in agent_run(agent_run_info):
+            try:
+                chunk = json.loads(raw_chunk)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if chunk.get("type") == "final_answer":
+                final_answer_parts.append(str(chunk.get("content") or ""))
+
+        if agent_run_info.stop_event.is_set():
+            terminal_status = "stopped"
+            return
+        assistant_answer = "".join(final_answer_parts)
+        if not assistant_answer:
+            raise ValueError("NL2AGENT completed without a final answer.")
+        message = finalize_nl2agent_message(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            runner_agent_id=agent_request.agent_id,
+            draft_agent_id=draft_agent_id,
+            conversation_id=agent_request.conversation_id,
+            assistant_answer=assistant_answer,
+        )
+        event = _nl2agent_message_event(message)
+        await channel.publish(event)
+        terminal_status = "completed"
+        yield event
+    except Exception as exc:
+        logger.error("NL2AGENT message finalization failed: %r", exc, exc_info=True)
+        error_event = _safe_agent_stream_error_chunk()
+        await channel.publish(error_event)
+        yield error_event
+    finally:
+        if not cancel_poll_task.done():
+            cancel_poll_task.cancel()
+        agent_run_manager.unregister_agent_run(
+            agent_request.conversation_id,
+            user_id,
+            status=terminal_status,
+        )
+        await streaming_channel_manager.complete_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id,
+            status=terminal_status,
+        )
+        cleanup_task = asyncio.create_task(
+            _cleanup_channel_later(
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+            )
+        )
+        _channel_cleanup_tasks.add(cleanup_task)
+        cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+
+
 async def _stream_agent_chunks(
     agent_request: "AgentRequest",
     user_id: str,
@@ -924,6 +1024,19 @@ async def _stream_agent_chunks(
         channel: Optional StreamingChannel for multi-subscriber support.
     """
 
+    nl2agent_draft_id = _valid_nl2agent_draft_id(agent_request)
+    if nl2agent_draft_id is not None:
+        async for event in _stream_nl2agent_message(
+            agent_request=agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            agent_run_info=agent_run_info,
+            draft_agent_id=nl2agent_draft_id,
+            channel=channel,
+        ):
+            yield event
+        return
+
     # Types whose chunks should be merged into the previous unit boundary,
     # matching the legacy batch merge logic.
     _MERGEABLE_TYPES = {
@@ -932,7 +1045,6 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    nl2agent_draft_id = _valid_nl2agent_draft_id(agent_request)
     final_answer_parts: list[str] = []
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
@@ -3553,7 +3665,9 @@ async def run_agent_stream(
         },
     ))
 
-    use_memory_stream = memory_enabled and not agent_request.is_debug
+    use_memory_stream = (
+        memory_enabled and not agent_request.is_debug and not is_nl2agent_run
+    )
 
     if use_memory_stream:
         stream_gen = generate_stream_with_memory(

@@ -655,6 +655,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': processed_units,
                     'message_id': message_id,
+                    'message_type': msg.get('message_type') or 'chat',
+                    'message_metadata': msg.get('message_metadata') or {},
                     'opinion_flag': msg['opinion_flag']
                 }
 

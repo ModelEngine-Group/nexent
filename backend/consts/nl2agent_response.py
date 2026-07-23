@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents.nl2agent_workflow import (
-    CardDelivery,
     CardType,
     RecommendationBatch,
     RequirementsReview,
@@ -17,11 +16,6 @@ class Nl2AgentResponse(BaseModel):
     """Strict base model for public NL2AGENT response contracts."""
 
     model_config = ConfigDict(extra="forbid")
-
-
-class Nl2AgentContinuationResponse(Nl2AgentResponse):
-    agent_id: int
-    chat_injection_text: Optional[str] = None
 
 
 class Nl2AgentSessionStartResponse(Nl2AgentResponse):
@@ -49,7 +43,8 @@ class Nl2AgentModelSummary(Nl2AgentResponse):
     display_name: str
 
 
-class Nl2AgentModelSelectionResponse(Nl2AgentContinuationResponse):
+class Nl2AgentModelSelectionResponse(Nl2AgentResponse):
+    agent_id: int
     primary_model_id: int
     fallback_model_ids: List[int]
     models: List[Nl2AgentModelSummary]
@@ -87,7 +82,6 @@ class Nl2AgentApplyLocalResourcesResponse(Nl2AgentResponse):
     bound_skill_count: int
     tool_ids: List[int]
     skill_ids: List[int]
-    chat_injection_text: str
 
 
 class Nl2AgentToolParameterSchema(Nl2AgentResponse):
@@ -121,7 +115,6 @@ class Nl2AgentLocalSkipResponse(Nl2AgentResponse):
     skill_ids: List[int]
     applied_tool_ids: List[int]
     applied_skill_ids: List[int]
-    chat_injection_text: str
 
 
 class Nl2AgentOnlineRecommendationResponse(Nl2AgentResponse):
@@ -147,22 +140,14 @@ class Nl2AgentRequirementsRegistrationResponse(Nl2AgentResponse):
     is_current: bool
 
 
-class Nl2AgentRequirementsConfirmationResponse(Nl2AgentContinuationResponse):
+class Nl2AgentRequirementsConfirmationResponse(Nl2AgentResponse):
+    agent_id: int
     status: Literal["confirmed"]
     fingerprint: str
 
 
-class Nl2AgentCardDeliveryResponse(Nl2AgentContinuationResponse):
-    message_id: int
-    card_type: CardType
-    status: Literal["rendered", "failed"]
-    card_key: Optional[str] = None
-    reason: Optional[str] = None
-    retry_count: int = 0
-    auto_retry_allowed: bool
-
-
-class Nl2AgentOnlineConfigurationResponse(Nl2AgentContinuationResponse):
+class Nl2AgentOnlineConfigurationResponse(Nl2AgentResponse):
+    agent_id: int
     online_configuration_confirmed: bool
     completed_batch_ids: List[str]
 
@@ -193,7 +178,7 @@ class Nl2AgentMcpWorkflowResponse(Nl2AgentResponse):
 
 
 class Nl2AgentWorkflowStateResponse(Nl2AgentResponse):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     revision: int = 0
     revision_mode: bool = False
     conversation_id: int
@@ -203,7 +188,6 @@ class Nl2AgentWorkflowStateResponse(Nl2AgentResponse):
     identity_confirmed: bool = False
     mcp_workflows: Dict[str, Nl2AgentMcpWorkflowResponse]
     online_configuration_confirmed: bool = False
-    card_delivery: Dict[CardType, CardDelivery] = Field(default_factory=dict)
 
 
 class Nl2AgentPersistedModel(Nl2AgentResponse):
@@ -252,7 +236,7 @@ class Nl2AgentInvalidReference(Nl2AgentResponse):
 class Nl2AgentSessionStateResponse(Nl2AgentResponse):
     agent_id: int
     session_status: Literal["active", "completed"]
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     revision: int
     current_stage: Literal[
         "revision_routing",
@@ -283,7 +267,8 @@ class Nl2AgentSessionStateResponse(Nl2AgentResponse):
     resource_review: Nl2AgentWorkflowStateResponse
 
 
-class Nl2AgentIdentityResponse(Nl2AgentContinuationResponse):
+class Nl2AgentIdentityResponse(Nl2AgentResponse):
+    agent_id: int
     display_name: str
     internal_name: str
     identity_confirmed: bool

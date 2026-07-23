@@ -138,24 +138,3 @@ export const OnlineConfigurationBar: React.FC<{
     </div>
   );
 };
-
-export const Nl2AgentContinuationError: React.FC = () => {
-  const workflow = useNl2AgentWorkflow();
-  if (!workflow.continuationError) return null;
-  return (
-    <Alert
-      className="mx-auto mb-2 max-w-3xl"
-      type="error"
-      title="NL2AGENT could not continue automatically."
-      description={workflow.continuationError}
-      action={
-        <Button
-          disabled={workflow.busy}
-          onClick={() => void workflow.retryContinuation()}
-        >
-          Retry continuation
-        </Button>
-      }
-    />
-  );
-};

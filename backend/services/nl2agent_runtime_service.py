@@ -19,7 +19,6 @@ from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candid
 
 from agents.nl2agent_session_catalog import (
     apply_requirements_revision_text,
-    assert_trusted_local_search_batch,
     assert_workflow_action_allowed,
     assert_requirements_confirmed,
     assert_identity_confirmed,
@@ -30,16 +29,11 @@ from agents.nl2agent_session_catalog import (
     complete_online_configuration as complete_online_configuration_state,
     complete_mcp_binding_result,
     confirm_requirements_from_summary,
-    confirm_requirements_summary,
     confirm_agent_identity,
     get_nl2agent_session_catalogs,
     get_nl2agent_installation_operations,
     get_nl2agent_session_state,
     initialize_nl2agent_session_state,
-    register_recommendation_batch,
-    register_online_recommendation_batch,
-    register_requirements_summary,
-    record_card_delivery,
     release_recommendation_batch_apply,
     resolve_recommendation_batch,
     reserve_recommendation_batch_apply,
@@ -76,9 +70,6 @@ from database.conversation_db import (
     claim_nl2agent_action_message,
     create_conversation,
     get_conversation,
-    get_latest_assistant_message_id,
-    get_message,
-    get_message_units,
     get_nl2agent_action_message,
     update_nl2agent_action_message,
 )
@@ -159,7 +150,6 @@ from services.nl2agent_resource_service import (
     LocalResourceDependencies,
     apply_local_resources,
     redact_tool_parameter_defaults,
-    register_local_recommendations,
     skip_local_recommendations,
 )
 from services.nl2agent_session_service import (
@@ -187,15 +177,10 @@ from services.nl2agent_summary_service import (
 from services.nl2agent_workflow_service import (
     WorkflowDependencies,
     confirm_online_resource_configuration as confirm_online_configuration_workflow,
-    confirm_requirements_review as confirm_requirements_review_workflow,
     get_session_state as get_workflow_session_state,
     process_requirements_revision_text as process_requirements_revision_workflow,
-    register_online_resource_recommendations as register_online_recommendations_workflow,
-    register_requirements_review as register_requirements_review_workflow,
-    report_card_delivery as report_card_delivery_workflow,
     save_agent_identity as save_agent_identity_workflow,
 )
-from utils.nl2agent_card_validation import message_contains_valid_card
 from services.remote_mcp_service import (
     add_container_mcp_service,
     add_mcp_service,
@@ -219,19 +204,6 @@ NL2AGENT_AGENT_NAME = "nl2agent"
 
 # Prefix for draft agent names created during NL2AGENT sessions.
 DRAFT_AGENT_NAME_PREFIX = "draft_"
-
-NL2AGENT_CHAT_INJECTION_TEXT = (
-    "The previous card action completed successfully. Re-read the authoritative "
-    "Current Session state and continue naturally from the next incomplete stage. "
-    "Do not ask the user to type continue."
-)
-NL2AGENT_CARD_RETRY_INJECTION_TEXT = (
-    "[[NL2AGENT_CARD_RETRY]]\n"
-    "The previous card output could not be rendered. Re-read the authoritative "
-    "Current Session state and generate only the card required by the first "
-    "incomplete stage. Do not claim the previous card is still valid."
-)
-
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
@@ -537,7 +509,6 @@ async def select_models(
             }
             for model_id in ordered_ids
         ],
-        "chat_injection_text": NL2AGENT_CHAT_INJECTION_TEXT,
     }
 
 
@@ -750,19 +721,15 @@ def _local_resource_dependencies(user_id: str) -> LocalResourceDependencies:
     return LocalResourceDependencies(
         get_owned_draft=_owned_draft_reader(user_id),
         get_session_state=get_nl2agent_session_state,
-        get_session_catalogs=get_nl2agent_session_catalogs,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         query_skills_by_ids=query_skills_by_ids,
         get_db_session=get_db_session,
         bind_tool=create_or_update_tool_by_tool_info,
         bind_skill=create_or_update_skill_by_skill_info,
-        assert_trusted_batch=assert_trusted_local_search_batch,
-        register_batch=register_recommendation_batch,
         resolve_batch=resolve_recommendation_batch,
         reserve_batch_apply=reserve_recommendation_batch_apply,
         complete_batch_apply=complete_recommendation_batch_apply,
         release_batch_apply=release_recommendation_batch_apply,
-        continuation_text=NL2AGENT_CHAT_INJECTION_TEXT,
     )
 
 
@@ -789,25 +756,6 @@ async def apply_local_resources_batch(
     )
 
 
-async def register_local_resource_recommendations(
-    agent_id: int,
-    recommendation_batch_id: str,
-    tool_ids: List[int],
-    skill_ids: List[int],
-    tenant_id: str,
-    user_id: str,
-) -> Dict[str, Any]:
-    """Register or recover one trusted local recommendation batch."""
-    return await register_local_recommendations(
-        _local_resource_dependencies(user_id),
-        agent_id=agent_id,
-        recommendation_batch_id=recommendation_batch_id,
-        tool_ids=tool_ids,
-        skill_ids=skill_ids,
-        tenant_id=tenant_id,
-    )
-
-
 async def skip_local_resource_recommendations(
     agent_id: int,
     recommendation_batch_id: str,
@@ -824,32 +772,14 @@ async def skip_local_resource_recommendations(
     )
 
 
-def _get_completed_final_answer(message_id: int) -> str:
-    """Rebuild the persisted final answer without exposing unit rows to the workflow."""
-    return "".join(
-        str(unit.get("unit_content") or "")
-        for unit in get_message_units(message_id)
-        if unit.get("unit_type") == "final_answer"
-        and unit.get("unit_status") == "completed"
-    )
-
-
 def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
     """Build workflow dependencies from facade-level operations."""
     return WorkflowDependencies(
         get_owned_draft=_owned_draft_reader(user_id),
         get_readable_draft=_readable_draft_reader(user_id),
-        register_online_batch=register_online_recommendation_batch,
         get_session_state=get_nl2agent_session_state,
         summarize_workflow_state=summarize_workflow_state,
-        get_message=get_message,
-        get_completed_final_answer=_get_completed_final_answer,
-        get_latest_assistant_message_id=get_latest_assistant_message_id,
-        message_contains_valid_card=message_contains_valid_card,
-        record_card_delivery=record_card_delivery,
         complete_online_configuration=complete_online_configuration_state,
-        register_requirements_summary=register_requirements_summary,
-        confirm_requirements_summary=confirm_requirements_summary,
         apply_requirements_revision_text=apply_requirements_revision_text,
         find_agent_info_by_agent_id=find_agent_info_by_agent_id,
         query_enabled_tool_instances=query_all_enabled_tool_instances,
@@ -865,51 +795,6 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         update_agent=update_agent,
         confirm_agent_identity=confirm_agent_identity,
         runner_agent_name=NL2AGENT_AGENT_NAME,
-        continuation_text=NL2AGENT_CHAT_INJECTION_TEXT,
-        card_retry_text=NL2AGENT_CARD_RETRY_INJECTION_TEXT,
-    )
-
-
-async def register_online_resource_recommendations(
-    agent_id: int,
-    recommendation_batch_id: str,
-    resource_type: str,
-    item_keys: List[str],
-    tenant_id: str,
-    user_id: str,
-) -> Dict[str, Any]:
-    """Register or recover one trusted online recommendation batch."""
-    return await register_online_recommendations_workflow(
-        _workflow_dependencies(user_id),
-        agent_id=agent_id,
-        recommendation_batch_id=recommendation_batch_id,
-        resource_type=resource_type,
-        item_keys=item_keys,
-        tenant_id=tenant_id,
-    )
-
-
-async def report_card_delivery(
-    agent_id: int,
-    message_id: int,
-    card_type: str,
-    status: str,
-    card_key: Optional[str],
-    reason: Optional[str],
-    tenant_id: str,
-    user_id: str,
-) -> Dict[str, Any]:
-    """Delegate card-delivery validation to the workflow service."""
-    return await report_card_delivery_workflow(
-        _workflow_dependencies(user_id),
-        agent_id=agent_id,
-        message_id=message_id,
-        card_type=card_type,
-        status=status,
-        card_key=card_key,
-        reason=reason,
-        tenant_id=tenant_id,
-        user_id=user_id,
     )
 
 
@@ -923,18 +808,6 @@ async def confirm_online_resource_configuration(
     return await confirm_online_configuration_workflow(
         _workflow_dependencies(user_id),
         agent_id=agent_id,
-        tenant_id=tenant_id,
-    )
-
-
-async def register_requirements_review(
-    agent_id: int, summary: Dict[str, Any], tenant_id: str, user_id: str
-) -> Dict[str, Any]:
-    """Register or recover one persisted requirements summary."""
-    return await register_requirements_review_workflow(
-        _workflow_dependencies(user_id),
-        agent_id=agent_id,
-        summary=summary,
         tenant_id=tenant_id,
     )
 
@@ -995,19 +868,6 @@ def validate_nl2agent_run_context(
         )
     _get_draft_configuration(draft_agent_id, tenant_id)
     return persisted_runner_id
-
-
-async def confirm_requirements_review(
-    agent_id: int, fingerprint: str, tenant_id: str, user_id: str
-) -> Dict[str, Any]:
-    """Delegate requirements confirmation to the workflow service."""
-    _require_workflow_action(agent_id, tenant_id, user_id, "confirm_requirements")
-    return await confirm_requirements_review_workflow(
-        _workflow_dependencies(user_id),
-        agent_id=agent_id,
-        fingerprint=fingerprint,
-        tenant_id=tenant_id,
-    )
 
 
 async def get_session_state(
