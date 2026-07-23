@@ -67,9 +67,10 @@ def test_ac008_service_failure_maps_to_500(monkeypatch):
         "get_current_user_id",
         lambda _authorization: ("user", "tenant"),
     )
+    request = memory_dreaming_app.DreamingRunRequest(agent_id="agent")
     with pytest.raises(HTTPException) as exc:
         memory_dreaming_app.run_dreaming(
-            memory_dreaming_app.DreamingRunRequest(agent_id="agent"),
+            request,
             authorization=None,
         )
     assert exc.value.status_code == 500
