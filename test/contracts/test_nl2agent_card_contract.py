@@ -12,6 +12,7 @@ from consts.model import (
     Nl2AgentRequirementsSummaryPayload,
     Nl2AgentSkipLocalResourcesActionPayload,
 )
+from consts.nl2agent_card import build_nl2agent_card_schema
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -21,9 +22,7 @@ SCHEMA = json.loads(
     )
 )
 OPENAPI = json.loads(
-    (PROJECT_ROOT / "contracts" / "nl2agent-openapi.json").read_text(
-        encoding="utf-8"
-    )
+    (PROJECT_ROOT / "contracts" / "nl2agent-openapi.json").read_text(encoding="utf-8")
 )
 
 
@@ -38,17 +37,33 @@ def test_canonical_schema_is_valid() -> None:
     Draft7Validator.check_schema(SCHEMA)
 
 
+def test_canonical_schema_is_generated_from_pydantic() -> None:
+    assert SCHEMA == build_nl2agent_card_schema()
+
+
+def test_openapi_exposes_structured_card_envelope_components() -> None:
+    schemas = OPENAPI["components"]["schemas"]
+
+    assert "Nl2AgentCardEnvelope" in schemas
+    assert "Nl2AgentRequirementsSummaryCardPayload" in schemas
+    assert "Nl2AgentFinalReviewCardPayload" in schemas
+
+
 def test_every_nl2agent_endpoint_declares_a_typed_success_response() -> None:
     for path, path_item in OPENAPI["paths"].items():
         for method, operation in path_item.items():
             if method not in {"get", "post", "put", "delete", "patch"}:
                 continue
-            schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+            schema = operation["responses"]["200"]["content"]["application/json"][
+                "schema"
+            ]
             non_null_schema = next(
                 (item for item in schema.get("anyOf", []) if "$ref" in item),
                 schema,
             )
-            assert non_null_schema["$ref"].startswith("#/components/schemas/Nl2Agent"), (
+            assert non_null_schema["$ref"].startswith(
+                "#/components/schemas/Nl2Agent"
+            ), (
                 path,
                 method,
                 schema,
@@ -225,9 +240,7 @@ def test_card_constraints_equal_http_model_constraints() -> None:
         "expected_output",
         "key_constraints",
     ):
-        card_field = SCHEMA["$defs"]["requirements_summary"]["properties"][
-            field_name
-        ]
+        card_field = SCHEMA["$defs"]["requirements_summary"]["properties"][field_name]
         http_field = requirements_http["properties"][field_name]
         assert {
             "minLength": card_field["minLength"],
@@ -284,7 +297,9 @@ def test_bilingual_prompt_card_examples_follow_canonical_contract() -> None:
             / "prompts"
             / f"nl2agent_system_prompt_{language}.yaml"
         )
-        prompt = yaml.safe_load(prompt_path.read_text(encoding="utf-8"))["system_prompt"]
+        prompt = yaml.safe_load(prompt_path.read_text(encoding="utf-8"))[
+            "system_prompt"
+        ]
         assert "`revision_routing`" in prompt
         assert "`allowed_card_types`" in prompt
         examples = re.findall(r"```(nl2agent-[^\n]+)\n(.+?)\n```", prompt, re.DOTALL)

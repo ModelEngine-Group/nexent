@@ -254,6 +254,30 @@ export interface components {
       /** Workflow Revision */
       workflow_revision: number;
     };
+    /** Nl2AgentAgentIdentityCard */
+    Nl2AgentAgentIdentityCard: {
+      /**
+       * Card Key
+       * @constant
+       */
+      card_key: "agent_identity";
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "agent_identity";
+      payload: components["schemas"]["Nl2AgentAgentIdentityCardPayload"];
+    };
+    /** Nl2AgentAgentIdentityCardPayload */
+    Nl2AgentAgentIdentityCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /** Display Name */
+      display_name: string;
+    };
     /**
      * Nl2AgentApplyLocalResourcesActionPayload
      * @description Select resources only from one server-recorded recommendation batch.
@@ -315,6 +339,31 @@ export interface components {
       expected_revision: number;
       payload: components["schemas"]["Nl2AgentBindMcpToolsActionPayload"];
     };
+    /**
+     * Nl2AgentCardEnvelope
+     * @description Persisted cards and their authoritative Session revision.
+     */
+    Nl2AgentCardEnvelope: {
+      /** Cards */
+      cards: (
+        | components["schemas"]["Nl2AgentRequirementsSummaryCard"]
+        | components["schemas"]["Nl2AgentModelSelectionCard"]
+        | components["schemas"]["Nl2AgentLocalResourcesCard"]
+        | components["schemas"]["Nl2AgentWebMcpCard"]
+        | components["schemas"]["Nl2AgentWebSkillCard"]
+        | components["schemas"]["Nl2AgentAgentIdentityCard"]
+        | components["schemas"]["Nl2AgentFinalReviewCard"]
+      )[];
+      /** Draft Agent Id */
+      draft_agent_id: number;
+      /**
+       * Schema Version
+       * @constant
+       */
+      schema_version: 1;
+      /** Workflow Revision */
+      workflow_revision: number;
+    };
     /** Nl2AgentCompleteOnlineConfigurationActionRequest */
     Nl2AgentCompleteOnlineConfigurationActionRequest: {
       /**
@@ -369,6 +418,76 @@ export interface components {
      * @description An action with no client-controlled domain identifiers.
      */
     Nl2AgentEmptyActionPayload: Record<string, never>;
+    /** Nl2AgentFinalReviewCard */
+    Nl2AgentFinalReviewCard: {
+      /**
+       * Card Key
+       * @constant
+       */
+      card_key: "final_review";
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "final_review";
+      payload: components["schemas"]["Nl2AgentFinalReviewCardPayload"];
+    };
+    /** Nl2AgentFinalReviewCardPayload */
+    Nl2AgentFinalReviewCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /** Business Description */
+      business_description: string;
+      /**
+       * Constraint Prompt
+       * @default null
+       */
+      constraint_prompt?: string;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /** Duty Prompt */
+      duty_prompt: string;
+      /**
+       * Enable Context Manager
+       * @default null
+       */
+      enable_context_manager?: boolean;
+      /**
+       * Example Questions
+       * @default null
+       */
+      example_questions?: string[];
+      /**
+       * Few Shots Prompt
+       * @default null
+       */
+      few_shots_prompt?: string;
+      /** Greeting Message */
+      greeting_message: string;
+      /**
+       * Max Steps
+       * @default null
+       */
+      max_steps?: number;
+      /**
+       * Provide Run Summary
+       * @default null
+       */
+      provide_run_summary?: boolean;
+      /**
+       * Requested Output Tokens
+       * @default null
+       */
+      requested_output_tokens?: number;
+      /** @default null */
+      verification_config?: components["schemas"]["Nl2AgentVerificationConfig"];
+    };
     /**
      * Nl2AgentFinalizeActionPayload
      * @description Unsaved descriptive, prompt, and runtime fields for draft publication.
@@ -514,6 +633,220 @@ export interface components {
        */
       reference_type: "model" | "tool" | "skill";
     };
+    /** Nl2AgentLocalResourcesCard */
+    Nl2AgentLocalResourcesCard: {
+      /** Card Key */
+      card_key: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "local_resources";
+      payload: components["schemas"]["Nl2AgentLocalResourcesCardPayload"];
+    };
+    /** Nl2AgentLocalResourcesCardPayload */
+    Nl2AgentLocalResourcesCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /** Skills */
+      skills: components["schemas"]["Nl2AgentLocalSkillCardItem"][];
+      /** Tools */
+      tools: components["schemas"]["Nl2AgentLocalToolCardItem"][];
+    };
+    /** Nl2AgentLocalSkillCardItem */
+    Nl2AgentLocalSkillCardItem: {
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /** Name */
+      name: string;
+      /**
+       * Reason
+       * @default null
+       */
+      reason?: string;
+      /**
+       * Score
+       * @default null
+       */
+      score?: number;
+      /** Skill Id */
+      skill_id: number;
+      /**
+       * Tags
+       * @default null
+       */
+      tags?: string[];
+    };
+    /** Nl2AgentLocalToolCardItem */
+    Nl2AgentLocalToolCardItem: {
+      /**
+       * Category
+       * @default null
+       */
+      category?: string;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /**
+       * Labels
+       * @default null
+       */
+      labels?: string[];
+      /** Name */
+      name: string;
+      /**
+       * Reason
+       * @default null
+       */
+      reason?: string;
+      /**
+       * Score
+       * @default null
+       */
+      score?: number;
+      /**
+       * Source
+       * @default null
+       */
+      source?: string;
+      /** Tool Id */
+      tool_id: number;
+      /**
+       * Usage
+       * @default null
+       */
+      usage?: string;
+    };
+    /** Nl2AgentMcpField */
+    Nl2AgentMcpField: {
+      /**
+       * Argument Name
+       * @default null
+       */
+      argument_name?: string | null;
+      /**
+       * Argument Type
+       * @default null
+       * @enum {string}
+       */
+      argument_type?: "named" | "positional";
+      /**
+       * Category
+       * @default null
+       */
+      category?: string;
+      /**
+       * Choices
+       * @default null
+       */
+      choices?: string[];
+      /**
+       * Default
+       * @default null
+       */
+      default?: string | number | boolean | null;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /** Key */
+      key: string;
+      /**
+       * Label
+       * @default null
+       */
+      label?: string;
+      /** Name */
+      name: string;
+      /**
+       * Placeholder
+       * @default null
+       */
+      placeholder?: string;
+      /**
+       * Repeated
+       * @default null
+       */
+      repeated?: boolean;
+      /** Required */
+      required: boolean;
+      /** Secret */
+      secret: boolean;
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: "text" | "number" | "url" | "json";
+    };
+    /** Nl2AgentMcpInstallOption */
+    Nl2AgentMcpInstallOption: {
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /** Fields */
+      fields: components["schemas"]["Nl2AgentMcpField"][];
+      /** Label */
+      label: string;
+      /** Option Id */
+      option_id: string;
+      /**
+       * Package Identifier
+       * @default null
+       */
+      package_identifier?: string | null;
+      /**
+       * Registry Type
+       * @default null
+       */
+      registry_type?: string | null;
+      /** Requires Configuration */
+      requires_configuration: boolean;
+      /**
+       * Runtime Hint
+       * @default null
+       */
+      runtime_hint?: string | null;
+      /**
+       * Server Url Template
+       * @default null
+       */
+      server_url_template?: string | null;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ready" | "configuration_required" | "unsupported";
+      /** Supported */
+      supported: boolean;
+      /**
+       * Transport
+       * @default null
+       */
+      transport?: string | null;
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: "remote" | "container" | "unsupported";
+      /**
+       * Unsupported Reason
+       * @default null
+       */
+      unsupported_reason?: string;
+    };
     /** Nl2AgentMcpWorkflowResponse */
     Nl2AgentMcpWorkflowResponse: {
       /** Bound Tool Ids */
@@ -543,6 +876,28 @@ export interface components {
             | "failed"
           )
         | null;
+    };
+    /** Nl2AgentModelSelectionCard */
+    Nl2AgentModelSelectionCard: {
+      /**
+       * Card Key
+       * @constant
+       */
+      card_key: "model_selection";
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "model_selection";
+      payload: components["schemas"]["Nl2AgentModelSelectionCardPayload"];
+    };
+    /** Nl2AgentModelSelectionCardPayload */
+    Nl2AgentModelSelectionCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
     };
     /** Nl2AgentPersistedModel */
     Nl2AgentPersistedModel: {
@@ -585,6 +940,38 @@ export interface components {
        */
       status?: "collecting" | "awaiting_confirmation" | "confirmed";
       summary?: components["schemas"]["Nl2AgentRequirementsData"] | null;
+    };
+    /** Nl2AgentRequirementsSummaryCard */
+    Nl2AgentRequirementsSummaryCard: {
+      /**
+       * Card Key
+       * @constant
+       */
+      card_key: "requirements_summary";
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "requirements_summary";
+      payload: components["schemas"]["Nl2AgentRequirementsSummaryCardPayload"];
+    };
+    /** Nl2AgentRequirementsSummaryCardPayload */
+    Nl2AgentRequirementsSummaryCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /** Audience Or Scenario */
+      audience_or_scenario: string;
+      /** Expected Output */
+      expected_output: string;
+      /** Goal */
+      goal: string;
+      /** Key Constraints */
+      key_constraints: string;
+      /** Primary Input */
+      primary_input: string;
     };
     /**
      * Nl2AgentRequirementsSummaryPayload
@@ -906,6 +1293,255 @@ export interface components {
       /** Tool Id */
       tool_id: number;
     };
+    /** Nl2AgentVerificationConfig */
+    Nl2AgentVerificationConfig: {
+      /**
+       * Critical Events
+       * @default null
+       */
+      critical_events?: (
+        | "tool_precheck"
+        | "tool_result"
+        | "retrieval"
+        | "code_execution"
+        | "handoff"
+        | "final_answer"
+      )[];
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Fail Policy
+       * @default null
+       * @enum {string}
+       */
+      fail_policy?: "repair_then_controlled_summary" | "warn";
+      /**
+       * Final Verification Enabled
+       * @default null
+       */
+      final_verification_enabled?: boolean;
+      /**
+       * Llm Verification Enabled
+       * @default null
+       */
+      llm_verification_enabled?: boolean;
+      /**
+       * Max Final Rounds
+       * @default null
+       */
+      max_final_rounds?: number;
+      /**
+       * Pass Score
+       * @default null
+       */
+      pass_score?: number;
+      /**
+       * Step Verification Enabled
+       * @default null
+       */
+      step_verification_enabled?: boolean;
+      /**
+       * Strictness
+       * @default null
+       * @enum {string}
+       */
+      strictness?: "lenient" | "balanced" | "strict";
+    };
+    /** Nl2AgentWebMcpCard */
+    Nl2AgentWebMcpCard: {
+      /** Card Key */
+      card_key: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "web_mcp";
+      /** Payload */
+      payload:
+        | components["schemas"]["Nl2AgentWebMcpListCardPayload"]
+        | components["schemas"]["Nl2AgentWebMcpSingleCardPayload"];
+    };
+    /** Nl2AgentWebMcpCardItem */
+    Nl2AgentWebMcpCardItem: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /** Install Options */
+      install_options: components["schemas"]["Nl2AgentMcpInstallOption"][];
+      /** Name */
+      name: string;
+      /**
+       * Reason
+       * @default null
+       */
+      reason?: string;
+      /**
+       * Recommendation Batch Id
+       * @default null
+       */
+      recommendation_batch_id?: string;
+      /** Recommendation Id */
+      recommendation_id: string;
+      /**
+       * Score
+       * @default null
+       */
+      score?: number;
+      /**
+       * Source
+       * @default null
+       * @enum {string}
+       */
+      source?: "registry" | "community";
+      /**
+       * Tags
+       * @default null
+       */
+      tags?: string[];
+      /**
+       * Transport
+       * @default null
+       */
+      transport?: string | null;
+    };
+    /** Nl2AgentWebMcpListCardPayload */
+    Nl2AgentWebMcpListCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /** Items */
+      items: components["schemas"]["Nl2AgentWebMcpCardItem"][];
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+    };
+    /** Nl2AgentWebMcpSingleCardPayload */
+    Nl2AgentWebMcpSingleCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /** Install Options */
+      install_options: components["schemas"]["Nl2AgentMcpInstallOption"][];
+      /** Name */
+      name: string;
+      /**
+       * Reason
+       * @default null
+       */
+      reason?: string;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /** Recommendation Id */
+      recommendation_id: string;
+      /**
+       * Score
+       * @default null
+       */
+      score?: number;
+      /**
+       * Source
+       * @default null
+       * @enum {string}
+       */
+      source?: "registry" | "community";
+      /**
+       * Tags
+       * @default null
+       */
+      tags?: string[];
+      /**
+       * Transport
+       * @default null
+       */
+      transport?: string | null;
+    };
+    /** Nl2AgentWebSkillCard */
+    Nl2AgentWebSkillCard: {
+      /** Card Key */
+      card_key: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      card_type: "web_skill";
+      /** Payload */
+      payload:
+        | components["schemas"]["Nl2AgentWebSkillListCardPayload"]
+        | components["schemas"]["Nl2AgentWebSkillSingleCardPayload"];
+    };
+    /** Nl2AgentWebSkillCardItem */
+    Nl2AgentWebSkillCardItem: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /**
+       * Name
+       * @default null
+       */
+      name?: string;
+      /**
+       * Reason
+       * @default null
+       */
+      reason?: string;
+      /**
+       * Recommendation Batch Id
+       * @default null
+       */
+      recommendation_batch_id?: string;
+      /**
+       * Score
+       * @default null
+       */
+      score?: number;
+      /**
+       * Skill Id
+       * @default null
+       */
+      skill_id?: number;
+      /**
+       * Skill Name
+       * @default null
+       */
+      skill_name?: string;
+      /**
+       * Source
+       * @default null
+       */
+      source?: string;
+      /**
+       * Status
+       * @default null
+       */
+      status?: string;
+      /**
+       * Tags
+       * @default null
+       */
+      tags?: string[];
+    } & ((unknown | unknown) & (unknown | unknown));
     /** Nl2AgentWebSkillConfigurationResponse */
     Nl2AgentWebSkillConfigurationResponse: {
       /** Config Schemas */
@@ -919,6 +1555,73 @@ export interface components {
       /** Skill Name */
       skill_name: string;
     };
+    /** Nl2AgentWebSkillListCardPayload */
+    Nl2AgentWebSkillListCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /** Items */
+      items: components["schemas"]["Nl2AgentWebSkillCardItem"][];
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+    };
+    /** Nl2AgentWebSkillSingleCardPayload */
+    Nl2AgentWebSkillSingleCardPayload: {
+      /**
+       * Agent Id
+       * @default null
+       */
+      agent_id?: number;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string;
+      /**
+       * Name
+       * @default null
+       */
+      name?: string;
+      /**
+       * Reason
+       * @default null
+       */
+      reason?: string;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /**
+       * Score
+       * @default null
+       */
+      score?: number;
+      /**
+       * Skill Id
+       * @default null
+       */
+      skill_id?: number;
+      /**
+       * Skill Name
+       * @default null
+       */
+      skill_name?: string;
+      /**
+       * Source
+       * @default null
+       */
+      source?: string;
+      /**
+       * Status
+       * @default null
+       */
+      status?: string;
+      /**
+       * Tags
+       * @default null
+       */
+      tags?: string[];
+    } & ((unknown | unknown) & (unknown | unknown));
     /** Nl2AgentWorkflowStateResponse */
     Nl2AgentWorkflowStateResponse: {
       /** Card Delivery */

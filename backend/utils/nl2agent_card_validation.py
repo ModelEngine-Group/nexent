@@ -1,14 +1,19 @@
-"""Server-side validation for persisted NL2AGENT card messages."""
+"""Authoritative parsing and validation for NL2AGENT card messages."""
 
 import json
 import logging
 import re
+from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from jsonschema import Draft7Validator
-from referencing import Registry, Resource
+from pydantic import TypeAdapter, ValidationError
+
+from consts.nl2agent_card import (
+    CARD_MODELS,
+    CARD_PAYLOAD_MODELS,
+    Nl2AgentCardEnvelope,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +23,7 @@ _CARD_OPENING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CARD_CLOSING_PATTERN = re.compile(r"^```[ \t]*\r?$", re.MULTILINE)
+_CARD_MARKER_PATTERN = re.compile(r"```nl2agent-", re.IGNORECASE)
 _LANGUAGE_TO_TYPE = {
     "nl2agent-requirements-summary": "requirements_summary",
     "nl2agent-model-selection": "model_selection",
@@ -29,25 +35,36 @@ _LANGUAGE_TO_TYPE = {
     "nl2agent-agent-identity": "agent_identity",
     "nl2agent-finalize": "final_review",
 }
-_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[2] / "contracts" / "nl2agent-card.schema.json"
-)
 _TRUSTED_CARD_TYPES = {"local_resources", "web_mcp", "web_skill"}
 TrustedSearchBatchProvider = Callable[[], Dict[str, Dict[str, Any]]]
 
 
+class Nl2AgentCardValidationError(ValueError):
+    """Raised when a complete assistant answer violates the card contract."""
+
+    def __init__(self, repair_instruction: str):
+        super().__init__(repair_instruction)
+        self.repair_instruction = repair_instruction
+
+
+@dataclass(frozen=True)
+class ParsedNl2AgentFinalAnswer:
+    """Validated metadata and user-visible text extracted from one final answer."""
+
+    envelope: Nl2AgentCardEnvelope
+    display_text: str
+
+
 @lru_cache(maxsize=1)
-def _schema_validators() -> Dict[str, Draft7Validator]:
-    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
-    schema_id = str(schema["$id"])
-    registry = Registry().with_resource(schema_id, Resource.from_contents(schema))
+def _payload_adapters() -> Dict[str, TypeAdapter]:
     return {
-        card_type: Draft7Validator(
-            {"$ref": f"{schema_id}#/$defs/{card_type}"},
-            registry=registry,
-        )
-        for card_type in set(_LANGUAGE_TO_TYPE.values())
+        card_type: TypeAdapter(payload_model)
+        for card_type, payload_model in CARD_PAYLOAD_MODELS.items()
     }
+
+
+def _payload_dict(payload: Any) -> Dict[str, Any]:
+    return payload.model_dump(mode="json", exclude_none=True)
 
 
 def _matches_agent(payload: Dict[str, Any], draft_agent_id: int) -> bool:
@@ -68,9 +85,11 @@ def _matches_agent(payload: Dict[str, Any], draft_agent_id: int) -> bool:
     )
 
 
-def _card_key(payload: Dict[str, Any]) -> Optional[str]:
-    value = payload.get("recommendation_batch_id")
-    return value if isinstance(value, str) and value.strip() else None
+def _card_key(card_type: str, payload: Dict[str, Any]) -> str:
+    if card_type in _TRUSTED_CARD_TYPES:
+        value = payload.get("recommendation_batch_id")
+        return value if isinstance(value, str) else ""
+    return card_type
 
 
 def _online_card_items(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
@@ -114,6 +133,136 @@ def _matches_trusted_search_batch(
     )
 
 
+def _strip_card_fences(message: str, spans: list[tuple[int, int]]) -> str:
+    visible_parts = []
+    position = 0
+    for start, end in spans:
+        visible_parts.append(message[position:start])
+        position = end
+    visible_parts.append(message[position:])
+    display_text = "".join(visible_parts).strip()
+    return re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", display_text)
+
+
+def parse_nl2agent_final_answer(
+    content: Any,
+    *,
+    draft_agent_id: int,
+    workflow_revision: int,
+    trusted_search_batch_provider: Optional[TrustedSearchBatchProvider] = None,
+) -> ParsedNl2AgentFinalAnswer:
+    """Parse one complete answer into a validated envelope and display text."""
+    message = "" if content is None else str(content)
+    position = 0
+    spans: list[tuple[int, int]] = []
+    cards = []
+    seen_types = set()
+    trusted_batches: Optional[Dict[str, Dict[str, Any]]] = None
+
+    while match := _CARD_OPENING_PATTERN.search(message, position):
+        language = match.group(1).lower()
+        card_type = _LANGUAGE_TO_TYPE.get(language)
+        closing_match = _CARD_CLOSING_PATTERN.search(message, match.end())
+        if closing_match is None:
+            raise Nl2AgentCardValidationError(
+                f"Close the `{language}` fence and copy the complete card JSON."
+            )
+        position = closing_match.end()
+        spans.append((match.start(), closing_match.end()))
+        if card_type is None:
+            raise Nl2AgentCardValidationError(
+                f"Use a supported NL2AGENT card fence instead of `{language}`."
+            )
+        try:
+            raw_payload = json.loads(
+                message[match.end() : closing_match.start()].strip()
+            )
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise Nl2AgentCardValidationError(
+                f"Copy valid JSON into the `{language}` card without rewriting it."
+            ) from exc
+        try:
+            payload_model = _payload_adapters()[card_type].validate_python(
+                raw_payload, strict=True
+            )
+        except ValidationError as exc:
+            raise Nl2AgentCardValidationError(
+                f"The `{language}` payload does not match the card contract. "
+                "Copy the complete tool Observation unchanged; arrays such as `skills` must stay flat."
+            ) from exc
+        payload = _payload_dict(payload_model)
+        if not _matches_agent(payload, draft_agent_id):
+            raise Nl2AgentCardValidationError(
+                f"Use the Current Session draft agent ID in the `{language}` card."
+            )
+        card_key = _card_key(card_type, payload)
+        if (
+            card_type in _TRUSTED_CARD_TYPES
+            and trusted_search_batch_provider is not None
+        ):
+            if trusted_batches is None:
+                try:
+                    trusted_batches = trusted_search_batch_provider()
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to load trusted NL2AGENT search batches: draft_agent_id=%s",
+                        draft_agent_id,
+                    )
+                    raise Nl2AgentCardValidationError(
+                        "The trusted search result could not be verified. "
+                        "Do not render a recommendation card; rerun the required search action."
+                    ) from exc
+            if not _matches_trusted_search_batch(
+                card_type,
+                payload,
+                trusted_batches.get(card_key) if card_key else None,
+            ):
+                raise Nl2AgentCardValidationError(
+                    f"The `{language}` card does not match its trusted search result. "
+                    "Rerun the required search action and copy its complete Observation unchanged "
+                    "without adding, removing, filtering, or replacing resources."
+                )
+        if card_type in seen_types:
+            raise Nl2AgentCardValidationError(
+                f"Render exactly one `{language}` card in the final answer."
+            )
+        seen_types.add(card_type)
+        try:
+            cards.append(
+                CARD_MODELS[card_type].model_validate(
+                    {
+                        "card_type": card_type,
+                        "card_key": card_key,
+                        "payload": payload_model,
+                    }
+                )
+            )
+        except ValidationError as exc:
+            raise Nl2AgentCardValidationError(
+                f"The `{language}` payload does not match the card contract."
+            ) from exc
+
+    if len(_CARD_MARKER_PATTERN.findall(message)) != len(spans):
+        raise Nl2AgentCardValidationError(
+            "Use a complete NL2AGENT card opening fence followed by a newline and valid JSON."
+        )
+    try:
+        envelope = Nl2AgentCardEnvelope(
+            schema_version=1,
+            draft_agent_id=draft_agent_id,
+            workflow_revision=workflow_revision,
+            cards=cards,
+        )
+    except ValidationError as exc:
+        raise Nl2AgentCardValidationError(
+            "The NL2AGENT card envelope does not match the current Session."
+        ) from exc
+    return ParsedNl2AgentFinalAnswer(
+        envelope=envelope,
+        display_text=_strip_card_fences(message, spans),
+    )
+
+
 def message_contains_valid_card(
     content: str,
     card_type: str,
@@ -121,33 +270,21 @@ def message_contains_valid_card(
     card_key: Optional[str],
 ) -> bool:
     """Return whether a message contains exactly one matching valid card."""
-    message = content or ""
-    target_count = 0
-    valid_count = 0
-    position = 0
-    while match := _CARD_OPENING_PATTERN.search(message, position):
-        resolved_type = _LANGUAGE_TO_TYPE.get(match.group(1).lower())
-        closing_match = _CARD_CLOSING_PATTERN.search(message, match.end())
-        closing_index = closing_match.start() if closing_match else -1
-        position = len(message) if closing_match is None else closing_match.end()
-        if resolved_type != card_type:
-            continue
-        target_count += 1
-        if closing_index < 0:
-            continue
-        try:
-            payload = json.loads(message[match.end():closing_index].strip())
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if (
-            not isinstance(payload, dict)
-            or not _schema_validators()[card_type].is_valid(payload)
-            or not _matches_agent(payload, draft_agent_id)
-            or _card_key(payload) != card_key
-        ):
-            continue
-        valid_count += 1
-    return target_count == 1 and valid_count == 1
+    try:
+        parsed = parse_nl2agent_final_answer(
+            content,
+            draft_agent_id=draft_agent_id,
+            workflow_revision=0,
+        )
+    except Nl2AgentCardValidationError:
+        return False
+    expected_key = card_key if card_key is not None else card_type
+    matches = [
+        card
+        for card in parsed.envelope.cards
+        if card.card_type == card_type and card.card_key == expected_key
+    ]
+    return len(matches) == 1
 
 
 def validate_nl2agent_final_answer(
@@ -156,60 +293,13 @@ def validate_nl2agent_final_answer(
     trusted_search_batch_provider: Optional[TrustedSearchBatchProvider] = None,
 ) -> Optional[str]:
     """Return a repair instruction when an NL2AGENT card block is invalid."""
-    message = "" if content is None else str(content)
-    position = 0
-    parsed_blocks = 0
-    seen_types = set()
-    trusted_batches: Optional[Dict[str, Dict[str, Any]]] = None
-    while match := _CARD_OPENING_PATTERN.search(message, position):
-        parsed_blocks += 1
-        language = match.group(1).lower()
-        card_type = _LANGUAGE_TO_TYPE.get(language)
-        closing_match = _CARD_CLOSING_PATTERN.search(message, match.end())
-        if closing_match is None:
-            return f"Close the `{language}` fence and copy the complete card JSON."
-        position = closing_match.end()
-        if card_type is None:
-            return f"Use a supported NL2AGENT card fence instead of `{language}`."
-        try:
-            payload = json.loads(message[match.end():closing_match.start()].strip())
-        except (json.JSONDecodeError, TypeError):
-            return f"Copy valid JSON into the `{language}` card without rewriting it."
-        if not isinstance(payload, dict) or not _schema_validators()[card_type].is_valid(payload):
-            return (
-                f"The `{language}` payload does not match the card contract. "
-                "Copy the complete tool Observation unchanged; arrays such as `skills` must stay flat."
-            )
-        if not _matches_agent(payload, draft_agent_id):
-            return f"Use the Current Session draft agent ID in the `{language}` card."
-        if card_type in _TRUSTED_CARD_TYPES and trusted_search_batch_provider is not None:
-            if trusted_batches is None:
-                try:
-                    trusted_batches = trusted_search_batch_provider()
-                except Exception:
-                    logger.exception(
-                        "Failed to load trusted NL2AGENT search batches: draft_agent_id=%s",
-                        draft_agent_id,
-                    )
-                    return (
-                        "The trusted search result could not be verified. "
-                        "Do not render a recommendation card; rerun the required search action."
-                    )
-            card_key = _card_key(payload)
-            if not _matches_trusted_search_batch(
-                card_type,
-                payload,
-                trusted_batches.get(card_key) if card_key else None,
-            ):
-                return (
-                    f"The `{language}` card does not match its trusted search result. "
-                    "Rerun the required search action and copy its complete Observation unchanged "
-                    "without adding, removing, filtering, or replacing resources."
-                )
-        if card_type in seen_types:
-            return f"Render exactly one `{language}` card in the final answer."
-        seen_types.add(card_type)
-    marker_count = len(re.findall(r"```nl2agent-", message, re.IGNORECASE))
-    if marker_count != parsed_blocks:
-        return "Use a complete NL2AGENT card opening fence followed by a newline and valid JSON."
+    try:
+        parse_nl2agent_final_answer(
+            content,
+            draft_agent_id=draft_agent_id,
+            workflow_revision=0,
+            trusted_search_batch_provider=trusted_search_batch_provider,
+        )
+    except Nl2AgentCardValidationError as exc:
+        return exc.repair_instruction
     return None

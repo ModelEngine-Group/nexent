@@ -28,6 +28,10 @@ import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
 import { getOnlineConfigurationBlockers } from "../OnlineConfigurationBar";
 import type { Nl2AgentSessionState } from "@/services/nl2agentService";
 import { validateNl2AgentCards } from "../cardValidation";
+import {
+  nl2AgentCardRegistry,
+  renderStructuredNl2AgentCard,
+} from "../cardRegistry";
 
 type RenderedCardTestProps = {
   agentId: number;
@@ -64,6 +68,33 @@ const readyMcpOption = {
 };
 
 describe("tryRenderNl2AgentCard", () => {
+  it("registers all seven structured card types", () => {
+    assert.deepEqual(Object.keys(nl2AgentCardRegistry).sort(), [
+      "agent_identity",
+      "final_review",
+      "local_resources",
+      "model_selection",
+      "requirements_summary",
+      "web_mcp",
+      "web_skill",
+    ]);
+  });
+
+  it("renders a structured card without parsing a Markdown fence", () => {
+    const node = renderStructuredNl2AgentCard(
+      {
+        card_type: "model_selection",
+        card_key: "model_selection",
+        payload: {},
+      },
+      202
+    );
+
+    assertElement(node);
+    assert.equal(node.type, ModelSelectionCard);
+    assert.equal(node.props.agentId, 202);
+  });
+
   it("exposes the effective verification configuration in final review", () => {
     assert.deepEqual(getVerificationReviewFields({ enabled: false }), [
       { label: "Verification", value: "Disabled" },

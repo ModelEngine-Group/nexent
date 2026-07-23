@@ -439,6 +439,79 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
+def create_nl2agent_assistant_message(
+    *,
+    conversation_id: int,
+    message_index: int,
+    display_text: str,
+    envelope: Dict[str, Any],
+    user_id: str,
+    db_session=None,
+) -> Dict[str, Any]:
+    """Atomically persist one structured assistant message and its final unit."""
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
+        conversation_id = int(conversation_id)
+        message_index = int(message_index)
+        owner = session.execute(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == "N",
+            )
+        ).first()
+        if owner is None:
+            raise ValueError("NL2AGENT conversation is not accessible.")
+
+        message_data = add_creation_tracking(
+            {
+                "conversation_id": conversation_id,
+                "message_index": message_index,
+                "message_role": "assistant",
+                "message_content": display_text,
+                "message_type": "nl2agent_card",
+                "message_metadata": {"nl2agent_card": envelope},
+                "minio_files": None,
+                "opinion_flag": None,
+                "delete_flag": "N",
+                "status": "completed",
+            },
+            user_id,
+        )
+        message_id = session.execute(
+            insert(ConversationMessage)
+            .values(**message_data)
+            .returning(ConversationMessage.message_id)
+        ).scalar_one()
+        unit_data = add_creation_tracking(
+            {
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "unit_index": 0,
+                "unit_type": "final_answer",
+                "unit_content": _serialize_unit_content(display_text),
+                "unit_status": "completed",
+                "delete_flag": "N",
+            },
+            user_id,
+        )
+        unit_id = session.execute(
+            insert(ConversationMessageUnit)
+            .values(**unit_data)
+            .returning(ConversationMessageUnit.unit_id)
+        ).scalar_one()
+        return {
+            "message_id": int(message_id),
+            "unit_ids": [int(unit_id)],
+            "conversation_id": conversation_id,
+            "message_index": message_index,
+            "message_content": display_text,
+            "message_type": "nl2agent_card",
+            "message_metadata": {"nl2agent_card": envelope},
+            "status": "completed",
+        }
+
+
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
                         unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,

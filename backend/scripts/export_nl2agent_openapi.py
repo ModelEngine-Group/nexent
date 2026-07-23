@@ -14,6 +14,10 @@ sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
 from apps.app_factory import create_app  # noqa: E402 -- repository paths must precede app import
 from apps.nl2agent_app import router as nl2agent_router  # noqa: E402
+from consts.nl2agent_card import (  # noqa: E402
+    Nl2AgentCardEnvelope,
+    build_nl2agent_card_schema,
+)
 
 
 def _build_contract_app() -> FastAPI:
@@ -58,9 +62,14 @@ def build_nl2agent_openapi() -> dict[str, Any]:
             if dependency not in required:
                 required.add(dependency)
                 pending.append(dependency)
-    schemas = {
+    schemas: dict[str, Any] = {
         name: all_schemas[name] for name in sorted(required) if name in all_schemas
     }
+    card_schema = Nl2AgentCardEnvelope.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    schemas.update(card_schema.pop("$defs", {}))
+    schemas["Nl2AgentCardEnvelope"] = card_schema
     return {
         "openapi": source["openapi"],
         "info": source["info"],
@@ -72,9 +81,10 @@ def build_nl2agent_openapi() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--card-output", type=Path, required=True)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    rendered = (
+    openapi_rendered = (
         json.dumps(
             build_nl2agent_openapi(),
             ensure_ascii=False,
@@ -83,17 +93,37 @@ def main() -> int:
         )
         + "\n"
     )
-    if args.check:
-        current = (
-            args.output.read_text(encoding="utf-8") if args.output.exists() else ""
+    card_rendered = (
+        json.dumps(
+            build_nl2agent_card_schema(),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
         )
-        if current != rendered:
+        + "\n"
+    )
+    if args.check:
+        try:
+            current_openapi = json.loads(args.output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current_openapi = None
+        try:
+            current_card = json.loads(args.card_output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current_card = None
+        if current_openapi != build_nl2agent_openapi():
             raise SystemExit(
                 "NL2AGENT OpenAPI snapshot is out of date. Run pnpm contracts:generate."
             )
+        if current_card != build_nl2agent_card_schema():
+            raise SystemExit(
+                "NL2AGENT card schema is out of date. Run pnpm contracts:generate."
+            )
         return 0
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(rendered.encode("utf-8"))
+    args.card_output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(openapi_rendered.encode("utf-8"))
+    args.card_output.write_bytes(card_rendered.encode("utf-8"))
     return 0
 
 

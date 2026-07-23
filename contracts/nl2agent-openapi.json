@@ -51,19 +51,12 @@
             "type": "integer"
           },
           "status": {
-            "enum": [
-              "rendered",
-              "failed"
-            ],
+            "enum": ["rendered", "failed"],
             "title": "Status",
             "type": "string"
           }
         },
-        "required": [
-          "message_id",
-          "card_type",
-          "status"
-        ],
+        "required": ["message_id", "card_type", "status"],
         "title": "CardDelivery",
         "type": "object"
       },
@@ -111,11 +104,7 @@
             "type": "object"
           },
           "status": {
-            "enum": [
-              "applied",
-              "pending",
-              "replayed"
-            ],
+            "enum": ["applied", "pending", "replayed"],
             "title": "Status",
             "type": "string"
           },
@@ -125,13 +114,49 @@
             "type": "integer"
           }
         },
-        "required": [
-          "action_id",
-          "action",
-          "status",
-          "workflow_revision"
-        ],
+        "required": ["action_id", "action", "status", "workflow_revision"],
         "title": "Nl2AgentActionResponse",
+        "type": "object"
+      },
+      "Nl2AgentAgentIdentityCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "const": "agent_identity",
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "agent_identity",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Nl2AgentAgentIdentityCardPayload"
+          }
+        },
+        "required": ["card_type", "card_key", "payload"],
+        "title": "Nl2AgentAgentIdentityCard",
+        "type": "object"
+      },
+      "Nl2AgentAgentIdentityCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "display_name": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": ["display_name"],
+        "title": "Nl2AgentAgentIdentityCardPayload",
         "type": "object"
       },
       "Nl2AgentApplyLocalResourcesActionPayload": {
@@ -172,9 +197,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "recommendation_batch_id"
-        ],
+        "required": ["recommendation_batch_id"],
         "title": "Nl2AgentApplyLocalResourcesActionPayload",
         "type": "object"
       },
@@ -235,9 +258,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "recommendation_id"
-        ],
+        "required": ["recommendation_id"],
         "title": "Nl2AgentBindMcpToolsActionPayload",
         "type": "object"
       },
@@ -277,6 +298,77 @@
           "payload"
         ],
         "title": "Nl2AgentBindMcpToolsActionRequest",
+        "type": "object"
+      },
+      "Nl2AgentCardEnvelope": {
+        "additionalProperties": false,
+        "description": "Persisted cards and their authoritative Session revision.",
+        "properties": {
+          "cards": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "agent_identity": "#/components/schemas/Nl2AgentAgentIdentityCard",
+                  "final_review": "#/components/schemas/Nl2AgentFinalReviewCard",
+                  "local_resources": "#/components/schemas/Nl2AgentLocalResourcesCard",
+                  "model_selection": "#/components/schemas/Nl2AgentModelSelectionCard",
+                  "requirements_summary": "#/components/schemas/Nl2AgentRequirementsSummaryCard",
+                  "web_mcp": "#/components/schemas/Nl2AgentWebMcpCard",
+                  "web_skill": "#/components/schemas/Nl2AgentWebSkillCard"
+                },
+                "propertyName": "card_type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Nl2AgentRequirementsSummaryCard"
+                },
+                {
+                  "$ref": "#/components/schemas/Nl2AgentModelSelectionCard"
+                },
+                {
+                  "$ref": "#/components/schemas/Nl2AgentLocalResourcesCard"
+                },
+                {
+                  "$ref": "#/components/schemas/Nl2AgentWebMcpCard"
+                },
+                {
+                  "$ref": "#/components/schemas/Nl2AgentWebSkillCard"
+                },
+                {
+                  "$ref": "#/components/schemas/Nl2AgentAgentIdentityCard"
+                },
+                {
+                  "$ref": "#/components/schemas/Nl2AgentFinalReviewCard"
+                }
+              ]
+            },
+            "maxItems": 7,
+            "title": "Cards",
+            "type": "array"
+          },
+          "draft_agent_id": {
+            "minimum": 1,
+            "title": "Draft Agent Id",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workflow_revision": {
+            "minimum": 0,
+            "title": "Workflow Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "draft_agent_id",
+          "workflow_revision",
+          "cards"
+        ],
+        "title": "Nl2AgentCardEnvelope",
         "type": "object"
       },
       "Nl2AgentCompleteOnlineConfigurationActionRequest": {
@@ -323,9 +415,7 @@
             "$ref": "#/components/schemas/Nl2AgentRequirementsSummaryPayload"
           }
         },
-        "required": [
-          "summary"
-        ],
+        "required": ["summary"],
         "title": "Nl2AgentConfirmRequirementsActionPayload",
         "type": "object"
       },
@@ -390,10 +480,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "tool_id",
-          "name"
-        ],
+        "required": ["tool_id", "name"],
         "title": "Nl2AgentDiscoveredTool",
         "type": "object"
       },
@@ -402,6 +489,114 @@
         "description": "An action with no client-controlled domain identifiers.",
         "properties": {},
         "title": "Nl2AgentEmptyActionPayload",
+        "type": "object"
+      },
+      "Nl2AgentFinalReviewCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "const": "final_review",
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "final_review",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Nl2AgentFinalReviewCardPayload"
+          }
+        },
+        "required": ["card_type", "card_key", "payload"],
+        "title": "Nl2AgentFinalReviewCard",
+        "type": "object"
+      },
+      "Nl2AgentFinalReviewCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "business_description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Business Description",
+            "type": "string"
+          },
+          "constraint_prompt": {
+            "default": null,
+            "maxLength": 4000,
+            "title": "Constraint Prompt",
+            "type": "string"
+          },
+          "description": {
+            "default": null,
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "duty_prompt": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Duty Prompt",
+            "type": "string"
+          },
+          "enable_context_manager": {
+            "default": null,
+            "title": "Enable Context Manager",
+            "type": "boolean"
+          },
+          "example_questions": {
+            "default": null,
+            "items": {
+              "maxLength": 500,
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Example Questions",
+            "type": "array"
+          },
+          "few_shots_prompt": {
+            "default": null,
+            "maxLength": 8000,
+            "title": "Few Shots Prompt",
+            "type": "string"
+          },
+          "greeting_message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Greeting Message",
+            "type": "string"
+          },
+          "max_steps": {
+            "default": null,
+            "maximum": 30,
+            "minimum": 1,
+            "title": "Max Steps",
+            "type": "integer"
+          },
+          "provide_run_summary": {
+            "default": null,
+            "title": "Provide Run Summary",
+            "type": "boolean"
+          },
+          "requested_output_tokens": {
+            "default": null,
+            "minimum": 1,
+            "title": "Requested Output Tokens",
+            "type": "integer"
+          },
+          "verification_config": {
+            "$ref": "#/components/schemas/Nl2AgentVerificationConfig",
+            "default": null
+          }
+        },
+        "required": ["business_description", "duty_prompt", "greeting_message"],
+        "title": "Nl2AgentFinalReviewCardPayload",
         "type": "object"
       },
       "Nl2AgentFinalizeActionPayload": {
@@ -519,11 +714,7 @@
             "title": "Verification Config"
           }
         },
-        "required": [
-          "business_description",
-          "duty_prompt",
-          "greeting_message"
-        ],
+        "required": ["business_description", "duty_prompt", "greeting_message"],
         "title": "Nl2AgentFinalizeActionPayload",
         "type": "object"
       },
@@ -595,10 +786,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "recommendation_batch_id",
-          "recommendation_id"
-        ],
+        "required": ["recommendation_batch_id", "recommendation_id"],
         "title": "Nl2AgentInstallMcpActionPayload",
         "type": "object"
       },
@@ -663,10 +851,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "recommendation_batch_id",
-          "item_key"
-        ],
+        "required": ["recommendation_batch_id", "item_key"],
         "title": "Nl2AgentInstallWebSkillActionPayload",
         "type": "object"
       },
@@ -727,21 +912,397 @@
             "type": "integer"
           },
           "reference_type": {
-            "enum": [
-              "model",
-              "tool",
-              "skill"
-            ],
+            "enum": ["model", "tool", "skill"],
             "title": "Reference Type",
             "type": "string"
           }
         },
-        "required": [
-          "reference_type",
-          "reference_id",
-          "reason"
-        ],
+        "required": ["reference_type", "reference_id", "reason"],
         "title": "Nl2AgentInvalidReference",
+        "type": "object"
+      },
+      "Nl2AgentLocalResourcesCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "local_resources",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Nl2AgentLocalResourcesCardPayload"
+          }
+        },
+        "required": ["card_key", "card_type", "payload"],
+        "title": "Nl2AgentLocalResourcesCard",
+        "type": "object"
+      },
+      "Nl2AgentLocalResourcesCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentLocalSkillCardItem"
+            },
+            "maxItems": 100,
+            "title": "Skills",
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentLocalToolCardItem"
+            },
+            "maxItems": 100,
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": ["recommendation_batch_id", "tools", "skills"],
+        "title": "Nl2AgentLocalResourcesCardPayload",
+        "type": "object"
+      },
+      "Nl2AgentLocalSkillCardItem": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": null,
+            "title": "Reason",
+            "type": "string"
+          },
+          "score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Score",
+            "type": "number"
+          },
+          "skill_id": {
+            "minimum": 1,
+            "title": "Skill Id",
+            "type": "integer"
+          },
+          "tags": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": ["skill_id", "name"],
+        "title": "Nl2AgentLocalSkillCardItem",
+        "type": "object"
+      },
+      "Nl2AgentLocalToolCardItem": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "default": null,
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "labels": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": null,
+            "title": "Reason",
+            "type": "string"
+          },
+          "score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Score",
+            "type": "number"
+          },
+          "source": {
+            "default": null,
+            "title": "Source",
+            "type": "string"
+          },
+          "tool_id": {
+            "minimum": 1,
+            "title": "Tool Id",
+            "type": "integer"
+          },
+          "usage": {
+            "default": null,
+            "title": "Usage",
+            "type": "string"
+          }
+        },
+        "required": ["tool_id", "name"],
+        "title": "Nl2AgentLocalToolCardItem",
+        "type": "object"
+      },
+      "Nl2AgentMcpField": {
+        "additionalProperties": false,
+        "properties": {
+          "argument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Argument Name"
+          },
+          "argument_type": {
+            "default": null,
+            "enum": ["named", "positional"],
+            "title": "Argument Type",
+            "type": "string"
+          },
+          "category": {
+            "default": null,
+            "title": "Category",
+            "type": "string"
+          },
+          "choices": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Default"
+          },
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "default": null,
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "placeholder": {
+            "default": null,
+            "title": "Placeholder",
+            "type": "string"
+          },
+          "repeated": {
+            "default": null,
+            "title": "Repeated",
+            "type": "boolean"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": ["text", "number", "url", "json"],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["key", "name", "type", "required", "secret"],
+        "title": "Nl2AgentMcpField",
+        "type": "object"
+      },
+      "Nl2AgentMcpInstallOption": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentMcpField"
+            },
+            "maxItems": 100,
+            "title": "Fields",
+            "type": "array"
+          },
+          "label": {
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "option_id": {
+            "minLength": 1,
+            "title": "Option Id",
+            "type": "string"
+          },
+          "package_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Package Identifier"
+          },
+          "registry_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Registry Type"
+          },
+          "requires_configuration": {
+            "title": "Requires Configuration",
+            "type": "boolean"
+          },
+          "runtime_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Runtime Hint"
+          },
+          "server_url_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Server Url Template"
+          },
+          "status": {
+            "enum": ["ready", "configuration_required", "unsupported"],
+            "title": "Status",
+            "type": "string"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Transport"
+          },
+          "type": {
+            "enum": ["remote", "container", "unsupported"],
+            "title": "Type",
+            "type": "string"
+          },
+          "unsupported_reason": {
+            "default": null,
+            "title": "Unsupported Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "option_id",
+          "type",
+          "requires_configuration",
+          "label",
+          "status",
+          "supported",
+          "fields"
+        ],
+        "title": "Nl2AgentMcpInstallOption",
         "type": "object"
       },
       "Nl2AgentMcpWorkflowResponse": {
@@ -836,10 +1397,42 @@
             "title": "Status"
           }
         },
-        "required": [
-          "recommendation_id"
-        ],
+        "required": ["recommendation_id"],
         "title": "Nl2AgentMcpWorkflowResponse",
+        "type": "object"
+      },
+      "Nl2AgentModelSelectionCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "const": "model_selection",
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "model_selection",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Nl2AgentModelSelectionCardPayload"
+          }
+        },
+        "required": ["card_type", "card_key", "payload"],
+        "title": "Nl2AgentModelSelectionCard",
+        "type": "object"
+      },
+      "Nl2AgentModelSelectionCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          }
+        },
+        "title": "Nl2AgentModelSelectionCardPayload",
         "type": "object"
       },
       "Nl2AgentPersistedModel": {
@@ -861,10 +1454,7 @@
             "type": "integer"
           },
           "role": {
-            "enum": [
-              "primary",
-              "fallback"
-            ],
+            "enum": ["primary", "fallback"],
             "title": "Role",
             "type": "string"
           },
@@ -873,11 +1463,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "model_id",
-          "role",
-          "valid"
-        ],
+        "required": ["model_id", "role", "valid"],
         "title": "Nl2AgentPersistedModel",
         "type": "object"
       },
@@ -925,11 +1511,7 @@
           },
           "status": {
             "default": "collecting",
-            "enum": [
-              "collecting",
-              "awaiting_confirmation",
-              "confirmed"
-            ],
+            "enum": ["collecting", "awaiting_confirmation", "confirmed"],
             "title": "Status",
             "type": "string"
           },
@@ -945,6 +1527,77 @@
           }
         },
         "title": "Nl2AgentRequirementsReviewResponse",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsSummaryCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "const": "requirements_summary",
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "requirements_summary",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Nl2AgentRequirementsSummaryCardPayload"
+          }
+        },
+        "required": ["card_type", "card_key", "payload"],
+        "title": "Nl2AgentRequirementsSummaryCard",
+        "type": "object"
+      },
+      "Nl2AgentRequirementsSummaryCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "audience_or_scenario": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Audience Or Scenario",
+            "type": "string"
+          },
+          "expected_output": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Expected Output",
+            "type": "string"
+          },
+          "goal": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "key_constraints": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Key Constraints",
+            "type": "string"
+          },
+          "primary_input": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Primary Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "goal",
+          "audience_or_scenario",
+          "primary_input",
+          "expected_output",
+          "key_constraints"
+        ],
+        "title": "Nl2AgentRequirementsSummaryCardPayload",
         "type": "object"
       },
       "Nl2AgentRequirementsSummaryPayload": {
@@ -1002,9 +1655,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "display_name"
-        ],
+        "required": ["display_name"],
         "title": "Nl2AgentSaveIdentityActionPayload",
         "type": "object"
       },
@@ -1064,9 +1715,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "primary_model_id"
-        ],
+        "required": ["primary_model_id"],
         "title": "Nl2AgentSaveModelSelectionActionPayload",
         "type": "object"
       },
@@ -1119,9 +1768,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "sessions"
-        ],
+        "required": ["sessions"],
         "title": "Nl2AgentSessionListResponse",
         "type": "object"
       },
@@ -1277,10 +1924,7 @@
             "type": "integer"
           },
           "session_status": {
-            "enum": [
-              "active",
-              "completed"
-            ],
+            "enum": ["active", "completed"],
             "title": "Session Status",
             "type": "string"
           },
@@ -1347,11 +1991,7 @@
             "type": "integer"
           },
           "status": {
-            "enum": [
-              "active",
-              "completed",
-              "abandoned"
-            ],
+            "enum": ["active", "completed", "abandoned"],
             "title": "Status",
             "type": "string"
           },
@@ -1497,9 +2137,7 @@
             "title": "Value"
           }
         },
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "title": "Nl2AgentSkillParameterSchema",
         "type": "object"
       },
@@ -1511,10 +2149,7 @@
             "type": "string"
           },
           "origin": {
-            "enum": [
-              "local",
-              "online"
-            ],
+            "enum": ["local", "online"],
             "title": "Origin",
             "type": "string"
           },
@@ -1527,12 +2162,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "skill_id",
-          "name",
-          "source",
-          "origin"
-        ],
+        "required": ["skill_id", "name", "source", "origin"],
         "title": "Nl2AgentSkillSummary",
         "type": "object"
       },
@@ -1547,9 +2177,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "recommendation_batch_id"
-        ],
+        "required": ["recommendation_batch_id"],
         "title": "Nl2AgentSkipLocalResourcesActionPayload",
         "type": "object"
       },
@@ -1601,9 +2229,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "recommendation_id"
-        ],
+        "required": ["recommendation_id"],
         "title": "Nl2AgentSkipMcpToolsActionPayload",
         "type": "object"
       },
@@ -1766,9 +2392,7 @@
             "title": "Type"
           }
         },
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "title": "Nl2AgentToolParameterSchema",
         "type": "object"
       },
@@ -1787,10 +2411,7 @@
             "type": "string"
           },
           "origin": {
-            "enum": [
-              "local",
-              "online"
-            ],
+            "enum": ["local", "online"],
             "title": "Origin",
             "type": "string"
           },
@@ -1810,13 +2431,430 @@
             "type": "integer"
           }
         },
-        "required": [
-          "tool_id",
-          "name",
-          "source",
-          "origin"
-        ],
+        "required": ["tool_id", "name", "source", "origin"],
         "title": "Nl2AgentToolSummary",
+        "type": "object"
+      },
+      "Nl2AgentVerificationConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "critical_events": {
+            "default": null,
+            "items": {
+              "enum": [
+                "tool_precheck",
+                "tool_result",
+                "retrieval",
+                "code_execution",
+                "handoff",
+                "final_answer"
+              ],
+              "type": "string"
+            },
+            "title": "Critical Events",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "fail_policy": {
+            "default": null,
+            "enum": ["repair_then_controlled_summary", "warn"],
+            "title": "Fail Policy",
+            "type": "string"
+          },
+          "final_verification_enabled": {
+            "default": null,
+            "title": "Final Verification Enabled",
+            "type": "boolean"
+          },
+          "llm_verification_enabled": {
+            "default": null,
+            "title": "Llm Verification Enabled",
+            "type": "boolean"
+          },
+          "max_final_rounds": {
+            "default": null,
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Max Final Rounds",
+            "type": "integer"
+          },
+          "pass_score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Pass Score",
+            "type": "number"
+          },
+          "step_verification_enabled": {
+            "default": null,
+            "title": "Step Verification Enabled",
+            "type": "boolean"
+          },
+          "strictness": {
+            "default": null,
+            "enum": ["lenient", "balanced", "strict"],
+            "title": "Strictness",
+            "type": "string"
+          }
+        },
+        "required": ["enabled"],
+        "title": "Nl2AgentVerificationConfig",
+        "type": "object"
+      },
+      "Nl2AgentWebMcpCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "web_mcp",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Nl2AgentWebMcpListCardPayload"
+              },
+              {
+                "$ref": "#/components/schemas/Nl2AgentWebMcpSingleCardPayload"
+              }
+            ],
+            "title": "Payload"
+          }
+        },
+        "required": ["card_key", "card_type", "payload"],
+        "title": "Nl2AgentWebMcpCard",
+        "type": "object"
+      },
+      "Nl2AgentWebMcpCardItem": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "install_options": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentMcpInstallOption"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Install Options",
+            "type": "array"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": null,
+            "title": "Reason",
+            "type": "string"
+          },
+          "recommendation_batch_id": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "recommendation_id": {
+            "minLength": 1,
+            "title": "Recommendation Id",
+            "type": "string"
+          },
+          "score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Score",
+            "type": "number"
+          },
+          "source": {
+            "default": null,
+            "enum": ["registry", "community"],
+            "title": "Source",
+            "type": "string"
+          },
+          "tags": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Transport"
+          }
+        },
+        "required": ["recommendation_id", "name", "install_options"],
+        "title": "Nl2AgentWebMcpCardItem",
+        "type": "object"
+      },
+      "Nl2AgentWebMcpListCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentWebMcpCardItem"
+            },
+            "maxItems": 100,
+            "title": "Items",
+            "type": "array"
+          },
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          }
+        },
+        "required": ["recommendation_batch_id", "items"],
+        "title": "Nl2AgentWebMcpListCardPayload",
+        "type": "object"
+      },
+      "Nl2AgentWebMcpSingleCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "install_options": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentMcpInstallOption"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Install Options",
+            "type": "array"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": null,
+            "title": "Reason",
+            "type": "string"
+          },
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "recommendation_id": {
+            "minLength": 1,
+            "title": "Recommendation Id",
+            "type": "string"
+          },
+          "score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Score",
+            "type": "number"
+          },
+          "source": {
+            "default": null,
+            "enum": ["registry", "community"],
+            "title": "Source",
+            "type": "string"
+          },
+          "tags": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Transport"
+          }
+        },
+        "required": [
+          "recommendation_batch_id",
+          "recommendation_id",
+          "name",
+          "install_options"
+        ],
+        "title": "Nl2AgentWebMcpSingleCardPayload",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillCard": {
+        "additionalProperties": false,
+        "properties": {
+          "card_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Card Key",
+            "type": "string"
+          },
+          "card_type": {
+            "const": "web_skill",
+            "title": "Card Type",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Nl2AgentWebSkillListCardPayload"
+              },
+              {
+                "$ref": "#/components/schemas/Nl2AgentWebSkillSingleCardPayload"
+              }
+            ],
+            "title": "Payload"
+          }
+        },
+        "required": ["card_key", "card_type", "payload"],
+        "title": "Nl2AgentWebSkillCard",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillCardItem": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": ["name"]
+              },
+              {
+                "required": ["skill_name"]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": ["skill_id"]
+              },
+              {
+                "required": ["skill_name"]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "default": null,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": null,
+            "title": "Reason",
+            "type": "string"
+          },
+          "recommendation_batch_id": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Score",
+            "type": "number"
+          },
+          "skill_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Skill Id",
+            "type": "integer"
+          },
+          "skill_name": {
+            "default": null,
+            "minLength": 1,
+            "title": "Skill Name",
+            "type": "string"
+          },
+          "source": {
+            "default": null,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": null,
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "title": "Nl2AgentWebSkillCardItem",
         "type": "object"
       },
       "Nl2AgentWebSkillConfigurationResponse": {
@@ -1850,10 +2888,131 @@
             "type": "string"
           }
         },
-        "required": [
-          "skill_name"
-        ],
+        "required": ["skill_name"],
         "title": "Nl2AgentWebSkillConfigurationResponse",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillListCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Nl2AgentWebSkillCardItem"
+            },
+            "maxItems": 100,
+            "title": "Items",
+            "type": "array"
+          },
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          }
+        },
+        "required": ["recommendation_batch_id", "items"],
+        "title": "Nl2AgentWebSkillListCardPayload",
+        "type": "object"
+      },
+      "Nl2AgentWebSkillSingleCardPayload": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": ["name"]
+              },
+              {
+                "required": ["skill_name"]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": ["skill_id"]
+              },
+              {
+                "required": ["skill_name"]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Agent Id",
+            "type": "integer"
+          },
+          "description": {
+            "default": null,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "default": null,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": null,
+            "title": "Reason",
+            "type": "string"
+          },
+          "recommendation_batch_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recommendation Batch Id",
+            "type": "string"
+          },
+          "score": {
+            "default": null,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Score",
+            "type": "number"
+          },
+          "skill_id": {
+            "default": null,
+            "minimum": 1,
+            "title": "Skill Id",
+            "type": "integer"
+          },
+          "skill_name": {
+            "default": null,
+            "minLength": 1,
+            "title": "Skill Name",
+            "type": "string"
+          },
+          "source": {
+            "default": null,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": null,
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": ["recommendation_batch_id"],
+        "title": "Nl2AgentWebSkillSingleCardPayload",
         "type": "object"
       },
       "Nl2AgentWorkflowStateResponse": {
@@ -1930,11 +3089,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "conversation_id",
-          "requirements_review",
-          "mcp_workflows"
-        ],
+        "required": ["conversation_id", "requirements_review", "mcp_workflows"],
         "title": "Nl2AgentWorkflowStateResponse",
         "type": "object"
       },
@@ -1983,11 +3138,7 @@
             "title": "Operation Id"
           },
           "resource_type": {
-            "enum": [
-              "local",
-              "mcp",
-              "skill"
-            ],
+            "enum": ["local", "mcp", "skill"],
             "title": "Resource Type",
             "type": "string"
           },
@@ -2022,10 +3173,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "resource_type",
-          "status"
-        ],
+        "required": ["resource_type", "status"],
         "title": "RecommendationBatch",
         "type": "object"
       },
@@ -2061,11 +3209,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
+        "required": ["loc", "msg", "type"],
         "title": "ValidationError",
         "type": "object"
       }

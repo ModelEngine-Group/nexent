@@ -5,7 +5,9 @@ import json
 import pytest
 
 from utils.nl2agent_card_validation import (
+    Nl2AgentCardValidationError,
     message_contains_valid_card,
+    parse_nl2agent_final_answer,
     validate_nl2agent_final_answer,
 )
 
@@ -80,7 +82,9 @@ def test_message_contains_matching_schema_valid_card(
             None,
         ),
         (
-            _fence("nl2agent-web-mcps", {"recommendation_batch_id": "other", "items": []}),
+            _fence(
+                "nl2agent-web-mcps", {"recommendation_batch_id": "other", "items": []}
+            ),
             "web_mcp",
             "expected",
         ),
@@ -111,7 +115,9 @@ def test_message_rejects_missing_malformed_or_mismatched_card(
 
 def test_message_rejects_duplicate_card_type():
     card = _fence("nl2agent-model-selection", {"agent_id": 202})
-    assert not message_contains_valid_card(f"{card}\n{card}", "model_selection", 202, None)
+    assert not message_contains_valid_card(
+        f"{card}\n{card}", "model_selection", 202, None
+    )
 
 
 def test_message_accepts_inline_fence_text_inside_json_string():
@@ -161,10 +167,21 @@ def test_final_answer_validator_accepts_complete_local_card():
         "agent_id": 77,
         "recommendation_batch_id": "local_1",
         "tools": [],
-        "skills": [{"skill_id": 3, "name": "create-docx", "description": "Create documents", "score": 0.87, "reason": "Matched"}],
+        "skills": [
+            {
+                "skill_id": 3,
+                "name": "create-docx",
+                "description": "Create documents",
+                "score": 0.87,
+                "reason": "Matched",
+            }
+        ],
     }
 
-    assert validate_nl2agent_final_answer(_fence("nl2agent-local-resources", payload), 77) is None
+    assert (
+        validate_nl2agent_final_answer(_fence("nl2agent-local-resources", payload), 77)
+        is None
+    )
 
 
 def test_final_answer_validator_rejects_local_card_filtered_from_trusted_batch():
@@ -352,3 +369,62 @@ def test_final_answer_validator_rejects_malformed_opening_fence():
     content = '```nl2agent-local-resources {"agent_id":77}```'
 
     assert validate_nl2agent_final_answer(content, 77) is not None
+
+
+def test_complete_answer_parser_builds_envelope_and_strips_card_fences():
+    content = (
+        "The configuration is ready.\n\n"
+        + _fence("nl2agent-model-selection", {"agent_id": 202})
+        + "\n\nChoose the models below."
+    )
+
+    parsed = parse_nl2agent_final_answer(
+        content,
+        draft_agent_id=202,
+        workflow_revision=18,
+    )
+
+    assert parsed.display_text == (
+        "The configuration is ready.\n\nChoose the models below."
+    )
+    assert parsed.envelope.model_dump(mode="json", exclude_none=True) == {
+        "schema_version": 1,
+        "draft_agent_id": 202,
+        "workflow_revision": 18,
+        "cards": [
+            {
+                "card_type": "model_selection",
+                "card_key": "model_selection",
+                "payload": {"agent_id": 202},
+            }
+        ],
+    }
+
+
+def test_complete_answer_parser_uses_recommendation_batch_as_card_key():
+    parsed = parse_nl2agent_final_answer(
+        _fence(
+            "nl2agent-local-resources",
+            {
+                "agent_id": 202,
+                "recommendation_batch_id": "local_18",
+                "tools": [],
+                "skills": [],
+            },
+        ),
+        draft_agent_id=202,
+        workflow_revision=18,
+    )
+
+    assert parsed.envelope.cards[0].card_key == "local_18"
+
+
+def test_complete_answer_parser_rejects_more_than_one_card_of_same_type():
+    card = _fence("nl2agent-model-selection", {"agent_id": 202})
+
+    with pytest.raises(Nl2AgentCardValidationError):
+        parse_nl2agent_final_answer(
+            f"{card}\n{card}",
+            draft_agent_id=202,
+            workflow_revision=18,
+        )
