@@ -698,6 +698,24 @@ def test_repository_list_and_detail_success():
     assert detail["author"] is None
 
 
+def test_repository_list_does_not_grant_take_down_to_regular_user():
+    _skill_repo_db_mock.list_skill_repository_summaries.return_value = {
+        "items": [_repository_record(status="shared")],
+        "pagination": {"total": 1},
+    }
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": "USER"
+    }
+
+    result = srs.list_skill_repository_listings_impl(
+        "tenant-1",
+        user_id="user-1",
+        status="shared",
+    )
+
+    assert result["items"][0]["can_take_down"] is False
+
+
 def test_mapping_and_filter_helpers_cover_edge_branches():
     created_at = datetime(2026, 1, 1, 12, 0, 0)
     assert srs._serialize_created_at(created_at) == created_at.isoformat()

@@ -382,6 +382,119 @@ def create_test_service(tenant_id="test-tenant"):
 
 
 # ===== Helper Functions Tests =====
+class TestSkillGroupPermissions:
+    def test_group_permission_helpers_handle_edit_read_only_and_private(self):
+        group_skill = {
+            "created_by": "creator",
+            "group_ids": "10,invalid,20",
+            "ingroup_permission": "EDIT",
+        }
+
+        assert skill_service._to_group_id_set(group_skill["group_ids"]) == {10, 20}
+        assert skill_service.can_view_skill(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) is True
+        assert skill_service.resolve_skill_permission(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) == "EDIT"
+
+        group_skill["ingroup_permission"] = "READ_ONLY"
+        assert skill_service.resolve_skill_permission(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) == "READ_ONLY"
+
+        group_skill["ingroup_permission"] = "PRIVATE"
+        assert skill_service.can_view_skill(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) is False
+
+    def test_group_permission_helpers_preserve_creator_and_admin_access(self):
+        private_skill = {
+            "created_by": "creator",
+            "group_ids": [],
+            "ingroup_permission": "PRIVATE",
+        }
+
+        assert skill_service.can_view_skill(
+            skill=private_skill,
+            user_id="creator",
+            user_role="DEV",
+            user_group_ids=set(),
+        ) is True
+        assert skill_service.resolve_skill_permission(
+            skill=private_skill,
+            user_id="admin",
+            user_role="ADMIN",
+            user_group_ids=set(),
+        ) == "EDIT"
+
+    def test_group_permission_helpers_reject_unmatched_groups_and_normalize_lists(self):
+        skill = {
+            "created_by": "creator",
+            "group_ids": [10, "20", "invalid"],
+            "ingroup_permission": "EDIT",
+        }
+
+        assert skill_service._to_group_id_set(skill["group_ids"]) == {10, 20}
+        assert skill_service._to_group_id_set(None) == set()
+        assert skill_service.can_view_skill(
+            skill=skill,
+            user_id="outsider",
+            user_role="DEV",
+            user_group_ids={30},
+        ) is False
+        assert skill_service.resolve_skill_permission(
+            skill=skill,
+            user_id="outsider",
+            user_role="DEV",
+            user_group_ids={30},
+        ) == "READ_ONLY"
+
+    def test_default_group_permission_does_not_override_explicit_values(self, mocker):
+        skill_data = {
+            "group_ids": [99],
+            "ingroup_permission": "READ_ONLY",
+        }
+        query_groups = mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+            return_value=[10],
+        )
+
+        skill_service._apply_default_skill_permission_fields(skill_data, "user-1")
+
+        assert skill_data == {
+            "group_ids": [99],
+            "ingroup_permission": "READ_ONLY",
+        }
+        query_groups.assert_not_called()
+
+    def test_default_group_permission_uses_creator_groups(self, mocker):
+        skill_data = {}
+        mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+            return_value=[10, 20],
+        )
+
+        skill_service._apply_default_skill_permission_fields(skill_data, "user-1")
+
+        assert skill_data == {
+            "group_ids": "10,20",
+            "ingroup_permission": "EDIT",
+        }
+
+
 class TestNormalizeZipEntryPath:
     """Test _normalize_zip_entry_path function."""
 

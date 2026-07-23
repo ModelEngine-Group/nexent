@@ -115,8 +115,27 @@ def test_get_repository_by_skill_id_with_optional_tenant(monkeypatch, mock_sessi
     assert repo_db.get_skill_repository_by_skill_id(
         8,
         publisher_tenant_id="tenant-1",
+        statuses={"pending_review", "rejected"},
     ) == {"skill_id": 8}
-    assert query.filter.call_count == 2
+    assert query.filter.call_count == 3
+    query.order_by.assert_called_once_with(repo_db.SkillRepository.update_time.desc())
+
+
+def test_reset_repository_status_resets_matching_peer_records(monkeypatch, mock_session):
+    session, _ = mock_session
+    session.execute.return_value.rowcount = 2
+    _patch_session(monkeypatch, session)
+    statement = _patch_update(monkeypatch)
+
+    affected = repo_db.reset_skill_repository_status(
+        repository_id=5,
+        skill_id=8,
+        status="pending_review",
+        publisher_tenant_id="tenant-1",
+    )
+
+    assert affected == 2
+    assert statement.values.call_args.kwargs == {"status": "not_shared"}
 
 
 def test_list_repository_summaries_with_filters(monkeypatch, mock_session):

@@ -919,6 +919,29 @@ description: Updated description
 
                 assert response.status_code == 404
 
+    def test_update_skill_from_file_forbidden(self, mocker):
+        from backend.apps.skill_app import ForbiddenError
+
+        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+                mock_auth.return_value = ("user123", "tenant123")
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.update_skill_from_file.side_effect = ForbiddenError(
+                    "Not authorized"
+                )
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+                response = client.put(
+                    "/skills/test/upload",
+                    files={"file": ("test.md", b"# Skill", "text/markdown")},
+                    headers={"Authorization": "Bearer token123"},
+                )
+
+                assert response.status_code == 403
+
 
 # ===== Update Skill Instance Endpoint Tests =====
 class TestUpdateSkillInstanceEndpoint:
