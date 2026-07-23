@@ -760,6 +760,111 @@ class MemoryUserConfig(TableBase):
     config_value = Column(String(10000), doc="the value of the config")
 
 
+class MemoryRecord(TableBase):
+    """Authoritative tenant/user/agent memory row."""
+
+    __tablename__ = "memory_records_t"
+    __table_args__ = (
+        Index("idx_memory_records_tenant", "tenant_id"),
+        Index("idx_memory_records_user", "tenant_id", "user_id"),
+        Index("idx_memory_records_agent", "tenant_id", "user_id", "agent_id", "conversation_id"),
+        Index("idx_memory_records_idempotency", "tenant_id", "idempotency_key"),
+        Index("idx_memory_records_status", "tenant_id", "user_id", "layer", "status"),
+        {"schema": SCHEMA},
+    )
+
+    memory_id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100))
+    conversation_id = Column(String(100))
+    layer = Column(String(30), nullable=False)
+    memory_type = Column(String(30))
+    status = Column(String(30), nullable=False, default="active")
+    content = Column(Text, nullable=False)
+    concept_tags = Column(ARRAY(Text))
+    es_index_name = Column(String(255))
+    idempotency_key = Column(String(128), nullable=False)
+    recall_count = Column(Integer, nullable=False, default=0)
+    daily_count = Column(Integer, nullable=False, default=0)
+    grounded_count = Column(Integer, nullable=False, default=0)
+    last_recalled_at = Column(TIMESTAMP(timezone=False))
+    query_hashes = Column(ARRAY(Text))
+    recall_days = Column(ARRAY(Text))
+    light_hits = Column(Integer, nullable=False, default=0)
+    rem_hits = Column(Integer, nullable=False, default=0)
+    last_light_at = Column(TIMESTAMP(timezone=False))
+    last_rem_at = Column(TIMESTAMP(timezone=False))
+
+
+class MemoryRetrievalHit(TableBase):
+    """Append-only recall evidence consumed by Dreaming."""
+
+    __tablename__ = "memory_retrieval_hits_t"
+    __table_args__ = (
+        Index("idx_memory_retrieval_hits_memory", "memory_id", "occurred_at"),
+        Index(
+            "idx_memory_retrieval_hits_tenant_user_agent",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "day",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    hit_id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
+    tenant_id = Column(String(100))
+    user_id = Column(String(100))
+    agent_id = Column(String(100))
+    conversation_id = Column(String(100))
+    memory_id = Column(Integer)
+    query_text = Column(Text)
+    query_hash = Column(String(128))
+    retrieval_score = Column(Numeric(38, 18))
+    source = Column(String(100), nullable=False, default="nexent")
+    occurred_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    day = Column(String(100))
+    grounded = Column(Boolean, nullable=False, default=False)
+
+
+class MemoryDreamingAudit(TableBase):
+    """One durable audit row per manual Dreaming run."""
+
+    __tablename__ = "memory_dreaming_audit_t"
+    __table_args__ = (
+        Index(
+            "idx_memory_dreaming_audit_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "started_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    run_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_audit_t_run_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    trigger_source = Column(String(30), nullable=False, default="manual")
+    status = Column(String(30), nullable=False, default="running")
+    current_phase = Column(String(30))
+    started_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    finished_at = Column(TIMESTAMP(timezone=False))
+    light_count = Column(Integer, nullable=False, default=0)
+    rem_count = Column(Integer, nullable=False, default=0)
+    promoted_count = Column(Integer, nullable=False, default=0)
+    deferred_count = Column(Integer, nullable=False, default=0)
+    result_json = Column(JSONB)
+    error = Column(Text)
+
+
 class McpRecord(TableBase):
     """
     MCP (Model Context Protocol) records table
@@ -1065,32 +1170,6 @@ class AgentRepository(TableBase):
     status = Column(String(30), default="not_shared",
                     doc="Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)")
     content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
-
-
-class SkillRepository(TableBase):
-    """
-    Skill repository (marketplace) table. Frozen snapshot of a shared skill for installation.
-    """
-    __tablename__ = "ag_skill_repository_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    skill_repository_id = Column(BigInteger, Sequence("ag_skill_repository_t_skill_repository_id_seq", schema=SCHEMA),
-                                 primary_key=True, nullable=False, doc="Skill repository listing ID, unique primary key")
-    publisher_tenant_id = Column(String(100), nullable=False, doc=_PUBLISHER_TENANT_ID_DOC)
-    publisher_user_id = Column(String(100), nullable=False, doc=_PUBLISHER_USER_ID_DOC)
-    skill_id = Column(Integer, nullable=False, doc="Source skill ID from ag_skill_info_t")
-    name = Column(String(100), nullable=False, doc="Skill name for display and search")
-    description = Column(Text, doc="Skill description")
-    source = Column(String(30), doc="Skill source")
-    submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
-    category_id = Column(Integer, doc="Optional marketplace category ID")
-    tags = Column(ARRAY(Text), doc="Marketplace tags")
-    icon = Column(String(100), doc="Marketplace card icon (emoji or URL)")
-    downloads = Column(Integer, default=0, doc="Marketplace install count for card display")
-    skill_info_json = Column(JSONB, nullable=False, doc="Frozen skill metadata snapshot")
-    skill_zip_base64 = Column(Text, nullable=False, doc="Frozen skill ZIP payload encoded as base64")
-    status = Column(String(30), default="not_shared",
-                    doc="Listing status: not_shared / pending_review / rejected / shared")
 
 
 class SkillRepository(TableBase):
