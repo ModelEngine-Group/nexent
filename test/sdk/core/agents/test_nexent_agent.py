@@ -4065,19 +4065,23 @@ class TestCreateBuiltinTool:
             },
         )
 
-        # Mock the skill script tool module
-        mock_run_skill_script = MagicMock()
-        mock_get_tool = MagicMock(return_value=mock_run_skill_script)
+        mock_tool_instance = MagicMock()
+        mock_tool_class = MagicMock(return_value=mock_tool_instance)
 
         with patch.dict("sys.modules", {
             "nexent.core.tools.run_skill_script_tool": MagicMock(
-                get_run_skill_script_tool=mock_get_tool,
-                run_skill_script=mock_run_skill_script
+                RunSkillScriptTool=mock_tool_class,
             )
         }):
             result = nexent_agent_instance.create_builtin_tool(tool_config)
-            assert result is mock_run_skill_script
-            mock_get_tool.assert_called_once()
+            assert result is mock_tool_instance
+            mock_tool_class.assert_called_once_with(
+                local_skills_dir="/tmp/skills",
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                version_no=1,
+                observer=nexent_agent_instance.observer,
+            )
 
     def test_create_builtin_tool_read_skill_md(self, nexent_agent_instance):
         """Test create_builtin_tool with ReadSkillMdTool."""
@@ -4096,18 +4100,22 @@ class TestCreateBuiltinTool:
             },
         )
 
-        mock_read_skill_md = MagicMock()
-        mock_get_tool = MagicMock(return_value=mock_read_skill_md)
+        mock_tool_instance = MagicMock()
+        mock_tool_class = MagicMock(return_value=mock_tool_instance)
 
         with patch.dict("sys.modules", {
             "nexent.core.tools.read_skill_md_tool": MagicMock(
-                get_read_skill_md_tool=mock_get_tool,
-                read_skill_md=mock_read_skill_md
+                ReadSkillMdTool=mock_tool_class,
             )
         }):
             result = nexent_agent_instance.create_builtin_tool(tool_config)
-            assert result is mock_read_skill_md
-            mock_get_tool.assert_called_once()
+            assert result is mock_tool_instance
+            mock_tool_class.assert_called_once_with(
+                local_skills_dir="/tmp/skills",
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                version_no=1,
+            )
 
     def test_create_builtin_tool_write_skill_file(self, nexent_agent_instance):
         """Test create_builtin_tool with WriteSkillFileTool."""
@@ -4126,18 +4134,22 @@ class TestCreateBuiltinTool:
             },
         )
 
-        mock_write_skill_file = MagicMock()
-        mock_get_tool = MagicMock(return_value=mock_write_skill_file)
+        mock_tool_instance = MagicMock()
+        mock_tool_class = MagicMock(return_value=mock_tool_instance)
 
         with patch.dict("sys.modules", {
             "nexent.core.tools.write_skill_file_tool": MagicMock(
-                get_write_skill_file_tool=mock_get_tool,
-                write_skill_file=mock_write_skill_file
+                WriteSkillFileTool=mock_tool_class,
             )
         }):
             result = nexent_agent_instance.create_builtin_tool(tool_config)
-            assert result is mock_write_skill_file
-            mock_get_tool.assert_called_once()
+            assert result is mock_tool_instance
+            mock_tool_class.assert_called_once_with(
+                local_skills_dir="/tmp/skills",
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                version_no=1,
+            )
 
     def test_create_builtin_tool_read_skill_config(self, nexent_agent_instance):
         """Test create_builtin_tool with ReadSkillConfigTool."""
@@ -4156,18 +4168,22 @@ class TestCreateBuiltinTool:
             },
         )
 
-        mock_read_skill_config = MagicMock()
-        mock_get_tool = MagicMock(return_value=mock_read_skill_config)
+        mock_tool_instance = MagicMock()
+        mock_tool_class = MagicMock(return_value=mock_tool_instance)
 
         with patch.dict("sys.modules", {
             "nexent.core.tools.read_skill_config_tool": MagicMock(
-                get_read_skill_config_tool=mock_get_tool,
-                read_skill_config=mock_read_skill_config
+                ReadSkillConfigTool=mock_tool_class,
             )
         }):
             result = nexent_agent_instance.create_builtin_tool(tool_config)
-            assert result is mock_read_skill_config
-            mock_get_tool.assert_called_once()
+            assert result is mock_tool_instance
+            mock_tool_class.assert_called_once_with(
+                local_skills_dir="/tmp/skills",
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                version_no=1,
+            )
 
     def test_create_builtin_tool_unknown_tool(self, nexent_agent_instance):
         """Test create_builtin_tool raises ValueError for unknown tool."""
