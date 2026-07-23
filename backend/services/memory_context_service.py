@@ -23,8 +23,8 @@ from nexent.memory.models import (
     MemorySearchRequest,
     MemorySearchResult,
     PipelineConfig,
-    RetrievalPipeline,
 )
+from nexent.memory.retrieval import RetrievalPipeline
 from nexent.memory.policy import MemoryRetrievalPolicy
 
 from consts.const import (

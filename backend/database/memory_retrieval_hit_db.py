@@ -186,6 +186,47 @@ def aggregate_memory_stats(
     return out
 
 
+def aggregate_dreaming_stats(
+    tenant_id: str,
+    user_id: str,
+    agent_id: str,
+    *,
+    since: datetime,
+) -> List[Dict[str, Any]]:
+    """Return complete Light/Deep evidence for one isolation scope."""
+    hits = list_hits_for_user(tenant_id, user_id, since=since, limit=10000)
+    grouped: Dict[int, Dict[str, Any]] = {}
+    for hit in hits:
+        if str(hit.get("agent_id")) != str(agent_id) or hit.get("memory_id") is None:
+            continue
+        memory_id = int(hit["memory_id"])
+        entry = grouped.setdefault(
+            memory_id,
+            {
+                "memory_id": memory_id,
+                "hit_count": 0,
+                "grounded_count": 0,
+                "days": set(),
+                "query_hashes": set(),
+                "total_retrieval_score": 0.0,
+                "last_recalled_at": None,
+            },
+        )
+        entry["hit_count"] += 1
+        entry["grounded_count"] += int(bool(hit.get("grounded")))
+        if hit.get("day"):
+            entry["days"].add(str(hit["day"]))
+        if hit.get("query_hash"):
+            entry["query_hashes"].add(str(hit["query_hash"]))
+        entry["total_retrieval_score"] += float(hit.get("retrieval_score") or 0)
+        occurred_at = hit.get("occurred_at")
+        if occurred_at and (
+            entry["last_recalled_at"] is None or occurred_at > entry["last_recalled_at"]
+        ):
+            entry["last_recalled_at"] = occurred_at
+    return list(grouped.values())
+
+
 def delete_hits_before(cutoff: datetime) -> int:
     """Delete hit rows older than ``cutoff`` (housekeeping)."""
     with get_db_session() as session:
