@@ -15397,3 +15397,542 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_ids"] == []
     assert result["model_names"] == []
     assert result["model_name"] is None
+
+
+# =============================================================================
+# Tests for Sandbox Policy Builder (lines 3671-3686)
+# =============================================================================
+
+
+class TestBuildSandboxPolicy:
+    """Tests for build_sandbox_policy function.
+
+    Note: The function imports consts.const inside the function body,
+    so we test the function signature and basic existence here.
+    Integration tests would require mocking at the consts module level.
+    """
+
+    def test_build_sandbox_policy_function_exists(self):
+        """Test that build_sandbox_policy function exists and is callable."""
+        from backend.services.agent_service import build_sandbox_policy
+
+        assert callable(build_sandbox_policy)
+
+    def test_build_sandbox_policy_accepts_required_args(self):
+        """Test that build_sandbox_policy accepts tenant_id and agent_type arguments."""
+        from backend.services.agent_service import build_sandbox_policy
+        import inspect
+
+        sig = inspect.signature(build_sandbox_policy)
+        params = list(sig.parameters.keys())
+
+        assert "tenant_id" in params
+        assert "agent_type" in params
+
+
+class TestGetSandboxMinioClient:
+    """Tests for get_sandbox_minio_client function."""
+
+    def test_get_sandbox_minio_client_function_exists(self):
+        """Test that get_sandbox_minio_client function exists and is callable."""
+        from backend.services.agent_service import get_sandbox_minio_client
+
+        assert callable(get_sandbox_minio_client)
+
+
+# =============================================================================
+# Tests for helper functions in agent_service.py
+# =============================================================================
+
+
+class TestExtractJsonObjectsFromText:
+    """Tests for _extract_json_objects_from_text function."""
+
+    def test_extract_json_objects_empty_string(self):
+        """Test _extract_json_objects_from_text returns empty list for empty string."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        result = _extract_json_objects_from_text("")
+        assert result == []
+
+    def test_extract_json_objects_none_string(self):
+        """Test _extract_json_objects_from_text returns empty list for None."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        result = _extract_json_objects_from_text(None)
+        assert result == []
+
+    def test_extract_json_objects_single_object(self):
+        """Test _extract_json_objects_from_text extracts single JSON object."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"key": "value"}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 1
+        assert result[0] == {"key": "value"}
+
+    def test_extract_json_objects_multiple_objects(self):
+        """Test _extract_json_objects_from_text extracts multiple JSON objects."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"a": 1} some text {"b": 2} more text {"c": 3}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 3
+        assert result[0] == {"a": 1}
+        assert result[1] == {"b": 2}
+        assert result[2] == {"c": 3}
+
+    def test_extract_json_objects_nested_object(self):
+        """Test _extract_json_objects_from_text extracts nested JSON objects."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"outer": {"inner": "value"}}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 1
+        assert result[0] == {"outer": {"inner": "value"}}
+
+    def test_extract_json_objects_array_not_included(self):
+        """Test _extract_json_objects_from_text excludes arrays."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"key": [1, 2, 3]}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 1
+        assert result[0] == {"key": [1, 2, 3]}
+
+    def test_extract_json_objects_with_invalid_json(self):
+        """Test _extract_json_objects_from_text skips invalid JSON."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"valid": true} {invalid} {"also": "valid"}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 2
+        assert result[0] == {"valid": True}
+        assert result[1] == {"also": "valid"}
+
+
+class TestExtractSkillFileUploadPayloads:
+    """Tests for _extract_skill_file_upload_payloads function."""
+
+    def test_extract_skill_file_payloads_empty(self):
+        """Test _extract_skill_file_upload_payloads returns empty list for empty input."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        result = _extract_skill_file_upload_payloads("")
+        assert result == []
+
+    def test_extract_skill_file_payloads_with_absolute_path(self):
+        """Test _extract_skill_file_upload_payloads extracts payloads with absolute_path."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        text = '{"absolute_path": "/tmp/test.txt", "file_name": "test.txt"}'
+        result = _extract_skill_file_upload_payloads(text)
+        assert len(result) == 1
+        assert result[0]["absolute_path"] == "/tmp/test.txt"
+
+    def test_extract_skill_file_payloads_without_absolute_path(self):
+        """Test _extract_skill_file_upload_payloads excludes payloads without absolute_path."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        text = '{"file_name": "test.txt"}'
+        result = _extract_skill_file_upload_payloads(text)
+        assert len(result) == 0
+
+    def test_extract_skill_file_payloads_multiple(self):
+        """Test _extract_skill_file_upload_payloads extracts multiple valid payloads."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        text = '{"absolute_path": "/tmp/a.txt"} extra {"absolute_path": "/tmp/b.txt"}'
+        result = _extract_skill_file_upload_payloads(text)
+        assert len(result) == 2
+        assert result[0]["absolute_path"] == "/tmp/a.txt"
+        assert result[1]["absolute_path"] == "/tmp/b.txt"
+
+
+class TestTransformSkillFilesToStandardFormat:
+    """Tests for _transform_skill_files_to_standard_format function."""
+
+    def test_transform_skill_files_empty(self):
+        """Test _transform_skill_files_to_standard_format returns empty list for empty input."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        result = _transform_skill_files_to_standard_format([])
+        assert result == []
+
+    def test_transform_skill_files_full_fields(self):
+        """Test _transform_skill_files_to_standard_format transforms complete upload results."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {
+                "file_name": "test.txt",
+                "object_name": "obj123",
+                "url": "https://example.com/test.txt",
+                "presigned_url": "https://example.com/presigned",
+                "file_size": 1024,
+                "mime_type": "text/plain"
+            }
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert len(result) == 1
+        assert result[0]["object_name"] == "obj123"
+        assert result[0]["name"] == "test.txt"
+        assert result[0]["type"] == "file"
+        assert result[0]["size"] == 1024
+        assert result[0]["url"] == "https://example.com/test.txt"
+        assert result[0]["presigned_url"] == "https://example.com/presigned"
+        assert result[0]["description"] == ""
+
+    def test_transform_skill_files_uses_preview_url(self):
+        """Test _transform_skill_files_to_standard_format uses preview_url as fallback for presigned_url."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {
+                "file_name": "test.txt",
+                "preview_url": "https://example.com/preview",
+                "url": "https://example.com/test.txt",
+                "file_size": 1024,
+            }
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert result[0]["presigned_url"] == "https://example.com/preview"
+
+    def test_transform_skill_files_uses_size_fallback(self):
+        """Test _transform_skill_files_to_standard_format uses 'size' as fallback for 'file_size'."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {
+                "name": "test.txt",
+                "size": 2048,
+            }
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert result[0]["size"] == 2048
+
+    def test_transform_skill_files_multiple(self):
+        """Test _transform_skill_files_to_standard_format transforms multiple files."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {"file_name": "a.txt", "size": 100},
+            {"file_name": "b.txt", "size": 200},
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert len(result) == 2
+        assert result[0]["name"] == "a.txt"
+        assert result[1]["name"] == "b.txt"
+
+
+class TestSafeAgentStreamErrorChunk:
+    """Tests for _safe_agent_stream_error_chunk function."""
+
+    def test_safe_agent_stream_error_chunk_format(self):
+        """Test _safe_agent_stream_error_chunk returns properly formatted SSE chunk."""
+        from backend.services.agent_service import _safe_agent_stream_error_chunk
+
+        result = _safe_agent_stream_error_chunk()
+        assert result.startswith("data: ")
+        assert "\n\n" in result
+        assert "error" in result
+        assert "content" in result
+
+    def test_safe_agent_stream_error_chunk_contains_safe_message(self):
+        """Test _safe_agent_stream_error_chunk contains safe error message."""
+        from backend.services.agent_service import _safe_agent_stream_error_chunk
+
+        result = _safe_agent_stream_error_chunk()
+        assert "Agent execution failed" in result
+
+
+class TestGetUserGroupIds:
+    """Tests for _get_user_group_ids function."""
+
+    @patch('backend.services.agent_service.query_group_ids_by_user')
+    def test_get_user_group_ids_success(self, mock_query_groups):
+        """Test _get_user_group_ids returns comma-separated group IDs."""
+        from backend.services.agent_service import _get_user_group_ids
+
+        mock_query_groups.return_value = ["1", "2", "3"]
+
+        result = _get_user_group_ids("user123", "tenant456")
+
+        assert result == "1,2,3"
+        mock_query_groups.assert_called_once_with("user123")
+
+    @patch('backend.services.agent_service.query_group_ids_by_user')
+    def test_get_user_group_ids_empty(self, mock_query_groups):
+        """Test _get_user_group_ids returns empty string when no groups."""
+        from backend.services.agent_service import _get_user_group_ids
+
+        mock_query_groups.return_value = []
+
+        result = _get_user_group_ids("user123", "tenant456")
+
+        assert result == ""
+
+    @patch('backend.services.agent_service.query_group_ids_by_user')
+    @patch('backend.services.agent_service.logger')
+    def test_get_user_group_ids_exception(self, mock_logger, mock_query_groups):
+        """Test _get_user_group_ids returns empty string on exception."""
+        from backend.services.agent_service import _get_user_group_ids
+
+        mock_query_groups.side_effect = Exception("Database error")
+
+        result = _get_user_group_ids("user123", "tenant456")
+
+        assert result == ""
+        mock_logger.warning.assert_called_once()
+
+
+class TestResolveModelIdsWithFallback:
+    """Tests for _resolve_model_ids_with_fallback function."""
+
+    @patch('backend.services.agent_service.get_model_by_model_id')
+    @patch('backend.services.agent_service.get_model_id_by_display_name')
+    @patch('backend.services.agent_service.MODEL_CONFIG_MAPPING')
+    def test_resolve_model_ids_explicit_ids(
+        self, mock_config, mock_get_by_name, mock_get_by_id
+    ):
+        """Test _resolve_model_ids_with_fallback uses explicit model_ids when available."""
+        from backend.services.agent_service import _resolve_model_ids_with_fallback
+
+        mock_get_by_id.return_value = {"display_name": "Test Model"}
+
+        result = _resolve_model_ids_with_fallback(
+            model_ids=[1, 2],
+            model_display_names=None,
+            model_label="Model",
+            tenant_id="tenant123"
+        )
+
+        assert result == [1, 2]
+
+    @patch('backend.services.agent_service.get_model_by_model_id')
+    @patch('backend.services.agent_service.get_model_id_by_display_name')
+    @patch('backend.services.agent_service.MODEL_CONFIG_MAPPING')
+    def test_resolve_model_ids_fallback_to_names(
+        self, mock_config, mock_get_by_name, mock_get_by_id
+    ):
+        """Test _resolve_model_ids_with_fallback falls back to display names."""
+        from backend.services.agent_service import _resolve_model_ids_with_fallback
+
+        mock_get_by_id.return_value = None
+        mock_get_by_name.return_value = 5
+
+        result = _resolve_model_ids_with_fallback(
+            model_ids=None,
+            model_display_names=["TestModel"],
+            model_label="Model",
+            tenant_id="tenant123"
+        )
+
+        assert result == [5]
+
+
+class TestCollectSkillNamesFromTree:
+    """Tests for _collect_skill_names_from_tree function."""
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_empty(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree returns empty list when no skills."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = []
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == []
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_single_skill(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree collects skill names."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = [
+            {"skill_id": 1}
+        ]
+        mock_skill_db.get_skill_by_id.return_value = {"name": "TestSkill"}
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == ["TestSkill"]
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_deduplicates(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree deduplicates skill names."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = [
+            {"skill_id": 1},
+            {"skill_id": 1},
+        ]
+        mock_skill_db.get_skill_by_id.return_value = {"name": "TestSkill"}
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == ["TestSkill"]
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_handles_missing_skill(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree handles missing skill gracefully."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = [
+            {"skill_id": 1}
+        ]
+        mock_skill_db.get_skill_by_id.return_value = None
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == []
+
+
+class TestCollectSkillZipEntries:
+    """Tests for collect_skill_zip_entries function."""
+
+    @patch('backend.services.agent_service._collect_skill_names_from_tree')
+    def test_collect_skill_zip_entries_empty(self, mock_collect):
+        """Test collect_skill_zip_entries returns empty list when no skills."""
+        from backend.services.agent_service import collect_skill_zip_entries
+
+        mock_collect.return_value = []
+
+        result = collect_skill_zip_entries(1, "tenant123", 0)
+
+        assert result == []
+
+    @patch('backend.services.agent_service.SkillService')
+    @patch('backend.services.agent_service._collect_skill_names_from_tree')
+    def test_collect_skill_zip_entries_success(self, mock_collect, mock_skill_service):
+        """Test collect_skill_zip_entries returns skill zip entries."""
+        from backend.services.agent_service import collect_skill_zip_entries
+
+        mock_collect.return_value = ["TestSkill"]
+        mock_service_instance = MagicMock()
+        mock_service_instance.export_skills_by_names.return_value = [
+            {"skill_name": "TestSkill", "skill_zip_base64": "abc123"}
+        ]
+        mock_skill_service.return_value = mock_service_instance
+
+        result = collect_skill_zip_entries(1, "tenant123", 0)
+
+        assert len(result) == 1
+        assert result[0].skill_name == "TestSkill"
+        assert result[0].skill_zip_base64 == "abc123"
+
+
+class TestClearAgentNewMarkImpl:
+    """Tests for clear_agent_new_mark_impl function."""
+
+    @patch('backend.services.agent_service.clear_agent_new_mark')
+    @patch('backend.services.agent_service.logger')
+    async def test_clear_agent_new_mark_impl_success(self, mock_logger, mock_clear):
+        """Test clear_agent_new_mark_impl calls clear_agent_new_mark and logs result."""
+        from backend.services.agent_service import clear_agent_new_mark_impl
+
+        mock_clear.return_value = 1
+
+        result = await clear_agent_new_mark_impl(123, "tenant456", "user789")
+
+        assert result == 1
+        mock_clear.assert_called_once_with(123, "tenant456", "user789")
+        mock_logger.info.assert_called_once()
+        assert "affected_rows=1" in mock_logger.info.call_args[0][0]
+
+
+class TestLoadDefaultAgentsJsonFile:
+    """Tests for load_default_agents_json_file function."""
+
+    @patch('builtins.open', new_callable=MagicMock)
+    @patch('backend.services.agent_service.os.listdir')
+    @patch('backend.services.agent_service.os.path.join')
+    def test_load_default_agents_json_file_empty_dir(
+        self, mock_join, mock_listdir, mock_open
+    ):
+        """Test load_default_agents_json_file returns empty list for empty directory."""
+        from backend.services.agent_service import load_default_agents_json_file
+
+        mock_listdir.return_value = ["readme.txt", "config.yaml"]
+
+        result = load_default_agents_json_file("/path/to/agents")
+
+        assert result == []
+
+    @patch('builtins.open', new_callable=MagicMock)
+    @patch('backend.services.agent_service.os.listdir')
+    @patch('backend.services.agent_service.os.path.join')
+    def test_load_default_agents_json_file_with_json(
+        self, mock_join, mock_listdir, mock_open
+    ):
+        """Test load_default_agents_json_file loads JSON files."""
+        from backend.services.agent_service import load_default_agents_json_file
+        import json
+
+        mock_listdir.return_value = ["agent1.json", "readme.txt"]
+        mock_file_content = {
+            "agent_id": "1",
+            "name": "TestAgent",
+            "display_name": "Test Agent",
+            "description": "A test agent",
+            "business_description": "Test",
+            "max_steps": 5,
+            "provide_run_summary": True,
+            "enabled": True,
+            "tools": [],
+            "managed_agents": []
+        }
+        mock_file = MagicMock()
+        mock_file.__enter__ = MagicMock(return_value=mock_file)
+        mock_file.__exit__ = MagicMock(return_value=False)
+        mock_file.read.return_value = json.dumps(mock_file_content)
+        mock_open.return_value = mock_file
+        mock_join.side_effect = lambda a, b: f"{a}/{b}"
+
+        result = load_default_agents_json_file("/path/to/agents")
+
+        assert len(result) == 1
+        assert result[0].name == "TestAgent"
+
+
+class TestInsertRelatedAgentImpl:
+    """Tests for insert_related_agent_impl function."""
+
+    @patch('backend.services.agent_service.insert_related_agent')
+    @patch('backend.services.agent_service.query_sub_agents_id_list')
+    def test_insert_related_agent_impl_success(self, mock_query, mock_insert):
+        """Test insert_related_agent_impl returns success response."""
+        from backend.services.agent_service import insert_related_agent_impl
+        from fastapi.responses import JSONResponse
+
+        mock_query.return_value = [2, 3]
+        mock_insert.return_value = True
+
+        result = insert_related_agent_impl(1, 2, "tenant123")
+
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 200
+
+    @patch('backend.services.agent_service.insert_related_agent')
+    @patch('backend.services.agent_service.query_sub_agents_id_list')
+    def test_insert_related_agent_impl_failure(self, mock_query, mock_insert):
+        """Test insert_related_agent_impl returns error response."""
+        from backend.services.agent_service import insert_related_agent_impl
+        from fastapi.responses import JSONResponse
+
+        mock_query.return_value = [2, 3]
+        mock_insert.return_value = False
+
+        result = insert_related_agent_impl(1, 2, "tenant123")
+
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 400

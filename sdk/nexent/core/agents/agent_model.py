@@ -296,6 +296,19 @@ class AgentConfig(BaseModel):
         description="Whether to enable the planning phase before execution",
         default=False,
     )
+    sandbox_policy: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Sandbox policy for LLM-generated Python code execution.  Keys: "
+            "level (local/docker/wasm), "
+            "scope (session/system), "
+            "docker_image, memory_limit_mb, cpu_quota, "
+            "network_disabled, timeout_seconds, shell_policy, "
+            "output_dir, auto_sync_outputs.  "
+            'Example: {"level": "docker", "scope": "session", '
+            '"docker_image": "nexent/nexent-sandbox:latest"}'
+        ),
+        default=None,
+    )
 
 
 class AgentHistory(BaseModel):
@@ -360,6 +373,22 @@ class AgentRunInfo(BaseModel):
         description="Redis client for plan persistence. "
                     "If provided, plan_repo will use Redis as primary storage with local fallback.",
         default=None
+    )
+    sandbox_config: Optional[Any] = Field(
+        description=(
+            "Resolved SandboxConfig for sandbox isolation.  "
+            "Populated by the backend service layer from AgentConfig.sandbox_policy "
+            "and NEXENT_SANDBOX_* environment variables.  "
+            "When None the SDK uses LocalPythonExecutor (backwards-compatible)."
+        ),
+        default=None,
+    )
+    minio_client: Optional[Any] = Field(
+        description=(
+            "MinIO client for syncing sandbox output files to object storage.  "
+            "Required when sandbox_config.auto_sync_outputs is True."
+        ),
+        default=None,
     )
 
     class Config:

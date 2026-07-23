@@ -254,6 +254,11 @@ sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
     initialize_tools_on_startup=AsyncMock(),
 )
+sys.modules['services.agent_service'] = _create_stub_module(
+    "services.agent_service",
+    build_sandbox_policy=MagicMock(return_value=None),
+    get_sandbox_minio_client=MagicMock(return_value=None),
+)
 sys.modules['nexent.memory.memory_service'] = MagicMock()
 
 # Build top-level nexent module to avoid importing the real package
@@ -262,9 +267,28 @@ sys.modules['nexent'] = nexent_module
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
-sys.modules['nexent.core.agents'] = _create_stub_module("nexent.core.agents")
+nexent_agents_module = _create_stub_module("nexent.core.agents")
+nexent_agents_module.__path__ = []
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")
 sys.modules['nexent.core.models'] = _create_stub_module("nexent.core.models")
+
+
+class MockSandboxConfig:
+    def __init__(self, auto_sync_outputs=True, **kwargs):
+        self.auto_sync_outputs = auto_sync_outputs
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**(data or {}))
+
+
+sandbox_module = _create_stub_module(
+    "nexent.core.agents.sandbox",
+    SandboxConfig=MockSandboxConfig,
+)
+nexent_agents_module.sandbox = sandbox_module
 
 
 class MockProviderCapabilityUnknown(Exception):
@@ -3519,7 +3543,9 @@ class TestCreateAgentRunInfo:
                 stop_event="stop_event",
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
-                redis_client=ANY
+                redis_client=ANY,
+                sandbox_config=None,
+                minio_client=None,
             )
 
             # Verify that other functions were called correctly

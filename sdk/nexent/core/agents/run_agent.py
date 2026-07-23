@@ -150,6 +150,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event,
                 redis_client=agent_run_info.redis_client,
+                sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                minio_client=getattr(agent_run_info, "minio_client", None),
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -172,6 +174,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     stop_event=agent_run_info.stop_event,
                     mcp_tool_collection=tool_collection,
                     redis_client=agent_run_info.redis_client,
+                    sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                    minio_client=getattr(agent_run_info, "minio_client", None),
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,
