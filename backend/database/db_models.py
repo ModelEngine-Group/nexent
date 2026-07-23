@@ -937,6 +937,43 @@ class MemoryRetrievalHit(TableBase):
                          doc="Soft delete flag (N = active, Y = deleted).")
 
 
+class MemoryDreamingAudit(TableBase):
+    """One durable audit row per manual Dreaming run."""
+
+    __tablename__ = "memory_dreaming_audit_t"
+    __table_args__ = (
+        Index(
+            "idx_memory_dreaming_audit_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "started_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    run_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_audit_t_run_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    trigger_source = Column(String(30), nullable=False, default="manual")
+    status = Column(String(30), nullable=False, default="running")
+    current_phase = Column(String(30))
+    started_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    finished_at = Column(TIMESTAMP(timezone=False))
+    light_count = Column(Integer, nullable=False, default=0)
+    rem_count = Column(Integer, nullable=False, default=0)
+    promoted_count = Column(Integer, nullable=False, default=0)
+    deferred_count = Column(Integer, nullable=False, default=0)
+    result_json = Column(JSONB)
+    error = Column(Text)
+
+
 class McpRecord(TableBase):
     """
     MCP (Model Context Protocol) records table
