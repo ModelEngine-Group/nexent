@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useEffect, useMemo, useRef, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -29,7 +29,6 @@ import {
 } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import {
-  THINKING_STEPS_ZH,
   type SkillFormData,
   type ChatMessage,
   type SkillFileContent,
@@ -41,13 +40,22 @@ import {
   findSkillByName,
   createSkillStream,
   stopSkillCreation,
+  getThinkingSteps,
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
-import { fetchSkillById } from "@/services/agentConfigService";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
+import {
+  fetchSkillById,
+  fetchSkillFileContent,
+  fetchSkillFiles,
+  type SkillFileNode,
+} from "@/services/agentConfigService";
+import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
 
 const { TextArea } = Input;
@@ -110,6 +118,39 @@ function mergeGeneratedSkillTabs(
   return { updatedTabs, finalTabs };
 }
 
+function flattenSkillFiles(
+  nodes: SkillFileNode[],
+  skillName: string
+): string[] {
+  const paths: string[] = [];
+  const walk = (items: SkillFileNode[], parentPath = "") => {
+    items.forEach((item) => {
+      const isRootSkillDirectory =
+        !parentPath && item.type === "directory" && item.name === skillName;
+      const path = isRootSkillDirectory
+        ? ""
+        : parentPath
+          ? `${parentPath}/${item.name}`
+          : item.name;
+      if (item.type === "file") {
+        paths.push(path);
+      } else if (item.children?.length) {
+        walk(item.children, path);
+      }
+    });
+  };
+  walk(nodes);
+  return paths;
+}
+
+function sortSkillTabs(tabs: SkillFileContent[]): SkillFileContent[] {
+  return [...tabs].sort((a, b) => {
+    if (a.path === "SKILL.md") return -1;
+    if (b.path === "SKILL.md") return 1;
+    return a.path.localeCompare(b.path);
+  });
+}
+
 export default function SkillBuildModal({
   isOpen,
   onCancel,
@@ -117,11 +158,34 @@ export default function SkillBuildModal({
   editingSkill,
   onBeforeEditSave,
 }: SkillBuildModalProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
+  const { data: groupData } = useGroupList(user?.tenantId ?? null);
+  const accessibleGroupIds = useMemo(
+    () => getAccessibleGroupIds(),
+    [getAccessibleGroupIds]
+  );
+  const { groups: filteredGroups } = useGroupDetails(
+    groupData?.groups ?? [],
+    accessibleGroupIds
+  );
+  const groupSelectOptions = useMemo(
+    () =>
+      filteredGroups.map((group) => ({
+        label: group.group_name,
+        value: group.group_id,
+      })),
+    [filteredGroups]
+  );
   const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingEditFiles, setIsLoadingEditFiles] = useState(false);
+  const [loadedEditSkillId, setLoadedEditSkillId] = useState<number | null>(
+    null
+  );
+  const [editFilesError, setEditFilesError] = useState<string | null>(null);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadExtractedSkillName, setUploadExtractedSkillName] =
@@ -229,6 +293,14 @@ export default function SkillBuildModal({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen || isEditMode) return;
+    form.setFieldsValue({
+      group_ids: accessibleGroupIds,
+      ingroup_permission: "READ_ONLY",
+    });
+  }, [accessibleGroupIds, form, isEditMode, isOpen]);
+
+  useEffect(() => {
     if (!isOpen) {
       // Abort any ongoing streaming request
       if (abortControllerRef.current) {
@@ -254,6 +326,9 @@ export default function SkillBuildModal({
       setSummaryContent("");
       currentAssistantIdRef.current = "";
       setAccumulatedDraft(null);
+      setLoadedEditSkillId(null);
+      setEditFilesError(null);
+      setIsLoadingEditFiles(false);
     }
   }, [isOpen]);
 
@@ -268,7 +343,6 @@ export default function SkillBuildModal({
   // Sync summary content to the current assistant chat message for real-time display.
   useEffect(() => {
     if (!currentAssistantIdRef.current) return;
-    if (!summaryContent) return;
     setChatMessages((prev) => {
       if (!prev.some((m) => m.id === currentAssistantIdRef.current))
         return prev;
@@ -308,24 +382,72 @@ export default function SkillBuildModal({
         description: skill.description || "",
         source: skill.source || "custom",
         tags: Array.isArray(skill.tags) ? skill.tags : [],
+        group_ids: Array.isArray(skill.group_ids) ? skill.group_ids : [],
+        ingroup_permission: skill.ingroup_permission || "READ_ONLY",
       });
-      setSkillTabs([{ path: "SKILL.md", content: skill.content || "" }]);
-      setActiveSkillTab("SKILL.md");
     };
 
     setActiveTab("interactive");
-    applySkillInfo({
-      name: skillName,
-      description: editingSkill.description || "",
-      source: editingSkill.source || "custom",
-      tags: editingSkill.tags || [],
-    });
+    setEditFilesError(null);
+    setLoadedEditSkillId(null);
+    setIsLoadingEditFiles(true);
 
-    void fetchSkillById(editingSkill.skill_id).then((result) => {
-      if (result.success && result.data) {
-        applySkillInfo(result.data);
+    const loadEditFiles = async () => {
+      try {
+        const result = await fetchSkillById(editingSkill.skill_id);
+        const skillInfo =
+          result.success && result.data
+            ? result.data
+            : {
+                name: skillName,
+                description: editingSkill.description || "",
+                source: editingSkill.source || "custom",
+                tags: editingSkill.tags || [],
+                group_ids: editingSkill.group_ids || [],
+                ingroup_permission:
+                  editingSkill.ingroup_permission || "READ_ONLY",
+              };
+        const resolvedSkillName = skillInfo.name?.trim() || skillName;
+        const fileTree = await fetchSkillFiles(resolvedSkillName);
+        const filePaths = flattenSkillFiles(
+          normalizeSkillFiles(fileTree),
+          resolvedSkillName
+        );
+        if (filePaths.length === 0) {
+          throw new Error("Skill file tree is empty");
+        }
+        const tabs = await Promise.all(
+          filePaths.map(async (path) => {
+            const content = await fetchSkillFileContent(
+              resolvedSkillName,
+              path
+            );
+            if (content === null) {
+              throw new Error(`Failed to load skill file: ${path}`);
+            }
+            return { path, content };
+          })
+        );
+        if (!cancelled) {
+          const sortedTabs = sortSkillTabs(tabs);
+          applySkillInfo(skillInfo);
+          setSkillTabs(sortedTabs);
+          setActiveSkillTab(sortedTabs[0]?.path || "SKILL.md");
+          setLoadedEditSkillId(editingSkill.skill_id);
+        }
+      } catch (error) {
+        log.error("Failed to load skill files for editing:", error);
+        if (!cancelled) {
+          setEditFilesError(t("skillManagement.message.loadFilesFailed"));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingEditFiles(false);
+        }
       }
-    });
+    };
+
+    void loadEditFiles();
 
     return () => {
       cancelled = true;
@@ -355,6 +477,12 @@ export default function SkillBuildModal({
 
   const handleManualSubmit = async () => {
     try {
+      if (isEditMode && (isLoadingEditFiles || editFilesError)) {
+        message.error(
+          editFilesError || t("skillManagement.message.loadFilesFailed")
+        );
+        return;
+      }
       const values = await form.validateFields();
       if (isEditMode && editingSkill && onBeforeEditSave) {
         const shouldContinue = await onBeforeEditSave(editingSkill);
@@ -395,7 +523,7 @@ export default function SkillBuildModal({
         form.setFields([
           {
             name: "name",
-            errors: ["技能名称已存在，请修改名称"],
+            errors: [t("skillManagement.message.nameExists")],
           },
         ]);
         return;
@@ -510,10 +638,24 @@ export default function SkillBuildModal({
     // Assemble skill content from all tabs
     const assembledContent = assembleSkillContent(skillTabs);
     const formContext = [
-      formValues.name ? `当前技能名称：${formValues.name}` : "",
-      formValues.description ? `当前技能描述：${formValues.description}` : "",
-      formValues.tags?.length ? `当前标签：${formValues.tags.join(", ")}` : "",
-      assembledContent ? `当前技能文件内容：\n${assembledContent}` : "",
+      formValues.name
+        ? t("skillManagement.chat.context.name", { name: formValues.name })
+        : "",
+      formValues.description
+        ? t("skillManagement.chat.context.description", {
+            description: formValues.description,
+          })
+        : "",
+      formValues.tags?.length
+        ? t("skillManagement.chat.context.tags", {
+            tags: formValues.tags.join(", "),
+          })
+        : "",
+      assembledContent
+        ? t("skillManagement.chat.context.content", {
+            content: assembledContent,
+          })
+        : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -528,9 +670,7 @@ export default function SkillBuildModal({
     setChatMessages((prev) => [...prev, userMessage]);
     setIsChatLoading(true);
     setIsThinkingVisible(true);
-    setThinkingDescription(
-      t("skillManagement.generatingSkill") || "生成技能内容中 ..."
-    );
+    setThinkingDescription(t("skillManagement.generatingSkill"));
 
     // Clear content input before streaming — start fresh so the streamed content
     // reflects the (possibly refined) result of this turn.
@@ -564,8 +704,11 @@ export default function SkillBuildModal({
       // On subsequent turns (accumulatedDraft exists), existing_skill is passed
       // → backend follows the modify-workflow template and refines the draft.
       const userPrompt = formContext
-        ? `用户需求：${currentInput}\n\n${formContext}`
-        : `用户需求：${currentInput}`;
+        ? t("skillManagement.chat.userRequestWithContext", {
+            request: currentInput,
+            context: formContext,
+          })
+        : t("skillManagement.chat.userRequest", { request: currentInput });
 
       await createSkillStream(
         {
@@ -579,22 +722,24 @@ export default function SkillBuildModal({
               }
             : undefined,
           complexity: "complicated",
-          language: "zh",
+          language: i18n.language?.startsWith("en") ? "en" : "zh",
         },
         {
           onTaskId: (taskId) => {
             taskIdRef.current = taskId;
           },
           onThinkingUpdate: (step, desc) => {
-            setThinkingDescription(desc || "生成技能内容中 ...");
+            setThinkingDescription(
+              desc || t("skillManagement.generatingSkill")
+            );
           },
           onThinkingVisible: (visible) => {
             setIsThinkingVisible(visible);
           },
           onStepCount: (step) => {
             setThinkingDescription(
-              THINKING_STEPS_ZH.find((s) => s.step === step)?.description ||
-                "生成技能内容中 ..."
+              getThinkingSteps(i18n.language).find((s) => s.step === step)?.description ||
+                t("skillManagement.generatingSkill")
             );
           },
           onFrontmatter: (content) => {
@@ -616,6 +761,7 @@ export default function SkillBuildModal({
           },
           onSkillBody: (content) => {
             if (isStreamingCompleteRef.current) return;
+            setSummaryContent("");
             // Frontmatter is complete when skill_body starts - clear the buffer
             frontmatterBufferRef.current = "";
             // Only add body content to textarea (no frontmatter)
@@ -623,6 +769,7 @@ export default function SkillBuildModal({
           },
           onFileContent: (path, content, isNewFile) => {
             if (isStreamingCompleteRef.current) return;
+            setSummaryContent("");
 
             if (isNewFile) {
               ensureStreamingTab(path);
@@ -759,6 +906,8 @@ export default function SkillBuildModal({
   const modalBodyFrame = "min(92vh, 760px)";
   const editingSkillName =
     editingSkill?.name?.trim() || interactiveSkillName.trim();
+  const isEditContentReady =
+    !isEditMode || loadedEditSkillId === editingSkill?.skill_id;
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
@@ -798,7 +947,9 @@ export default function SkillBuildModal({
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
-          <p className="text-sm font-semibold text-gray-800">安装</p>
+          <p className="text-sm font-semibold text-gray-800">
+            {t("skillManagement.tabs.install")}
+          </p>
           <p className="text-xs text-gray-500">
             {t("skillManagement.form.uploadHint")}
           </p>
@@ -928,22 +1079,19 @@ export default function SkillBuildModal({
               {isEditMode ? (
                 <>
                   <p>
-                    你好！我是 Skill 构建助手，当前正在编辑「{editingSkillName}
-                    」。
+                    {t("skillManagement.chat.editGreetingTitle", {
+                      name: editingSkillName,
+                    })}
                   </p>
                   <p className="mt-3">
-                    你可以告诉我需要优化或调整的地方，我会帮你更新对应的文件内容。
+                    {t("skillManagement.chat.editGreetingBody")}
                   </p>
                 </>
               ) : (
                 <>
-                  <p>
-                    你好！我是 Skill
-                    构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill
-                    的结构和代码。
-                  </p>
+                  <p>{t("skillManagement.chat.createGreetingTitle")}</p>
                   <p className="mt-3">
-                    例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」
+                    {t("skillManagement.chat.createGreetingExample")}
                   </p>
                 </>
               )}
@@ -1001,8 +1149,8 @@ export default function SkillBuildModal({
               }}
               placeholder={
                 isEditMode
-                  ? "告诉我需要如何优化这个技能..."
-                  : "描述你想要的技能..."
+                  ? t("skillManagement.chat.editPlaceholder")
+                  : t("skillManagement.chat.createPlaceholder")
               }
               disabled={isChatLoading || isStreaming}
               autoSize={{ minRows: 1, maxRows: 3 }}
@@ -1037,7 +1185,7 @@ export default function SkillBuildModal({
             )}
           </Flex>
           <div className="mt-3 text-xs text-slate-500">
-            按 Enter 发送，Shift+Enter 换行
+            {t("skillManagement.chat.sendHint")}
           </div>
         </div>
       </div>
@@ -1056,6 +1204,7 @@ export default function SkillBuildModal({
       textareaRefs={textareaRefs}
       shouldAutoScrollRef={shouldAutoScrollRef}
       onTextareaScroll={handleTextareaScroll}
+      groupSelectOptions={groupSelectOptions}
     />
   );
 
@@ -1074,7 +1223,7 @@ export default function SkillBuildModal({
       label: (
         <Flex gap={6} align="center">
           <Box size={16} />
-          <span>安装</span>
+          <span>{t("skillManagement.tabs.install")}</span>
         </Flex>
       ),
     },
@@ -1083,7 +1232,7 @@ export default function SkillBuildModal({
 
   const getConfirmButtonText = () => {
     if (isEditMode) {
-      return "保存更改";
+      return t("skillManagement.mode.saveChanges");
     }
     if (activeTab === "interactive") {
       return t("skillManagement.mode.create");
@@ -1096,12 +1245,14 @@ export default function SkillBuildModal({
       title={
         <div>
           <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {isEditMode ? "编辑技能" : t("skillManagement.title")}
+            {isEditMode
+              ? t("skillManagement.edit.title")
+              : t("skillManagement.title")}
           </div>
           <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
             {isEditMode
-              ? `正在编辑：${editingSkillName}`
-              : "创建、编辑并发布你的 Skill。"}
+              ? t("skillManagement.edit.subtitle", { name: editingSkillName })
+              : t("skillManagement.create.subtitle")}
           </div>
         </div>
       }
@@ -1128,6 +1279,9 @@ export default function SkillBuildModal({
             type="primary"
             loading={isSubmitting}
             onClick={handleManualSubmit}
+            disabled={
+              isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
+            }
           >
             {getConfirmButtonText()}
           </Button>
@@ -1158,7 +1312,17 @@ export default function SkillBuildModal({
         items={visibleTabItems}
         className="skill-build-tabs shrink-0"
       />
-      {isEditMode || activeTab === "interactive" ? (
+      {isEditMode && !isEditContentReady ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <Spin spinning={isLoadingEditFiles}>
+            {editFilesError ? (
+              <p className="text-sm text-red-500">{editFilesError}</p>
+            ) : (
+              <div className="h-16 w-16" />
+            )}
+          </Spin>
+        </div>
+      ) : isEditMode || activeTab === "interactive" ? (
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {renderChatPanel()}
           {renderDraftPanel()}

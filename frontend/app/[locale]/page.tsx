@@ -87,27 +87,24 @@ export default function Homepage() {
         >
           <Row gutter={[16, 16]} justify="center">
             <Col xs={24} sm={24} md={8}>
-              <Button
+              <Button type="primary" size="large"
                 onClick={navigateToChat}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
               >
                 <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
                 {t("page.startChat")}
               </Button>
             </Col>
             <Col xs={24} sm={24} md={8}>
-              <Button
+              <Button type="primary" size="large"
                 onClick={navigateToAgent}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
               >
                 <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
                 {t("page.quickConfig")}
               </Button>
             </Col>
             <Col xs={24} sm={24} md={8}>
-              <Button
+              <Button type="primary" size="large"
                 onClick={navigateToRepository}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
               >
                 <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
                 {t("sidebar.agentRepository")}

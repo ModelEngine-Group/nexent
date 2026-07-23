@@ -199,7 +199,6 @@ class TestAidpSearchToolInit:
         assert tool.top_k == 100
         assert tool.multi_modal is True
         assert tool.observer == mock_observer
-        assert tool.running_prompt_en == "Searching AIDP knowledge base..."
 
     @pytest.mark.parametrize(
         "server_url,api_key,kds_list,expected_error",
@@ -302,12 +301,11 @@ class TestAidpSearchToolForward:
         assert parsed[1]["title"] == "Image Doc"
         assert aidp_tool.record_ops == 3
 
-        assert mock_observer.add_message.call_count == 4
-        assert mock_observer.add_message.call_args_list[0].args[1] == aidp_module.ProcessType.TOOL
-        assert mock_observer.add_message.call_args_list[1].args[1] == aidp_module.ProcessType.CARD
-        assert mock_observer.add_message.call_args_list[2].args[1] == aidp_module.ProcessType.SEARCH_CONTENT
-        assert mock_observer.add_message.call_args_list[3].args[1] == aidp_module.ProcessType.PICTURE_WEB
-        assert "https://aidp.example.com/files/2.png" in mock_observer.add_message.call_args_list[3].args[2]
+        assert mock_observer.add_message.call_count == 3
+        assert mock_observer.add_message.call_args_list[0].args[1] == aidp_module.ProcessType.CARD
+        assert mock_observer.add_message.call_args_list[1].args[1] == aidp_module.ProcessType.SEARCH_CONTENT
+        assert mock_observer.add_message.call_args_list[2].args[1] == aidp_module.ProcessType.PICTURE_WEB
+        assert "https://aidp.example.com/files/2.png" in mock_observer.add_message.call_args_list[2].args[2]
 
     def test_forward_without_image_does_not_emit_picture_message(
         self,

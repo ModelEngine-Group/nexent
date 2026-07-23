@@ -15,7 +15,7 @@ import {
   Puzzle,
   Building2,
   Zap,
-  Inbox,
+  CalendarClock,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -67,26 +67,33 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 1,
     parentKey: null,
   },
+  {
+    path: "/agent-tasks",
+    Icon: CalendarClock,
+    labelKey: "sidebar.agentTasks",
+    order: 2,
+    parentKey: null,
+  },
   // Agent Development submenu
   {
     path: "/agent-dev",
     Icon: Code,
     labelKey: "sidebar.agentDev",
-    order: 2,
+    order: 3,
     parentKey: null,
   },
   {
     path: "/models",
     Icon: Settings,
     labelKey: "sidebar.modelConfig",
-    order: 3,
+    order: 4,
     parentKey: "/agent-dev",
   },
   {
     path: "/knowledges",
     Icon: BookOpen,
     labelKey: "sidebar.knowledgeBaseConfig",
-    order: 4,
+    order: 5,
     parentKey: "/agent-dev",
   },
   {
@@ -189,7 +196,12 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   // Update selected key and expand parent menu when pathname changes
   useEffect(() => {
     const currentPath = getEffectiveRoutePath(pathname);
-    const matchedKey = ROUTE_PATHS.includes(currentPath) ? currentPath : null;
+    const matchedKey =
+      currentPath === "/newchat"
+        ? "/chat"
+        : ROUTE_PATHS.includes(currentPath)
+          ? currentPath
+          : null;
     setSelectedKey(matchedKey || "");
 
     // Auto-expand parent menu when visiting child page
@@ -275,7 +287,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     return {
       key: route.path,
       icon: <route.Icon className="w-4 h-4" />,
-      label: t(route.labelKey),
+      label: createRouteLabel(route),
       onClick: () => {
         setSelectedKey(route.path);
 
@@ -289,6 +301,42 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
         router.push(route.path);
       },
     };
+  };
+
+  const navigateToNewChat = () => {
+    setSelectedKey("/chat");
+
+    if (!isAuthenticated && !isSpeedMode) {
+      setPendingNavigationPath("/newchat");
+      openAuthPromptModal("/newchat");
+      return;
+    }
+
+    router.push("/newchat");
+  };
+
+  const createRouteLabel = (route: RouteConfig) => {
+    if (route.path !== "/chat") {
+      return t(route.labelKey);
+    }
+
+    return (
+      <div className="flex w-full items-center justify-between gap-2">
+        <span>{t(route.labelKey)}</span>
+        <button
+          type="button"
+          aria-label={t("sidebar.openNewChat")}
+          title={t("sidebar.openNewChat")}
+          className="flex h-5 w-8 shrink-0 items-center justify-center rounded-sm text-current/70 transition-colors hover:bg-black/10 hover:text-current"
+          onClick={(event) => {
+            event.stopPropagation();
+            navigateToNewChat();
+          }}
+        >
+          <span className="text-[10px] font-semibold uppercase leading-none tracking-wide">new</span>
+        </button>
+      </div>
+    );
   };
 
   // Build menu items from accessible routes with nested submenus

@@ -13,6 +13,7 @@ import { Button, Col, Form, Input, Modal, Row, Select, Tooltip } from "antd";
 import { FileText, Folder, Maximize2, Pencil, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { Can } from "@/components/permission/Can";
 import type { SkillFileContent, SkillFormData } from "@/types/skill";
 
 const { TextArea } = Input;
@@ -31,6 +32,7 @@ interface SkillDraftPanelProps {
   textareaRefs?: MutableRefObject<Record<string, unknown>>;
   shouldAutoScrollRef?: MutableRefObject<Record<string, boolean>>;
   onTextareaScroll?: (tabPath: string) => void;
+  groupSelectOptions?: Array<{ label: string; value: number }>;
   className?: string;
 }
 
@@ -46,6 +48,7 @@ export default function SkillDraftPanel({
   textareaRefs,
   shouldAutoScrollRef,
   onTextareaScroll,
+  groupSelectOptions = [],
   className,
 }: SkillDraftPanelProps) {
   const { t } = useTranslation("common");
@@ -224,6 +227,58 @@ export default function SkillDraftPanel({
             </Col>
           </Row>
 
+          {!readOnly ? (
+            <Can permission="group:read">
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="group_ids"
+                    label={t("agent.userGroup")}
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Select
+                      mode="multiple"
+                      placeholder={t("agent.userGroup")}
+                      options={groupSelectOptions}
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="ingroup_permission"
+                    label={t("tenantResources.knowledgeBase.permission")}
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Select
+                      placeholder={t("tenantResources.knowledgeBase.permission")}
+                      options={[
+                        {
+                          value: "EDIT",
+                          label: t(
+                            "tenantResources.knowledgeBase.permission.EDIT"
+                          ),
+                        },
+                        {
+                          value: "READ_ONLY",
+                          label: t(
+                            "tenantResources.knowledgeBase.permission.READ_ONLY"
+                          ),
+                        },
+                        {
+                          value: "PRIVATE",
+                          label: t(
+                            "tenantResources.knowledgeBase.permission.PRIVATE"
+                          ),
+                        },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Can>
+          ) : null}
+
           <Form.Item
             name="description"
             label={t("skillManagement.form.description")}
@@ -270,7 +325,9 @@ export default function SkillDraftPanel({
               mode="tags"
               maxCount={MAX_SKILL_TAGS}
               suffixIcon={null}
-              placeholder={t("skillManagement.form.tagsPlaceholder")}
+              placeholder={
+                readOnly ? "-" : t("skillManagement.form.tagsPlaceholder")
+              }
               open={false}
               onInputKeyDown={handleTagInputKeyDown}
               onChange={() => {
@@ -289,7 +346,9 @@ export default function SkillDraftPanel({
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
             <div className="flex h-11 items-center justify-between border-b border-slate-200 px-3">
-              <span className="text-sm font-medium text-slate-700">文件</span>
+              <span className="text-sm font-medium text-slate-700">
+                {t("skillManagement.detail.file")}
+              </span>
               {canEditFiles ? (
                 <Button
                   type="text"
@@ -379,7 +438,7 @@ export default function SkillDraftPanel({
                 <span className="min-w-0 flex-1 truncate">
                   {activeFile.path}
                 </span>
-                <Tooltip title="放大查看">
+                <Tooltip title={t("skillManagement.detail.expand")}>
                   <Button
                     type="text"
                     size="small"
@@ -434,7 +493,8 @@ export default function SkillDraftPanel({
           setExpandedEditorContent("");
         }}
         centered
-        width={640}
+        width="min(960px, calc(100vw - 48px))"
+        className="expanded-file-editor"
         styles={{ body: { padding: 0 } }}
         footer={
           readOnly
@@ -447,7 +507,7 @@ export default function SkillDraftPanel({
                     setExpandedEditorContent("");
                   }}
                 >
-                  取消
+                  {t("common.cancel")}
                 </Button>,
                 <Button
                   key="save-expanded-editor"
@@ -465,7 +525,7 @@ export default function SkillDraftPanel({
                     setExpandedEditorContent("");
                   }}
                 >
-                  保存
+                  {t("common.save")}
                 </Button>,
               ]
         }
@@ -478,7 +538,7 @@ export default function SkillDraftPanel({
             if (readOnly) return;
             setExpandedEditorContent(e.target.value);
           }}
-          autoSize={{ minRows: 10, maxRows: 28 }}
+          autoSize={{ minRows: 16, maxRows: 32 }}
           className="rounded-none border-0 font-mono text-sm shadow-none focus:border-0 focus:shadow-none"
           style={{ resize: "none" }}
         />

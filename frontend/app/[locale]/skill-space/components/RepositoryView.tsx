@@ -2,6 +2,7 @@
 
 import { Button, Input } from "antd";
 import { Copy, Eye, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { SkillRepositoryCard } from "./SkillRepositoryCard";
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
@@ -44,6 +45,7 @@ export function RepositoryView({
   installingRepositoryId: number | null;
   takingDownRepositoryId: number | null;
 }) {
+  const { t } = useTranslation("common");
   return (
     <div className="space-y-5">
       <div className="relative">
@@ -51,15 +53,14 @@ export function RepositoryView({
           allowClear
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="搜索Skill名称、描述或标签"
+          placeholder={t("skillRepository.searchPlaceholder")}
           prefix={<Search className="size-4 text-slate-400" aria-hidden />}
           className="h-11 rounded-xl"
         />
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">
-        共 {total} 个 Skill · 同租户内的 Skill 需先「复制为我的
-        Skill」后才能编辑
+        {t("skillRepository.repository.summary", { count: total })}
       </p>
 
       <AsyncContent
@@ -68,53 +69,54 @@ export function RepositoryView({
         isFetching={isFetching}
         onRetry={onRetry}
         isEmpty={listings.length === 0}
-        emptyDescription="暂无已上架 Skill"
+        emptyDescription={t("skillRepository.repository.empty")}
       >
-        <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {listings.map((listing) => (
-            <SkillRepositoryCard
-              key={listing.skill_repository_id}
-              listing={listing}
-              onDetailClick={() => onDetailClick(listing)}
-              showAdminMenu={showAdminMenu}
-              isTakingDown={
-                takingDownRepositoryId === listing.skill_repository_id
-              }
-              onTakeDown={() => onTakeDown(listing)}
-              action={
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="primary"
-                    className="flex-1 text-sm"
-                    icon={<Copy className="size-3.5" />}
-                    loading={
-                      installingRepositoryId === listing.skill_repository_id
-                    }
-                    onClick={() => onInstall(listing)}
-                  >
-                    复制
-                  </Button>
-                  <Button
-                    type="default"
-                    className="flex-1 text-sm"
-                    icon={<Eye className="size-3.5" />}
-                    onClick={() => onDetailClick(listing)}
-                  >
-                    详情
-                  </Button>
-                </div>
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {listings.map((listing) => (
+              <SkillRepositoryCard
+                key={listing.skill_repository_id}
+                listing={listing}
+                onDetailClick={() => onDetailClick(listing)}
+                showAdminMenu={showAdminMenu || listing.can_take_down === true}
+                isTakingDown={
+                  takingDownRepositoryId === listing.skill_repository_id
+                }
+                onTakeDown={() => onTakeDown(listing)}
+                action={
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="primary"
+                      className="flex-1 text-sm"
+                      icon={<Copy className="size-3.5" />}
+                      loading={
+                        installingRepositoryId === listing.skill_repository_id
+                      }
+                      onClick={() => onInstall(listing)}
+                    >
+                      {t("skillRepository.repository.copy")}
+                    </Button>
+                    <Button
+                      type="default"
+                      className="flex-1 text-sm"
+                      icon={<Eye className="size-3.5" />}
+                      onClick={() => onDetailClick(listing)}
+                    >
+                      {t("skillRepository.common.detail")}
+                    </Button>
+                  </div>
+                }
+              />
+            ))}
+          </div>
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={onPageChange}
+          />
+        </>
       </AsyncContent>
-
-      <PaginationBar
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={onPageChange}
-      />
     </div>
   );
 }

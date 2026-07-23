@@ -46,9 +46,10 @@ async def list_skill_repository_listings_api(
 ):
     """List all skill marketplace repository listings with optional filters."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         result = list_skill_repository_listings_impl(
             tenant_id,
+            user_id=user_id,
             status=status,
             skill_id=skill_id,
             category_id=category_id,

@@ -1,4 +1,4 @@
-"""Low-dependency tests for independent legacy and managed context runtimes."""
+"""Low-dependency tests for the ContextManager runtime."""
 from __future__ import annotations
 
 import importlib.util
@@ -6,18 +6,24 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[4] / "sdk" / "nexent"
 _BOOTSTRAP_MODULES = (
     "nexent",
     "nexent.core",
+    "nexent.core.agents",
+    "nexent.core.agents.context",
+    "nexent.core.agents.context.manager",
+    "nexent.core.agents.context.models",
+    "nexent.core.agents.context.run_context",
+    "nexent.core.agents.context.runtime",
     "nexent.core.context_runtime",
-    "nexent.core.context_runtime.managed",
-    "nexent.core.context_runtime.legacy",
     "nexent.core.context_runtime.contracts",
-    "nexent.core.context_runtime.legacy.runtime",
-    "nexent.core.context_runtime.managed.runtime",
     "smolagents.memory",
+    "smolagents.models",
+    "smolagents.tools",
 )
 
 
@@ -34,9 +40,9 @@ def _bootstrap():
     for name, path in (
         ("nexent", ROOT),
         ("nexent.core", ROOT / "core"),
+        ("nexent.core.agents", ROOT / "core" / "agents"),
+        ("nexent.core.agents.context", ROOT / "core" / "agents" / "context"),
         ("nexent.core.context_runtime", ROOT / "core" / "context_runtime"),
-        ("nexent.core.context_runtime.managed", ROOT / "core" / "context_runtime" / "managed"),
-        ("nexent.core.context_runtime.legacy", ROOT / "core" / "context_runtime" / "legacy"),
     ):
         package = types.ModuleType(name)
         package.__path__ = [str(path)]
@@ -52,11 +58,28 @@ def _bootstrap():
             return [{"role": "system", "content": self.system_prompt}]
 
     memory_module.SystemPromptStep = SystemPromptStep
+    memory_module.AgentMemory = type("AgentMemory", (), {})
+    memory_module.MemoryStep = type("MemoryStep", (), {})
     sys.modules["smolagents.memory"] = memory_module
+
+    models_module = types.ModuleType("smolagents.models")
+    models_module.ChatMessage = type("ChatMessage", (), {})
+    models_module.Model = type("Model", (), {})
+    sys.modules["smolagents.models"] = models_module
+    tools_module = types.ModuleType("smolagents.tools")
+    tools_module.Tool = type("Tool", (), {})
+    sys.modules["smolagents.tools"] = tools_module
+
+    manager_module = types.ModuleType("nexent.core.agents.context.manager")
+    manager_module.ContextManager = type("ContextManager", (), {})
+    sys.modules[manager_module.__name__] = manager_module
+    models_module = types.ModuleType("nexent.core.agents.context.models")
+    models_module.ContextItem = type("ContextItem", (), {})
+    models_module.ContextItemInput = type("ContextItemInput", (), {})
+    sys.modules[models_module.__name__] = models_module
     _load("nexent.core.context_runtime.contracts", "core/context_runtime/contracts.py")
-    legacy = _load("nexent.core.context_runtime.legacy.runtime", "core/context_runtime/legacy/runtime.py")
-    managed = _load("nexent.core.context_runtime.managed.runtime", "core/context_runtime/managed/runtime.py")
-    return legacy, managed, snapshot
+    managed = _load("nexent.core.agents.context.runtime", "core/agents/context/runtime.py")
+    return managed, snapshot
 
 
 def _restore(snapshot):
@@ -79,22 +102,22 @@ class _ContextManager:
         chars_per_token = 1.5
         max_observation_length = 0
         token_threshold = 1024
+        context_window_tokens = 4096
 
     config = _Config()
+    hard_input_budget_tokens = 3584
+    processing_mode = "adaptive_compact"
 
     def __init__(self):
         self.calls = []
 
-    def prepare_run_context(self, *, memory, fallback_system_prompt, components=None):
-        self.calls.append(("prepare_run_context", fallback_system_prompt, components))
-        memory.system_prompt = types.SimpleNamespace(
-            to_messages=lambda: [{"role": "system", "content": "managed stable"}]
-        )
+    def prepare_run_context(self, *, memory, fallback_system_prompt, items=None):
+        self.calls.append(("prepare_run_context", fallback_system_prompt, items))
         return types.SimpleNamespace(
             stable_messages=({"role": "system", "content": "managed stable"},),
             dynamic_messages=(),
-            selected_component_types=tuple(getattr(component, "component_type", "unknown") for component in components or ()),
-            components=tuple(components or ()),
+            selected_item_types=tuple(str(getattr(item, "type", "unknown")) for item in items or ()),
+            items=tuple(items or ()),
         )
 
     def assemble_final_context(self, **kwargs):
@@ -109,14 +132,29 @@ class _ContextManager:
     def get_step_compression_stats(self):
         return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}
 
+    def get_all_compression_stats(self):
+        return {"calls": 1, "records": ["record"]}
+
+    def get_token_counts(self):
+        return {"uncompressed": 1200, "compressed": 900}
+
+    def consume_history_summary_event(self):
+        return None
+
+    def render_memory_messages(self, memory):
+        return []
+
 
 def test_managed_runtime_is_thin_context_manager_adapter():
-    _, managed_module, snapshot = _bootstrap()
+    managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
-        component = types.SimpleNamespace(component_type="system_prompt")
-        runtime = managed_module.ManagedContextRuntime(manager, components=[component])
+        item = types.SimpleNamespace(type="system_prompt")
+        runtime = managed_module.ManagedContextRuntime(manager, items=[item])
         memory = _Memory()
+
+        with pytest.raises(AttributeError):
+            runtime.context_manager = _ContextManager()
 
         runtime.prepare_run(memory=memory, fallback_system_prompt="fallback")
         final = runtime.prepare_step(
@@ -134,72 +172,49 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         )
 
         assert manager.calls == [
-            ("prepare_run_context", "fallback", [component]),
+            ("prepare_run_context", "fallback", [item]),
             ("assemble_final_context", "step", [{"name": "z"}]),
             ("assemble_final_context", "final_answer", None),
         ]
         assert final.messages == [{"role": "system", "content": "step"}]
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
+        evidence = runtime.finalize_evidence(status="completed")
+        assert evidence.model_call_count == 2
+        assert evidence.loop_status == "completed"
+        assert runtime.finalize_evidence(status="error") is evidence
+        assert runtime.token_threshold == 1024
+        assert runtime.context_window_tokens == 4096
+        assert runtime.hard_input_budget_tokens == 3584
+        assert runtime.processing_mode == "adaptive_compact"
+        assert runtime.token_counts() == {"uncompressed": 1200, "compressed": 900}
+        assert runtime.global_compression_stats() == {"calls": 1, "records": ["record"]}
     finally:
         _restore(snapshot)
 
-
-def test_managed_runtime_replaces_components_without_mutating_context_manager():
-    _, managed_module, snapshot = _bootstrap()
+def test_managed_runtime_replaces_items_without_mutating_context_manager():
+    managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
         runtime = managed_module.ManagedContextRuntime(manager)
-        component = types.SimpleNamespace(component_type="memory")
+        item = types.SimpleNamespace(type="memory")
 
-        runtime.replace_components([component])
+        runtime.replace_items([item])
         runtime.prepare_run(memory=_Memory(), fallback_system_prompt="fallback")
 
-        assert manager.calls[0] == ("prepare_run_context", "fallback", [component])
+        assert manager.calls[0] == ("prepare_run_context", "fallback", [item])
     finally:
         _restore(snapshot)
 
 
-def test_managed_runtime_uses_component_snapshot_without_explicit_prepare_run():
-    _, managed_module, snapshot = _bootstrap()
+def test_managed_runtime_uses_item_snapshot_without_explicit_prepare_run():
+    managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
-        component = types.SimpleNamespace(component_type="knowledge")
-        runtime = managed_module.ManagedContextRuntime(manager, components=[component])
+        item = types.SimpleNamespace(type="knowledge")
+        runtime = managed_module.ManagedContextRuntime(manager, items=[item])
 
         runtime.prepare_step(model=None, memory=_Memory(), current_run_start_idx=0)
 
-        assert manager.calls[0] == ("prepare_run_context", "", [component])
-    finally:
-        _restore(snapshot)
-
-
-def test_legacy_runtime_does_not_require_context_manager():
-    legacy_module, _, snapshot = _bootstrap()
-    try:
-        runtime = legacy_module.LegacyContextRuntime()
-        memory = _Memory()
-        runtime.prepare_run(memory=memory, fallback_system_prompt="legacy prompt")
-        final = runtime.prepare_step(
-            model=None,
-            memory=memory,
-            current_run_start_idx=0,
-        )
-
-        assert runtime.context_manager is None
-        assert final.messages == [{"role": "system", "content": "legacy prompt"}]
-    finally:
-        _restore(snapshot)
-
-
-def test_legacy_runtime_truncates_large_observations():
-    legacy_module, _, snapshot = _bootstrap()
-    try:
-        runtime = legacy_module.LegacyContextRuntime()
-        step = types.SimpleNamespace(observations="x" * 120_000)
-
-        runtime.truncate_observation(step)
-
-        assert len(step.observations) > 100_000
-        assert "Output truncated to 100000 characters" in step.observations
+        assert manager.calls[0] == ("prepare_run_context", "", [item])
     finally:
         _restore(snapshot)

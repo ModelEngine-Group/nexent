@@ -7,7 +7,7 @@ from sdk.nexent.core.utils.observer import (
     MessageObserver, Message, ProcessType,
     DefaultTransformer, StepCountTransformer,
     ParseTransformer, ExecutionLogsTransformer, FinalAnswerTransformer,
-    TokenCountTransformer, ErrorTransformer
+    TokenCountTransformer
 )
 
 
@@ -42,6 +42,35 @@ class TestMessage:
 
         parsed = json.loads(json_str)
         assert parsed["content"] == unicode_content
+
+    def test_message_to_json_preserves_dict_content_and_tool_metadata(self):
+        """Test Message.to_json() preserves structured content and tool metadata."""
+        content = {"status": "complete", "items": ["one", "two"]}
+        tool_arguments = {"query": "test", "limit": 10}
+        message = Message(
+            ProcessType.TOOL,
+            content,
+            tool_name="search_documents",
+            tool_arguments=tool_arguments,
+        )
+
+        parsed = json.loads(message.to_json())
+
+        assert parsed == {
+            "type": ProcessType.TOOL.value,
+            "content": content,
+            "tool_name": "search_documents",
+            "tool_arguments": tool_arguments,
+        }
+
+    def test_message_to_json_omits_unset_tool_metadata(self):
+        """Test Message.to_json() omits tool metadata when it is not provided."""
+        parsed = json.loads(Message(ProcessType.OTHER, "Test content").to_json())
+
+        assert parsed == {
+            "type": ProcessType.OTHER.value,
+            "content": "Test content",
+        }
 
 
 class TestDefaultTransformer:
@@ -145,23 +174,20 @@ class TestParseTransformer:
 class TestExecutionLogsTransformer:
     """Test ExecutionLogsTransformer class"""
 
-    def test_execution_logs_transformer_zh(self):
-        """Test ExecutionLogsTransformer with Chinese language"""
+    def test_execution_logs_transformer(self):
+        """Test ExecutionLogsTransformer returns content as-is"""
         transformer = ExecutionLogsTransformer()
         log_content = "Hello World\n42"
 
         result = transformer.transform(content=log_content, lang="zh")
-        expected = "\n📝 执行结果\n```bash\nHello World\n42\n```\n"
-        assert result == expected
+        assert result == log_content
 
-    def test_execution_logs_transformer_en(self):
-        """Test ExecutionLogsTransformer with English language"""
+    def test_execution_logs_transformer_empty(self):
+        """Test ExecutionLogsTransformer with empty content"""
         transformer = ExecutionLogsTransformer()
-        log_content = "Success"
 
-        result = transformer.transform(content=log_content, lang="en")
-        expected = "\n📝 Execution Logs\n```bash\nSuccess\n```\n"
-        assert result == expected
+        result = transformer.transform(content="", lang="en")
+        assert result == ""
 
 
 class TestFinalAnswerTransformer:
@@ -201,28 +227,6 @@ class TestTokenCountTransformer:
 
         result = transformer.transform(content=duration, lang="en")
         assert result == duration
-
-
-class TestErrorTransformer:
-    """Test ErrorTransformer class"""
-
-    def test_error_transformer_zh(self):
-        """Test ErrorTransformer with Chinese language"""
-        transformer = ErrorTransformer()
-        error_content = "Something went wrong"
-
-        result = transformer.transform(content=error_content, lang="zh")
-        expected = "\n💥 运行出错： \nSomething went wrong\n"
-        assert result == expected
-
-    def test_error_transformer_en(self):
-        """Test ErrorTransformer with English language"""
-        transformer = ErrorTransformer()
-        error_content = "Runtime error"
-
-        result = transformer.transform(content=error_content, lang="en")
-        expected = "\n💥 Error: \nRuntime error\n"
-        assert result == expected
 
 
 class TestMessageObserver:

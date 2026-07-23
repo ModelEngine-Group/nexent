@@ -20,11 +20,7 @@ Nexent is a zero-code platform for auto-generating production-grade AI agents, b
 
 > ⭐ Before you get started, please star us on [GitHub](https://github.com/ModelEngine-Group/nexent) — your support drives us forward!
 
-## Option 1: Try Our Official Demo
-
-No installation required — jump right in with our **[online demo environment](http://60.204.251.153:3000/en)** to experience Nexent's capabilities instantly.
-
-## Option 2: Deploy on Your Own
+## Deploy on Your Own
 
 If you need to run Nexent locally or in your private infrastructure, we offer two deployment options:
 

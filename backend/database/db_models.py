@@ -15,6 +15,8 @@ _PRIMARY_KEY_DOC = "Primary key, auto-increment"
 _TENANT_ID_DOC = "Tenant ID for multi-tenancy isolation"
 _PUBLISHER_TENANT_ID_DOC = "Publisher tenant ID"
 _PUBLISHER_USER_ID_DOC = "Publisher user ID"
+_MCP_NAME_DOC = "MCP name"
+_INGROUP_PERMISSION_DOC = "In-group permission: EDIT, READ_ONLY, PRIVATE"
 
 # Base class for tables without audit fields
 
@@ -94,6 +96,143 @@ class ConversationMessageUnit(TableBase):
     unit_status = Column(
         String(30), default='completed',
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
+
+
+class AgentAutomationTask(TableBase):
+    """User-managed scheduled automation task bound to one conversation."""
+
+    __tablename__ = "agent_automation_task_t"
+    __table_args__ = (
+        Index(
+            "idx_agent_automation_due",
+            "status",
+            "next_fire_at",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "idx_agent_automation_owner",
+            "tenant_id",
+            "user_id",
+            "status",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "uq_agent_automation_conversation_active",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N' AND status <> 'DELETED'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    task_id = Column(BigInteger, Sequence(
+        "agent_automation_task_t_task_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="Owner user ID")
+    conversation_id = Column(BigInteger, nullable=False, doc="Bound conversation ID")
+    agent_id = Column(BigInteger, nullable=False, doc="Bound agent ID")
+    agent_version_no = Column(Integer, nullable=True, doc="Pinned agent version")
+    title = Column(String(255), nullable=False, doc="Task title")
+    instruction = Column(Text, nullable=False, doc="Base instruction for every automation run")
+    status = Column(String(32), nullable=False, doc="Task lifecycle status")
+    source = Column(String(32), nullable=False, doc="Creation source")
+    schedule_mode = Column(String(16), nullable=False, doc="ONCE or RECURRING")
+    schedule_rule_type = Column(String(16), nullable=False, doc="AT, INTERVAL, or CRON")
+    schedule_expr = Column(Text, nullable=True, doc="Display schedule expression")
+    schedule_config = Column(JSONB, nullable=False, doc="Normalized ScheduleTrigger payload")
+    capability_requirements = Column(JSONB, doc="Capability requirements parsed from user intent")
+    capability_bindings = Column(JSONB, doc="Confirmed matched capabilities")
+    runtime_snapshot = Column(JSONB, doc="Agent/runtime capability snapshot at creation time")
+    timezone = Column(String(64), nullable=False, doc="IANA timezone")
+    next_fire_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Next scheduled fire time")
+    last_fire_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Last scheduled fire time")
+    fire_count = Column(Integer, default=0, nullable=False, doc="Number of scheduled fires")
+    last_run_status = Column(String(32), nullable=True, doc="Latest run status")
+    last_error = Column(Text, nullable=True, doc="Latest run error")
+    consecutive_failures = Column(Integer, default=0, nullable=False, doc="Consecutive failure count")
+    timeout_seconds = Column(Integer, nullable=False, doc="Single-run timeout")
+    overlap_policy = Column(String(16), nullable=False, doc="Overlap policy")
+    misfire_policy = Column(String(16), nullable=False, doc="Misfire policy")
+    lock_owner = Column(String(128), nullable=True, doc="Scheduler lease owner")
+    lock_until = Column(TIMESTAMP(timezone=True), nullable=True, doc="Scheduler lease expiry")
+
+
+class AgentAutomationRun(TableBase):
+    """Execution history for an automation task fire."""
+
+    __tablename__ = "agent_automation_run_t"
+    __table_args__ = (
+        Index(
+            "idx_agent_automation_run_task",
+            "task_id",
+            "scheduled_fire_at",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "idx_agent_automation_run_conversation",
+            "conversation_id",
+            "status",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "uq_agent_automation_active_occurrence",
+            "task_id",
+            "scheduled_fire_at",
+            unique=True,
+            postgresql_where=text(
+                "delete_flag = 'N' AND trigger_type = 'SCHEDULED' "
+                "AND status IN ('QUEUED', 'RUNNING')"
+            ),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    run_id = Column(BigInteger, Sequence(
+        "agent_automation_run_t_run_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    task_id = Column(BigInteger, nullable=False, doc="Automation task ID")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="Owner user ID")
+    conversation_id = Column(BigInteger, nullable=False, doc="Bound conversation ID")
+    scheduled_fire_at = Column(TIMESTAMP(timezone=True), nullable=False, doc="Scheduled fire time")
+    actual_fire_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Actual fire time")
+    trigger_type = Column(String(32), nullable=False, doc="SCHEDULED or MANUAL")
+    status = Column(String(32), nullable=False, doc="Run lifecycle status")
+    generated_prompt = Column(Text, nullable=True, doc="Prompt appended to the conversation")
+    user_message_id = Column(BigInteger, nullable=True, doc="Automation user message ID")
+    assistant_message_id = Column(BigInteger, nullable=True, doc="Assistant message ID")
+    started_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Run start time")
+    finished_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Run finish time")
+    duration_ms = Column(BigInteger, nullable=True, doc="Run duration in milliseconds")
+    error_code = Column(String(64), nullable=True, doc="Automation error code")
+    error_message = Column(Text, nullable=True, doc="Automation error message")
+    capability_check = Column(JSONB, nullable=True, doc="Capability check result before execution")
+
+
+class AgentAutomationProposal(TableBase):
+    """Pending automation task proposal created from chat intent."""
+
+    __tablename__ = "agent_automation_proposal_t"
+    __table_args__ = (
+        Index(
+            "idx_agent_automation_proposal_owner",
+            "tenant_id",
+            "user_id",
+            "status",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    proposal_id = Column(BigInteger, Sequence(
+        "agent_automation_proposal_t_proposal_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="Owner user ID")
+    conversation_id = Column(BigInteger, nullable=False, doc="Source conversation ID")
+    agent_id = Column(BigInteger, nullable=False, doc="Bound agent ID")
+    proposed_task = Column(JSONB, nullable=False, doc="Proposed automation task payload")
+    capability_resolution = Column(JSONB, nullable=False, doc="Capability matching result")
+    status = Column(String(32), nullable=False, doc="PENDING, ACCEPTED, REJECTED, or EXPIRED")
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False, doc="Proposal expiry time")
 
 
 class ConversationSourceImage(TableBase):
@@ -457,6 +596,7 @@ class AgentInfo(TableBase):
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")
+    is_main_agent = Column(Boolean, default=True, nullable=False, doc="Whether this agent is a main agent")
     provide_run_summary = Column(
         Boolean, doc="Whether to provide the running summary to the manager agent")
     business_description = Column(
@@ -472,7 +612,7 @@ class AgentInfo(TableBase):
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
-    ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    ingroup_permission = Column(String(30), doc=_INGROUP_PERMISSION_DOC)
     requested_output_tokens = Column(
         Integer,
         doc=(
@@ -482,6 +622,7 @@ class AgentInfo(TableBase):
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
+    context_policy = Column(JSONB, doc="Agent-level context processing policy override")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
 
@@ -568,7 +709,7 @@ class KnowledgeRecord(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
-        String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+        String(30), doc=_INGROUP_PERMISSION_DOC)
     summary_frequency = Column(String(10), nullable=True,
                                doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
     last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
@@ -579,6 +720,10 @@ class KnowledgeRecord(TableBase):
         Boolean,
         default=True,
         doc="Whether to preserve uploaded source documents after vectorization",
+    )
+    quota_limit_bytes = Column(
+        BigInteger, nullable=True,
+        doc="Per-KB soft storage quota in bytes. NULL means no per-KB limit (shares tenant pool freely)."
     )
 
 
@@ -627,7 +772,7 @@ class McpRecord(TableBase):
                     primary_key=True, nullable=False, doc="MCP record ID, unique primary key")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
-    mcp_name = Column(String(100), doc="MCP name")
+    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
     mcp_server = Column(String(500), doc="MCP server address")
     status = Column(
         Boolean,
@@ -654,11 +799,17 @@ class McpRecord(TableBase):
     )
     source = Column(
         String(30), doc="Source type: local/mcp_registry/community")
+    market_id = Column(Integer, doc="Published market record ID (FK to mcp_market_record_t)")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+    group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
+    ingroup_permission = Column(String(30), default="READ_ONLY",
+                                 doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    shared_fields = Column(JSON, default=None,
+                           doc="JSON object of field-level sharing flags (e.g. {\"serverUrl\": true, \"authorizationToken\": false})")
 
 
 class McpCommunityRecord(TableBase):
@@ -676,16 +827,54 @@ class McpCommunityRecord(TableBase):
     )
     tenant_id = Column(String(100), doc=_PUBLISHER_TENANT_ID_DOC)
     user_id = Column(String(100), doc=_PUBLISHER_USER_ID_DOC)
-    mcp_name = Column(String(100), doc="MCP name")
+    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
     mcp_server = Column(String(500), doc="MCP server URL")
     source = Column(String(30), doc="Source type, fixed to community")
-    version = Column(String(50), doc="MCP version")
     registry_json = Column(JSONB, doc="Full MCP metadata JSON")
     transport_type = Column(
         String(30), doc="Transport type: http/sse/container")
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    review_status = Column(
+        String(30), default="pending", doc="Review status: pending/approved/rejected/offline")
+    review_type = Column(
+        String(30), default="initial_listing", doc="Review submission type: initial_listing/update")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+
+
+class McpMarketRecord(TableBase):
+    """MCP market (community) record — single table covering all listing states."""
+
+    __tablename__ = "mcp_market_record_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    market_id = Column(
+        BigInteger,
+        Sequence("mcp_market_record_t_market_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Market record ID, unique primary key",
+    )
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    user_id = Column(String(100), nullable=False, doc="Publisher user ID")
+    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
+    mcp_server = Column(String(500), doc="MCP server URL")
+    source = Column(String(30), doc="Source type, fixed to community")
+    registry_json = Column(JSONB, doc="Full MCP metadata JSON")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
+    download_count = Column(Integer, default=0, doc="Cumulative download/install count")
+    review_status = Column(String(30), default="not_shared",
+                           doc="Listing status: not_shared / pending_review / rejected / shared")
+    submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
+    source_mcp_id = Column(Integer, doc="Local MCP record ID that created this market record")
+    group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
+    ingroup_permission = Column(String(30), default="READ_ONLY",
+                                 doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    shared_fields = Column(JSON, default=None,
+                           doc="Snapshot of shared_fields at submission time")
 
 
 class UserTenant(TableBase):
@@ -886,6 +1075,7 @@ class AgentRepository(TableBase):
                              doc="Frozen ExportAndImportDataFormat snapshot with optional skills")
     status = Column(String(30), default="not_shared",
                     doc="Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)")
+    content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
 
 
 class SkillRepository(TableBase):
@@ -1023,6 +1213,8 @@ class SkillInfo(TableBase):
         JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
+    group_ids = Column(String, doc="Skill group IDs list")
+    ingroup_permission = Column(String(30), doc=_INGROUP_PERMISSION_DOC)
 
 
 class SkillToolRelation(TableBase):
@@ -1560,5 +1752,66 @@ class AgentEvaluationCase(TableBase):
         Index("ix_agent_eval_case_eval_id", "agent_evaluation_id"),
         Index("ix_agent_eval_case_tenant_id", "tenant_id"),
         Index("ix_agent_eval_case_pass_status", "tenant_id", "agent_evaluation_id", "pass_status"),
+        {"schema": SCHEMA},
+    )
+
+
+class Notification(TableBase):
+    """
+    In-app notification message table. One row per message; actual per-user
+    delivery and read state live in notification_receiver_t (fan-out).
+    """
+    __tablename__ = "notification_t"
+
+    notification_id = Column(
+        BigInteger,
+        Sequence("notification_t_notification_id_seq", schema=SCHEMA),
+        primary_key=True, nullable=False,
+        doc="Notification ID, unique primary key")
+    event_type = Column(String(50), nullable=False,
+                        doc="Event type, e.g. repository_review_approved / repository_review_rejected")
+    resource_type = Column(String(50), nullable=False,
+                           doc="Resource type, e.g. agent_repository / skill_repository / mcp_repository")
+    unique_id = Column(BigInteger,
+                       doc="Related resource primary key (e.g. agent_repository_id)")
+    details = Column(JSONB, doc="i18n interpolation details for the event template")
+    scope = Column(String(20), nullable=False,
+                          doc="Audience scope: SU / TENANT / TENANT_ADMIN / USER")
+    tenant_id = Column(String(100),
+                              doc="tenant for TENANT / TENANT_ADMIN scope; NULL for SU")
+    is_active = Column(Boolean, nullable=False, default=True,
+                       doc="Whether this notification is still active/valid")
+
+    __table_args__ = (
+        Index(
+            "ix_notification_event_resource_unique_active",
+            "event_type", "resource_type", "unique_id", "is_active",
+        ),
+        {"schema": SCHEMA},
+    )
+
+
+class NotificationReceiver(TableBase):
+    """
+    Per-user notification delivery and read status (fan-out from notification_t).
+    """
+    __tablename__ = "notification_receiver_t"
+
+    receiver_id = Column(
+        BigInteger,
+        Sequence("notification_receiver_t_receiver_id_seq", schema=SCHEMA),
+        primary_key=True, nullable=False,
+        doc="Receiver row ID, unique primary key")
+    notification_id = Column(BigInteger, nullable=False,
+                             doc="FK to notification_t.notification_id")
+    receiver_user_id = Column(String(100), nullable=False,
+                               doc="Receiver user ID")
+    tenant_id = Column(String(100), doc=_TENANT_ID_DOC)
+    is_read = Column(Boolean, default=False,
+                     doc="Whether this receiver has read the notification")
+
+    __table_args__ = (
+        Index("ix_notification_receiver_user_read", "receiver_user_id", "is_read"),
+        Index("ix_notification_receiver_notification_id", "notification_id"),
         {"schema": SCHEMA},
     )

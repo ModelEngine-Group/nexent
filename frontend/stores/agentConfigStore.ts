@@ -16,6 +16,7 @@ import {
   AgentConfigUpdate,
   Skill,
   DEFAULT_AGENT_VERIFICATION_CONFIG,
+  DEFAULT_GUARDRAIL_CONFIG,
 } from "@/types/agentConfig";
 import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
@@ -35,6 +36,7 @@ export type EditableAgent = Pick<
   | "model_ids"
   | "max_step"
   | "requested_output_tokens"
+  | "is_main_agent"
   | "provide_run_summary"
   | "tools"
   | "duty_prompt"
@@ -169,6 +171,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     model_ids: llmConfig?.id ? [llmConfig.id] : [],
     max_step: 15,
     requested_output_tokens: null,
+    is_main_agent: true,
     provide_run_summary: false,
     tools: [],
     skills: [],
@@ -180,7 +183,10 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     business_logic_model_id: llmConfig?.id || 0,
     prompt_template_id: 0,
     prompt_template_name: "system_default",
-    verification_config: { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
+    verification_config: {
+      ...DEFAULT_AGENT_VERIFICATION_CONFIG,
+      guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
+    },
     sub_agent_id_list: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
@@ -202,6 +208,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         model_ids: agent.model_ids || [],
         max_step: agent.max_step,
         requested_output_tokens: agent.requested_output_tokens ?? null,
+        is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
@@ -323,6 +330,7 @@ const isDirty = (
       normalizeArray(editedAgent.model_ids || []).length > 0 ||
       editedAgent.max_step !== 0 ||
       editedAgent.requested_output_tokens != null ||
+      editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
@@ -356,6 +364,7 @@ const isDirty = (
     baselineAgent.max_step !== editedAgent.max_step ||
     (baselineAgent.requested_output_tokens ?? null) !==
       (editedAgent.requested_output_tokens ?? null) ||
+    (baselineAgent.is_main_agent ?? true) !== (editedAgent.is_main_agent ?? true) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||

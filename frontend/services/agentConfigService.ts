@@ -201,6 +201,7 @@ export const fetchPublishedAgentList = async () => {
     // Convert backend data to frontend format
     const formattedAgents = data.map((agent: any) => ({
       id: String(agent.agent_id),
+      agent_id: Number(agent.agent_id),
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
@@ -209,6 +210,7 @@ export const fetchPublishedAgentList = async () => {
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
+      is_main_agent: agent.is_main_agent,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
@@ -422,6 +424,7 @@ export interface UpdateAgentInfoPayload {
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
@@ -787,6 +790,7 @@ export const searchAgentInfo = async (
         data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
+      is_main_agent: data.is_main_agent ?? true,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,
@@ -1093,6 +1097,11 @@ export const fetchSkills = async (tenantId?: string | null) => {
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
+      group_ids: Array.isArray(skill.group_ids)
+        ? skill.group_ids.map(Number)
+        : [],
+      ingroup_permission: skill.ingroup_permission ?? null,
+      permission: skill.permission ?? "READ_ONLY",
       created_by: skill.created_by ?? null,
       updated_by: skill.updated_by ?? null,
       update_time: skill.update_time,
@@ -1244,6 +1253,8 @@ export const createSkill = async (skillData: {
   source?: string;
   tags?: string[];
   content?: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   files?: Array<{ path: string; content: string }>;
 }) => {
   try {
@@ -1256,6 +1267,12 @@ export const createSkill = async (skillData: {
     };
     if (skillData.files && skillData.files.length > 0) {
       requestBody.files = skillData.files;
+    }
+    if (skillData.group_ids !== undefined) {
+      requestBody.group_ids = skillData.group_ids;
+    }
+    if (skillData.ingroup_permission !== undefined) {
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
     const response = await fetch(API_ENDPOINTS.skills.create, {
@@ -1304,6 +1321,8 @@ export const updateSkill = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1319,6 +1338,10 @@ export const updateSkill = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId
@@ -1365,6 +1388,8 @@ export const updateSkillById = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1381,6 +1406,10 @@ export const updateSkillById = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId

@@ -4,8 +4,12 @@ import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
 import { Button, Dropdown, Tag } from "antd";
 import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
-import { STATUS_COLORS, STATUS_LABELS } from "./skillRepositoryShared";
+import {
+  getSkillRepositoryStatusLabel,
+  STATUS_COLORS,
+} from "./skillRepositoryShared";
 import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
@@ -16,7 +20,12 @@ export function StatusTag({
 }: {
   status: SkillRepositoryListingStatus;
 }) {
-  return <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status]}</Tag>;
+  const { t } = useTranslation("common");
+  return (
+    <Tag color={STATUS_COLORS[status]}>
+      {getSkillRepositoryStatusLabel(t, status)}
+    </Tag>
+  );
 }
 
 export function SkillRepositoryCard({
@@ -34,13 +43,14 @@ export function SkillRepositoryCard({
   isTakingDown?: boolean;
   onTakeDown?: () => void;
 }) {
+  const { t } = useTranslation("common");
   const showMenu = showAdminMenu && onTakeDown != null;
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
   const menuItems: MenuProps["items"] = showMenu
     ? [
         {
           key: "takeDown",
-          label: "下架",
+          label: t("skillRepository.action.status.notShared"),
           icon: <PackageX className="size-3.5" aria-hidden />,
           danger: true,
           disabled: isTakingDown,
@@ -73,14 +83,14 @@ export function SkillRepositoryCard({
               className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
               icon={<MoreHorizontal className="size-4" aria-hidden />}
               loading={isTakingDown}
-              aria-label="更多操作"
+              aria-label={t("skillRepository.common.moreActions")}
             />
           </Dropdown>
         ) : null}
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {listing.description || "暂无描述"}
+        {listing.description || t("skillRepository.common.noDescription")}
       </p>
 
       {tags.length > 0 ? (
@@ -100,7 +110,9 @@ export function SkillRepositoryCard({
         <div className="flex min-h-[1.75rem] items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
           <span
             className="inline-flex items-center gap-1"
-            aria-label={`下载 ${listing.downloads ?? 0}`}
+            aria-label={t("skillRepository.card.downloadAria", {
+              count: listing.downloads ?? 0,
+            })}
           >
             <Download className="size-3.5" aria-hidden />
             {(listing.downloads ?? 0).toLocaleString()}

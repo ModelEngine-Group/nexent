@@ -2,6 +2,7 @@
 branch = True
 source =
     ../../sdk
+    ../../backend
 omit =
     */test*
     */tests/*
@@ -14,7 +15,9 @@ omit =
 [paths]
 source =
     ../../sdk
+    ../../backend
     */sdk
+    */backend
 
 [report]
 exclude_lines =

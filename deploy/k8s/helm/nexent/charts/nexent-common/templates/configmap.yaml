@@ -155,6 +155,9 @@ data:
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}
 
+  # Sandbox Container Image
+  NEXENT_SANDBOX_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.sandbox.repository .Values.images.sandbox.tag | quote }}
+
   # Kubernetes Deployment Mode
   IS_DEPLOYED_BY_KUBERNETES: {{ .Values.config.isDeployedByKubernetes | quote }}
   KUBERNETES_NAMESPACE: {{ .Values.global.namespace | quote }}
@@ -176,6 +179,7 @@ data:
   OAUTH_SSL_VERIFY: {{ .Values.config.oauth.sslVerify | quote }}
   OAUTH_CA_BUNDLE: {{ .Values.config.oauth.caBundle | quote }}
   OAUTH_CALLBACK_BASE_URL: {{ .Values.config.oauth.callbackBaseUrl | quote }}
+  OAUTH_LOGIN_MODE: {{ .Values.config.oauth.loginMode | quote }}
 
   # ===== CAS SSO Configuration =====
   CAS_ENABLED: {{ .Values.config.cas.enabled | quote }}
