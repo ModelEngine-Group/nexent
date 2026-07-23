@@ -515,6 +515,35 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "EDIT",
         }
 
+    def test_default_group_permission_skips_anonymous_user(self, mocker):
+        query_groups = mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+        )
+
+        skill_data = {}
+        skill_service._apply_default_skill_permission_fields(skill_data, None)
+
+        assert skill_data == {}
+        query_groups.assert_not_called()
+
+    def test_can_edit_skill_requires_user_and_allows_group_editor(self, mocker):
+        skill = {
+            "created_by": "owner",
+            "group_ids": [10],
+            "ingroup_permission": "EDIT",
+        }
+        mocker.patch(
+            "backend.services.skill_service.get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        )
+        mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+            return_value=[10],
+        )
+
+        assert skill_service._can_edit_skill(skill, None) is False
+        assert skill_service._can_edit_skill(skill, "group-editor") is True
+
 
 class TestNormalizeZipEntryPath:
     """Test _normalize_zip_entry_path function."""
@@ -2198,6 +2227,35 @@ description: Updated via MD
                 tenant_id="test-tenant",
                 user_id="viewer",
             )
+
+    def test_update_from_file_allows_user_with_edit_permission(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
+        )
+        can_edit = mocker.patch(
+            "backend.services.skill_service._can_edit_skill",
+            return_value=True,
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill",
+            return_value={"skill_id": 1, "name": "existing"},
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_ids_by_names",
+            return_value=[],
+        )
+        service = SkillService(tenant_id="test-tenant")
+        service.skill_manager = MagicMock()
+        service._enrich_configs_from_yaml = lambda result: result
+        service.update_skill_from_file(
+            "existing",
+            b"---\nname: existing\n---\n# Content",
+            file_type="md",
+            user_id="group-editor",
+        )
+
+        can_edit.assert_called_once()
 
     def test_update_from_zip(self, mocker):
         import zipfile
@@ -6068,4 +6126,3 @@ class TestTooltipForCommentedMapKey:
         """Test with non-dict/cm value."""
         result = skill_service._tooltip_for_commented_map_key("not a map", [], 0, "key")
         assert result is None
-

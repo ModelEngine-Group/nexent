@@ -121,6 +121,17 @@ def test_get_repository_by_skill_id_with_optional_tenant(monkeypatch, mock_sessi
     query.order_by.assert_called_once_with(repo_db.SkillRepository.update_time.desc())
 
 
+def test_get_repository_by_skill_id_without_status_filter(monkeypatch, mock_session):
+    session, query = mock_session
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.first.return_value = None
+    _patch_session(monkeypatch, session)
+
+    assert repo_db.get_skill_repository_by_skill_id(8) is None
+    assert query.filter.call_count == 1
+
+
 def test_reset_repository_status_resets_matching_peer_records(monkeypatch, mock_session):
     session, _ = mock_session
     session.execute.return_value.rowcount = 2

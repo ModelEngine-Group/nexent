@@ -2288,6 +2288,20 @@ class TestBuildSkillUpdateValues:
         assert "config_schemas" in result
         assert "config_values" in result
 
+    def test_group_permission_fields(self):
+        result = _build_skill_update_values(
+            {"group_ids": [10, 20], "ingroup_permission": "READ_ONLY"},
+            "admin",
+        )
+
+        assert result["group_ids"] == "10,20"
+        assert result["ingroup_permission"] == "READ_ONLY"
+
+    def test_group_ids_string_is_preserved(self):
+        result = _build_skill_update_values({"group_ids": "10,20"}, "admin")
+
+        assert result["group_ids"] == "10,20"
+
     def test_empty_skill_data(self):
         result = _build_skill_update_values({}, "user1")
         assert "update_time" in result

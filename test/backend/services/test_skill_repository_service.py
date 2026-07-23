@@ -697,6 +697,14 @@ def test_repository_list_and_detail_success():
     detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
     assert detail["author"] is None
 
+    record_without_creator = _repository_record(status="shared")
+    record_without_creator["skill_info_json"]["created_by"] = None
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = record_without_creator
+    _user_tenant_db_mock.get_user_tenant_by_user_id.reset_mock()
+    detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+    assert detail["author"] is None
+    _user_tenant_db_mock.get_user_tenant_by_user_id.assert_not_called()
+
 
 def test_repository_list_does_not_grant_take_down_to_regular_user():
     _skill_repo_db_mock.list_skill_repository_summaries.return_value = {

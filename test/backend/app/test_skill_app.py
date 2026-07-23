@@ -2861,6 +2861,8 @@ class TestBuildSkillUpdateData:
         request.config_schemas = {"key": "value"}
         request.config_values = {"param": "val"}
         request.files = [mock_file_data]
+        request.group_ids = [10, 20]
+        request.ingroup_permission = "READ_ONLY"
 
         result = _build_skill_update_data(request)
 
@@ -2872,6 +2874,8 @@ class TestBuildSkillUpdateData:
         assert result["config_schemas"] == {"key": "value"}
         assert result["config_values"] == {"param": "val"}
         assert result["files"] == [{"path": "test.py", "content": "code"}]
+        assert result["group_ids"] == [10, 20]
+        assert result["ingroup_permission"] == "READ_ONLY"
 
     def test_build_skill_update_data_with_partial_fields(self, mocker):
         """Test _build_skill_update_data with only some fields provided."""
@@ -2886,6 +2890,8 @@ class TestBuildSkillUpdateData:
         request.config_schemas = None
         request.config_values = None
         request.files = None
+        request.group_ids = None
+        request.ingroup_permission = None
 
         result = _build_skill_update_data(request)
 
@@ -2906,6 +2912,8 @@ class TestBuildSkillUpdateData:
         request.config_schemas = None
         request.config_values = None
         request.files = []  # Empty list is not None, so it gets included
+        request.group_ids = None
+        request.ingroup_permission = None
 
         result = _build_skill_update_data(request)
 
