@@ -260,6 +260,12 @@ export default function AgentTasksPage() {
       defaultValue: triggerType,
     });
 
+  const paginationLocale = {
+    items_per_page: t("common.pagination.itemsPerPage"),
+    jump_to: t("common.pagination.jumpTo"),
+    page: t("common.pagination.page"),
+  };
+
   const formatScheduleDetail = (task: AgentAutomationTask) => {
     const trigger = task.schedule_config;
     if (trigger.rule_type === "AT") {
@@ -570,7 +576,7 @@ export default function AgentTasksPage() {
         <div className="min-w-0">
           <Link
             href={`/${params.locale}/chat?conversation_id=${task.conversation_id}`}
-            className="block w-fit max-w-full truncate font-medium text-gray-900 transition-colors hover:text-blue-600 hover:underline"
+            className="block w-fit max-w-full truncate font-medium !text-gray-900 transition-colors hover:!text-blue-600 hover:underline"
             title={t("agentAutomation.page.openConversation")}
           >
             {task.title}
@@ -803,6 +809,7 @@ export default function AgentTasksPage() {
           pageSize: taskPageSize,
           total: taskTotal,
           showSizeChanger: true,
+          locale: paginationLocale,
         }}
         locale={{ emptyText: t("agentAutomation.page.empty") }}
       />
@@ -959,6 +966,7 @@ export default function AgentTasksPage() {
             pageSize: runPageSize,
             total: runTotal,
             showSizeChanger: true,
+            locale: paginationLocale,
             onChange: (page, pageSize) => {
               if (selectedTask) {
                 void loadRuns(selectedTask, page, pageSize);
