@@ -711,6 +711,21 @@ python backend/scripts/check_nl2agent_cutover.py
 
 检查会阻止非 v3 active Session、无效 catalog hash、遗留 `card_delivery/online_installations` 和未绑定 v3 Session 的 Builder Conversation。
 
+如果检查明确给出旧 Session 和 Builder Conversation ID，应先停止 NL2AGENT 写流量并备份 PostgreSQL。先以只读模式预览精确清理目标，不修改数据：
+
+```bash
+python backend/scripts/cleanup_nl2agent_cutover.py --session-ids 4 5 --conversation-ids 12 13
+```
+
+确认一一映射和行数后，再执行带保护的软删除事务并重新运行切换检查：
+
+```bash
+python backend/scripts/cleanup_nl2agent_cutover.py --session-ids 4 5 --conversation-ids 12 13 --apply --confirm SOFT_DELETE_LEGACY_NL2AGENT
+python backend/scripts/check_nl2agent_cutover.py
+```
+
+清理脚本会在 serializable 单事务中重新校验并锁定精确目标，拒绝健康 v3 Session 和普通 Conversation。它只软删除 Session、installation operation 和内部 Conversation/message/unit/source 图，保留 Draft Agent 及其资源绑定。
+
 ### 17.3 回滚
 
 - 没有创建 v3 Session 时，可以停流量后回退应用；
@@ -867,6 +882,7 @@ source backend/.venv/bin/activate
 pytest test/deploy/test_local_sql_migrations.py -v
 bash deploy/tests/test_sql_migrations.sh
 python backend/scripts/check_nl2agent_cutover.py
+python backend/scripts/cleanup_nl2agent_cutover.py --help
 ```
 
 ### 20.5 必测业务场景
@@ -912,7 +928,7 @@ python backend/scripts/check_nl2agent_cutover.py
 | 前端 Action lifecycle | `frontend/components/nl2agent/useNl2AgentCardLifecycle.ts` |
 | Chat/SSE 适配 | `frontend/app/[locale]/newchat/adapter/remote-chat-model-adapter.ts` |
 | 合同生成 | `backend/scripts/export_nl2agent_openapi.py`, `frontend/scripts/sync-nl2agent-contracts.mjs` |
-| v3 切换检查 | `backend/scripts/check_nl2agent_cutover.py` |
+| v3 切换检查/清理 | `backend/scripts/check_nl2agent_cutover.py`, `backend/scripts/cleanup_nl2agent_cutover.py` |
 
 ## 22. 最终评价
 

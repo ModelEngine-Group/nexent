@@ -711,6 +711,21 @@ python backend/scripts/check_nl2agent_cutover.py
 
 The guard blocks non-v3 active Sessions, invalid catalog hashes, remaining `card_delivery/online_installations`, and Builder Conversations not bound to a v3 Session.
 
+If the guard reports explicit legacy Session and Builder Conversation IDs, first stop NL2AGENT writes and back up PostgreSQL. Preview the exact cleanup target without changing data:
+
+```bash
+python backend/scripts/cleanup_nl2agent_cutover.py --session-ids 4 5 --conversation-ids 12 13
+```
+
+After checking the one-to-one mapping and row counts, apply the guarded soft-delete transaction and rerun the cutover check:
+
+```bash
+python backend/scripts/cleanup_nl2agent_cutover.py --session-ids 4 5 --conversation-ids 12 13 --apply --confirm SOFT_DELETE_LEGACY_NL2AGENT
+python backend/scripts/check_nl2agent_cutover.py
+```
+
+The cleanup script revalidates and locks the exact targets in a serializable transaction. It refuses healthy v3 Sessions and ordinary Conversations. It only soft-deletes the Session, installation operations, and internal Conversation/message/unit/source graph; the Draft Agent and its resource bindings are preserved.
+
 ### 17.3 Rollback
 
 - If no v3 Session has been created, stop traffic and deploy the previous application.
@@ -867,6 +882,7 @@ source backend/.venv/bin/activate
 pytest test/deploy/test_local_sql_migrations.py -v
 bash deploy/tests/test_sql_migrations.sh
 python backend/scripts/check_nl2agent_cutover.py
+python backend/scripts/cleanup_nl2agent_cutover.py --help
 ```
 
 ### 20.5 Required business scenarios
@@ -912,7 +928,7 @@ python backend/scripts/check_nl2agent_cutover.py
 | Frontend Action lifecycle | `frontend/components/nl2agent/useNl2AgentCardLifecycle.ts` |
 | Chat/SSE adapter | `frontend/app/[locale]/newchat/adapter/remote-chat-model-adapter.ts` |
 | Contract generation | `backend/scripts/export_nl2agent_openapi.py`, `frontend/scripts/sync-nl2agent-contracts.mjs` |
-| v3 cutover guard | `backend/scripts/check_nl2agent_cutover.py` |
+| v3 cutover guard/cleanup | `backend/scripts/check_nl2agent_cutover.py`, `backend/scripts/cleanup_nl2agent_cutover.py` |
 
 ## 22. Overall assessment
 
