@@ -14,6 +14,7 @@ from consts.nl2agent_card import (
     CARD_PAYLOAD_MODELS,
     Nl2AgentCardEnvelope,
 )
+from utils.nl2agent_observability import record_card_parse
 
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ def _strip_card_fences(message: str, spans: list[tuple[int, int]]) -> str:
     return re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", display_text)
 
 
-def parse_nl2agent_final_answer(
+def _parse_nl2agent_final_answer(
     content: Any,
     *,
     draft_agent_id: int,
@@ -261,3 +262,25 @@ def parse_nl2agent_final_answer(
         envelope=envelope,
         display_text=_strip_card_fences(message, spans),
     )
+
+
+def parse_nl2agent_final_answer(
+    content: Any,
+    *,
+    draft_agent_id: int,
+    workflow_revision: int,
+    trusted_search_batch_provider: Optional[TrustedSearchBatchProvider] = None,
+) -> ParsedNl2AgentFinalAnswer:
+    """Parse one complete answer and record only its validation outcome."""
+    try:
+        parsed = _parse_nl2agent_final_answer(
+            content,
+            draft_agent_id=draft_agent_id,
+            workflow_revision=workflow_revision,
+            trusted_search_batch_provider=trusted_search_batch_provider,
+        )
+    except Nl2AgentCardValidationError:
+        record_card_parse("failure")
+        raise
+    record_card_parse("success")
+    return parsed

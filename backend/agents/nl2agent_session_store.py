@@ -16,6 +16,7 @@ from consts.exceptions import (
     Nl2AgentStateConflictError as _Nl2AgentStateConflictError,
     Nl2AgentWorkflowConflictError,
 )
+from utils.nl2agent_observability import record_cas_conflict
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,9 @@ def load_durable_session(
 
     if db_session is None:
         return get_nl2agent_session_snapshot(tenant_id, draft_agent_id)
-    return get_nl2agent_session_snapshot(tenant_id, draft_agent_id, db_session=db_session)
+    return get_nl2agent_session_snapshot(
+        tenant_id, draft_agent_id, db_session=db_session
+    )
 
 
 def persist_workflow_state(
@@ -185,7 +188,9 @@ def mutate_session_state(
         original_state = state.model_dump(mode="json")
         result = mutator(state)
         try:
-            validated_state = Nl2AgentWorkflowState.model_validate(state.model_dump(mode="json"))
+            validated_state = Nl2AgentWorkflowState.model_validate(
+                state.model_dump(mode="json")
+            )
         except ValidationError as exc:
             raise Nl2AgentSessionCatalogError(
                 "NL2AGENT workflow state exceeds its schema or capacity limits."
@@ -201,6 +206,7 @@ def mutate_session_state(
         if db_session is not None:
             persist_kwargs["db_session"] = db_session
         if not persist_workflow_state(tenant_id, draft_agent_id, **persist_kwargs):
+            record_cas_conflict("session_mutation")
             _recover_active_session_after_conflict(tenant_id, draft_agent_id)
             continue
         return deepcopy(result)

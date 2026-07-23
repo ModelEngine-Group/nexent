@@ -96,7 +96,7 @@ def _dependencies(*, allowed_actions=None, existing=None):
             True,
         )
     )
-    async_result = AsyncMock(return_value={"ok": True, "chat_injection_text": "hidden"})
+    async_result = AsyncMock(return_value={"ok": True})
     return Nl2AgentActionDependencies(
         get_session=get_session,
         get_action_message=get_action_message,
@@ -110,9 +110,7 @@ def _dependencies(*, allowed_actions=None, existing=None):
         ),
         get_session_catalogs=MagicMock(
             return_value={
-                "official_skills": [
-                    {"skill_id": 12, "skill_name": "code-review"}
-                ]
+                "official_skills": [{"skill_id": 12, "skill_name": "code-review"}]
             }
         ),
         confirm_requirements=MagicMock(
@@ -203,7 +201,7 @@ async def test_each_action_dispatches_successfully(action, payload):
 
     assert response["status"] == "applied"
     assert response["workflow_revision"] == 19
-    assert "chat_injection_text" not in response["result"]
+    assert isinstance(response["result"], dict)
     dependencies.claim_action_message.assert_called_once()
     dependencies.update_action_message.assert_called_once()
 

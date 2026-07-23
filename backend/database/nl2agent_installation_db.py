@@ -70,7 +70,9 @@ def claim_installation_operation(
     with get_db_session() as session:
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-            {"lock_key": f"{identity.tenant_id}:{identity.draft_agent_id}:{installation_key}"},
+            {
+                "lock_key": f"{identity.tenant_id}:{identity.draft_agent_id}:{installation_key}"
+            },
         )
         record = (
             session.query(Nl2AgentInstallationOperation)
@@ -89,13 +91,20 @@ def claim_installation_operation(
                 )
             if record.status == "completed":
                 return as_dict(record)
+            lease_takeover = (
+                record.status == "running"
+                and record.lease_owner != lease_owner
+                and (record.lease_expires_at is None or record.lease_expires_at <= now)
+            )
             if (
                 record.status == "running"
                 and record.lease_expires_at is not None
                 and record.lease_expires_at > now
                 and record.lease_owner != lease_owner
             ):
-                raise InstallationLeaseActiveError("Installation is already in progress.")
+                raise InstallationLeaseActiveError(
+                    "Installation is already in progress."
+                )
             record.status = "running"
             record.lease_owner = lease_owner
             record.lease_expires_at = lease_expires_at
@@ -103,7 +112,9 @@ def claim_installation_operation(
             record.error = None
             record.updated_by = identity.user_id
             session.flush()
-            return as_dict(record)
+            result = as_dict(record)
+            result["_lease_takeover"] = lease_takeover
+            return result
 
         record = Nl2AgentInstallationOperation(
             operation_id=operation_id,

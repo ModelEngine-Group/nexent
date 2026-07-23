@@ -11,7 +11,7 @@ from services import nl2agent_session_lifecycle_service as lifecycle
 
 def _workflow_state(*, revision_mode=False):
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "revision": 7,
         "revision_mode": revision_mode,
         "conversation_id": 902,
@@ -47,14 +47,6 @@ def _workflow_state(*, revision_mode=False):
         },
         "identity_confirmed": True,
         "online_configuration_confirmed": True,
-        "card_delivery": {
-            "final_review": {
-                "message_id": 71,
-                "card_type": "final_review",
-                "status": "rendered",
-                "retry_count": 0,
-            }
-        },
     }
 
 
@@ -98,11 +90,14 @@ def test_resolve_session_does_not_disclose_missing_foreign_or_abandoned_session(
         MagicMock(return_value=None),
     )
 
-    assert lifecycle.resolve_session(
-        conversation_id=902,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    ) is None
+    assert (
+        lifecycle.resolve_session(
+            conversation_id=902,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("status", ["active", "completed"])
@@ -135,22 +130,28 @@ def test_resolve_session_by_agent_hides_abandoned_session(monkeypatch):
         "get_nl2agent_session",
         MagicMock(return_value=_record(status="abandoned")),
     )
-    assert lifecycle.resolve_session_by_agent(
-        draft_agent_id=202,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    ) is None
+    assert (
+        lifecycle.resolve_session_by_agent(
+            draft_agent_id=202,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+        is None
+    )
 
     monkeypatch.setattr(
         lifecycle,
         "get_nl2agent_session_by_conversation",
         MagicMock(return_value=_record(status="abandoned")),
     )
-    assert lifecycle.resolve_session(
-        conversation_id=902,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    ) is None
+    assert (
+        lifecycle.resolve_session(
+            conversation_id=902,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+        is None
+    )
 
 
 def test_require_active_session_authorizes_owner_and_conversation(monkeypatch):
@@ -248,7 +249,7 @@ def test_resume_session_reactivates_completed_session(monkeypatch):
     assert call["expected_revision"] == 7
     assert call["workflow_state"]["revision"] == 8
     assert call["workflow_state"]["revision_mode"] is True
-    assert "final_review" in call["workflow_state"]["card_delivery"]
+    assert "card_delivery" not in call["workflow_state"]
 
 
 def test_resume_session_accepts_concurrent_reactivation(monkeypatch):

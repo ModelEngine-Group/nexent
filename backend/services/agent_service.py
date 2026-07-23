@@ -124,6 +124,7 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
+from utils.nl2agent_observability import record_structured_sse
 
 logger = logging.getLogger(__name__)
 
@@ -959,6 +960,7 @@ async def _stream_nl2agent_message(
 
         if agent_run_info.stop_event.is_set():
             terminal_status = "stopped"
+            record_structured_sse("stopped")
             return
         assistant_answer = "".join(final_answer_parts)
         if not assistant_answer:
@@ -973,9 +975,11 @@ async def _stream_nl2agent_message(
         )
         event = _nl2agent_message_event(message)
         await channel.publish(event)
+        record_structured_sse("sent")
         terminal_status = "completed"
         yield event
     except Exception as exc:
+        record_structured_sse("failure")
         logger.error("NL2AGENT message finalization failed: %r", exc, exc_info=True)
         error_event = _safe_agent_stream_error_chunk()
         await channel.publish(error_event)

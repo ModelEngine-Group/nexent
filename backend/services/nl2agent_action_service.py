@@ -13,6 +13,7 @@ from consts.exceptions import (
     Nl2AgentWorkflowConflictError,
 )
 from consts.model import Nl2AgentActionContext, Nl2AgentActionRequest
+from utils.nl2agent_observability import record_action, record_cas_conflict
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,11 @@ def _existing_action_response(
     return None
 
 
-def _validate_stage(request: Nl2AgentActionRequest, workflow_state: Dict[str, Any], summary: Dict[str, Any]) -> None:
+def _validate_stage(
+    request: Nl2AgentActionRequest,
+    workflow_state: Dict[str, Any],
+    summary: Dict[str, Any],
+) -> None:
     if request.action == "confirm_requirements":
         if not (
             {"render_requirements_summary", "confirm_requirements"}
@@ -143,18 +148,16 @@ def _validate_recommendation_proof(
             )
     elif request.action == "install_mcp":
         batch = recommendations.get(payload.recommendation_batch_id) or {}
-        if (
-            batch.get("resource_type") != "mcp"
-            or payload.recommendation_id not in set(batch.get("item_keys") or [])
+        if batch.get("resource_type") != "mcp" or payload.recommendation_id not in set(
+            batch.get("item_keys") or []
         ):
             raise Nl2AgentWorkflowConflictError(
                 "The MCP recommendation is not part of this session batch."
             )
     elif request.action == "install_web_skill":
         batch = recommendations.get(payload.recommendation_batch_id) or {}
-        if (
-            batch.get("resource_type") != "skill"
-            or payload.item_key not in set(batch.get("item_keys") or [])
+        if batch.get("resource_type") != "skill" or payload.item_key not in set(
+            batch.get("item_keys") or []
         ):
             raise Nl2AgentWorkflowConflictError(
                 "The Skill recommendation is not part of this session batch."
@@ -310,7 +313,7 @@ async def _execute_action(
     raise Nl2AgentValidationError("Unsupported NL2AGENT action.")
 
 
-async def dispatch_nl2agent_action(
+async def _dispatch_nl2agent_action(
     dependencies: Nl2AgentActionDependencies,
     *,
     draft_agent_id: int,
@@ -340,6 +343,7 @@ async def dispatch_nl2agent_action(
 
     current_revision = int(session.get("workflow_revision") or 0)
     if current_revision != request.expected_revision:
+        record_cas_conflict("action")
         raise Nl2AgentWorkflowConflictError(
             "The NL2AGENT workflow revision changed before this action was applied."
         )
@@ -413,6 +417,40 @@ async def dispatch_nl2agent_action(
             error_code=type(exc).__name__,
         )
         raise
+
+
+async def dispatch_nl2agent_action(
+    dependencies: Nl2AgentActionDependencies,
+    *,
+    draft_agent_id: int,
+    request: Nl2AgentActionRequest,
+    tenant_id: str,
+    user_id: str,
+    locale: str,
+) -> Dict[str, Any]:
+    """Dispatch one action and record a bounded, secret-free outcome."""
+    try:
+        response = await _dispatch_nl2agent_action(
+            dependencies,
+            draft_agent_id=draft_agent_id,
+            request=request,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            locale=locale,
+        )
+    except Nl2AgentWorkflowConflictError:
+        record_action(request.action, "conflict")
+        raise
+    except Exception:
+        record_action(request.action, "failure")
+        raise
+    outcome = {
+        "applied": "success",
+        "replayed": "replayed",
+        "pending": "pending",
+    }.get(str(response.get("status")), "failure")
+    record_action(request.action, outcome)
+    return response
 
 
 def validate_nl2agent_action_context(

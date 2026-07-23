@@ -33,6 +33,8 @@ from database.nl2agent_session_db import (
     resume_nl2agent_session,
     update_nl2agent_session_status,
 )
+from utils.nl2agent_observability import record_cas_conflict
+
 
 def _positive_identifier(value: int, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -105,7 +107,10 @@ def require_active_session(
     )
     if record is None or record.get("status") != "active":
         raise Nl2AgentDraftNotFoundError()
-    if conversation_id is not None and int(record["conversation_id"]) != conversation_id:
+    if (
+        conversation_id is not None
+        and int(record["conversation_id"]) != conversation_id
+    ):
         raise Nl2AgentDraftNotFoundError()
     return record
 
@@ -165,6 +170,7 @@ def resume_session(
         workflow_schema_version=WORKFLOW_SCHEMA_VERSION,
         workflow_state=next_state,
     ):
+        record_cas_conflict("session_resume")
         current = require_readable_session(
             draft_agent_id=draft_agent_id,
             tenant_id=tenant_id,

@@ -28,6 +28,10 @@ from utils.nl2agent_card_validation import (
     Nl2AgentCardValidationError,
     parse_nl2agent_final_answer,
 )
+from utils.nl2agent_observability import (
+    record_atomic_finalize,
+    record_cas_conflict,
+)
 
 
 def _trusted_search_batches(state: Nl2AgentWorkflowState) -> Dict[str, Dict[str, Any]]:
@@ -111,7 +115,7 @@ def _apply_card_transitions(state: Nl2AgentWorkflowState, cards: list[Any]) -> N
             state.revision_mode = False
 
 
-def finalize_nl2agent_message(
+def _finalize_nl2agent_message(
     *,
     tenant_id: str,
     user_id: str,
@@ -141,6 +145,7 @@ def finalize_nl2agent_message(
             )
         current_revision = int(snapshot.get("workflow_revision", -1))
         if expected_revision is not None and current_revision != int(expected_revision):
+            record_cas_conflict("message_finalize")
             raise Nl2AgentWorkflowConflictError(
                 "The NL2AGENT workflow revision changed before the message was finalized."
             )
@@ -171,6 +176,7 @@ def finalize_nl2agent_message(
             workflow_state=state_to_dict(state),
             db_session=session,
         ):
+            record_cas_conflict("message_finalize")
             raise Nl2AgentWorkflowConflictError(
                 "The NL2AGENT workflow revision changed before the message was finalized."
             )
@@ -187,3 +193,36 @@ def finalize_nl2agent_message(
             "envelope": envelope.model_dump(mode="json", exclude_none=True),
             "workflow_revision": next_revision,
         }
+
+
+def finalize_nl2agent_message(
+    *,
+    tenant_id: str,
+    user_id: str,
+    runner_agent_id: int,
+    draft_agent_id: int,
+    conversation_id: int,
+    message_index: Optional[int] = None,
+    expected_revision: Optional[int] = None,
+    assistant_answer: str,
+) -> Dict[str, Any]:
+    """Finalize atomically and emit a secret-free outcome metric."""
+    try:
+        result = _finalize_nl2agent_message(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            runner_agent_id=runner_agent_id,
+            draft_agent_id=draft_agent_id,
+            conversation_id=conversation_id,
+            message_index=message_index,
+            expected_revision=expected_revision,
+            assistant_answer=assistant_answer,
+        )
+    except Nl2AgentWorkflowConflictError:
+        record_atomic_finalize("conflict")
+        raise
+    except Exception:
+        record_atomic_finalize("failure")
+        raise
+    record_atomic_finalize("success")
+    return result

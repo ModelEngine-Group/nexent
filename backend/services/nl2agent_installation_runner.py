@@ -21,6 +21,7 @@ from database.nl2agent_installation_db import (
     transition_installation_operation,
 )
 from database.nl2agent_session_db import Nl2AgentSessionIdentity
+from utils.nl2agent_observability import record_installation
 
 logger = logging.getLogger(__name__)
 BlockingResult = TypeVar("BlockingResult")
@@ -240,10 +241,12 @@ class DurableInstallationRunner:
                 + timedelta(seconds=self.lease_seconds),
             )
         except InstallationRequestConflictError as exc:
+            record_installation(request.resource_type, "request_conflict")
             raise AgentRunException(
                 "This installation key belongs to a different request."
             ) from exc
         except InstallationLeaseActiveError as exc:
+            record_installation(request.resource_type, "lease_conflict")
             raise AgentRunException(
                 "This installation is already in progress. Retry after it completes."
             ) from exc
@@ -253,7 +256,12 @@ class DurableInstallationRunner:
             ) from exc
 
         if operation.get("status") == "completed":
+            record_installation(request.resource_type, "replayed")
             return deepcopy(operation.get("result") or {})
+        if int(operation.get("attempt") or 0) > 1:
+            record_installation(request.resource_type, "retry")
+        if operation.get("_lease_takeover") is True:
+            record_installation(request.resource_type, "lease_takeover")
 
         context = InstallationRunContext(
             operation_id=operation_id,
@@ -264,7 +272,17 @@ class DurableInstallationRunner:
         heartbeat = asyncio.create_task(
             self._heartbeat(operation_id=operation_id, lease_owner=lease_owner)
         )
-        execution = asyncio.create_task(execute(context, context.checkpoint_data))
+
+        async def execute_with_observability() -> Dict[str, Any]:
+            try:
+                return await execute(context, context.checkpoint_data)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                record_installation(request.resource_type, "provider_failure")
+                raise
+
+        execution = asyncio.create_task(execute_with_observability())
         terminal = False
         try:
             done, _ = await asyncio.wait(
@@ -276,6 +294,7 @@ class DurableInstallationRunner:
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
                 if heartbeat_error is not None:
+                    record_installation(request.resource_type, "heartbeat_failure")
                     raise heartbeat_error
                 raise AgentRunException(
                     "Installation heartbeat stopped unexpectedly. Retry installation."
@@ -299,6 +318,7 @@ class DurableInstallationRunner:
                     "Installation completed, but its durable lease was lost. Retry installation."
                 )
             terminal = True
+            record_installation(request.resource_type, "success")
             return result
         except asyncio.CancelledError:
             raise

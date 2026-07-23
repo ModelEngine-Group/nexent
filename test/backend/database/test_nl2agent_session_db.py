@@ -40,7 +40,7 @@ def test_create_session_uses_caller_transaction(monkeypatch):
         runner_agent_id=7,
         draft_agent_id=11,
         conversation_id=22,
-        workflow_schema_version=2,
+        workflow_schema_version=3,
         workflow_state={"revision": 0},
         session_catalogs={"tool_catalog": []},
         db_session=session,
@@ -182,7 +182,7 @@ def test_workflow_update_is_revision_guarded(monkeypatch, updated_count, expecte
             tenant_id="tenant-a",
             draft_agent_id=11,
             expected_revision=3,
-            workflow_schema_version=2,
+            workflow_schema_version=3,
             workflow_state={"revision": 4},
             user_id="user-a",
         )
@@ -199,7 +199,7 @@ def test_workflow_update_rejects_revision_jump():
             tenant_id="tenant-a",
             draft_agent_id=11,
             expected_revision=3,
-            workflow_schema_version=2,
+            workflow_schema_version=3,
             workflow_state={"revision": 5},
             user_id="user-a",
         )
@@ -253,7 +253,7 @@ def test_resume_session_only_updates_completed_owner_session(
             draft_agent_id=11,
             user_id="user-a",
             expected_revision=3,
-            workflow_schema_version=2,
+            workflow_schema_version=3,
             workflow_state={"revision": 4, "revision_mode": True},
         )
         is expected
@@ -394,5 +394,7 @@ def test_nl2agent_migration_is_safe_to_reapply():
         root / "deploy/sql/migrations/v2.4.0_0722_add_nl2agent.sql"
     ).read_text(encoding="utf-8")
     assert session_migration.count("CREATE TABLE nexent.nl2agent_") == 2
-    assert "DROP TABLE IF EXISTS nexent.nl2agent_catalog_snapshot_t" in session_migration
+    assert (
+        "DROP TABLE IF EXISTS nexent.nl2agent_catalog_snapshot_t" in session_migration
+    )
     assert "CREATE UNIQUE INDEX IF NOT EXISTS" in session_migration
