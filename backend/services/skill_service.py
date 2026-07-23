@@ -2111,8 +2111,23 @@ class SkillService:
                 skill_name
             )
             if not os.path.isdir(skill_dir):
-                logger.warning(f"Skill directory not found for export: {skill_name}")
-                continue
+                skill_info = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
+                if not skill_info:
+                    logger.warning(f"Skill directory and DB record not found for export: {skill_name}")
+                    continue
+                logger.warning(
+                    "Skill directory not found for export, rebuilding SKILL.md from DB snapshot: %s",
+                    skill_name,
+                )
+                self.skill_manager.save_skill({
+                    "name": skill_info.get("name") or skill_name,
+                    "description": skill_info.get("description", ""),
+                    "content": skill_info.get("content", ""),
+                    "tags": skill_info.get("tags", []),
+                })
+                if not os.path.isdir(skill_dir):
+                    logger.warning(f"Failed to rebuild skill directory for export: {skill_name}")
+                    continue
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:

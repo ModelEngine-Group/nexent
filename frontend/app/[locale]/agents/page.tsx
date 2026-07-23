@@ -51,8 +51,25 @@ export default function AgentSetupOrchestrator() {
     }
   }, [searchParams, enterCreateMode]);
 
-  // Handle auto-select agent from URL params (agent_id)
+  // Clear manual selection flag when page loads with agent_id in URL
+  // This handles the case when user navigates from external page (e.g., agent space)
   useEffect(() => {
+    const agentId = searchParams.get('agent_id');
+    if (agentId) {
+      // User is navigating with agent_id, clear any previous manual selection flag
+      sessionStorage.removeItem("agent_manual_select");
+    }
+  }, [searchParams]);
+
+  // Handle auto-select agent from URL params (agent_id)
+  // Only auto-load if user hasn't manually selected an agent and URL has agent_id
+  useEffect(() => {
+    // Skip if user manually selected an agent (e.g., via dropdown)
+    // Check sessionStorage for manual selection flag
+    if (sessionStorage.getItem("agent_manual_select") === "true") {
+      return;
+    }
+
     const agentId = searchParams.get('agent_id');
     if (agentId && (!currentAgentId || String(currentAgentId) !== agentId)) {
       const loadAgent = async () => {
@@ -70,6 +87,13 @@ export default function AgentSetupOrchestrator() {
       loadAgent();
     }
   }, [searchParams, currentAgentId, setCurrentAgent]);
+
+  // Reset the flag when URL no longer has agent_id (e.g., user navigated to clean URL)
+  useEffect(() => {
+    if (!searchParams.has('agent_id')) {
+      sessionStorage.removeItem("agent_manual_select");
+    }
+  }, [searchParams]);
 
   // Reset agent selection state when leaving the page
   useEffect(() => {

@@ -39,6 +39,7 @@ import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
 import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   getUserTokens,
@@ -199,7 +200,7 @@ export default function UserProfileComp() {
   const handleCopyAk = async () => {
     if (akInfo) {
       try {
-        await navigator.clipboard.writeText(akInfo);
+        await copyToClipboard(akInfo);
         antdMessage.success(
           t("profile.copyAkSuccess") || "Access key copied to clipboard"
         );

@@ -89,17 +89,13 @@ class RunSkillScriptTool:
             return f"[UnexpectedError] Failed to execute skill script: {type(e).__name__}: {str(e)}"
 
 
-# Global instance for tool execution
-_skill_script_tool = None
-
-
 def get_run_skill_script_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
 ) -> RunSkillScriptTool:
-    """Get or create the skill script tool instance.
+    """Create a new skill script tool instance.
 
     Args:
         local_skills_dir: Path to local skills storage.
@@ -107,10 +103,7 @@ def get_run_skill_script_tool(
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
     """
-    global _skill_script_tool
-    if _skill_script_tool is None:
-        _skill_script_tool = RunSkillScriptTool(local_skills_dir, agent_id, tenant_id, version_no)
-    return _skill_script_tool
+    return RunSkillScriptTool(local_skills_dir, agent_id, tenant_id, version_no)
 
 
 @tool
@@ -129,5 +122,5 @@ def run_skill_script(skill_name: str, script_path: str, params: Optional[str] = 
     Returns:
         Script execution result as string
     """
-    tool_instance = get_run_skill_script_tool()
+    tool_instance = run_skill_script._tool_instance
     return tool_instance.execute(skill_name, script_path, params)
