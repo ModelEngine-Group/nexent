@@ -234,6 +234,10 @@ database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['database.knowledge_db'] = MagicMock()
 sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
 sys.modules['services.vectordatabase_service'] = MagicMock()
+# Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
+# existing tests (which don't explicitly mock this permission filter) still work correctly.
+sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_accessible_indices.side_effect = \
+    lambda index_names, **kwargs: list(index_names)
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
@@ -817,6 +821,13 @@ class TestDiscoverLangchainTools:
 
 class TestCreateToolConfigList:
     """Tests for the create_tool_config_list function"""
+
+    @pytest.fixture(autouse=True)
+    def mock_filter_accessible_indices(self):
+        """Pass-through mock for filter_accessible_indices for all tests in this class."""
+        with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
+                   side_effect=lambda index_names, **kwargs: index_names):
+            yield
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_basic(self):
@@ -4718,6 +4729,13 @@ class TestGetExternalA2AAgents:
 class TestCreateToolConfigListWithDisplayNameMap:
     """Tests for create_tool_config_list with display_name_to_index_map functionality"""
 
+    @pytest.fixture(autouse=True)
+    def mock_filter_accessible_indices(self):
+        """Pass-through mock for filter_accessible_indices for all tests in this class."""
+        with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
+                   side_effect=lambda index_names, **kwargs: index_names):
+            yield
+
     @pytest.mark.asyncio
     async def test_knowledge_base_with_display_name_to_index_map(self):
         """Test that KnowledgeBaseSearchTool gets correct display_name_to_index_map from index_names"""
@@ -4984,8 +5002,15 @@ class TestCreateToolConfigListWithDisplayNameMap:
             assert "idx3" not in result[0].metadata["display_name_to_index_map"]
 
     @pytest.mark.asyncio
-    async def test_knowledge_base_empty_index_names_raises_validation_error(self):
-        """Test that ValidationError is raised when index_names is empty for KnowledgeBaseSearchTool."""
+    async def test_knowledge_base_empty_index_names_keeps_tool(self):
+        """Test that tool is kept when index_names is empty for KnowledgeBaseSearchTool.
+
+        After the permission-control change, an empty index_names list (whether from permission
+        filtering or not configured) causes the tool to be kept with empty index_names rather
+        than being skipped. The SDK forward() will return a clear "no accessible knowledge base"
+        message, allowing the LLM to explain the situation to the user instead of entering a
+        retry loop against a non-existent tool.
+        """
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
         mock_tool_instance.params = {
@@ -5020,16 +5045,16 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_get_emb.return_value = None  # Will trigger ValidationError
+            mock_get_emb.return_value = None
             mock_rerank.return_value = None
             mock_get_knowledge_map.return_value = {}
 
-            # Should raise ValidationError
-            with pytest.raises(ValidationError) as exc_info:
-                await create_tool_config_list("agent_1", "tenant_1", "user_1")
+            # Tool with empty index_names should be kept (not skipped) so the LLM can call it
+            # and receive a clear permission-denial message from the SDK forward()
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
-            # Verify error message
-            assert "index_names" in str(exc_info.value) and "not configured" in str(exc_info.value)
+            # Verify the tool was kept with empty index_names
+            assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_knowledge_base_no_embedding_model_raises_validation_error(self):
@@ -5909,3 +5934,196 @@ class TestDispatchProfileHitMetric:
             None,
         ):
             create_agent_info_module._record_dispatch_profile_hit("openai")
+
+
+# ============================================================================
+# KB Read Permission Control Tests for create_tool_config_list (Issue #3339)
+# ============================================================================
+
+
+class TestKBPermissionFilteringInCreateToolConfigList:
+    """Tests for knowledge base permission filtering in create_tool_config_list."""
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_filters_inaccessible_kbs(self):
+        """
+        When user lacks read permission on some knowledge bases, those indices are filtered out
+        from the KnowledgeBaseSearchTool's index_names.
+        """
+        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.get_knowledge_name_map_by_index_names") as mock_kb_map, \
+             patch("backend.agents.create_agent_info.get_vector_db_core") as mock_vdb, \
+             patch("backend.agents.create_agent_info.get_embedding_model_by_index_name") as mock_get_embedding, \
+             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+
+            # Mock tool list with KnowledgeBaseSearchTool
+            # params must be a list of dicts with "name" and "default" keys
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": ["kb_allowed", "kb_forbidden", "kb_creator"]},
+                    {"name": "top_k", "default": 5},
+                ],
+            }]
+
+            # Mock permission check: kb_forbidden returns None, others return permissions
+            def mock_filter(indices, user_id, tenant_id=None):
+                return [idx for idx in indices if idx != "kb_forbidden"]
+
+            mock_es_service.filter_accessible_indices = mock_filter
+            mock_kb_map.return_value = {
+                "kb_allowed": "Allowed KB",
+                "kb_creator": "Creator KB",
+            }
+            mock_vdb.return_value = MagicMock()
+            mock_get_embedding.return_value = (MagicMock(), None, None)
+
+            # Create a simple class that stores params and allows modification
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+            
+            mock_tc_instance = MockToolConfigInstance()
+            
+            def capture_and_return(**kwargs):
+                # Set all kwargs as attributes on the instance
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            # Tool should be included (2 accessible KBs remain)
+            assert len(result) == 1
+            # Verify params.index_names was updated to filtered list
+            assert mock_tc_instance.params["index_names"] == ["kb_allowed", "kb_creator"]
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_keeps_tool_when_no_accessible_kbs(self):
+        """
+        When user has no read permission on any knowledge base, the KnowledgeBaseSearchTool
+        is kept in the tool list with empty index_names. The SDK forward() will return a
+        clear "no accessible knowledge base" message, allowing the LLM to explain the
+        situation to the user instead of entering a retry loop against a non-existent tool.
+        """
+        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": ["kb1", "kb2"]},
+                    {"name": "top_k", "default": 5},
+                ],
+            }]
+
+            # All KBs are inaccessible - filter returns empty list
+            def mock_filter(indices, user_id, tenant_id=None):
+                return []  # Return empty list to simulate no accessible KBs
+
+            mock_es_service.filter_accessible_indices = mock_filter
+
+            # Create a simple class that stores params and allows modification
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+            
+            mock_tc_instance = MockToolConfigInstance()
+            
+            def capture_and_return(**kwargs):
+                # Set all kwargs as attributes on the instance
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            # Tool should be kept in the list (not skipped) so the LLM can call it
+            # and receive a clear permission-denial message from the SDK forward()
+            assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_preserves_order_after_filtering(self):
+        """
+        After filtering, the order of accessible knowledge bases is preserved.
+        """
+        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.get_knowledge_name_map_by_index_names") as mock_kb_map, \
+             patch("backend.agents.create_agent_info.get_vector_db_core") as mock_vdb, \
+             patch("backend.agents.create_agent_info.get_embedding_model_by_index_name") as mock_get_embedding, \
+             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": ["kb_a", "kb_b", "kb_c", "kb_d"]},
+                    {"name": "top_k", "default": 5},
+                ],
+            }]
+
+            # Filter out kb_a and kb_c, preserving relative order
+            def mock_filter(indices, user_id, tenant_id=None):
+                return [idx for idx in indices if idx in ["kb_b", "kb_d"]]
+
+            mock_es_service.filter_accessible_indices = mock_filter
+            mock_kb_map.return_value = {
+                "kb_b": "B KB",
+                "kb_d": "D KB",
+            }
+            mock_vdb.return_value = MagicMock()
+            mock_get_embedding.return_value = (MagicMock(), None, None)
+
+            # Create a simple class that stores params and allows modification
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+            
+            mock_tc_instance = MockToolConfigInstance()
+            
+            def capture_and_return(**kwargs):
+                # Set all kwargs as attributes on the instance
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            assert len(result) == 1
+            # Order should be preserved from original index_names list
+            assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]

@@ -708,13 +708,14 @@ class TestKnowledgeBaseSearchToolRerank:
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once()
 
     def test_forward_empty_index_names_string(self, knowledge_base_search_tool):
-        """Test forward method with empty index_names string returns no results"""
+        """Test forward method with empty index_names string returns a clear denial message"""
         knowledge_base_search_tool.index_names = ""
 
         result = knowledge_base_search_tool.forward("test query")
 
-        # Should return no results message
-        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+        # Should return the permission-denial message since no index is available
+        assert "no knowledge base is accessible" in result.lower()
+        assert "permission" in result.lower()
 
     def test_forward_single_index_name(self, knowledge_base_search_tool):
         """Test forward method with single index name"""
@@ -1861,3 +1862,156 @@ class TestDocumentPathsAccessControl:
 
         assert len(filtered) == 1
         assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
+
+
+# ============================================================================
+# KB Read Permission Control Tests (Issue #3339)
+# ============================================================================
+
+
+class TestAllowedIndexNamesWhitelist:
+    """Tests for allowed_index_names whitelist filtering in forward()."""
+
+    def test_forward_filters_unauthorized_indices(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names is set, forward() filters out any index_name not in the whitelist
+        before calling hybrid_search.
+        """
+        mock_results = create_mock_search_result(2)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["allowed_kb", "forbidden_kb"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["allowed_kb"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        # Verify hybrid_search was called with only the allowed index
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["index_names"] == ["allowed_kb"]
+        assert "forbidden_kb" not in call_kwargs["index_names"]
+
+    def test_forward_with_empty_whitelist_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names is an empty list, forward() returns early without calling hybrid_search.
+        The message indicates that no knowledge base is accessible due to permissions.
+        """
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=[],
+        )
+
+        result = tool.forward("test query")
+
+        # Should return early with a clear permission-denial message
+        assert "no knowledge base is accessible" in result.lower()
+        assert "permission" in result.lower()
+        mock_vdb_core.hybrid_search.assert_not_called()
+
+    def test_forward_without_whitelist_allows_all(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names is None (default), forward() does NOT filter any indices.
+        All configured indices are used.
+        """
+        mock_results = create_mock_search_result(3)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2", "kb3"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=None,
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        # All indices should be used
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["index_names"] == ["kb1", "kb2", "kb3"]
+
+    def test_forward_with_partial_overlap_only(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names contains a subset of configured indices,
+        forward() uses only the intersection.
+        """
+        mock_results = create_mock_search_result(2)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2", "kb3"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["kb2", "kb3", "kb4"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["index_names"] == ["kb2", "kb3"]
+
+    def test_forward_with_no_overlap_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        When allowed_index_names has no intersection with configured indices,
+        forward() returns early without calling hybrid_search.
+        """
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["kb3", "kb4"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        mock_vdb_core.hybrid_search.assert_not_called()
+        # Clear permission-denial message is returned
+        assert "no knowledge base is accessible" in result.lower()
+        assert "permission" in result.lower()
+
+    def test_forward_preserves_index_order_after_filtering(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """
+        After filtering by allowed_index_names, the order of remaining indices is preserved.
+        """
+        mock_results = create_mock_search_result(2)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb_c", "kb_a", "kb_b", "kb_d"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["kb_a", "kb_c", "kb_d"],
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        # Order should be preserved from the original index_names list
+        assert call_kwargs["index_names"] == ["kb_c", "kb_a", "kb_d"]

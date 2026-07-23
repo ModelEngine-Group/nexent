@@ -151,6 +151,16 @@ def mock_knowledge_base_edit_permission():
     ):
         yield
 
+
+@pytest.fixture(autouse=True)
+def mock_knowledge_base_read_permission():
+    """Auto-mock read permission so hybrid_search and other endpoints don't hit the real DB."""
+    with patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
+        return_value="READ_ONLY",
+    ):
+        yield
+
 # Test cases using pytest-asyncio
 
 
@@ -2830,3 +2840,105 @@ async def test_get_document_error_info_regex_failure_returns_none(auth_data):
         response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
     assert response.status_code == 200
     assert response.json()["error_code"] is None
+
+
+# ============================================================================
+# KB Read Permission Control Tests for hybrid_search (Issue #3339)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_forbidden_without_read_permission(vdb_core_mock, auth_data):
+    """
+    Test hybrid_search returns 403 when user lacks read permission on knowledge base.
+    The permission check happens BEFORE the search is executed.
+    """
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=403, detail="No permission to access this knowledge base")) as mock_perm, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.search_hybrid") as mock_search:
+
+        payload = {
+            "index_names": ["private_kb"],
+            "query": "test query",
+            "top_k": 5,
+            "weight_accurate": 0.5,
+        }
+        response = client.post(
+            "/indices/search/hybrid",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert "No permission to access this knowledge base" in response.json()["detail"]
+        mock_perm.assert_called_once_with(
+            index_name="private_kb",
+            user_id=auth_data["user_id"],
+            tenant_id=auth_data["tenant_id"],
+        )
+        mock_search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_not_found_when_kb_missing(vdb_core_mock, auth_data):
+    """
+    Test hybrid_search returns 404 when knowledge base does not exist.
+    """
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=404, detail="Knowledge base 'missing_kb' not found")) as mock_perm, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.search_hybrid") as mock_search:
+
+        payload = {
+            "index_names": ["missing_kb"],
+            "query": "test query",
+            "top_k": 5,
+            "weight_accurate": 0.5,
+        }
+        response = client.post(
+            "/indices/search/hybrid",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"]
+        mock_perm.assert_called_once()
+        mock_search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_checks_all_indices(vdb_core_mock, auth_data):
+    """
+    Test hybrid_search checks permission for EVERY index in the request.
+    If any index fails permission check, the entire request is rejected.
+    """
+    call_log = []
+
+    def mock_permission_check(index_name, user_id, tenant_id):
+        call_log.append(index_name)
+        if index_name == "forbidden_kb":
+            raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
+
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.require_knowledge_base_read_permission", side_effect=mock_permission_check), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.search_hybrid") as mock_search:
+
+        payload = {
+            "index_names": ["allowed_kb", "forbidden_kb", "another_kb"],
+            "query": "test query",
+            "top_k": 5,
+            "weight_accurate": 0.5,
+        }
+        response = client.post(
+            "/indices/search/hybrid",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        # Should have checked allowed_kb, then forbidden_kb (stopped there)
+        assert call_log == ["allowed_kb", "forbidden_kb"]
+        mock_search.assert_not_called()

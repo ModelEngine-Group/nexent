@@ -119,6 +119,12 @@ class KnowledgeBaseSearchTool(Tool):
         document_paths: Optional[List[str]] = Field(
             description="Internal: restrict results to documents with these path_or_urls", default=None, exclude=True
         ),
+        # Defense-in-depth whitelist populated by the backend when it builds the ToolConfig.
+        # If set, forward() will silently drop any index_name not in this list so that even
+        # a fabricated LLM argument cannot reach a KB the chatting user is not allowed to read.
+        allowed_index_names: Optional[List[str]] = Field(
+            description="Internal: read-permission whitelist for index_names", default=None, exclude=True,
+        ),
     ):
         """Initialize the KBSearchTool.
 
@@ -148,6 +154,11 @@ class KnowledgeBaseSearchTool(Tool):
         # raw FieldInfo default when no value is supplied. Unwrap it here so the
         # internal filter is always a concrete list (or None), never a FieldInfo.
         self._internal_document_paths = _unwrap_field_info(document_paths)
+        # `allowed_index_names` is `exclude=True`; unwrap in case smolagents passed FieldInfo.
+        raw_allowed = _unwrap_field_info(allowed_index_names)
+        self._allowed_index_names: Optional[set] = (
+            set(raw_allowed) if isinstance(raw_allowed, list) else None
+        )
 
         self.record_ops = 1
         self.running_prompt_zh = "知识库检索中..."
@@ -229,6 +240,25 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Convert display names to index names if necessary
         search_index_names = self._convert_to_index_names(search_index_names)
+
+        # Defense-in-depth: enforce the backend-computed read-permission whitelist.
+        # Even if the LLM fabricates an unauthorized index name (or if the caller bypassed
+        # the backend), forward() drops it here so the underlying ES query never sees it.
+        if self._allowed_index_names is not None:
+            search_index_names = [
+                n for n in search_index_names if n in self._allowed_index_names
+            ]
+
+        # Guard: if no knowledge bases are accessible after permission filtering,
+        # return a clear denial message so the LLM can inform the user instead of
+        # retrying against a non-existent tool.
+        if not search_index_names:
+            logger.warning(
+                "KnowledgeBaseSearchTool called with query '%s' but no accessible "
+                "knowledge bases after permission filtering",
+                query,
+            )
+            return "No knowledge base is accessible with your current permissions. Please contact the administrator if you need access."
 
         # Use the instance search_mode
         search_mode = self.search_mode

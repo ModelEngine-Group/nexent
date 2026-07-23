@@ -603,6 +603,62 @@ class ElasticSearchService:
         return permission
 
     @staticmethod
+    def require_knowledge_base_read_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> str:
+        """Raise when the current user cannot read the knowledge base.
+
+        Accepts any non-None permission level (READ_ONLY, EDIT, or CREATOR).
+        """
+        permission = ElasticSearchService.resolve_knowledge_base_permission(
+            index_name=index_name,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if permission is None:
+            raise PermissionError("No permission to access this knowledge base")
+        return permission
+
+    @staticmethod
+    def filter_accessible_indices(
+        index_names: List[str],
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> List[str]:
+        """Return only the indices the user has at least read access to.
+
+        Indices whose knowledge base record cannot be found, or whose permission
+        check fails for any reason, are treated as inaccessible and dropped.
+        Order of the accessible subset is preserved.
+        """
+        accessible: List[str] = []
+        for index_name in index_names:
+            try:
+                permission = ElasticSearchService.resolve_knowledge_base_permission(
+                    index_name=index_name,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except ValueError:
+                # Knowledge base record not found in the DB - treat as inaccessible.
+                logger.warning(
+                    "Knowledge base '%s' not found during permission check, skipping",
+                    index_name,
+                )
+                continue
+            except Exception as e:
+                logger.warning(
+                    "Permission check failed for knowledge base '%s': %s", index_name, e
+                )
+                continue
+
+            if permission is not None:
+                accessible.append(index_name)
+        return accessible
+
+    @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
         """
         Completely delete a knowledge base, including its index, associated files in MinIO,

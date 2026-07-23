@@ -1065,6 +1065,28 @@ async def create_tool_config_list(
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
             index_names = tool_config.params.get("index_names", [])
+
+            # Enforce knowledge-base-level read permission for the chatting user.
+            # Agent-level permission controls "who can use this agent", but each knowledge
+            # base has its own "who can read" permission (group_ids + ingroup_permission).
+            # Filter out any index the current user does NOT have at least read access to,
+            # so the tool, its display-name mapping, and the injected KB summary all honour
+            # the per-KB ACL.
+            if index_names:
+                original_count = len(index_names)
+                index_names = ElasticSearchService.filter_accessible_indices(
+                    index_names, user_id=user_id, tenant_id=tenant_id,
+                )
+                filtered_count = original_count - len(index_names)
+                if filtered_count > 0:
+                    logger.info(
+                        "Filtered %d inaccessible knowledge base(s) for user '%s' in agent '%s'",
+                        filtered_count, user_id, agent_name or agent_id,
+                    )
+                # Persist the filtered list back into params so downstream consumers
+                # (knowledge_base_summary builder, metadata) see only accessible indices.
+                tool_config.params["index_names"] = index_names
+
             display_name_to_index_map = {}
             index_name_to_display_map = {}
             if index_names:
@@ -1082,12 +1104,27 @@ async def create_tool_config_list(
                 "index_name_to_display_map": index_name_to_display_map,
                 # Internal access control: restrict results to specific document paths (path_or_urls)
                 "document_paths": document_paths,
+                # Defense-in-depth whitelist: forward() will reject any index not in this list,
+                # even if the LLM fabricates an unauthorized index name.
+                "allowed_index_names": list(index_names),
             }
 
             if not index_names:
-                raise ValidationError(
-                    f"[{agent_name or agent_id}] knowledge_base_search tool requires index_names, "
-                    f"but it is not configured in the agent and not provided via tool_params.")
+                # Empty after permission filtering means the current user has no read access
+                # to any of the agent's configured knowledge bases. Instead of skipping the tool
+                # (which would cause the LLM to hallucinate tool calls against a non-existent tool),
+                # we keep the tool in the list with empty index_names. The SDK forward() will return
+                # a clear "no accessible knowledge base" message, allowing the LLM to explain
+                # the situation to the user instead of entering a retry loop.
+                logger.warning(
+                    "Keeping knowledge_base_search tool for agent '%s' with no accessible "
+                    "knowledge bases for user '%s' after permission filtering. "
+                    "Tool will return a permission-denial message at search time.",
+                    agent_name or agent_id, user_id,
+                )
+                # Append the tool and skip embedding model lookup (no index to lookup from)
+                tool_config_list.append(tool_config)
+                continue
 
             embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
             if not embedding_model:
