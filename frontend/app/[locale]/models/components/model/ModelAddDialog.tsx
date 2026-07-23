@@ -663,14 +663,16 @@ export const ModelAddDialog = ({
 
       let connectivity = false;
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        connectivity = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name,
-          modelType
-        );
-      } else if (form.type === MODEL_TYPES.STT) {
+      // Connectivity is a property of the raw model config (base_url + api_key +
+      // model_name) and is independent of the target tenant. In this dialog the
+      // model has not been persisted yet, so BOTH the self-service and the manage
+      // (tenantId) flows must verify against the config-based temporary
+      // healthcheck. Do NOT route the manage flow through
+      // checkManageTenantModelConnectivity: that endpoint looks up an
+      // already-saved record by display_name + tenant and returns "unavailable"
+      // for a brand-new model that has not been created yet, which blocks adding
+      // models from the tenant resource management page.
+      if (form.type === MODEL_TYPES.STT) {
         // For STT models, build the appropriate config based on provider
         const sttConfig: any = {
           modelType: modelType,
