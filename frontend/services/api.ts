@@ -605,11 +605,13 @@ export const API_ENDPOINTS = {
   quota: {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
-    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    usage: (tenantId: string) =>
+      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
     // Platform-level quota (SU/ASSET_OWNER only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
-    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    platformTenantQuota: (tenantId: string) =>
+      `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
@@ -673,40 +675,12 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/nl2agent/session/${agentId}/abandon`,
     resumeSession: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/resume`,
-    selectModels: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/models`,
-    installMcp: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/mcp/install`,
-    bindMcpTools: (agentId: number, mcpId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/mcp/${mcpId}/bind-tools`,
-    skipMcpTools: (agentId: number, mcpId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/mcp/${mcpId}/skip-tools`,
-    applyLocalResources: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/apply-local-resources`,
-    registerLocalResources: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/local-resources/register`,
-    skipLocalResources: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/local-resources/skip`,
-    registerOnlineRecommendations: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/online-recommendations/register`,
-    registerRequirements: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/requirements/register`,
-    confirmRequirements: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/requirements/confirm`,
-    cardDelivery: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/card-delivery`,
-    completeOnlineConfiguration: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/online-configuration/complete`,
+    actions: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/actions`,
     sessionState: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/state`,
-    saveIdentity: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/identity`,
-    installWebSkill: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/install-web-skill`,
     webSkillConfiguration: (agentId: number) =>
       `${API_BASE_URL}/nl2agent/session/${agentId}/web-skill/configuration`,
-    finalize: (agentId: number) =>
-      `${API_BASE_URL}/nl2agent/session/${agentId}/finalize`,
   },
 };
 

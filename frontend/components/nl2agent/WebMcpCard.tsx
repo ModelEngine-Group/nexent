@@ -4,11 +4,6 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Checkbox, message } from "antd";
 import { Download } from "lucide-react";
-import {
-  bindNl2AgentMcpTools,
-  installNl2AgentMcp,
-  skipNl2AgentMcpTools,
-} from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { WebMcpInstallConfiguration } from "./WebMcpInstallConfiguration";
@@ -19,6 +14,7 @@ export type { WebMcpCardItem } from "./webMcpTypes";
 export interface WebMcpCardProps {
   /** The draft agent_id used by the NL2AGENT MCP workflow endpoints. */
   agentId: number;
+  recommendationBatchId: string;
   item: WebMcpCardItem;
 }
 
@@ -67,7 +63,11 @@ const fieldValueIsValid = (
 };
 
 /** Renders the in-chat MCP configuration, installation, and tool-binding flow. */
-export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
+export const WebMcpCard: React.FC<WebMcpCardProps> = ({
+  agentId,
+  recommendationBatchId,
+  item,
+}) => {
   const workflowState = useNl2AgentWorkflow().sessionState;
   const lifecycle = useNl2AgentCardLifecycle(
     `web-mcp:${agentId}:${item.recommendation_id ?? item.name}`
@@ -186,16 +186,31 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
     setInstallError(undefined);
     try {
       await lifecycle.execute(
-        () =>
-          installNl2AgentMcp(agentId, {
+        {
+          action: "install_mcp",
+          display_text: t("nl2agent.action.installMcp", {
+            defaultValue: "MCP installed: {{name}}",
+            name: item.name,
+          }),
+          payload: {
+            recommendation_batch_id: recommendationBatchId,
             recommendation_id: item.recommendation_id!,
             option_id: optionId,
             config_values: {
               fields: fieldValues,
             },
-          }),
+          },
+        },
         {
-          onSuccess: (result) => {
+          onSuccess: (response) => {
+            const result = response.result as {
+              mcp_id: number;
+              tools: Array<{
+                tool_id: number;
+                name: string;
+                description?: string | null;
+              }>;
+            };
             setInstalled({
               mcp_id: result.mcp_id,
               tools: result.tools.map((tool) => ({
@@ -208,7 +223,7 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
             );
             message.success("MCP installed and connected.");
           },
-          notifyStateChanged: true,
+          continueAfterSuccess: false,
         }
       );
     } catch (error) {
@@ -223,14 +238,24 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
     if (!installed) return;
     try {
       await lifecycle.execute(
-        () => bindNl2AgentMcpTools(agentId, installed.mcp_id, selectedTools),
+        {
+          action: "bind_mcp_tools",
+          display_text: t("nl2agent.action.bindMcpTools", {
+            defaultValue: "MCP tools bound: {{count}}",
+            count: selectedTools.length,
+          }),
+          payload: {
+            recommendation_id: item.recommendation_id!,
+            tool_ids: selectedTools,
+          },
+        },
         {
           onSuccess: () => {
             setBound(true);
             setInstallError(undefined);
             message.success("Selected MCP tools are bound to the draft.");
           },
-          notifyStateChanged: true,
+          continueAfterSuccess: false,
         }
       );
     } catch (error) {
@@ -245,14 +270,21 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({ agentId, item }) => {
     if (!installed) return;
     try {
       await lifecycle.execute(
-        () => skipNl2AgentMcpTools(agentId, installed.mcp_id),
+        {
+          action: "skip_mcp_tools",
+          display_text: t(
+            "nl2agent.action.skipMcpTools",
+            "MCP tool binding skipped"
+          ),
+          payload: { recommendation_id: item.recommendation_id! },
+        },
         {
           onSuccess: () => {
             setSkipped(true);
             setInstallError(undefined);
             message.success("MCP tool binding skipped.");
           },
-          notifyStateChanged: true,
+          continueAfterSuccess: false,
         }
       );
     } catch (error) {

@@ -1,62 +1,44 @@
-export const NL2AGENT_AUTO_CONTINUE_PREFIX = "[[NL2AGENT_AUTO_CONTINUE]]";
-export const NL2AGENT_CARD_RETRY_PREFIX = "[[NL2AGENT_CARD_RETRY]]";
+import type {
+  Nl2AgentActionResponse,
+  Nl2AgentActionType,
+} from "@/services/nl2agentService";
 
-export type Nl2AgentUserActionType =
-  | "confirm_requirements"
-  | "save_model_selection"
-  | "apply_local_resources"
-  | "skip_local_resources"
-  | "complete_online_configuration"
-  | "save_identity";
-
-const NL2AGENT_USER_ACTION_TYPES: readonly Nl2AgentUserActionType[] = [
-  "confirm_requirements",
-  "save_model_selection",
-  "apply_local_resources",
-  "skip_local_resources",
-  "complete_online_configuration",
-  "save_identity",
-];
-
-export interface Nl2AgentUserAction {
+export interface Nl2AgentActionContext {
   actionId: string;
-  action: Nl2AgentUserActionType;
+  action: Nl2AgentActionType;
   displayText: string;
+  workflowRevision: number;
 }
 
-export type Nl2AgentUserActionDraft = Omit<Nl2AgentUserAction, "actionId">;
-
-export const createNl2AgentUserAction = (
-  draft: Nl2AgentUserActionDraft
-): Nl2AgentUserAction => ({
-  ...draft,
-  actionId: crypto.randomUUID(),
+export const createNl2AgentActionContext = (
+  response: Nl2AgentActionResponse,
+  displayText: string
+): Nl2AgentActionContext => ({
+  actionId: response.action_id,
+  action: response.action,
+  displayText,
+  workflowRevision: response.workflow_revision,
 });
 
-export const parseNl2AgentUserAction = (
+export const parseNl2AgentActionContext = (
   value: unknown
-): Nl2AgentUserAction | undefined => {
+): Nl2AgentActionContext | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const action = value as Record<string, unknown>;
+  const context = value as Record<string, unknown>;
   if (
-    typeof action.actionId !== "string" ||
-    action.actionId.trim().length === 0 ||
-    typeof action.action !== "string" ||
-    typeof action.displayText !== "string" ||
-    action.displayText.trim().length === 0 ||
-    !NL2AGENT_USER_ACTION_TYPES.includes(
-      action.action as Nl2AgentUserActionType
-    )
+    typeof context.actionId !== "string" ||
+    context.actionId.trim().length === 0 ||
+    typeof context.action !== "string" ||
+    typeof context.displayText !== "string" ||
+    context.displayText.trim().length === 0 ||
+    typeof context.workflowRevision !== "number" ||
+    !Number.isInteger(context.workflowRevision) ||
+    context.workflowRevision < 0
   ) {
     return;
   }
-  return action as unknown as Nl2AgentUserAction;
+  return context as unknown as Nl2AgentActionContext;
 };
-
-export const isNl2AgentAutoContinueText = (value: unknown): boolean =>
-  [NL2AGENT_AUTO_CONTINUE_PREFIX, NL2AGENT_CARD_RETRY_PREFIX].some((prefix) =>
-    String(value || "").startsWith(prefix)
-  );
 
 export const nl2AgentContinuationScopeKey = (
   conversationId?: number | null,

@@ -22,17 +22,6 @@ export type Nl2AgentCardType =
   | "agent_identity"
   | "final_review";
 
-export type Nl2AgentCardRegistrationReceipt =
-  | { cardType: "requirements_summary"; cardKey?: never }
-  | {
-      cardType: "local_resources" | "web_mcp" | "web_skill";
-      cardKey: string;
-    };
-
-export type Nl2AgentCardRegistrationHandler = (
-  receipt: Nl2AgentCardRegistrationReceipt
-) => void | Promise<void>;
-
 export type Nl2AgentCardFailureReason =
   "truncated_fence" | "invalid_json" | "invalid_schema" | "missing_card";
 
@@ -87,7 +76,6 @@ export type Nl2AgentCardLanguage = keyof Nl2AgentCardDefinitionMap;
 interface ValidatedNl2AgentCardBase {
   agentId: number;
   cardKey?: string;
-  requiresRegistration: boolean;
 }
 
 export type ValidatedNl2AgentCard = {
@@ -115,13 +103,6 @@ const LANGUAGE_TO_TYPE: {
   "nl2agent-agent-identity": "agent_identity",
   "nl2agent-finalize": "final_review",
 };
-
-const REGISTRATION_CARD_TYPES = new Set<Nl2AgentCardType>([
-  "requirements_summary",
-  "local_resources",
-  "web_mcp",
-  "web_skill",
-]);
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 ajv.addSchema(cardSchema);
@@ -215,9 +196,6 @@ const createValidatedCard = <Language extends Nl2AgentCardLanguage>(
     payload,
     agentId,
     cardKey,
-    requiresRegistration: REGISTRATION_CARD_TYPES.has(
-      LANGUAGE_TO_TYPE[language]
-    ),
   }) as ValidatedNl2AgentCard;
 
 export const parseNl2AgentCard = (

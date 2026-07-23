@@ -2,47 +2,50 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { createNl2AgentActionContext } from "@/lib/chat/nl2agentContinuation";
 import {
-  createNl2AgentUserAction,
-  type Nl2AgentUserActionDraft,
-} from "@/lib/chat/nl2agentContinuation";
+  dispatchNl2AgentAction,
+  type Nl2AgentActionDraft,
+  type Nl2AgentActionRequest,
+  type Nl2AgentActionResponse,
+} from "@/services/nl2agentService";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
-interface LifecycleOptions<T> {
-  onSuccess?: (result: T) => void | Promise<void>;
-  continuationText?: (result: T) => string | undefined;
-  userAction?: (result: T) => Nl2AgentUserActionDraft;
+interface LifecycleOptions {
+  onSuccess?: (result: Nl2AgentActionResponse) => void | Promise<void>;
   notifyStateChanged?: boolean;
+  continueAfterSuccess?: boolean;
   blockInput?: boolean;
   retainInputBlockOnError?: boolean | ((error: unknown) => boolean);
 }
 
-type LifecycleAction<T> = () => Promise<T>;
+interface PendingActionIdentity {
+  fingerprint: string;
+  actionId: string;
+}
 
 export const useNl2AgentCardLifecycle = (scopeKey: string) => {
   const workflow = useNl2AgentWorkflow();
   const {
     active,
+    agentId,
+    sessionState,
     beginAction,
     endAction,
     setInputBlocked,
     notifyStateChanged,
-    continueWithText,
-    continueWithUserAction,
-    claimCardDelivery,
-    completeCardDelivery,
-    failCardDelivery,
+    continueWithAction,
   } = workflow;
   const mountedRef = useRef(true);
   const pendingRef = useRef(false);
-  const retryRef = useRef<(() => Promise<unknown>) | null>(null);
+  const actionIdentityRef = useRef<PendingActionIdentity>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     mountedRef.current = true;
     pendingRef.current = false;
-    retryRef.current = null;
+    actionIdentityRef.current = undefined;
     setPending(false);
     setError(undefined);
     return () => {
@@ -52,13 +55,28 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
   }, [scopeKey, setInputBlocked]);
 
   const execute = useCallback(
-    async <T>(
-      action: LifecycleAction<T>,
-      options: LifecycleOptions<T> = {}
-    ): Promise<T | undefined> => {
+    async (
+      action: Nl2AgentActionDraft,
+      options: LifecycleOptions = {}
+    ): Promise<Nl2AgentActionResponse | undefined> => {
       if (!active || pendingRef.current) return undefined;
+      if (!agentId || !sessionState) {
+        throw new Error("NL2AGENT session state is not ready.");
+      }
+
+      const fingerprint = JSON.stringify(action);
+      const actionIdentity =
+        actionIdentityRef.current?.fingerprint === fingerprint
+          ? actionIdentityRef.current
+          : { fingerprint, actionId: crypto.randomUUID() };
+      actionIdentityRef.current = actionIdentity;
+      const request = {
+        ...action,
+        action_id: actionIdentity.actionId,
+        expected_revision: sessionState.revision,
+      } as Nl2AgentActionRequest;
+
       pendingRef.current = true;
-      retryRef.current = () => execute(action, options);
       setPending(true);
       setError(undefined);
       beginAction();
@@ -66,21 +84,18 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
       let succeeded = false;
       let failure: unknown;
       try {
-        const result = await action();
+        const result = await dispatchNl2AgentAction(agentId, request);
+        if (result.status === "pending") {
+          throw new Error("The NL2AGENT action is still being applied.");
+        }
+        actionIdentityRef.current = undefined;
         if (!mountedRef.current) return result;
         await options.onSuccess?.(result);
-        if (options.notifyStateChanged) notifyStateChanged();
-        const continuationText = options.continuationText?.(result);
-        if (continuationText) {
-          const userAction = options.userAction?.(result);
-          if (userAction) {
-            await continueWithUserAction(
-              continuationText,
-              createNl2AgentUserAction(userAction)
-            );
-          } else {
-            await continueWithText(continuationText);
-          }
+        if (options.notifyStateChanged !== false) notifyStateChanged();
+        if (options.continueAfterSuccess !== false) {
+          await continueWithAction(
+            createNl2AgentActionContext(result, action.display_text)
+          );
         }
         succeeded = true;
         return result;
@@ -109,36 +124,16 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
     },
     [
       active,
+      agentId,
       beginAction,
-      continueWithText,
-      continueWithUserAction,
+      continueWithAction,
       endAction,
       notifyStateChanged,
       scopeKey,
+      sessionState,
       setInputBlocked,
     ]
   );
 
-  const retry = useCallback(async () => {
-    if (retryRef.current) await retryRef.current();
-  }, []);
-
-  const deliveryKey = useCallback(
-    (messageId: number, cardType: string) =>
-      `${scopeKey}:${messageId}:${cardType}`,
-    [scopeKey]
-  );
-
-  return {
-    pending,
-    error,
-    execute,
-    retry,
-    claimDelivery: (messageId: number, cardType: string) =>
-      claimCardDelivery(deliveryKey(messageId, cardType)),
-    completeDelivery: (messageId: number, cardType: string) =>
-      completeCardDelivery(deliveryKey(messageId, cardType)),
-    failDelivery: (messageId: number, cardType: string) =>
-      failCardDelivery(deliveryKey(messageId, cardType)),
-  };
+  return { pending, error, execute };
 };

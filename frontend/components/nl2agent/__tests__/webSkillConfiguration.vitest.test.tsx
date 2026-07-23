@@ -10,18 +10,18 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  dispatchNl2AgentAction,
   getNl2AgentSessionState,
   getWebSkillConfiguration,
-  installWebSkill,
 } from "@/services/nl2agentService";
 import { Nl2AgentWorkflowProvider } from "../Nl2AgentWorkflowContext";
 import { WebSkillCard } from "../WebSkillCard";
 
 vi.mock("@/services/nl2agentService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/nl2agentService")>()),
+  dispatchNl2AgentAction: vi.fn(),
   getNl2AgentSessionState: vi.fn(),
   getWebSkillConfiguration: vi.fn(),
-  installWebSkill: vi.fn(),
 }));
 
 describe("online Skill configuration", () => {
@@ -31,6 +31,7 @@ describe("online Skill configuration", () => {
     vi.mocked(getNl2AgentSessionState).mockReset();
     vi.mocked(getNl2AgentSessionState).mockResolvedValue({
       agent_id: 202,
+      revision: 18,
       models: [],
       tools: [],
       skills: [],
@@ -51,14 +52,13 @@ describe("online Skill configuration", () => {
       ],
       config_values: { tone: "formal" },
     });
-    vi.mocked(installWebSkill).mockReset();
-    vi.mocked(installWebSkill).mockResolvedValue({
-      skill_id: 112,
-      skill_name: "writer",
-      installed: true,
-      bound: true,
-      installed_ids: [],
-      installed_names: ["writer"],
+    vi.mocked(dispatchNl2AgentAction).mockReset();
+    vi.mocked(dispatchNl2AgentAction).mockResolvedValue({
+      action_id: "action-1",
+      action: "install_web_skill",
+      status: "applied",
+      workflow_revision: 19,
+      result: {},
     });
   });
 
@@ -72,6 +72,8 @@ describe("online Skill configuration", () => {
       >
         <WebSkillCard
           agentId={202}
+          recommendationBatchId="skill-batch"
+          itemKey="skill:12"
           item={{ skill_id: 12, skill_name: "writer", name: "writer" }}
         />
       </Nl2AgentWorkflowProvider>
@@ -87,11 +89,18 @@ describe("online Skill configuration", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Install" }));
 
     await waitFor(() =>
-      expect(installWebSkill).toHaveBeenCalledWith(202, {
-        skill_id: 12,
-        skill_name: "writer",
-        config_values: { api_key: "secret-key", tone: "formal" },
-      })
+      expect(dispatchNl2AgentAction).toHaveBeenCalledWith(
+        202,
+        expect.objectContaining({
+          action: "install_web_skill",
+          expected_revision: 18,
+          payload: {
+            recommendation_batch_id: "skill-batch",
+            item_key: "skill:12",
+            config_values: { api_key: "secret-key", tone: "formal" },
+          },
+        })
+      )
     );
     expect(
       await screen.findByRole("button", { name: "Installed" })
@@ -115,6 +124,8 @@ describe("online Skill configuration", () => {
       >
         <WebSkillCard
           agentId={202}
+          recommendationBatchId="skill-batch"
+          itemKey="skill:13"
           item={{
             skill_id: 13,
             skill_name: "create-docx",
@@ -127,11 +138,17 @@ describe("online Skill configuration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Install" }));
 
     await waitFor(() =>
-      expect(installWebSkill).toHaveBeenCalledWith(202, {
-        skill_id: 13,
-        skill_name: "create-docx",
-        config_values: {},
-      })
+      expect(dispatchNl2AgentAction).toHaveBeenCalledWith(
+        202,
+        expect.objectContaining({
+          action: "install_web_skill",
+          payload: {
+            recommendation_batch_id: "skill-batch",
+            item_key: "skill:13",
+            config_values: {},
+          },
+        })
+      )
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

@@ -5,10 +5,7 @@ import { Button, Input, message } from "antd";
 import { CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import {
-  getNl2AgentSessionState,
-  saveNl2AgentIdentity,
-} from "@/services/nl2agentService";
+import { getNl2AgentSessionState } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import { ActionCard } from "./ActionCard";
 
@@ -53,22 +50,28 @@ export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
       return;
     }
     try {
-      await lifecycle.execute(() => saveNl2AgentIdentity(agentId, value), {
-        onSuccess: (result) => {
-          setDisplayName(result.display_name);
-          setInternalName(result.internal_name);
-          setSaved(true);
-          message.success("Agent identity saved.");
-        },
-        continuationText: (result) => result.chat_injection_text ?? undefined,
-        userAction: (result) => ({
+      await lifecycle.execute(
+        {
           action: "save_identity",
-          displayText: t("nl2agent.action.saveIdentity", {
+          display_text: t("nl2agent.action.saveIdentity", {
             defaultValue: "Agent name saved: {{name}}",
-            name: result.display_name,
+            name: value,
           }),
-        }),
-      });
+          payload: { display_name: value },
+        },
+        {
+          onSuccess: (response) => {
+            const result = response.result as {
+              display_name?: string;
+              internal_name?: string;
+            };
+            setDisplayName(result.display_name || value);
+            setInternalName(result.internal_name || "");
+            setSaved(true);
+            message.success("Agent identity saved.");
+          },
+        }
+      );
     } catch (error) {
       message.error(
         error instanceof Error

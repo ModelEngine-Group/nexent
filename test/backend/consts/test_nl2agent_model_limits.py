@@ -5,24 +5,24 @@ from pydantic import ValidationError
 
 from agents.nl2agent_workflow import Nl2AgentWorkflowState
 from consts.model import (
-    Nl2AgentApplyLocalResourcesRequest,
-    Nl2AgentModelSelectionRequest,
+    Nl2AgentApplyLocalResourcesActionPayload,
+    Nl2AgentSaveModelSelectionActionPayload,
 )
 
 
 def test_request_identifiers_reject_booleans() -> None:
     with pytest.raises(ValidationError):
-        Nl2AgentModelSelectionRequest(primary_model_id=True)
+        Nl2AgentSaveModelSelectionActionPayload(primary_model_id=True)
 
     with pytest.raises(ValidationError):
-        Nl2AgentApplyLocalResourcesRequest(
+        Nl2AgentApplyLocalResourcesActionPayload(
             recommendation_batch_id="batch",
             tool_ids=[True],
         )
 
 
 def test_local_tool_config_accepts_canonical_json_object_id_keys() -> None:
-    request = Nl2AgentApplyLocalResourcesRequest.model_validate(
+    request = Nl2AgentApplyLocalResourcesActionPayload.model_validate(
         {
             "recommendation_batch_id": "batch",
             "tool_ids": [28],
@@ -36,7 +36,7 @@ def test_local_tool_config_accepts_canonical_json_object_id_keys() -> None:
 @pytest.mark.parametrize("tool_id", [True, "0", "-1", "1.5", "01", " 28"])
 def test_local_tool_config_rejects_invalid_json_object_id_keys(tool_id) -> None:
     with pytest.raises(ValidationError):
-        Nl2AgentApplyLocalResourcesRequest.model_validate(
+        Nl2AgentApplyLocalResourcesActionPayload.model_validate(
             {
                 "recommendation_batch_id": "batch",
                 "tool_ids": [28],
@@ -47,7 +47,7 @@ def test_local_tool_config_rejects_invalid_json_object_id_keys(tool_id) -> None:
 
 def test_request_collections_are_bounded() -> None:
     with pytest.raises(ValidationError):
-        Nl2AgentApplyLocalResourcesRequest(
+        Nl2AgentApplyLocalResourcesActionPayload(
             recommendation_batch_id="batch",
             tool_ids=list(range(1, 102)),
         )

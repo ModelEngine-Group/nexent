@@ -13,15 +13,8 @@ import {
   message as AntMessage,
 } from "antd";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import {
-  applyLocalResources,
-  isNl2AgentWorkflowConflict,
-  registerLocalResourceRecommendations,
-  skipLocalResourceRecommendations,
-} from "@/services/nl2agentService";
 import type { LocalToolParameterSchema } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import type { Nl2AgentCardRegistrationHandler } from "./cardValidation";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export interface LocalResourceItem {
@@ -41,8 +34,6 @@ export interface LocalResourcesCardProps {
   recommendationBatchId: string;
   tools: LocalResourceItem[];
   skills: LocalResourceItem[];
-  onRegistered?: Nl2AgentCardRegistrationHandler;
-  registrationEnabled?: boolean;
 }
 
 const MASKED_SECRET_VALUE = "••••••••";
@@ -60,14 +51,11 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   recommendationBatchId,
   tools,
   skills,
-  onRegistered,
-  registrationEnabled = true,
 }) => {
   const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(
     `local:${agentId}:${recommendationBatchId}`
   );
-  const { active, notifyStateChanged } = workflow;
   const { execute, pending } = lifecycle;
   const { t } = useTranslation("common");
   const [selected, setSelected] = useState<Set<string>>(() => {
@@ -79,27 +67,12 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const [applied, setApplied] = useState(false);
   const [skipped, setSkipped] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [registered, setRegistered] = useState(false);
-  const [registrationError, setRegistrationError] = useState<string>();
-  const [registrationRetryable, setRegistrationRetryable] = useState(true);
   const [toolParameterSchemas, setToolParameterSchemas] = useState<
     Record<string, LocalToolParameterSchema[]>
   >({});
   const [toolConfigValues, setToolConfigValues] = useState<
     Record<number, Record<string, unknown>>
   >({});
-  const resourceIds = useMemo(
-    () => ({
-      tool_ids: tools.flatMap((item) =>
-        item.tool_id == null ? [] : [item.tool_id]
-      ),
-      skill_ids: skills.flatMap((item) =>
-        item.skill_id == null ? [] : [item.skill_id]
-      ),
-    }),
-    [skills, tools]
-  );
-
   useEffect(() => {
     const state = workflow.sessionState;
     if (state?.agent_id !== agentId) return;
@@ -107,7 +80,6 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
       state.resource_review.recommendations?.[recommendationBatchId];
     if (!batch || batch.resource_type !== "local") return;
 
-    setRegistered(batch.status !== "searched");
     setApplying(batch.status === "applying");
     setToolParameterSchemas(
       state.local_tool_parameter_schemas?.[recommendationBatchId] ?? {}
@@ -154,76 +126,6 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
       setSkipped(false);
     }
   }, [agentId, recommendationBatchId, workflow.sessionState]);
-
-  const register = React.useCallback(async () => {
-    if (registered || !recommendationBatchId || !active || !registrationEnabled)
-      return;
-    setRegistrationError(undefined);
-    setRegistrationRetryable(true);
-    try {
-      const result = await execute(
-        () =>
-          registerLocalResourceRecommendations(agentId, {
-            recommendation_batch_id: recommendationBatchId,
-            ...resourceIds,
-          }),
-        {
-          onSuccess: async (result) => {
-            setToolParameterSchemas(result.tool_parameter_schemas ?? {});
-            setApplying(result.status === "applying");
-            setApplied(result.status === "applied");
-            setSkipped(result.status === "skipped");
-            if (result.status === "applied") {
-              setSelected(
-                new Set([
-                  ...(result.applied_tool_ids ?? []).map(
-                    (toolId) => `t:${toolId}`
-                  ),
-                  ...(result.applied_skill_ids ?? []).map(
-                    (skillId) => `s:${skillId}`
-                  ),
-                ])
-              );
-            } else if (result.status === "skipped") {
-              setSelected(new Set());
-            }
-            await onRegistered?.({
-              cardType: "local_resources",
-              cardKey: recommendationBatchId,
-            });
-          },
-          notifyStateChanged: true,
-          blockInput: true,
-          retainInputBlockOnError: (error) =>
-            !isNl2AgentWorkflowConflict(error),
-        }
-      );
-      if (result) setRegistered(true);
-    } catch (error) {
-      const retryable = !isNl2AgentWorkflowConflict(error);
-      setRegistrationRetryable(retryable);
-      if (!retryable) notifyStateChanged();
-      setRegistrationError(
-        error instanceof Error
-          ? error.message
-          : "Failed to register resource recommendations."
-      );
-    }
-  }, [
-    active,
-    agentId,
-    execute,
-    onRegistered,
-    recommendationBatchId,
-    registered,
-    registrationEnabled,
-    resourceIds,
-    notifyStateChanged,
-  ]);
-
-  useEffect(() => {
-    void register();
-  }, [register]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -284,8 +186,15 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
     }
     try {
       await execute(
-        () =>
-          applyLocalResources(agentId, {
+        {
+          action: "apply_local_resources",
+          display_text: t("nl2agent.action.applyLocalResources", {
+            defaultValue:
+              "Local resources applied: {{toolCount}} tool(s), {{skillCount}} skill(s)",
+            toolCount: selectedToolIds.length,
+            skillCount: selectedSkillIds.length,
+          }),
+          payload: {
             recommendation_batch_id: recommendationBatchId,
             tool_ids: selectedToolIds,
             skill_ids: selectedSkillIds,
@@ -296,36 +205,26 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
                   : []
               )
             ),
-          }),
+          },
+        },
         {
-          onSuccess: (result) => {
+          onSuccess: () => {
             AntMessage.success(
               t("nl2agent.localResources.applied", {
                 defaultValue:
                   "Applied {{toolCount}} tool(s) and {{skillCount}} skill(s).",
-                toolCount: result.bound_tool_count,
-                skillCount: result.bound_skill_count,
+                toolCount: selectedToolIds.length,
+                skillCount: selectedSkillIds.length,
               })
             );
             setSelected(
               new Set([
-                ...result.tool_ids.map((toolId) => `t:${toolId}`),
-                ...result.skill_ids.map((skillId) => `s:${skillId}`),
+                ...selectedToolIds.map((toolId) => `t:${toolId}`),
+                ...selectedSkillIds.map((skillId) => `s:${skillId}`),
               ])
             );
             setApplied(true);
           },
-          notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text,
-          userAction: (result) => ({
-            action: "apply_local_resources",
-            displayText: t("nl2agent.action.applyLocalResources", {
-              defaultValue:
-                "Local resources applied: {{toolCount}} tool(s), {{skillCount}} skill(s)",
-              toolCount: result.bound_tool_count,
-              skillCount: result.bound_skill_count,
-            }),
-          }),
         }
       );
     } catch (error) {
@@ -338,7 +237,14 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   const handleSkip = async () => {
     try {
       await execute(
-        () => skipLocalResourceRecommendations(agentId, recommendationBatchId),
+        {
+          action: "skip_local_resources",
+          display_text: t(
+            "nl2agent.action.skipLocalResources",
+            "Local resources skipped"
+          ),
+          payload: { recommendation_batch_id: recommendationBatchId },
+        },
         {
           onSuccess: () => {
             setSkipped(true);
@@ -349,15 +255,6 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
               )
             );
           },
-          notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text,
-          userAction: () => ({
-            action: "skip_local_resources",
-            displayText: t(
-              "nl2agent.action.skipLocalResources",
-              "Local resources skipped"
-            ),
-          }),
         }
       );
     } catch (error) {
@@ -546,25 +443,7 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           </div>
         )}
       </div>
-      {registrationError && (
-        <Alert
-          className="m-3"
-          type="error"
-          title={registrationError}
-          action={
-            registrationRetryable ? (
-              <Button
-                onClick={() => void register()}
-                loading={pending}
-                disabled={pending}
-              >
-                Retry registration
-              </Button>
-            ) : undefined
-          }
-        />
-      )}
-      {!registrationError && workflow.active && workflow.sessionStateError && (
+      {workflow.active && workflow.sessionStateError && (
         <Alert
           className="m-3"
           type="error"
@@ -584,7 +463,6 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           loading={pending}
           disabled={
             !recommendationBatchId ||
-            !registered ||
             pending ||
             applying ||
             workflow.sessionStateLoading ||
@@ -614,7 +492,6 @@ export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
           loading={pending}
           disabled={
             !recommendationBatchId ||
-            !registered ||
             pending ||
             applying ||
             workflow.sessionStateLoading ||

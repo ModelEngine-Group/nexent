@@ -1,55 +1,23 @@
 "use client";
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import {
-  confirmRequirementsSummary,
-  registerRequirementsSummary,
-  type Nl2AgentRequirementsSummary,
-} from "@/services/nl2agentService";
-import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import type { Nl2AgentCardRegistrationHandler } from "./cardValidation";
+import type { Nl2AgentRequirementsSummary } from "@/services/nl2agentService";
+import { ActionCard, StaticFieldList } from "./ActionCard";
 import {
   toRequirementsSummaryRequest,
   type RequirementsSummaryCardPayload,
 } from "./cardPayloadTypes";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
-import { ActionCard, StaticFieldList } from "./ActionCard";
+import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export interface RequirementsSummaryCardProps {
   agentId: number;
   summary: RequirementsSummaryCardPayload;
-  onRegistered?: Nl2AgentCardRegistrationHandler;
-  registrationEnabled?: boolean;
 }
-
-export interface RequirementsRegistrationState {
-  status: "collecting" | "awaiting_confirmation" | "confirmed";
-  fingerprint: string;
-  isCurrent: boolean;
-}
-
-export const resolveRequirementsCardState = (
-  loading: boolean,
-  registrationError: string | undefined,
-  registration: RequirementsRegistrationState | undefined
-): "loading" | "error" | "superseded" | "confirmed" | "awaiting" | "idle" => {
-  if (loading) return "loading";
-  if (registrationError) return "error";
-  if (registration && !registration.isCurrent) return "superseded";
-  if (registration?.status === "confirmed") return "confirmed";
-  if (registration?.status === "awaiting_confirmation") return "awaiting";
-  return "idle";
-};
 
 const labels: Array<[keyof Nl2AgentRequirementsSummary, string]> = [
   ["goal", "goal"],
@@ -61,169 +29,46 @@ const labels: Array<[keyof Nl2AgentRequirementsSummary, string]> = [
 
 export const RequirementsSummaryCard: React.FC<
   RequirementsSummaryCardProps
-> = ({ agentId, summary, onRegistered, registrationEnabled = true }) => {
+> = ({ agentId, summary }) => {
   const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(`requirements:${agentId}`);
-  const [loading, setLoading] = useState(true);
-  const [registration, setRegistration] =
-    useState<RequirementsRegistrationState>();
-  const [registrationError, setRegistrationError] = useState<string>();
+  const [confirmedLocally, setConfirmedLocally] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string>();
-  const registrationFailedMessage = t(
-    "nl2agent.requirements.registrationFailed",
-    "Failed to register the requirements summary."
-  );
-  const {
-    audience_or_scenario,
-    expected_output,
-    goal,
-    key_constraints,
-    primary_input,
-  } = summary;
   const summaryPayload = useMemo(
-    () =>
-      toRequirementsSummaryRequest({
-        audience_or_scenario,
-        expected_output,
-        goal,
-        key_constraints,
-        primary_input,
-      }),
-    [
-      audience_or_scenario,
-      expected_output,
-      goal,
-      key_constraints,
-      primary_input,
-    ]
+    () => toRequirementsSummaryRequest(summary),
+    [summary]
   );
-  const blockerKey = `requirements-summary:${agentId}`;
-  const { active, setInputBlocked, stateVersion } = workflow;
-  const { execute, pending } = lifecycle;
-  const lastStateVersionRef = useRef(stateVersion);
-  const ignoreNextStateVersionRef = useRef(false);
-  const onRegisteredRef = useRef(onRegistered);
-
-  onRegisteredRef.current = onRegistered;
-
-  const register = useCallback(
-    async (notify = true) => {
-      if (!active || !registrationEnabled) {
-        setLoading(false);
-        return;
-      }
-      setLoading(true);
-      setRegistrationError(undefined);
-      try {
-        await execute(
-          () => registerRequirementsSummary(agentId, summaryPayload),
-          {
-            onSuccess: async (result) => {
-              setRegistration({
-                status: result.status,
-                fingerprint: result.fingerprint,
-                isCurrent: result.is_current,
-              });
-              ignoreNextStateVersionRef.current = notify;
-              setInputBlocked(blockerKey, false);
-              await onRegisteredRef.current?.({
-                cardType: "requirements_summary",
-              });
-            },
-            notifyStateChanged: notify,
-          }
-        );
-      } catch (registrationError) {
-        setRegistration(undefined);
-        setRegistrationError(
-          registrationError instanceof Error
-            ? registrationError.message
-            : registrationFailedMessage
-        );
-        setInputBlocked(blockerKey, true);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [
-      active,
-      agentId,
-      blockerKey,
-      execute,
-      registrationEnabled,
-      registrationFailedMessage,
-      setInputBlocked,
-      summaryPayload,
-    ]
-  );
+  const persistedStatus =
+    workflow.sessionState?.resource_review.requirements_review.status;
+  const confirmed = confirmedLocally || persistedStatus === "confirmed";
 
   const confirm = useCallback(async () => {
-    if (
-      !active ||
-      !registration?.isCurrent ||
-      registration.status !== "awaiting_confirmation" ||
-      pending
-    ) {
-      return;
-    }
+    if (!workflow.active || lifecycle.pending || confirmed) return;
     setConfirmationError(undefined);
     try {
-      await execute(
-        () => confirmRequirementsSummary(agentId, registration.fingerprint),
+      await lifecycle.execute(
         {
-          onSuccess: () => {
-            setRegistration((current) =>
-              current ? { ...current, status: "confirmed" } : current
-            );
-          },
-          notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text ?? undefined,
-          userAction: () => ({
-            action: "confirm_requirements",
-            displayText: t(
-              "nl2agent.action.confirmRequirements",
-              "Requirements confirmed"
-            ),
-          }),
-        }
+          action: "confirm_requirements",
+          display_text: t(
+            "nl2agent.action.confirmRequirements",
+            "Requirements confirmed"
+          ),
+          payload: { summary: summaryPayload },
+        },
+        { onSuccess: () => setConfirmedLocally(true) }
       );
-    } catch (confirmationFailure) {
+    } catch (error) {
       setConfirmationError(
-        confirmationFailure instanceof Error
-          ? confirmationFailure.message
+        error instanceof Error
+          ? error.message
           : t(
               "nl2agent.requirements.confirmationFailed",
               "Failed to confirm the requirements summary."
             )
       );
     }
-  }, [active, agentId, execute, pending, registration, t]);
-
-  useEffect(() => {
-    void register(true);
-  }, [register]);
-
-  useEffect(
-    () => () => setInputBlocked(blockerKey, false),
-    [blockerKey, setInputBlocked]
-  );
-
-  useEffect(() => {
-    if (stateVersion === lastStateVersionRef.current) return;
-    lastStateVersionRef.current = stateVersion;
-    if (ignoreNextStateVersionRef.current) {
-      ignoreNextStateVersionRef.current = false;
-      return;
-    }
-    void register(false);
-  }, [register, stateVersion]);
-
-  const cardState = resolveRequirementsCardState(
-    loading,
-    registrationError,
-    registration
-  );
+  }, [confirmed, lifecycle, summaryPayload, t, workflow.active]);
 
   return (
     <ActionCard
@@ -236,43 +81,19 @@ export const RequirementsSummaryCard: React.FC<
           value: summary[field],
         }))}
       />
-      {cardState === "loading" ? (
+      {workflow.sessionStateLoading && !workflow.sessionState ? (
         <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
           <Spin size="small" />
-          {t("nl2agent.requirements.registering", "Registering summary…")}
+          {t("nl2agent.requirements.loading", "Loading workflow state…")}
         </div>
-      ) : cardState === "error" ? (
-        <Alert
-          className="mt-3"
-          type="error"
-          title={t(
-            "nl2agent.requirements.notRegistered",
-            "Requirements summary was not registered."
-          )}
-          description={registrationError}
-          action={
-            <Button onClick={() => void register(true)}>
-              {t("nl2agent.requirements.retry", "Retry")}
-            </Button>
-          }
-        />
-      ) : cardState === "superseded" ? (
-        <Alert
-          className="mt-3"
-          type="warning"
-          title={t(
-            "nl2agent.requirements.superseded",
-            "This summary has been replaced by a newer version."
-          )}
-        />
-      ) : cardState === "confirmed" ? (
+      ) : confirmed ? (
         <Alert
           className="mt-3"
           type="success"
           showIcon
           title={t("nl2agent.requirements.confirmed", "Requirements confirmed")}
         />
-      ) : cardState === "awaiting" ? (
+      ) : (
         <div className="mt-3 space-y-2">
           <Alert
             type="info"
@@ -293,19 +114,21 @@ export const RequirementsSummaryCard: React.FC<
           ) : null}
           <Button
             type="primary"
-            loading={pending}
-            disabled={pending}
+            loading={lifecycle.pending}
+            disabled={!workflow.active || lifecycle.pending}
             icon={
-              !pending ? <CheckCircle2 className="h-3.5 w-3.5" /> : undefined
+              !lifecycle.pending ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : undefined
             }
             onClick={() => void confirm()}
           >
-            {pending
+            {lifecycle.pending
               ? t("nl2agent.requirements.confirming", "Confirming…")
               : t("nl2agent.requirements.confirm", "Confirm Requirements")}
           </Button>
         </div>
-      ) : null}
+      )}
     </ActionCard>
   );
 };

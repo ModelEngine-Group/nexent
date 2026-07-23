@@ -512,7 +512,7 @@ async def test_finalize_agent_rejects_invalid_draft_agent_id(monkeypatch):
 
 def test_finalize_request_rejects_fabricated_persisted_fields():
     with pytest.raises(ValidationError):
-        Nl2AgentFinalizeRequest(
+        Nl2AgentFinalizeActionPayload(
             business_description="Build document presentations",
             duty_prompt="Create presentations from documents.",
             greeting_message="Upload a document to begin.",
@@ -525,7 +525,7 @@ def test_finalize_request_rejects_fabricated_persisted_fields():
 
 def test_finalize_request_rejects_unknown_verification_fields():
     with pytest.raises(ValidationError):
-        Nl2AgentFinalizeRequest(
+        Nl2AgentFinalizeActionPayload(
             business_description="Build document presentations",
             duty_prompt="Create presentations from documents.",
             greeting_message="Upload a document to begin.",
@@ -535,7 +535,7 @@ def test_finalize_request_rejects_unknown_verification_fields():
 
 def test_finalize_request_rejects_more_than_six_example_questions():
     with pytest.raises(ValidationError):
-        Nl2AgentFinalizeRequest(
+        Nl2AgentFinalizeActionPayload(
             business_description="Build document presentations",
             duty_prompt="Create presentations from documents.",
             greeting_message="Upload a document to begin.",

@@ -50,11 +50,7 @@ export interface paths {
     put?: never;
     /**
      * Start Session Api
-     * @description Start a new NL2AGENT session: creates a draft agent and a conversation.
-     *
-     *     Returns ``{"agent_id": int, "conversation_id": int, "draft_name": str}``.
-     *     The frontend then opens the chat page with the NL2AGENT default agent_id
-     *     and this conversation_id.
+     * @description Create one draft, builder Conversation, and durable workflow session.
      */
     post: operations["start_session_api_nl2agent_session_start_post"];
     delete?: never;
@@ -63,7 +59,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/nl2agent/session/{agent_id}/abandon": {
+  "/nl2agent/session/{draft_agent_id}/abandon": {
     parameters: {
       query?: never;
       header?: never;
@@ -74,16 +70,16 @@ export interface paths {
     put?: never;
     /**
      * Abandon Session Api
-     * @description Explicitly end one owned draft session without deleting it immediately.
+     * @description Explicitly end one owned draft session.
      */
-    post: operations["abandon_session_api_nl2agent_session__agent_id__abandon_post"];
+    post: operations["abandon_session_api_nl2agent_session__draft_agent_id__abandon_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/nl2agent/session/{agent_id}/apply-local-resources": {
+  "/nl2agent/session/{draft_agent_id}/actions": {
     parameters: {
       query?: never;
       header?: never;
@@ -93,261 +89,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Apply Local Resources Api
-     * @description Bulk-bind local tools and skills to the draft agent.
+     * Dispatch Action Api
+     * @description Apply one strict, idempotent business action to an active session.
      */
-    post: operations["apply_local_resources_api_nl2agent_session__agent_id__apply_local_resources_post"];
+    post: operations["dispatch_action_api_nl2agent_session__draft_agent_id__actions_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/nl2agent/session/{agent_id}/card-delivery": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Report Card Delivery Api */
-    post: operations["report_card_delivery_api_nl2agent_session__agent_id__card_delivery_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/finalize": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Finalize Agent Api
-     * @description Finalize the draft agent by generating its full prompt set.
-     */
-    post: operations["finalize_agent_api_nl2agent_session__agent_id__finalize_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/identity": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /** Save Agent Identity Api */
-    put: operations["save_agent_identity_api_nl2agent_session__agent_id__identity_put"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/install-web-skill": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Install Web Skill Api
-     * @description Install a single official/web skill and bind it to the draft agent.
-     */
-    post: operations["install_web_skill_api_nl2agent_session__agent_id__install_web_skill_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/local-resources/register": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Register Local Resources Api */
-    post: operations["register_local_resources_api_nl2agent_session__agent_id__local_resources_register_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/local-resources/skip": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Skip Local Resources Api */
-    post: operations["skip_local_resources_api_nl2agent_session__agent_id__local_resources_skip_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/mcp/install": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Install Recommended Mcp Api */
-    post: operations["install_recommended_mcp_api_nl2agent_session__agent_id__mcp_install_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/mcp/{mcp_id}/bind-tools": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Bind Mcp Tools Api */
-    post: operations["bind_mcp_tools_api_nl2agent_session__agent_id__mcp__mcp_id__bind_tools_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/mcp/{mcp_id}/skip-tools": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Skip Mcp Tools Api */
-    post: operations["skip_mcp_tools_api_nl2agent_session__agent_id__mcp__mcp_id__skip_tools_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/models": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /** Select Models Api */
-    put: operations["select_models_api_nl2agent_session__agent_id__models_put"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/online-configuration/complete": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Complete Online Configuration Api */
-    post: operations["complete_online_configuration_api_nl2agent_session__agent_id__online_configuration_complete_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/online-recommendations/register": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Register Online Recommendations Api */
-    post: operations["register_online_recommendations_api_nl2agent_session__agent_id__online_recommendations_register_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/requirements/confirm": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Confirm Requirements Api */
-    post: operations["confirm_requirements_api_nl2agent_session__agent_id__requirements_confirm_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/requirements/register": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Register Requirements Api */
-    post: operations["register_requirements_api_nl2agent_session__agent_id__requirements_register_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nl2agent/session/{agent_id}/resume": {
+  "/nl2agent/session/{draft_agent_id}/resume": {
     parameters: {
       query?: never;
       header?: never;
@@ -358,24 +110,27 @@ export interface paths {
     put?: never;
     /**
      * Resume Session Api
-     * @description Resume a final-review NL2AGENT session in targeted editing mode.
+     * @description Resume a final-review session in targeted editing mode.
      */
-    post: operations["resume_session_api_nl2agent_session__agent_id__resume_post"];
+    post: operations["resume_session_api_nl2agent_session__draft_agent_id__resume_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/nl2agent/session/{agent_id}/state": {
+  "/nl2agent/session/{draft_agent_id}/state": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get Session State Api */
-    get: operations["get_session_state_api_nl2agent_session__agent_id__state_get"];
+    /**
+     * Get Session State Api
+     * @description Return the authoritative read-only workflow projection.
+     */
+    get: operations["get_session_state_api_nl2agent_session__draft_agent_id__state_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -384,7 +139,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/nl2agent/session/{agent_id}/web-skill/configuration": {
+  "/nl2agent/session/{draft_agent_id}/web-skill/configuration": {
     parameters: {
       query?: never;
       header?: never;
@@ -393,9 +148,9 @@ export interface paths {
     };
     /**
      * Get Web Skill Configuration Api
-     * @description Return authoritative configuration metadata for one trusted Skill.
+     * @description Return trusted, redacted configuration metadata for one Skill.
      */
-    get: operations["get_web_skill_configuration_api_nl2agent_session__agent_id__web_skill_configuration_get"];
+    get: operations["get_web_skill_configuration_api_nl2agent_session__draft_agent_id__web_skill_configuration_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -464,11 +219,46 @@ export interface components {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
     };
+    /** Nl2AgentActionResponse */
+    Nl2AgentActionResponse: {
+      /**
+       * Action
+       * @enum {string}
+       */
+      action:
+        | "confirm_requirements"
+        | "save_model_selection"
+        | "apply_local_resources"
+        | "skip_local_resources"
+        | "install_mcp"
+        | "bind_mcp_tools"
+        | "skip_mcp_tools"
+        | "install_web_skill"
+        | "complete_online_configuration"
+        | "save_identity"
+        | "finalize";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Result */
+      result?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "applied" | "pending" | "replayed";
+      /** Workflow Revision */
+      workflow_revision: number;
+    };
     /**
-     * Nl2AgentApplyLocalResourcesRequest
-     * @description Request body for bulk-binding local tools and skills to a draft agent.
+     * Nl2AgentApplyLocalResourcesActionPayload
+     * @description Select resources only from one server-recorded recommendation batch.
      */
-    Nl2AgentApplyLocalResourcesRequest: {
+    Nl2AgentApplyLocalResourcesActionPayload: {
       /** Recommendation Batch Id */
       recommendation_batch_id: string;
       /** Skill Ids */
@@ -482,101 +272,88 @@ export interface components {
       /** Tool Ids */
       tool_ids?: number[];
     };
-    /** Nl2AgentApplyLocalResourcesResponse */
-    Nl2AgentApplyLocalResourcesResponse: {
-      /** Bound Skill Count */
-      bound_skill_count: number;
-      /** Bound Tool Count */
-      bound_tool_count: number;
-      /** Chat Injection Text */
-      chat_injection_text: string;
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-      /** Skill Ids */
-      skill_ids: number[];
+    /** Nl2AgentApplyLocalResourcesActionRequest */
+    Nl2AgentApplyLocalResourcesActionRequest: {
       /**
-       * Status
-       * @constant
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
        */
-      status: "applied";
+      action: "apply_local_resources";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentApplyLocalResourcesActionPayload"];
+    };
+    /** Nl2AgentBindMcpToolsActionPayload */
+    Nl2AgentBindMcpToolsActionPayload: {
+      /** Recommendation Id */
+      recommendation_id: string;
       /** Tool Ids */
-      tool_ids: number[];
+      tool_ids?: number[];
     };
-    /**
-     * Nl2AgentCardDeliveryRequest
-     * @description Report final-message rendering success or failure for one NL2AGENT card.
-     */
-    Nl2AgentCardDeliveryRequest: {
+    /** Nl2AgentBindMcpToolsActionRequest */
+    Nl2AgentBindMcpToolsActionRequest: {
       /**
-       * Card Key
-       * @description The recommendation_batch_id for local or online resource cards; omit for all other card types.
-       */
-      card_key?: string | null;
-      /**
-       * Card Type
+       * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
-      card_type:
-        | "requirements_summary"
-        | "model_selection"
-        | "local_resources"
-        | "web_mcp"
-        | "web_skill"
-        | "agent_identity"
-        | "final_review";
-      /** Message Id */
-      message_id: number;
-      /** Reason */
-      reason?:
-        | (
-            | "truncated_fence"
-            | "invalid_json"
-            | "invalid_schema"
-            | "missing_card"
-          )
-        | null;
+      action: "bind_mcp_tools";
       /**
-       * Status
-       * @enum {string}
+       * Action Id
+       * Format: uuid
        */
-      status: "rendered" | "failed";
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentBindMcpToolsActionPayload"];
     };
-    /** Nl2AgentCardDeliveryResponse */
-    Nl2AgentCardDeliveryResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Auto Retry Allowed */
-      auto_retry_allowed: boolean;
-      /** Card Key */
-      card_key?: string | null;
+    /** Nl2AgentCompleteOnlineConfigurationActionRequest */
+    Nl2AgentCompleteOnlineConfigurationActionRequest: {
       /**
-       * Card Type
+       * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
-      card_type:
-        | "requirements_summary"
-        | "model_selection"
-        | "local_resources"
-        | "web_mcp"
-        | "web_skill"
-        | "agent_identity"
-        | "final_review";
-      /** Chat Injection Text */
-      chat_injection_text?: string | null;
-      /** Message Id */
-      message_id: number;
-      /** Reason */
-      reason?: string | null;
+      action: "complete_online_configuration";
       /**
-       * Retry Count
-       * @default 0
+       * Action Id
+       * Format: uuid
        */
-      retry_count?: number;
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload?: components["schemas"]["Nl2AgentEmptyActionPayload"];
+    };
+    /** Nl2AgentConfirmRequirementsActionPayload */
+    Nl2AgentConfirmRequirementsActionPayload: {
+      summary: components["schemas"]["Nl2AgentRequirementsSummaryPayload"];
+    };
+    /** Nl2AgentConfirmRequirementsActionRequest */
+    Nl2AgentConfirmRequirementsActionRequest: {
       /**
-       * Status
+       * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
-      status: "rendered" | "failed";
+      action: "confirm_requirements";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentConfirmRequirementsActionPayload"];
     };
     /** Nl2AgentDiscoveredTool */
     Nl2AgentDiscoveredTool: {
@@ -588,10 +365,15 @@ export interface components {
       tool_id: number;
     };
     /**
-     * Nl2AgentFinalizeRequest
+     * Nl2AgentEmptyActionPayload
+     * @description An action with no client-controlled domain identifiers.
+     */
+    Nl2AgentEmptyActionPayload: Record<string, never>;
+    /**
+     * Nl2AgentFinalizeActionPayload
      * @description Unsaved descriptive, prompt, and runtime fields for draft publication.
      */
-    Nl2AgentFinalizeRequest: {
+    Nl2AgentFinalizeActionPayload: {
       /** Business Description */
       business_description: string;
       /** Constraint Prompt */
@@ -625,58 +407,92 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
-    /** Nl2AgentFinalizeResponse */
-    Nl2AgentFinalizeResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Display Name */
-      display_name: string;
-      /** Name */
-      name: string;
-      /** Skill Ids */
-      skill_ids: number[];
+    /** Nl2AgentFinalizeActionRequest */
+    Nl2AgentFinalizeActionRequest: {
       /**
-       * Status
-       * @constant
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
        */
-      status: "draft_ready";
-      /** Tool Ids */
-      tool_ids: number[];
+      action: "finalize";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentFinalizeActionPayload"];
     };
     /**
-     * Nl2AgentIdentityRequest
-     * @description Persist the user-confirmed display name for an NL2AGENT draft.
+     * Nl2AgentInstallMcpActionPayload
+     * @description Install one MCP recommendation without accepting a client URL.
      */
-    Nl2AgentIdentityRequest: {
-      /** Display Name */
-      display_name: string;
-    };
-    /** Nl2AgentIdentityResponse */
-    Nl2AgentIdentityResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Chat Injection Text */
-      chat_injection_text?: string | null;
-      /** Display Name */
-      display_name: string;
-      /** Identity Confirmed */
-      identity_confirmed: boolean;
-      /** Internal Name */
-      internal_name: string;
-    };
-    /**
-     * Nl2AgentInstallWebSkillRequest
-     * @description Request body for installing a single official/web skill into the tenant.
-     */
-    Nl2AgentInstallWebSkillRequest: {
+    Nl2AgentInstallMcpActionPayload: {
       /** Config Values */
       config_values?: {
         [key: string]: unknown;
       };
-      /** Skill Id */
-      skill_id?: number | null;
-      /** Skill Name */
-      skill_name?: string | null;
+      /**
+       * Option Id
+       * @default remote
+       */
+      option_id?: string;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+      /** Recommendation Id */
+      recommendation_id: string;
+    };
+    /** Nl2AgentInstallMcpActionRequest */
+    Nl2AgentInstallMcpActionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "install_mcp";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentInstallMcpActionPayload"];
+    };
+    /**
+     * Nl2AgentInstallWebSkillActionPayload
+     * @description Install one Skill from a server-recorded recommendation batch.
+     */
+    Nl2AgentInstallWebSkillActionPayload: {
+      /** Config Values */
+      config_values?: {
+        [key: string]: unknown;
+      };
+      /** Item Key */
+      item_key: string;
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+    };
+    /** Nl2AgentInstallWebSkillActionRequest */
+    Nl2AgentInstallWebSkillActionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "install_web_skill";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentInstallWebSkillActionPayload"];
     };
     /** Nl2AgentInvalidReference */
     Nl2AgentInvalidReference: {
@@ -697,108 +513,6 @@ export interface components {
        * @enum {string}
        */
       reference_type: "model" | "tool" | "skill";
-    };
-    /** Nl2AgentLocalRecommendationResponse */
-    Nl2AgentLocalRecommendationResponse: {
-      /** Applied Skill Ids */
-      applied_skill_ids: number[];
-      /** Applied Tool Ids */
-      applied_tool_ids: number[];
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-      /** Skill Ids */
-      skill_ids: number[];
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "recommendations_ready" | "applying" | "applied" | "skipped";
-      /** Tool Ids */
-      tool_ids: number[];
-      /** Tool Parameter Schemas */
-      tool_parameter_schemas: {
-        [key: string]: components["schemas"]["Nl2AgentToolParameterSchema"][];
-      };
-    };
-    /** Nl2AgentLocalSkipResponse */
-    Nl2AgentLocalSkipResponse: {
-      /** Applied Skill Ids */
-      applied_skill_ids: number[];
-      /** Applied Tool Ids */
-      applied_tool_ids: number[];
-      /** Chat Injection Text */
-      chat_injection_text: string;
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-      /** Skill Ids */
-      skill_ids: number[];
-      /**
-       * Status
-       * @constant
-       */
-      status: "skipped";
-      /** Tool Ids */
-      tool_ids: number[];
-    };
-    /**
-     * Nl2AgentMcpBindToolsRequest
-     * @description Bind selected tools from an installed MCP to an NL2AGENT draft.
-     */
-    Nl2AgentMcpBindToolsRequest: {
-      /** Tool Ids */
-      tool_ids?: number[];
-    };
-    /** Nl2AgentMcpBindToolsResponse */
-    Nl2AgentMcpBindToolsResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Bound Tool Ids */
-      bound_tool_ids: number[];
-      /** Mcp Id */
-      mcp_id: number;
-    };
-    /**
-     * Nl2AgentMcpInstallRequest
-     * @description Install a recommended MCP using user-confirmed configuration.
-     */
-    Nl2AgentMcpInstallRequest: {
-      /** Config Values */
-      config_values?: {
-        [key: string]: unknown;
-      };
-      /**
-       * Option Id
-       * @default remote
-       */
-      option_id?: string;
-      /** Recommendation Id */
-      recommendation_id: string;
-    };
-    /** Nl2AgentMcpInstallResponse */
-    Nl2AgentMcpInstallResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Mcp Id */
-      mcp_id: number;
-      /**
-       * Status
-       * @constant
-       */
-      status: "connected";
-      /** Tools */
-      tools: components["schemas"]["Nl2AgentDiscoveredTool"][];
-    };
-    /** Nl2AgentMcpSkipToolsResponse */
-    Nl2AgentMcpSkipToolsResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Mcp Id */
-      mcp_id: number;
-      /**
-       * Status
-       * @constant
-       */
-      status: "binding_skipped";
     };
     /** Nl2AgentMcpWorkflowResponse */
     Nl2AgentMcpWorkflowResponse: {
@@ -830,79 +544,6 @@ export interface components {
           )
         | null;
     };
-    /**
-     * Nl2AgentModelSelectionRequest
-     * @description Persist the ordered LLM selection for an NL2AGENT draft.
-     */
-    Nl2AgentModelSelectionRequest: {
-      /** Fallback Model Ids */
-      fallback_model_ids?: number[];
-      /** Primary Model Id */
-      primary_model_id: number;
-    };
-    /** Nl2AgentModelSelectionResponse */
-    Nl2AgentModelSelectionResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Chat Injection Text */
-      chat_injection_text?: string | null;
-      /** Fallback Model Ids */
-      fallback_model_ids: number[];
-      /** Models */
-      models: components["schemas"]["Nl2AgentModelSummary"][];
-      /** Primary Model Id */
-      primary_model_id: number;
-    };
-    /** Nl2AgentModelSummary */
-    Nl2AgentModelSummary: {
-      /** Display Name */
-      display_name: string;
-      /** Model Id */
-      model_id: number;
-    };
-    /** Nl2AgentOnlineConfigurationResponse */
-    Nl2AgentOnlineConfigurationResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Chat Injection Text */
-      chat_injection_text?: string | null;
-      /** Completed Batch Ids */
-      completed_batch_ids: string[];
-      /** Online Configuration Confirmed */
-      online_configuration_confirmed: boolean;
-    };
-    /**
-     * Nl2AgentOnlineRecommendationBatchRequest
-     * @description Register a rendered MCP or web-Skill recommendation batch.
-     */
-    Nl2AgentOnlineRecommendationBatchRequest: {
-      /** Item Keys */
-      item_keys?: string[];
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-      /**
-       * Resource Type
-       * @enum {string}
-       */
-      resource_type: "mcp" | "skill";
-    };
-    /** Nl2AgentOnlineRecommendationResponse */
-    Nl2AgentOnlineRecommendationResponse: {
-      /** Item Keys */
-      item_keys: string[];
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-      /**
-       * Resource Type
-       * @enum {string}
-       */
-      resource_type: "mcp" | "skill";
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "recommendations_ready" | "completed";
-    };
     /** Nl2AgentPersistedModel */
     Nl2AgentPersistedModel: {
       /** Display Name */
@@ -917,48 +558,6 @@ export interface components {
       /** Valid */
       valid: boolean;
     };
-    /**
-     * Nl2AgentRecommendationBatchRequest
-     * @description Register a local-resource recommendation card rendered by the client.
-     */
-    Nl2AgentRecommendationBatchRequest: {
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-      /** Skill Ids */
-      skill_ids?: number[];
-      /** Tool Ids */
-      tool_ids?: number[];
-    };
-    /**
-     * Nl2AgentRecommendationSkipRequest
-     * @description Explicitly skip one rendered local-resource recommendation batch.
-     */
-    Nl2AgentRecommendationSkipRequest: {
-      /** Recommendation Batch Id */
-      recommendation_batch_id: string;
-    };
-    /**
-     * Nl2AgentRequirementsConfirmRequest
-     * @description Confirm the currently registered NL2AGENT requirements summary.
-     */
-    Nl2AgentRequirementsConfirmRequest: {
-      /** Fingerprint */
-      fingerprint: string;
-    };
-    /** Nl2AgentRequirementsConfirmationResponse */
-    Nl2AgentRequirementsConfirmationResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Chat Injection Text */
-      chat_injection_text?: string | null;
-      /** Fingerprint */
-      fingerprint: string;
-      /**
-       * Status
-       * @constant
-       */
-      status: "confirmed";
-    };
     /** Nl2AgentRequirementsData */
     Nl2AgentRequirementsData: {
       /** Audience Or Scenario */
@@ -971,21 +570,6 @@ export interface components {
       key_constraints: string;
       /** Primary Input */
       primary_input: string;
-    };
-    /** Nl2AgentRequirementsRegistrationResponse */
-    Nl2AgentRequirementsRegistrationResponse: {
-      /** Agent Id */
-      agent_id: number;
-      /** Fingerprint */
-      fingerprint: string;
-      /** Is Current */
-      is_current: boolean;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "collecting" | "awaiting_confirmation" | "confirmed";
-      summary: components["schemas"]["Nl2AgentRequirementsData"];
     };
     /** Nl2AgentRequirementsReviewResponse */
     Nl2AgentRequirementsReviewResponse: {
@@ -1003,10 +587,10 @@ export interface components {
       summary?: components["schemas"]["Nl2AgentRequirementsData"] | null;
     };
     /**
-     * Nl2AgentRequirementsSummaryRequest
-     * @description Register the read-only requirements summary rendered by NL2AGENT.
+     * Nl2AgentRequirementsSummaryPayload
+     * @description The five-field requirements summary visible in a confirmation card.
      */
-    Nl2AgentRequirementsSummaryRequest: {
+    Nl2AgentRequirementsSummaryPayload: {
       /** Audience Or Scenario */
       audience_or_scenario: string;
       /** Expected Output */
@@ -1017,6 +601,54 @@ export interface components {
       key_constraints: string;
       /** Primary Input */
       primary_input: string;
+    };
+    /** Nl2AgentSaveIdentityActionPayload */
+    Nl2AgentSaveIdentityActionPayload: {
+      /** Display Name */
+      display_name: string;
+    };
+    /** Nl2AgentSaveIdentityActionRequest */
+    Nl2AgentSaveIdentityActionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "save_identity";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentSaveIdentityActionPayload"];
+    };
+    /** Nl2AgentSaveModelSelectionActionPayload */
+    Nl2AgentSaveModelSelectionActionPayload: {
+      /** Fallback Model Ids */
+      fallback_model_ids?: number[];
+      /** Primary Model Id */
+      primary_model_id: number;
+    };
+    /** Nl2AgentSaveModelSelectionActionRequest */
+    Nl2AgentSaveModelSelectionActionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "save_model_selection";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentSaveModelSelectionActionPayload"];
     };
     /** Nl2AgentSessionListResponse */
     Nl2AgentSessionListResponse: {
@@ -1167,6 +799,55 @@ export interface components {
       /** Source */
       source: string;
     };
+    /**
+     * Nl2AgentSkipLocalResourcesActionPayload
+     * @description Skip one server-recorded local recommendation batch.
+     */
+    Nl2AgentSkipLocalResourcesActionPayload: {
+      /** Recommendation Batch Id */
+      recommendation_batch_id: string;
+    };
+    /** Nl2AgentSkipLocalResourcesActionRequest */
+    Nl2AgentSkipLocalResourcesActionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "skip_local_resources";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentSkipLocalResourcesActionPayload"];
+    };
+    /** Nl2AgentSkipMcpToolsActionPayload */
+    Nl2AgentSkipMcpToolsActionPayload: {
+      /** Recommendation Id */
+      recommendation_id: string;
+    };
+    /** Nl2AgentSkipMcpToolsActionRequest */
+    Nl2AgentSkipMcpToolsActionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "skip_mcp_tools";
+      /**
+       * Action Id
+       * Format: uuid
+       */
+      action_id: string;
+      /** Display Text */
+      display_text: string;
+      /** Expected Revision */
+      expected_revision: number;
+      payload: components["schemas"]["Nl2AgentSkipMcpToolsActionPayload"];
+    };
     /** Nl2AgentToolConfigurationField */
     Nl2AgentToolConfigurationField: {
       /**
@@ -1237,21 +918,6 @@ export interface components {
       skill_id?: number | null;
       /** Skill Name */
       skill_name: string;
-    };
-    /** Nl2AgentWebSkillInstallResponse */
-    Nl2AgentWebSkillInstallResponse: {
-      /** Bound */
-      bound: boolean;
-      /** Installed */
-      installed: boolean;
-      /** Installed Ids */
-      installed_ids: number[];
-      /** Installed Names */
-      installed_names?: string[] | null;
-      /** Skill Id */
-      skill_id: number;
-      /** Skill Name */
-      skill_name?: string | null;
     };
     /** Nl2AgentWorkflowStateResponse */
     Nl2AgentWorkflowStateResponse: {
@@ -1457,14 +1123,14 @@ export interface operations {
       };
     };
   };
-  abandon_session_api_nl2agent_session__agent_id__abandon_post: {
+  abandon_session_api_nl2agent_session__draft_agent_id__abandon_post: {
     parameters: {
       query?: never;
       header?: {
         authorization?: string | null;
       };
       path: {
-        agent_id: number;
+        draft_agent_id: number;
       };
       cookie?: never;
     };
@@ -1490,20 +1156,31 @@ export interface operations {
       };
     };
   };
-  apply_local_resources_api_nl2agent_session__agent_id__apply_local_resources_post: {
+  dispatch_action_api_nl2agent_session__draft_agent_id__actions_post: {
     parameters: {
       query?: never;
       header?: {
         authorization?: string | null;
       };
       path: {
-        agent_id: number;
+        draft_agent_id: number;
       };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["Nl2AgentApplyLocalResourcesRequest"];
+        "application/json":
+          | components["schemas"]["Nl2AgentConfirmRequirementsActionRequest"]
+          | components["schemas"]["Nl2AgentSaveModelSelectionActionRequest"]
+          | components["schemas"]["Nl2AgentApplyLocalResourcesActionRequest"]
+          | components["schemas"]["Nl2AgentSkipLocalResourcesActionRequest"]
+          | components["schemas"]["Nl2AgentInstallMcpActionRequest"]
+          | components["schemas"]["Nl2AgentBindMcpToolsActionRequest"]
+          | components["schemas"]["Nl2AgentSkipMcpToolsActionRequest"]
+          | components["schemas"]["Nl2AgentInstallWebSkillActionRequest"]
+          | components["schemas"]["Nl2AgentCompleteOnlineConfigurationActionRequest"]
+          | components["schemas"]["Nl2AgentSaveIdentityActionRequest"]
+          | components["schemas"]["Nl2AgentFinalizeActionRequest"];
       };
     };
     responses: {
@@ -1513,7 +1190,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Nl2AgentApplyLocalResourcesResponse"];
+          "application/json": components["schemas"]["Nl2AgentActionResponse"];
         };
       };
       /** @description Validation Error */
@@ -1527,526 +1204,14 @@ export interface operations {
       };
     };
   };
-  report_card_delivery_api_nl2agent_session__agent_id__card_delivery_post: {
+  resume_session_api_nl2agent_session__draft_agent_id__resume_post: {
     parameters: {
       query?: never;
       header?: {
         authorization?: string | null;
       };
       path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentCardDeliveryRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentCardDeliveryResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  finalize_agent_api_nl2agent_session__agent_id__finalize_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentFinalizeRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentFinalizeResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  save_agent_identity_api_nl2agent_session__agent_id__identity_put: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentIdentityRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentIdentityResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  install_web_skill_api_nl2agent_session__agent_id__install_web_skill_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentInstallWebSkillRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentWebSkillInstallResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  register_local_resources_api_nl2agent_session__agent_id__local_resources_register_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentRecommendationBatchRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentLocalRecommendationResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  skip_local_resources_api_nl2agent_session__agent_id__local_resources_skip_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentRecommendationSkipRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentLocalSkipResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  install_recommended_mcp_api_nl2agent_session__agent_id__mcp_install_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentMcpInstallRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentMcpInstallResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  bind_mcp_tools_api_nl2agent_session__agent_id__mcp__mcp_id__bind_tools_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-        mcp_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentMcpBindToolsRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentMcpBindToolsResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  skip_mcp_tools_api_nl2agent_session__agent_id__mcp__mcp_id__skip_tools_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-        mcp_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentMcpSkipToolsResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  select_models_api_nl2agent_session__agent_id__models_put: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentModelSelectionRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentModelSelectionResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  complete_online_configuration_api_nl2agent_session__agent_id__online_configuration_complete_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentOnlineConfigurationResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  register_online_recommendations_api_nl2agent_session__agent_id__online_recommendations_register_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentOnlineRecommendationBatchRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentOnlineRecommendationResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  confirm_requirements_api_nl2agent_session__agent_id__requirements_confirm_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentRequirementsConfirmRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentRequirementsConfirmationResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  register_requirements_api_nl2agent_session__agent_id__requirements_register_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["Nl2AgentRequirementsSummaryRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["Nl2AgentRequirementsRegistrationResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  resume_session_api_nl2agent_session__agent_id__resume_post: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path: {
-        agent_id: number;
+        draft_agent_id: number;
       };
       cookie?: never;
     };
@@ -2072,14 +1237,14 @@ export interface operations {
       };
     };
   };
-  get_session_state_api_nl2agent_session__agent_id__state_get: {
+  get_session_state_api_nl2agent_session__draft_agent_id__state_get: {
     parameters: {
       query?: never;
       header?: {
         authorization?: string | null;
       };
       path: {
-        agent_id: number;
+        draft_agent_id: number;
       };
       cookie?: never;
     };
@@ -2105,7 +1270,7 @@ export interface operations {
       };
     };
   };
-  get_web_skill_configuration_api_nl2agent_session__agent_id__web_skill_configuration_get: {
+  get_web_skill_configuration_api_nl2agent_session__draft_agent_id__web_skill_configuration_get: {
     parameters: {
       query?: {
         skill_id?: number | null;
@@ -2115,7 +1280,7 @@ export interface operations {
         authorization?: string | null;
       };
       path: {
-        agent_id: number;
+        draft_agent_id: number;
       };
       cookie?: never;
     };

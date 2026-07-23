@@ -14,18 +14,19 @@ const actionMessage = (messageId: number, actionId: string): ApiMessage => ({
   message_metadata: {
     action_id: actionId,
     action: "confirm_requirements",
+    workflow_revision: 19,
   },
 });
 
-describe("NL2AGENT user action history", () => {
-  it("preserves distinct structured actions and removes legacy hidden controls", () => {
+describe("NL2AGENT action context history", () => {
+  it("preserves distinct structured actions and ordinary user messages", () => {
     const messages: ApiMessage[] = [
       actionMessage(1, "action-1"),
       { message_id: 2, role: "assistant", message: [] },
       {
         message_id: 3,
         role: "user",
-        message: "[[NL2AGENT_AUTO_CONTINUE]] legacy control",
+        message: "Please make the agent more concise",
       },
       { message_id: 4, role: "assistant", message: [] },
       actionMessage(5, "action-2"),
@@ -33,7 +34,7 @@ describe("NL2AGENT user action history", () => {
 
     expect(
       collapseRefreshUserMessages(messages).map((item) => item.message_id)
-    ).toEqual([1, 2, 4, 5]);
+    ).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("deduplicates only repeated persistence of the same action id", () => {

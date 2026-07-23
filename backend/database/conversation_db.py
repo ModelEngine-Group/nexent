@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TypedDict
 
@@ -198,6 +199,193 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         result = session.execute(stmt)
         message_id = result.scalar()
         return message_id
+
+
+def _nl2agent_action_lock_key(conversation_id: int, action_id: str) -> int:
+    digest = hashlib.sha256(f"{int(conversation_id)}:{action_id}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def _nl2agent_action_message_query(conversation_id: int, action_id: str):
+    return select(
+        ConversationMessage.message_id,
+        ConversationMessage.conversation_id,
+        ConversationMessage.message_index,
+        ConversationMessage.message_content,
+        ConversationMessage.message_type,
+        ConversationMessage.message_metadata,
+        ConversationMessage.status,
+    ).where(
+        ConversationMessage.conversation_id == int(conversation_id),
+        ConversationMessage.message_role == "user",
+        ConversationMessage.message_type == "nl2agent_action",
+        ConversationMessage.message_metadata["action_id"].as_string() == action_id,
+        ConversationMessage.delete_flag == "N",
+    )
+
+
+def get_nl2agent_action_message(
+    conversation_id: int,
+    action_id: str,
+    *,
+    user_id: str,
+    db_session=None,
+) -> Optional[Dict[str, Any]]:
+    """Return one owner-scoped persisted NL2AGENT action message."""
+    session_context = get_db_session(db_session) if db_session is not None else get_db_session()
+    with session_context as session:
+        owner = session.execute(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == "N",
+            )
+        ).first()
+        if owner is None:
+            return None
+        record = session.execute(
+            _nl2agent_action_message_query(conversation_id, action_id)
+        ).first()
+        return as_dict(record) if record else None
+
+
+def claim_nl2agent_action_message(
+    *,
+    conversation_id: int,
+    action_id: str,
+    action: str,
+    fingerprint: str,
+    expected_revision: int,
+    display_text: str,
+    user_id: str,
+) -> tuple[Dict[str, Any], bool]:
+    """Serialize action-id claims and create at most one visible user message."""
+    with get_db_session() as session:
+        session.execute(
+            select(func.pg_advisory_xact_lock(_nl2agent_action_lock_key(conversation_id, action_id)))
+        )
+        owner = session.execute(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == "N",
+            )
+        ).first()
+        if owner is None:
+            raise ValueError("NL2AGENT conversation is not accessible.")
+
+        existing = session.execute(
+            _nl2agent_action_message_query(conversation_id, action_id)
+        ).first()
+        if existing:
+            record = as_dict(existing)
+            metadata = dict(record.get("message_metadata") or {})
+            if (
+                metadata.get("action_fingerprint") == fingerprint
+                and metadata.get("action_status") == "failed"
+            ):
+                metadata["action_status"] = "pending"
+                metadata.pop("action_error", None)
+                session.execute(
+                    update(ConversationMessage)
+                    .where(ConversationMessage.message_id == record["message_id"])
+                    .values(
+                        message_metadata=metadata,
+                        update_time=func.current_timestamp(),
+                        updated_by=user_id,
+                    )
+                )
+                record["message_metadata"] = metadata
+                return record, True
+            return record, False
+
+        message_index = session.scalar(
+            select(func.coalesce(func.max(ConversationMessage.message_index), -1) + 1).where(
+                ConversationMessage.conversation_id == int(conversation_id),
+                ConversationMessage.delete_flag == "N",
+            )
+        )
+        metadata = {
+            "action_id": action_id,
+            "action": action,
+            "action_fingerprint": fingerprint,
+            "action_status": "pending",
+            "expected_revision": expected_revision,
+        }
+        data = add_creation_tracking(
+            {
+                "conversation_id": int(conversation_id),
+                "message_index": int(message_index),
+                "message_role": "user",
+                "message_content": display_text,
+                "message_type": "nl2agent_action",
+                "message_metadata": metadata,
+                "minio_files": None,
+                "opinion_flag": None,
+                "delete_flag": "N",
+                "status": "completed",
+            },
+            user_id,
+        )
+        message_id = session.execute(
+            insert(ConversationMessage).values(**data).returning(ConversationMessage.message_id)
+        ).scalar_one()
+        return {
+            "message_id": message_id,
+            "conversation_id": int(conversation_id),
+            "message_index": int(message_index),
+            "message_content": display_text,
+            "message_type": "nl2agent_action",
+            "message_metadata": metadata,
+            "status": "completed",
+        }, True
+
+
+def update_nl2agent_action_message(
+    *,
+    conversation_id: int,
+    action_id: str,
+    user_id: str,
+    action_status: str,
+    workflow_revision: int,
+    result: Optional[Dict[str, Any]] = None,
+    error_code: Optional[str] = None,
+) -> bool:
+    """Persist a redacted terminal action result without changing its visible text."""
+    with get_db_session() as session:
+        record = session.execute(
+            _nl2agent_action_message_query(conversation_id, action_id)
+        ).first()
+        if not record:
+            return False
+        message = as_dict(record)
+        metadata = dict(message.get("message_metadata") or {})
+        metadata.update(
+            action_status=action_status,
+            workflow_revision=int(workflow_revision),
+        )
+        if result is not None:
+            metadata["action_result"] = result
+        else:
+            metadata.pop("action_result", None)
+        if error_code:
+            metadata["action_error"] = {"code": error_code}
+        else:
+            metadata.pop("action_error", None)
+        updated = session.execute(
+            update(ConversationMessage)
+            .where(
+                ConversationMessage.message_id == message["message_id"],
+                ConversationMessage.created_by == user_id,
+                ConversationMessage.delete_flag == "N",
+            )
+            .values(
+                message_metadata=metadata,
+                update_time=func.current_timestamp(),
+                updated_by=user_id,
+            )
+        )
+        return updated.rowcount == 1
 
 
 def create_message_units(message_units: List[Dict[str, Any]], message_id: int, conversation_id: int,

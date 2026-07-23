@@ -6,10 +6,7 @@ import {
   resolveNl2AgentDraftAgentId,
   resolveNl2AgentRunnerId,
 } from "@/lib/chat/nl2agentDraftContext";
-import {
-  isNl2AgentAutoContinueText,
-  nl2AgentContinuationScopeKey,
-} from "@/lib/chat/nl2agentContinuation";
+import { nl2AgentContinuationScopeKey } from "@/lib/chat/nl2agentContinuation";
 
 import {
   OnlineRecommendationGroup,
@@ -19,10 +16,7 @@ import {
 import { LocalResourcesCard } from "../LocalResourcesCard";
 import { ModelSelectionCard } from "../ModelSelectionCard";
 import { AgentIdentityCard } from "../AgentIdentityCard";
-import {
-  RequirementsSummaryCard,
-  resolveRequirementsCardState,
-} from "../RequirementsSummaryCard";
+import { RequirementsSummaryCard } from "../RequirementsSummaryCard";
 import {
   FinalizeCard,
   canPublishFinalReview,
@@ -560,46 +554,6 @@ describe("online configuration blockers", () => {
   });
 });
 
-describe("requirements summary card state", () => {
-  const awaiting = {
-    status: "awaiting_confirmation" as const,
-    fingerprint: "a".repeat(64),
-    isCurrent: true,
-  };
-
-  it("shows a confirmable state only for the current pending summary", () => {
-    assert.equal(
-      resolveRequirementsCardState(false, undefined, awaiting),
-      "awaiting"
-    );
-    assert.equal(
-      resolveRequirementsCardState(false, undefined, {
-        ...awaiting,
-        isCurrent: false,
-      }),
-      "superseded"
-    );
-  });
-
-  it("keeps loading, failure, and confirmed states distinct", () => {
-    assert.equal(
-      resolveRequirementsCardState(true, undefined, undefined),
-      "loading"
-    );
-    assert.equal(
-      resolveRequirementsCardState(false, "failed", undefined),
-      "error"
-    );
-    assert.equal(
-      resolveRequirementsCardState(false, undefined, {
-        ...awaiting,
-        status: "confirmed",
-      }),
-      "confirmed"
-    );
-  });
-});
-
 describe("final review persisted names", () => {
   it("groups local and online resources without using IDs as labels", () => {
     const state = {
@@ -712,23 +666,7 @@ describe("resolveNl2AgentCardAgentId", () => {
   });
 });
 
-describe("NL2AGENT automatic continuation messages", () => {
-  it("recognizes only the reserved hidden-message prefix", () => {
-    assert.equal(
-      isNl2AgentAutoContinueText(
-        "[[NL2AGENT_AUTO_CONTINUE]]\nThe previous card action completed."
-      ),
-      true
-    );
-    assert.equal(isNl2AgentAutoContinueText("Please continue"), false);
-    assert.equal(
-      isNl2AgentAutoContinueText(
-        "[[NL2AGENT_CARD_RETRY]]\nThe previous card was invalid."
-      ),
-      true
-    );
-  });
-
+describe("NL2AGENT action continuation scope", () => {
   it("isolates pending continuations by conversation and draft", () => {
     assert.notEqual(
       nl2AgentContinuationScopeKey(10, 202),

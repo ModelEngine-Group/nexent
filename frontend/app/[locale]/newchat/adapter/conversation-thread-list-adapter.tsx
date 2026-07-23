@@ -21,10 +21,9 @@ import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
-import { isNl2AgentAutoContinueText } from "@/lib/chat/nl2agentContinuation";
 import {
-  parseNl2AgentUserAction,
-  type Nl2AgentUserAction,
+  parseNl2AgentActionContext,
+  type Nl2AgentActionContext,
 } from "@/lib/chat/nl2agentContinuation";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
@@ -158,9 +157,9 @@ const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
       JSON.stringify(left.minio_files ?? []) ===
         JSON.stringify(right.minio_files ?? []));
 
-const restoreNl2AgentUserAction = (
+const restoreNl2AgentActionContext = (
   message: ApiMessage
-): Nl2AgentUserAction | undefined => {
+): Nl2AgentActionContext | undefined => {
   if (
     message.role !== "user" ||
     message.message_type !== "nl2agent_action" ||
@@ -168,10 +167,11 @@ const restoreNl2AgentUserAction = (
   ) {
     return;
   }
-  return parseNl2AgentUserAction({
+  return parseNl2AgentActionContext({
     actionId: message.message_metadata?.action_id,
     action: message.message_metadata?.action,
     displayText: message.message,
+    workflowRevision: message.message_metadata?.workflow_revision,
   });
 };
 
@@ -189,14 +189,6 @@ export const collapseRefreshUserMessages = (
   let activeUserMessage: ApiMessage | undefined;
 
   for (const message of messages) {
-    if (
-      message.role === "user" &&
-      isNl2AgentAutoContinueText(
-        typeof message.message === "string" ? message.message : ""
-      )
-    ) {
-      continue;
-    }
     if (message.role !== "user") {
       collapsed.push(message);
       continue;
@@ -296,7 +288,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // (sources registry, metadata bucket) is keyed off this value so it
       // matches the id that assistant-ui later sets on the rendered message.
       const messageId = String(msg.message_id ?? `${remoteId}-${messageIndex}`);
-      const nl2agentUserAction = restoreNl2AgentUserAction(msg);
+      const nl2agentActionContext = restoreNl2AgentActionContext(msg);
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
@@ -620,7 +612,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       const metadata = {
         custom: {
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
-          ...(nl2agentUserAction ? { nl2agentUserAction } : {}),
+          ...(nl2agentActionContext ? { nl2agentActionContext } : {}),
         },
       };
 

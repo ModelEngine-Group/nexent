@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
-import { Alert, Button } from "antd";
+import React from "react";
 import { LocalResourcesCard } from "./LocalResourcesCard";
 import { WebMcpCard } from "./WebMcpCard";
 import { WebSkillCard } from "./WebSkillCard";
@@ -9,12 +8,9 @@ import { FinalizeCard } from "./FinalizeCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { RequirementsSummaryCard } from "./RequirementsSummaryCard";
-import { isNl2AgentWorkflowConflict } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
-import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 import {
   parseNl2AgentCard,
-  type Nl2AgentCardRegistrationHandler,
   type ValidatedNl2AgentCard,
 } from "./cardValidation";
 import {
@@ -26,134 +22,19 @@ export const OnlineRecommendationGroup: React.FC<{
   agentId: number;
   recommendationBatchId: string;
   resourceType: "mcp" | "skill";
-  itemKeys: string[];
   children: React.ReactNode;
-  onRegistered?: Nl2AgentCardRegistrationHandler;
-  registrationEnabled?: boolean;
-}> = ({
-  agentId,
-  recommendationBatchId,
-  resourceType,
-  itemKeys,
-  children,
-  onRegistered,
-  registrationEnabled = true,
-}) => {
+}> = ({ recommendationBatchId, resourceType, children }) => {
   const workflow = useNl2AgentWorkflow();
-  const { active, notifyStateChanged, registerOnlineRecommendations } =
-    workflow;
-  const { execute, error } = useNl2AgentCardLifecycle(
-    `online:${agentId}:${resourceType}:${recommendationBatchId}`
-  );
-  const serializedKeys = JSON.stringify(itemKeys);
-  const [registered, setRegistered] = useState(false);
-  const [completed, setCompleted] = useState(false);
-  const [registrationRetryable, setRegistrationRetryable] = useState(true);
-
-  useEffect(() => {
-    const batch =
-      workflow.sessionState?.resource_review.recommendations?.[
-        recommendationBatchId
-      ];
-    if (!batch || batch.resource_type !== resourceType) return;
-    setRegistered(batch.status !== "searched");
-    setCompleted(batch.status === "completed");
-    if (!registrationEnabled) setRegistered(true);
-  }, [
-    recommendationBatchId,
-    registrationEnabled,
-    resourceType,
-    workflow.sessionState,
-  ]);
-
-  const register = useCallback(async () => {
-    if (registered || !recommendationBatchId || !active || !registrationEnabled)
-      return;
-    setRegistrationRetryable(true);
-    try {
-      await execute(
-        () =>
-          registerOnlineRecommendations(agentId, {
-            recommendation_batch_id: recommendationBatchId,
-            resource_type: resourceType,
-            item_keys: JSON.parse(serializedKeys),
-          }),
-        {
-          onSuccess: async (result) => {
-            setCompleted(result.status === "completed");
-            await onRegistered?.({
-              cardType: resourceType === "mcp" ? "web_mcp" : "web_skill",
-              cardKey: recommendationBatchId,
-            });
-            setRegistered(true);
-          },
-          notifyStateChanged: true,
-          blockInput: true,
-          retainInputBlockOnError: (error) =>
-            !isNl2AgentWorkflowConflict(error),
-        }
-      );
-    } catch (error) {
-      const retryable = !isNl2AgentWorkflowConflict(error);
-      setRegistrationRetryable(retryable);
-      if (!retryable) notifyStateChanged();
-    }
-  }, [
-    agentId,
-    execute,
-    onRegistered,
-    notifyStateChanged,
-    recommendationBatchId,
-    registerOnlineRecommendations,
-    resourceType,
-    serializedKeys,
-    active,
-    registrationEnabled,
-    registered,
-  ]);
-
-  useEffect(() => {
-    void register();
-  }, [register]);
+  const batch =
+    workflow.sessionState?.resource_review.recommendations?.[
+      recommendationBatchId
+    ];
+  const completed =
+    batch?.resource_type === resourceType && batch.status === "completed";
 
   return (
-    <div>
-      {error && (
-        <Alert
-          className="my-2"
-          type="error"
-          title={error}
-          action={
-            registrationRetryable ? (
-              <Button size="small" onClick={() => void register()}>
-                Retry registration
-              </Button>
-            ) : undefined
-          }
-        />
-      )}
-      {!error && workflow.active && workflow.sessionStateError && (
-        <Alert
-          className="my-2"
-          type="error"
-          title="Failed to restore online resource state."
-          action={
-            <Button
-              size="small"
-              onClick={() => void workflow.refreshSessionState()}
-            >
-              Retry
-            </Button>
-          }
-        />
-      )}
-      <div
-        className={
-          !registered || completed ? "pointer-events-none opacity-60" : ""
-        }
-      >
-        {children}
-      </div>
+    <div className={completed ? "pointer-events-none opacity-60" : ""}>
+      {children}
     </div>
   );
 };
@@ -179,8 +60,6 @@ export interface Nl2AgentCardRendererProps {
   language: string;
   content: string;
   trustedDraftAgentId?: number | null;
-  onRegistered?: Nl2AgentCardRegistrationHandler;
-  registrationEnabled?: boolean;
 }
 
 const renderInvalidAgentId = () => (
@@ -217,9 +96,7 @@ const renderMissingOnlineBatch = () => (
 export const tryRenderNl2AgentCard = (
   language: string,
   content: string,
-  trustedDraftAgentId?: number | null,
-  onRegistered?: Nl2AgentCardRegistrationHandler,
-  registrationEnabled = false
+  trustedDraftAgentId?: number | null
 ): React.ReactNode | null => {
   const normalizedLanguage = language?.trim().toLowerCase();
   if (!normalizedLanguage || !normalizedLanguage.startsWith("nl2agent-")) {
@@ -268,26 +145,19 @@ export const tryRenderNl2AgentCard = (
   }
   const card = validation.cards[0];
   if (!card) return null;
-  return renderValidatedNl2AgentCard(card, onRegistered, registrationEnabled);
+  return renderValidatedNl2AgentCard(card);
 };
 
 /** Render an already parsed and schema-validated card AST node. */
 export const renderValidatedNl2AgentCard = (
-  card: ValidatedNl2AgentCard,
-  onRegistered?: Nl2AgentCardRegistrationHandler,
-  registrationEnabled = false
+  card: ValidatedNl2AgentCard
 ): React.ReactNode => {
   const agentId = card.agentId;
 
   switch (card.language) {
     case "nl2agent-requirements-summary":
       return (
-        <RequirementsSummaryCard
-          agentId={agentId}
-          summary={card.payload}
-          onRegistered={onRegistered}
-          registrationEnabled={registrationEnabled}
-        />
+        <RequirementsSummaryCard agentId={agentId} summary={card.payload} />
       );
     case "nl2agent-model-selection":
       return <ModelSelectionCard agentId={agentId} />;
@@ -313,8 +183,6 @@ export const renderValidatedNl2AgentCard = (
           recommendationBatchId={card.payload.recommendation_batch_id}
           tools={tools}
           skills={skills}
-          onRegistered={onRegistered}
-          registrationEnabled={registrationEnabled}
         />
       );
     }
@@ -325,11 +193,12 @@ export const renderValidatedNl2AgentCard = (
           agentId={agentId}
           recommendationBatchId={item.recommendation_batch_id}
           resourceType="mcp"
-          itemKeys={[item.recommendation_id]}
-          onRegistered={onRegistered}
-          registrationEnabled={registrationEnabled}
         >
-          <WebMcpCard agentId={agentId} item={item} />
+          <WebMcpCard
+            agentId={agentId}
+            recommendationBatchId={item.recommendation_batch_id}
+            item={item}
+          />
         </OnlineRecommendationGroup>
       );
     }
@@ -341,14 +210,12 @@ export const renderValidatedNl2AgentCard = (
           agentId={agentId}
           recommendationBatchId={recommendationBatchId}
           resourceType="mcp"
-          itemKeys={items.map((item) => item.recommendation_id)}
-          onRegistered={onRegistered}
-          registrationEnabled={registrationEnabled}
         >
           {items.map((item) => (
             <WebMcpCard
               key={item.recommendation_id}
               agentId={agentId}
+              recommendationBatchId={recommendationBatchId}
               item={item}
             />
           ))}
@@ -362,11 +229,13 @@ export const renderValidatedNl2AgentCard = (
           agentId={agentId}
           recommendationBatchId={card.payload.recommendation_batch_id}
           resourceType="skill"
-          itemKeys={[webSkillRecommendationKey(item)]}
-          onRegistered={onRegistered}
-          registrationEnabled={registrationEnabled}
         >
-          <WebSkillCard agentId={agentId} item={item} />
+          <WebSkillCard
+            agentId={agentId}
+            recommendationBatchId={card.payload.recommendation_batch_id}
+            itemKey={webSkillRecommendationKey(item)}
+            item={item}
+          />
         </OnlineRecommendationGroup>
       );
     }
@@ -377,14 +246,13 @@ export const renderValidatedNl2AgentCard = (
           agentId={agentId}
           recommendationBatchId={card.payload.recommendation_batch_id}
           resourceType="skill"
-          itemKeys={items.map(webSkillRecommendationKey)}
-          onRegistered={onRegistered}
-          registrationEnabled={registrationEnabled}
         >
           {items.map((item) => (
             <WebSkillCard
               key={webSkillRecommendationKey(item)}
               agentId={agentId}
+              recommendationBatchId={card.payload.recommendation_batch_id}
+              itemKey={webSkillRecommendationKey(item)}
               item={item}
             />
           ))}

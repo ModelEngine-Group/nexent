@@ -15,8 +15,9 @@ from consts.exceptions import (
     Nl2AgentOperationError,
     Nl2AgentValidationError,
     UnauthorizedError,
+    ForbiddenError,
 )
-from consts.model import Nl2AgentFinalizeRequest, Nl2AgentRecommendationBatchRequest
+from consts.model import Nl2AgentApplyLocalResourcesActionRequest
 
 from apps import nl2agent_app
 from apps.nl2agent_app import _session_http_error
@@ -327,59 +328,79 @@ async def test_abandon_session_api_passes_authenticated_owner(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_local_registration_api_maps_workflow_conflict(monkeypatch) -> None:
+async def test_action_api_passes_authenticated_identity_and_locale(monkeypatch) -> None:
     monkeypatch.setattr(
         nl2agent_app,
         "_current_user",
         MagicMock(return_value=("user", "tenant", "en")),
     )
-    register_local = AsyncMock(side_effect=AgentRunException("stale card"))
-    monkeypatch.setattr(
-        nl2agent_app,
-        "register_local_resource_recommendations",
-        register_local,
+    dispatch = AsyncMock(
+        return_value={
+            "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+            "action": "apply_local_resources",
+            "status": "applied",
+            "workflow_revision": 19,
+            "result": {"tool_ids": [28]},
+        }
+    )
+    monkeypatch.setattr(nl2agent_app, "dispatch_action", dispatch)
+    payload = Nl2AgentApplyLocalResourcesActionRequest(
+        action_id="2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+        action="apply_local_resources",
+        expected_revision=18,
+        display_text="Resources applied",
+        payload={
+            "recommendation_batch_id": "batch",
+            "tool_ids": [28],
+            "skill_ids": [],
+            "tool_config_values": {"28": {"top_k": 8}},
+        },
     )
 
-    with pytest.raises(AppException) as exc_info:
-        await nl2agent_app.register_local_resources_api(
-            202,
-            Nl2AgentRecommendationBatchRequest(recommendation_batch_id="batch"),
-            MagicMock(),
-            None,
-        )
+    result = await nl2agent_app.dispatch_action_api(202, payload, MagicMock(), None)
 
-    assert exc_info.value.error_code == ErrorCode.AGENTSPACE_NL2AGENT_WORKFLOW_CONFLICT
-    register_local.assert_awaited_once_with(
+    assert result["workflow_revision"] == 19
+    dispatch.assert_awaited_once_with(
         202,
-        "batch",
-        [],
-        [],
+        payload,
         "tenant",
         "user",
+        "en",
     )
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (ForbiddenError("not owned"), 403),
+        (Nl2AgentValidationError("invalid payload"), 422),
+        (Nl2AgentExternalServiceError("provider failed"), 502),
+        (Nl2AgentOperationError("database failed"), 503),
+    ],
+)
+def test_action_error_semantics(error, status) -> None:
+    converted = nl2agent_app._action_http_error(error)
+
+    assert converted.status_code == status
 
 
 @pytest.mark.asyncio
-async def test_apply_local_resources_http_contract_accepts_tool_config_map(
-    monkeypatch,
-) -> None:
+async def test_action_http_contract_uses_discriminated_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         nl2agent_app,
         "_current_user",
         MagicMock(return_value=("user", "tenant", "en")),
     )
-    apply_local = AsyncMock(
+    dispatch = AsyncMock(
         return_value={
-            "recommendation_batch_id": "batch",
+            "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+            "action": "apply_local_resources",
             "status": "applied",
-            "bound_tool_count": 1,
-            "bound_skill_count": 0,
-            "tool_ids": [28],
-            "skill_ids": [],
-            "chat_injection_text": "Continue",
+            "workflow_revision": 19,
+            "result": {"tool_ids": [28]},
         }
     )
-    monkeypatch.setattr(nl2agent_app, "apply_local_resources_batch", apply_local)
+    monkeypatch.setattr(nl2agent_app, "dispatch_action", dispatch)
     app = FastAPI()
     app.include_router(nl2agent_app.router)
 
@@ -388,46 +409,71 @@ async def test_apply_local_resources_http_contract_accepts_tool_config_map(
         base_url="http://test",
     ) as client:
         response = await client.post(
-            "/nl2agent/session/202/apply-local-resources",
+            "/nl2agent/session/202/actions",
             json={
-                "recommendation_batch_id": "batch",
-                "tool_ids": [28],
-                "skill_ids": [],
-                "tool_config_values": {"28": {"top_k": 8}},
+                "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+                "action": "apply_local_resources",
+                "expected_revision": 18,
+                "display_text": "Resources applied",
+                "payload": {
+                    "recommendation_batch_id": "batch",
+                    "tool_ids": [28],
+                    "skill_ids": [],
+                    "tool_config_values": {"28": {"top_k": 8}},
+                },
             },
         )
 
     assert response.status_code == 200
-    apply_local.assert_awaited_once_with(
-        agent_id=202,
-        recommendation_batch_id="batch",
-        tool_ids=[28],
-        skill_ids=[],
-        tool_config_values={28: {"top_k": 8}},
-        tenant_id="tenant",
-        user_id="user",
-    )
+    request = dispatch.await_args.args[1]
+    assert request.payload.tool_config_values == {28: {"top_k": 8}}
 
 
 @pytest.mark.asyncio
-async def test_finalize_api_passes_validated_verification_config(monkeypatch) -> None:
-    monkeypatch.setattr(
-        nl2agent_app,
-        "get_current_user_info",
-        MagicMock(return_value=("user", "tenant", "en")),
-    )
-    finalize = AsyncMock(return_value={"agent_id": 202, "status": "draft_ready"})
-    monkeypatch.setattr(nl2agent_app, "finalize_agent", finalize)
-    payload = Nl2AgentFinalizeRequest(
-        business_description="Build an agent",
-        duty_prompt="Help the user",
-        greeting_message="Hello",
-        verification_config={"enabled": False},
-    )
+async def test_action_http_contract_rejects_payload_for_another_action() -> None:
+    app = FastAPI()
+    app.include_router(nl2agent_app.router)
 
-    await nl2agent_app.finalize_agent_api(202, payload, MagicMock(), None)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/nl2agent/session/202/actions",
+            json={
+                "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+                "action": "save_identity",
+                "expected_revision": 18,
+                "display_text": "Saved",
+                "payload": {"primary_model_id": 7},
+            },
+        )
 
-    verification_config = finalize.await_args.kwargs["verification_config"]
-    assert verification_config["enabled"] is False
-    assert verification_config["strictness"] == "balanced"
-    assert "mode" not in verification_config
+    assert response.status_code == 422
+
+
+def test_old_business_write_routes_are_not_registered() -> None:
+    paths = {
+        route.path
+        for route in nl2agent_app.router.routes
+        if "POST" in (route.methods or set()) or "PUT" in (route.methods or set())
+    }
+
+    assert "/nl2agent/session/{draft_agent_id}/actions" in paths
+    assert not any(
+        fragment in path
+        for path in paths
+        for fragment in (
+            "requirements/",
+            "local-resources",
+            "online-recommendations",
+            "card-delivery",
+            "mcp/install",
+            "bind-tools",
+            "skip-tools",
+            "install-web-skill",
+            "/identity",
+            "/finalize",
+            "/models",
+        )
+    )

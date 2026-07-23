@@ -29,7 +29,7 @@ vi.mock("@/services/nl2agentService", async (importOriginal) => {
     await importOriginal<typeof import("@/services/nl2agentService")>();
   return {
     ...actual,
-    finalizeNl2Agent: vi.fn(),
+    dispatchNl2AgentAction: vi.fn(),
     getNl2AgentSessionState: vi.fn(),
     resumeNl2AgentSession: vi.fn(),
   };

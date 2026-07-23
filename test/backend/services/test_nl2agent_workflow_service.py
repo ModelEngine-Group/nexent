@@ -936,7 +936,7 @@ def test_workflow_action_gate_rejects_completed_stage_actions():
 
 def test_finalize_request_rejects_model_supplied_prompt_template_id():
     with pytest.raises(ValidationError, match="prompt_template_id"):
-        Nl2AgentFinalizeRequest(
+        Nl2AgentFinalizeActionPayload(
             business_description="Draft a concise brief.",
             duty_prompt="Write the brief.",
             greeting_message="What should I summarize?",

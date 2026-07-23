@@ -31,6 +31,7 @@ from agents.nl2agent_session_catalog import (
     complete_online_configuration as complete_online_configuration_state,
     complete_mcp_binding_operation,
     complete_online_installation,
+    confirm_requirements_from_summary,
     confirm_requirements_summary,
     confirm_agent_identity,
     get_nl2agent_session_catalogs,
@@ -67,6 +68,8 @@ from consts.exceptions import (
 )
 from consts.model import (
     AgentInfoRequest,
+    Nl2AgentActionContext,
+    Nl2AgentActionRequest,
 )
 from database.agent_db import (
     create_agent,
@@ -78,16 +81,20 @@ from database.agent_db import (
     update_agent,
 )
 from database.conversation_db import (
+    claim_nl2agent_action_message,
     create_conversation,
     get_conversation,
     get_latest_assistant_message_id,
     get_message,
     get_message_units,
+    get_nl2agent_action_message,
+    update_nl2agent_action_message,
 )
 from database.client import get_db_session
 from database.model_management_db import get_model_records
 from database.nl2agent_session_db import (
     create_nl2agent_session,
+    get_nl2agent_session,
     update_nl2agent_session_status,
 )
 from database.skill_db import (
@@ -113,6 +120,11 @@ from database.remote_mcp_db import (
 from services.mcp_management_service import (
     list_community_mcp_services,
     list_registry_mcp_services,
+)
+from services.nl2agent_action_service import (
+    Nl2AgentActionDependencies,
+    dispatch_nl2agent_action,
+    validate_nl2agent_action_context as validate_action_context_service,
 )
 from services.nl2agent_catalog_service import (
     CatalogDependencies,
@@ -213,7 +225,6 @@ NL2AGENT_AGENT_NAME = "nl2agent"
 DRAFT_AGENT_NAME_PREFIX = "draft_"
 
 NL2AGENT_CHAT_INJECTION_TEXT = (
-    "[[NL2AGENT_AUTO_CONTINUE]]\n"
     "The previous card action completed successfully. Re-read the authoritative "
     "Current Session state and continue naturally from the next incomplete stage. "
     "Do not ask the user to type continue."
@@ -313,6 +324,67 @@ async def start_session(user_id: str, tenant_id: str, language: str) -> Dict[str
         user_id=user_id,
         tenant_id=tenant_id,
         language=language,
+    )
+
+
+def _action_dependencies() -> Nl2AgentActionDependencies:
+    """Compose the sole business-action dispatcher from focused domain services."""
+    return Nl2AgentActionDependencies(
+        get_session=get_nl2agent_session,
+        get_action_message=get_nl2agent_action_message,
+        claim_action_message=claim_nl2agent_action_message,
+        update_action_message=update_nl2agent_action_message,
+        summarize_workflow_state=summarize_workflow_state,
+        get_session_catalogs=get_nl2agent_session_catalogs,
+        confirm_requirements=confirm_requirements_from_summary,
+        save_model_selection=select_models,
+        apply_local_resources=apply_local_resources_batch,
+        skip_local_resources=skip_local_resource_recommendations,
+        install_mcp=install_recommended_mcp,
+        bind_mcp_tools=bind_mcp_tools,
+        skip_mcp_tools=skip_mcp_tool_binding,
+        install_web_skill=install_web_skill,
+        complete_online_configuration=confirm_online_resource_configuration,
+        save_identity=save_agent_identity,
+        finalize=finalize_agent,
+    )
+
+
+async def dispatch_action(
+    draft_agent_id: int,
+    request: Nl2AgentActionRequest,
+    tenant_id: str,
+    user_id: str,
+    locale: str,
+) -> Dict[str, Any]:
+    """Dispatch one authenticated action through the unified service."""
+    return await dispatch_nl2agent_action(
+        _action_dependencies(),
+        draft_agent_id=draft_agent_id,
+        request=request,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        locale=locale,
+    )
+
+
+def validate_nl2agent_action_context(
+    *,
+    context: Nl2AgentActionContext,
+    draft_agent_id: int,
+    conversation_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> str:
+    """Return the model-facing context for one durable applied action."""
+    return validate_action_context_service(
+        get_session=get_nl2agent_session,
+        get_action_message=get_nl2agent_action_message,
+        context=context,
+        draft_agent_id=draft_agent_id,
+        conversation_id=conversation_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
 
 

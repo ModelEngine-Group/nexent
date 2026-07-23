@@ -39,6 +39,7 @@ describe("persisted NL2AGENT card state", () => {
     });
     vi.mocked(getNl2AgentSessionState).mockResolvedValue({
       agent_id: 202,
+      revision: 18,
       business_logic_model_id: 7,
       model_ids: [7, 8],
       models: [
@@ -104,6 +105,7 @@ describe("persisted NL2AGENT card state", () => {
         <ModelSelectionCard agentId={202} />
         <WebMcpCard
           agentId={202}
+          recommendationBatchId="mcp_batch"
           item={{
             recommendation_id: "registry:github",
             name: "GitHub",
@@ -123,11 +125,11 @@ describe("persisted NL2AGENT card state", () => {
           agentId={202}
           recommendationBatchId="skill_batch"
           resourceType="skill"
-          itemKeys={["skill:12"]}
-          registrationEnabled={false}
         >
           <WebSkillCard
             agentId={202}
+            recommendationBatchId="skill_batch"
+            itemKey="skill:12"
             item={{
               name: "search-web-tavily",
               skill_name: "search-web-tavily",

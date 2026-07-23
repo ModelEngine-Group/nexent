@@ -4,10 +4,7 @@ import React from "react";
 import { Alert, Button, Spin, message } from "antd";
 import { useTranslation } from "react-i18next";
 
-import {
-  completeOnlineResourceConfiguration,
-  type Nl2AgentSessionState,
-} from "@/services/nl2agentService";
+import type { Nl2AgentSessionState } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
@@ -88,21 +85,19 @@ export const OnlineConfigurationBar: React.FC<{
     if (!agentId) return;
     try {
       await lifecycle.execute(
-        () => completeOnlineResourceConfiguration(agentId),
+        {
+          action: "complete_online_configuration",
+          display_text: t("nl2agent.action.completeOnlineConfiguration", {
+            defaultValue:
+              "Online resource configuration completed: {{batchCount}} batch(es)",
+            batchCount: batches.length,
+          }),
+          payload: {},
+        },
         {
           onSuccess: () => {
             message.success("Online resource configuration completed.");
           },
-          notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text ?? undefined,
-          userAction: (result) => ({
-            action: "complete_online_configuration",
-            displayText: t("nl2agent.action.completeOnlineConfiguration", {
-              defaultValue:
-                "Online resource configuration completed: {{batchCount}} batch(es)",
-              batchCount: result.completed_batch_ids.length,
-            }),
-          }),
         }
       );
     } catch (error) {

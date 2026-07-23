@@ -41,7 +41,6 @@ from database.conversation_db import (
 )
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
-from agents.agent_run_manager import agent_run_manager
 from services.nl2agent_session_lifecycle_service import (
     abandon_session_by_conversation,
 )
@@ -234,21 +233,11 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
-    action = getattr(request, "nl2agent_user_action", None)
-    message_content = action.display_text if action else request.query
-    message_type = "nl2agent_action" if action else "chat"
-    message_metadata = (
-        {"action_id": str(action.action_id), "action": action.action}
-        if action
-        else {}
-    )
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
         message_idx=user_role_count * 2,
         role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=message_content)],
-        message_type=message_type,
-        message_metadata=message_metadata,
+        message=[MessageUnit(type="string", content=request.query)],
         minio_files=request.minio_files,
     )
     save_message(

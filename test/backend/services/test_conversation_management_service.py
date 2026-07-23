@@ -197,7 +197,7 @@ import json
 import asyncio
 import os
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 # Environment variables are now configured in conftest.py
 
@@ -383,17 +383,18 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.message_metadata, {})
 
     @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user_action(self, mock_save_message):
-        """Structured NL2AGENT actions persist their display text and identity."""
-        action = types.SimpleNamespace(
-            action_id="2f8567b1-7080-4d7e-9f57-fac9db39cd20",
-            action="confirm_requirements",
-            display_text="Requirements confirmed",
-        )
+    def test_save_conversation_user_does_not_duplicate_action_receipts(self, mock_save_message):
+        """Action receipts are owned by the dispatcher, not this generic saver."""
         agent_request = AgentRequest(
             conversation_id=123,
-            query="internal directive",
-            nl2agent_user_action=action,
+            query="Requirements confirmed",
+            draft_agent_id=7,
+            nl2agent_action_context={
+                "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
+                "action": "confirm_requirements",
+                "display_text": "Requirements confirmed",
+                "workflow_revision": 4,
+            },
             minio_files=[],
             history=[],
         )
@@ -402,14 +403,8 @@ class TestConversationManagementService(unittest.TestCase):
 
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "Requirements confirmed")
-        self.assertEqual(request_arg.message_type, "nl2agent_action")
-        self.assertEqual(
-            request_arg.message_metadata,
-            {
-                "action_id": "2f8567b1-7080-4d7e-9f57-fac9db39cd20",
-                "action": "confirm_requirements",
-            },
-        )
+        self.assertEqual(request_arg.message_type, "chat")
+        self.assertEqual(request_arg.message_metadata, {})
 
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
@@ -928,13 +923,20 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_message.assert_called_once_with(123, 2)
 
     # Tests for generate_conversation_title_service
+    @patch(
+        'backend.services.conversation_management_service.asyncio.to_thread',
+        new_callable=AsyncMock,
+    )
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
-    def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm):
+    def test_generate_conversation_title_service(
+        self, mock_update_title, mock_call_llm, mock_to_thread
+    ):
         """Test generate_conversation_title_service generates title from question."""
         # Setup
         mock_call_llm.return_value = "Python Tips"
         mock_update_title.return_value = True
+        mock_to_thread.side_effect = lambda function, *args: function(*args)
 
         # Execute
         import asyncio
@@ -1609,8 +1611,8 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
         self.assertEqual(search_item["message_id"], 1)
 
     @patch('backend.services.conversation_management_service.get_conversation')
-    @patch('backend.services.conversation_management_service.get_source_searches_by_message')
-    @patch('backend.services.conversation_management_service.get_source_images_by_message')
+    @patch('backend.services.conversation_management_service.get_source_searches_by_conversation')
+    @patch('backend.services.conversation_management_service.get_source_images_by_conversation')
     def test_no_message_id_uses_conversation_id(self, mock_get_images, mock_get_searches, mock_get_conv):
         """When message_id is None but conversation_id is provided."""
         mock_get_conv.return_value = {"conversation_id": 123}
@@ -1634,11 +1636,18 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
 class TestGenerateConversationTitleServiceEdgeCases(unittest.TestCase):
     """Test edge cases for generate_conversation_title_service."""
 
+    @patch(
+        'backend.services.conversation_management_service.asyncio.to_thread',
+        new_callable=AsyncMock,
+    )
     @patch('backend.services.conversation_management_service.update_conversation_title')
     @patch('backend.services.conversation_management_service.call_llm_for_title')
-    def test_title_generation_exception(self, mock_call_llm, mock_update_title):
+    def test_title_generation_exception(
+        self, mock_call_llm, mock_update_title, mock_to_thread
+    ):
         """Should re-raise exception when title generation fails."""
         mock_call_llm.side_effect = Exception("LLM error")
+        mock_to_thread.side_effect = lambda function, *args: function(*args)
         from backend.services.conversation_management_service import generate_conversation_title_service
         import asyncio
 

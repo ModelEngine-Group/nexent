@@ -1,12 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button } from "antd";
 import { useAuiState } from "@assistant-ui/react";
 import type { SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
 
 import { tryRenderNl2AgentCard } from "./index";
-import { parseNl2AgentCard } from "./cardValidation";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 
 export const resolveNl2AgentPersistedMessageId = (
@@ -31,37 +28,12 @@ export const Nl2AgentFenceRenderer = ({
   code,
 }: SyntaxHighlighterProps) => {
   const workflow = useNl2AgentWorkflow();
-  const { agentId, editable, reportRenderedCard } = workflow;
-  const messageIdValue = useAuiState((s) => s.message.id);
-  const persistedMessageIdValue = useAuiState(
-    (s) => s.message.metadata.custom.persistedMessageId
-  );
+  const { agentId, editable } = workflow;
   const complete = useAuiState((s) => s.message.status?.type === "complete");
   const latest = useAuiState(
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
-  const messageId = resolveNl2AgentPersistedMessageId(
-    persistedMessageIdValue,
-    messageIdValue
-  );
-  const validation = useMemo(
-    () => parseNl2AgentCard(language, code, agentId),
-    [agentId, code, language]
-  );
-  const card = validation.cards[0];
   const interactive = complete && latest && editable;
-  const registrationEnabled = interactive && messageId !== undefined;
-
-  const onRegistered = useCallback(async () => {
-    if (!card || messageId === undefined) return;
-    await reportRenderedCard(messageId, card);
-  }, [card, messageId, reportRenderedCard]);
-
-  useEffect(() => {
-    if (!registrationEnabled || !card || card.requiresRegistration) return;
-    if (messageId === undefined) return;
-    void reportRenderedCard(messageId, card).catch(() => undefined);
-  }, [card, messageId, registrationEnabled, reportRenderedCard]);
 
   if (!complete) {
     return (
@@ -71,13 +43,7 @@ export const Nl2AgentFenceRenderer = ({
     );
   }
 
-  const rendered = tryRenderNl2AgentCard(
-    language,
-    code,
-    agentId,
-    onRegistered,
-    registrationEnabled
-  );
+  const rendered = tryRenderNl2AgentCard(language, code, agentId);
   if (!rendered) return null;
   return (
     <div
@@ -140,65 +106,4 @@ export const nl2AgentComponentsByLanguage = Object.fromEntries(
   })
 );
 
-export const Nl2AgentMessageLifecycle = () => {
-  const workflow = useNl2AgentWorkflow();
-  const { active, busy, continueWithText, processCompletedMessage } = workflow;
-  const [manualRetryText, setManualRetryText] = useState<string>();
-  const messageIdValue = useAuiState((s) => s.message.id);
-  const persistedMessageIdValue = useAuiState(
-    (s) => s.message.metadata.custom.persistedMessageId
-  );
-  const complete = useAuiState((s) => s.message.status?.type === "complete");
-  const latest = useAuiState(
-    (s) => s.thread.messages.at(-1)?.id === s.message.id
-  );
-  const text = useAuiState((s) =>
-    s.message.content
-      .filter((part) => part.type === "text")
-      .map((part) => (part.type === "text" ? part.text : ""))
-      .join("")
-  );
-
-  useEffect(() => {
-    const messageId = resolveNl2AgentPersistedMessageId(
-      persistedMessageIdValue,
-      messageIdValue
-    );
-    if (!active || !complete || !latest || messageId === undefined) {
-      return;
-    }
-    void processCompletedMessage(messageId, text)
-      .then(setManualRetryText)
-      .catch(() => undefined);
-  }, [
-    active,
-    complete,
-    latest,
-    messageIdValue,
-    persistedMessageIdValue,
-    processCompletedMessage,
-    text,
-  ]);
-
-  if (!manualRetryText) return null;
-  return (
-    <Alert
-      className="mt-2"
-      type="warning"
-      showIcon
-      title="The configuration card could not be rendered."
-      action={
-        <Button
-          size="small"
-          disabled={busy}
-          onClick={() => {
-            setManualRetryText(undefined);
-            void continueWithText(manualRetryText);
-          }}
-        >
-          Regenerate
-        </Button>
-      }
-    />
-  );
-};
+export const Nl2AgentMessageLifecycle = () => null;

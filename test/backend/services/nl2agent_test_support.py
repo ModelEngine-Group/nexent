@@ -21,7 +21,7 @@ from consts.exceptions import (
     Nl2AgentValidationError,
     Nl2AgentWorkflowConflictError,
 )
-from consts.model import Nl2AgentFinalizeRequest
+from consts.model import Nl2AgentFinalizeActionPayload
 from consts.nl2agent_response import (
     Nl2AgentApplyLocalResourcesResponse,
     Nl2AgentFinalizeResponse,

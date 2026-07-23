@@ -261,6 +261,50 @@ def register_requirements_summary(
     return _mutate_session_state(tenant, draft_id, mutate)
 
 
+def confirm_requirements_from_summary(
+    tenant_id: Optional[str],
+    draft_agent_id: Optional[int],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Register and confirm the visible requirements summary in one CAS mutation."""
+    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    normalized_summary = {
+        field_name: _normalize_requirement_text(summary.get(field_name))
+        for field_name in _REQUIREMENTS_FIELDS
+    }
+    missing_fields = [
+        field_name
+        for field_name, field_value in normalized_summary.items()
+        if not field_value
+    ]
+    if missing_fields:
+        raise Nl2AgentSessionCatalogError(
+            "Requirements summary fields cannot be empty: " + ", ".join(missing_fields)
+        )
+    fingerprint = _requirements_fingerprint(normalized_summary)
+
+    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
+        allowed_actions = evaluate_workflow(state).allowed_actions
+        if not ({"render_requirements_summary", "confirm_requirements"} & set(allowed_actions)):
+            raise Nl2AgentSessionCatalogError(
+                "Requirements cannot be confirmed during the current workflow stage."
+            )
+        current = state.requirements_review
+        if current.status != "collecting" and current.fingerprint != fingerprint:
+            raise Nl2AgentSessionCatalogError(
+                "The requirements summary changed after this action was prepared."
+            )
+        state.requirements_review = RequirementsReview(
+            status="confirmed",
+            summary=normalized_summary,
+            fingerprint=fingerprint,
+        )
+        _finish_revision(state)
+        return state.requirements_review.model_dump(mode="json")
+
+    return _mutate_session_state(tenant, draft_id, mutate)
+
+
 def classify_requirements_message_intent(text: str) -> str:
     """Classify a pending-review message without confirming from chat text."""
     normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
@@ -958,7 +1002,7 @@ def resolve_recommendation_batch(
             )
         if batch.status == "skipped":
             return _recommendation_batch_response(batch)
-        if batch.status != "presented":
+        if batch.status not in {"searched", "presented"}:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch is already being applied or resolved."
             )
@@ -1015,7 +1059,7 @@ def reserve_recommendation_batch_apply(
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch is already resolved."
             )
-        if batch.status != "presented":
+        if batch.status not in {"searched", "presented"}:
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch is already resolved."
             )

@@ -6,12 +6,12 @@ type Nl2AgentApiSchemas = Nl2AgentApiComponents["schemas"];
 type WithOptionalAgentId = { agent_id?: number };
 
 export type RequirementsSummaryCardPayload =
-  Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"] &
+  Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryPayload"] &
     WithOptionalAgentId;
 
 export const toRequirementsSummaryRequest = (
   payload: RequirementsSummaryCardPayload
-): Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryRequest"] => ({
+): Nl2AgentApiSchemas["Nl2AgentRequirementsSummaryPayload"] => ({
   goal: payload.goal,
   audience_or_scenario: payload.audience_or_scenario,
   primary_input: payload.primary_input,
@@ -95,7 +95,7 @@ export interface AgentIdentityCardPayload extends WithOptionalAgentId {
 }
 
 export type FinalizeVerificationConfig = NonNullable<
-  Nl2AgentApiSchemas["Nl2AgentFinalizeRequest"]["verification_config"]
+  Nl2AgentApiSchemas["Nl2AgentFinalizeActionPayload"]["verification_config"]
 > & { enabled: boolean };
 
 export interface FinalReviewCardPayload extends WithOptionalAgentId {

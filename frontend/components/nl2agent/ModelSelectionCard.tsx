@@ -3,10 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Select, Spin, message } from "antd";
 import { useTranslation } from "react-i18next";
-import {
-  getAvailablePlatformLlms,
-  selectNl2AgentModels,
-} from "@/services/nl2agentService";
+import { getAvailablePlatformLlms } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
@@ -70,30 +67,28 @@ export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
 
   const save = async () => {
     if (!primary) return message.warning("Select a primary LLM.");
+    const fallbackModelIds = fallbacks.filter((id) => id !== primary);
+    const selectedNames = [primary, ...fallbackModelIds]
+      .map((id) => models.find((model) => model.id === id)?.displayName)
+      .filter((name): name is string => Boolean(name));
     try {
       await lifecycle.execute(
-        () =>
-          selectNl2AgentModels(
-            agentId,
-            primary,
-            fallbacks.filter((id) => id !== primary)
-          ),
+        {
+          action: "save_model_selection",
+          display_text: t("nl2agent.action.saveModelSelection", {
+            defaultValue: "Models selected: {{models}}",
+            models: selectedNames.join(", "),
+          }),
+          payload: {
+            primary_model_id: primary,
+            fallback_model_ids: fallbackModelIds,
+          },
+        },
         {
           onSuccess: () => {
             setSaved(true);
             message.success("LLM selection saved.");
           },
-          notifyStateChanged: true,
-          continuationText: (result) => result.chat_injection_text ?? undefined,
-          userAction: (result) => ({
-            action: "save_model_selection",
-            displayText: t("nl2agent.action.saveModelSelection", {
-              defaultValue: "Models selected: {{models}}",
-              models: result.models
-                .map((model) => model.display_name)
-                .join(", "),
-            }),
-          }),
         }
       );
     } catch (error) {

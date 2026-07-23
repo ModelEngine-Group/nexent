@@ -8,7 +8,6 @@ import { useRouter } from "next/navigation";
 import { useParams } from "next/navigation";
 
 import {
-  finalizeNl2Agent,
   getNl2AgentSessionState,
   Nl2AgentRequestError,
   type Nl2AgentSessionState,
@@ -18,6 +17,7 @@ import type {
   FinalizeVerificationConfig,
 } from "./cardPayloadTypes";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
+import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
 export type { FinalizeCardData } from "./cardPayloadTypes";
 
@@ -162,6 +162,7 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const params = useParams<{ locale: string }>();
   const locale = params?.locale || "en";
   const workflow = useNl2AgentWorkflow();
+  const lifecycle = useNl2AgentCardLifecycle(`finalize:${data.agent_id}`);
   const [loading, setLoading] = useState(false);
   const [sessionState, setSessionState] = useState<Nl2AgentSessionState | null>(
     null
@@ -213,23 +214,40 @@ export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
   const handlePublish = async () => {
     setLoading(true);
     try {
-      await finalizeNl2Agent(agentId, {
-        description: data.description,
-        business_description: data.business_description,
-        duty_prompt: data.duty_prompt,
-        constraint_prompt: data.constraint_prompt,
-        few_shots_prompt: data.few_shots_prompt,
-        greeting_message: data.greeting_message,
-        example_questions: data.example_questions ?? [],
-        max_steps: data.max_steps,
-        requested_output_tokens: data.requested_output_tokens,
-        provide_run_summary: data.provide_run_summary,
-        verification_config: data.verification_config,
-        enable_context_manager: data.enable_context_manager,
-      });
-      workflow.notifyStateChanged();
-      message.success(
-        t("nl2agent.finalize.published", "Configuration applied successfully!")
+      await lifecycle.execute(
+        {
+          action: "finalize",
+          display_text: t(
+            "nl2agent.action.finalize",
+            "Agent configuration applied"
+          ),
+          payload: {
+            description: data.description,
+            business_description: data.business_description,
+            duty_prompt: data.duty_prompt,
+            constraint_prompt: data.constraint_prompt,
+            few_shots_prompt: data.few_shots_prompt,
+            greeting_message: data.greeting_message,
+            example_questions: data.example_questions ?? [],
+            max_steps: data.max_steps,
+            requested_output_tokens: data.requested_output_tokens,
+            provide_run_summary: data.provide_run_summary,
+            verification_config: data.verification_config,
+            enable_context_manager: data.enable_context_manager,
+          },
+        },
+        {
+          continueAfterSuccess: false,
+          onSuccess: async () => {
+            await loadState();
+            message.success(
+              t(
+                "nl2agent.finalize.published",
+                "Configuration applied successfully!"
+              )
+            );
+          },
+        }
       );
     } catch (error: unknown) {
       message.error(

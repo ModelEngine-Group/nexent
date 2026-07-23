@@ -5,9 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, message as AntMessage } from "antd";
 import { Download, CheckCircle2, Loader2 } from "lucide-react";
 import {
-  installWebSkill,
   getWebSkillConfiguration,
-  type Nl2AgentInstallWebSkillPayload,
   type Nl2AgentWebSkillConfiguration,
 } from "@/services/nl2agentService";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
@@ -19,6 +17,8 @@ export type { WebSkillCardItem } from "./cardPayloadTypes";
 
 export interface WebSkillCardProps {
   agentId: number;
+  recommendationBatchId: string;
+  itemKey: string;
   item: WebSkillCardItem;
 }
 
@@ -32,6 +32,8 @@ export interface WebSkillCardProps {
  */
 export const WebSkillCard: React.FC<WebSkillCardProps> = ({
   agentId,
+  recommendationBatchId,
+  itemKey,
   item,
 }) => {
   const workflow = useNl2AgentWorkflow();
@@ -84,25 +86,32 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
 
   const performInstall = async (configValues: Record<string, unknown>) => {
     try {
-      const payload: Nl2AgentInstallWebSkillPayload = {
-        skill_name: item.skill_name || item.name,
-        config_values: configValues,
-      };
-      if (typeof item.skill_id === "number" && item.skill_id > 0) {
-        payload.skill_id = item.skill_id;
-      }
-      await lifecycle.execute(() => installWebSkill(agentId, payload), {
-        onSuccess: () => {
-          AntMessage.success(
-            t("nl2agent.webSkill.installed", {
-              defaultValue: 'Skill "{{name}}" installed.',
-              name: item.name,
-            })
-          );
-          setInstalled(true);
+      await lifecycle.execute(
+        {
+          action: "install_web_skill",
+          display_text: t("nl2agent.action.installWebSkill", {
+            defaultValue: "Skill installed: {{name}}",
+            name: item.name,
+          }),
+          payload: {
+            recommendation_batch_id: recommendationBatchId,
+            item_key: itemKey,
+            config_values: configValues,
+          },
         },
-        notifyStateChanged: true,
-      });
+        {
+          onSuccess: () => {
+            AntMessage.success(
+              t("nl2agent.webSkill.installed", {
+                defaultValue: 'Skill "{{name}}" installed.',
+                name: item.name,
+              })
+            );
+            setInstalled(true);
+          },
+          continueAfterSuccess: false,
+        }
+      );
       return true;
     } catch (error) {
       AntMessage.error(

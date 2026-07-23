@@ -69,10 +69,7 @@ import {
   type VerificationPresentation,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
-import {
-  isNl2AgentAutoContinueText,
-  parseNl2AgentUserAction,
-} from "@/lib/chat/nl2agentContinuation";
+import { parseNl2AgentActionContext } from "@/lib/chat/nl2agentContinuation";
 import { Nl2AgentMessageLifecycle } from "@/components/nl2agent/Nl2AgentFenceRenderer";
 import { useNl2AgentWorkflow } from "@/components/nl2agent/Nl2AgentWorkflowContext";
 import {
@@ -359,15 +356,10 @@ const ThreadMessages: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
     <ThreadPrimitive.Messages>
       {({ message }) => {
         if (message.role === "user") {
-          const nl2agentUserAction = parseNl2AgentUserAction(
-            message.metadata?.custom?.nl2agentUserAction
+          const nl2agentActionContext = parseNl2AgentActionContext(
+            message.metadata?.custom?.nl2agentActionContext
           );
-          if (nl2agentUserAction) return <Nl2AgentUserActionMessage />;
-          const text = message.content
-            .filter((part) => part.type === "text")
-            .map((part) => (part.type === "text" ? part.text : ""))
-            .join("");
-          if (isNl2AgentAutoContinueText(text)) return null;
+          if (nl2agentActionContext) return <Nl2AgentActionMessage />;
           return <UserMessage />;
         }
         return <AssistantMessage agent={agent} />;
@@ -684,7 +676,7 @@ const UserMessage: FC = () => {
 
 const PlainText: TextMessagePartComponent = ({ text }) => <>{text}</>;
 
-const Nl2AgentUserActionMessage: FC = () => (
+const Nl2AgentActionMessage: FC = () => (
   <MessagePrimitive.Root
     data-slot="aui_nl2agent-action-message-root"
     data-role="user"

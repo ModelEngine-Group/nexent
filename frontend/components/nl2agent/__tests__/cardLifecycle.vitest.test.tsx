@@ -1,13 +1,30 @@
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  dispatchNl2AgentAction,
+  getNl2AgentSessionState,
+  type Nl2AgentActionDraft,
+} from "@/services/nl2agentService";
 import {
   type Nl2AgentContinuationRequest,
   Nl2AgentWorkflowProvider,
   useNl2AgentWorkflow,
 } from "../Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "../useNl2AgentCardLifecycle";
+
+vi.mock("@/services/nl2agentService", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/nl2agentService")>()),
+  dispatchNl2AgentAction: vi.fn(),
+  getNl2AgentSessionState: vi.fn(),
+}));
+
+const action: Nl2AgentActionDraft = {
+  action: "save_identity",
+  display_text: "Agent name saved: Research Agent",
+  payload: { display_name: "Research Agent" },
+};
 
 const wrapperFor = (
   onContinue: (request: Nl2AgentContinuationRequest) => Promise<void>
@@ -16,6 +33,7 @@ const wrapperFor = (
     return (
       <Nl2AgentWorkflowProvider
         enabled
+        agentId={54}
         scopeKey="conversation:1:draft:54"
         onContinue={onContinue}
       >
@@ -25,174 +43,143 @@ const wrapperFor = (
   };
 
 const useLifecycleWithWorkflow = () => ({
-  lifecycle: useNl2AgentCardLifecycle("models:54"),
+  lifecycle: useNl2AgentCardLifecycle("identity:54"),
   workflow: useNl2AgentWorkflow(),
 });
 
 describe("useNl2AgentCardLifecycle", () => {
-  it("balances busy state and triggers continuation after success", async () => {
-    const onContinue = vi.fn(async () => undefined);
-    let resolveAction:
-      ((value: { chat_injection_text: string }) => void) | undefined;
-    const action = vi.fn(
-      () =>
-        new Promise<{ chat_injection_text: string }>((resolve) => {
-          resolveAction = resolve;
-        })
-    );
-    const { result } = renderHook(useLifecycleWithWorkflow, {
-      wrapper: wrapperFor(onContinue),
-    });
-
-    let execution: Promise<unknown> | undefined;
-    act(() => {
-      execution = result.current.lifecycle.execute(action, {
-        blockInput: true,
-        continuationText: (value) => value.chat_injection_text,
-      });
-    });
-    expect(result.current.lifecycle.pending).toBe(true);
-    expect(result.current.workflow.busy).toBe(true);
-
-    await act(async () => {
-      resolveAction?.({ chat_injection_text: "[[NL2AGENT_AUTO_CONTINUE]]" });
-      await execution;
-    });
-
-    expect(result.current.lifecycle.pending).toBe(false);
-    expect(result.current.workflow.busy).toBe(false);
-    expect(onContinue).toHaveBeenCalledOnce();
-    expect(onContinue).toHaveBeenCalledWith({
-      kind: "automatic",
-      text: "[[NL2AGENT_AUTO_CONTINUE]]",
-    });
+  beforeEach(() => {
+    vi.mocked(getNl2AgentSessionState).mockReset();
+    vi.mocked(getNl2AgentSessionState).mockResolvedValue({
+      agent_id: 54,
+      revision: 18,
+      models: [],
+      tools: [],
+      skills: [],
+      local_tool_parameter_schemas: {},
+      invalid_references: [],
+      resource_review: { recommendations: {}, mcp_workflows: {} },
+    } as never);
+    vi.mocked(dispatchNl2AgentAction).mockReset();
   });
 
-  it("records a successful card action as a structured user continuation", async () => {
+  it("dispatches one revision-bound action and continues with its durable context", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => "action-123" });
     const onContinue = vi.fn(async () => undefined);
-    const action = vi.fn(async () => ({
-      chat_injection_text: "[[NL2AGENT_AUTO_CONTINUE]] models saved",
-      modelNames: ["GPT-5", "Embedding V3"],
-    }));
+    vi.mocked(dispatchNl2AgentAction).mockResolvedValue({
+      action_id: "action-123",
+      action: "save_identity",
+      status: "applied",
+      workflow_revision: 19,
+      result: { display_name: "Research Agent" },
+    });
     const { result } = renderHook(useLifecycleWithWorkflow, {
       wrapper: wrapperFor(onContinue),
     });
+    await waitFor(() =>
+      expect(result.current.workflow.sessionState).toBeTruthy()
+    );
 
     await act(async () => {
-      await result.current.lifecycle.execute(action, {
-        continuationText: (value) => value.chat_injection_text,
-        userAction: (value) => ({
-          action: "save_model_selection",
-          displayText: `Saved models: ${value.modelNames.join(", ")}`,
-        }),
-      });
+      await result.current.lifecycle.execute(action);
     });
 
+    expect(dispatchNl2AgentAction).toHaveBeenCalledWith(54, {
+      ...action,
+      action_id: "action-123",
+      expected_revision: 18,
+    });
     expect(onContinue).toHaveBeenCalledWith({
-      kind: "user_action",
-      text: "[[NL2AGENT_AUTO_CONTINUE]] models saved",
-      action: {
+      kind: "action",
+      context: {
         actionId: "action-123",
-        action: "save_model_selection",
-        displayText: "Saved models: GPT-5, Embedding V3",
+        action: "save_identity",
+        displayText: "Agent name saved: Research Agent",
+        workflowRevision: 19,
       },
     });
     vi.unstubAllGlobals();
   });
 
-  it("does not record a user action when the card operation fails", async () => {
-    const onContinue = vi.fn(async () => undefined);
-    const action = vi.fn(async () => {
-      throw new Error("save failed");
-    });
-    const { result } = renderHook(useLifecycleWithWorkflow, {
-      wrapper: wrapperFor(onContinue),
-    });
-
-    await act(async () => {
-      await expect(
-        result.current.lifecycle.execute(action, {
-          continuationText: () => "[[NL2AGENT_AUTO_CONTINUE]]",
-          userAction: () => ({
-            action: "save_model_selection",
-            displayText: "Saved models",
-          }),
-        })
-      ).rejects.toThrow("save failed");
-    });
-
-    expect(onContinue).not.toHaveBeenCalled();
-  });
-
-  it("keeps a failed action retryable", async () => {
-    const action = vi
-      .fn<() => Promise<{ ok: boolean }>>()
+  it("keeps the same action_id when a failed request is retried", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "stable-action" });
+    vi.mocked(dispatchNl2AgentAction)
       .mockRejectedValueOnce(new Error("temporary failure"))
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce({
+        action_id: "stable-action",
+        action: "save_identity",
+        status: "replayed",
+        workflow_revision: 19,
+        result: {},
+      });
     const { result } = renderHook(useLifecycleWithWorkflow, {
       wrapper: wrapperFor(vi.fn(async () => undefined)),
     });
+    await waitFor(() =>
+      expect(result.current.workflow.sessionState).toBeTruthy()
+    );
 
     await act(async () => {
       await expect(result.current.lifecycle.execute(action)).rejects.toThrow(
         "temporary failure"
       );
     });
-    expect(result.current.lifecycle.error).toBe("temporary failure");
-
     await act(async () => {
-      await result.current.lifecycle.retry();
+      await result.current.lifecycle.execute(action, {
+        continueAfterSuccess: false,
+      });
     });
-    await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
-    expect(result.current.lifecycle.error).toBeUndefined();
+
+    expect(dispatchNl2AgentAction).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(dispatchNl2AgentAction).mock.calls[0][1].action_id).toBe(
+      "stable-action"
+    );
+    expect(vi.mocked(dispatchNl2AgentAction).mock.calls[1][1].action_id).toBe(
+      "stable-action"
+    );
+    vi.unstubAllGlobals();
   });
 
-  it("retains an input blocker after registration failure until retry succeeds", async () => {
-    const action = vi
-      .fn<() => Promise<{ ok: boolean }>>()
-      .mockRejectedValueOnce(new Error("registration unavailable"))
-      .mockResolvedValueOnce({ ok: true });
+  it("balances pending and busy state while a dispatch is in flight", async () => {
+    let resolveAction: ((value: never) => void) | undefined;
+    vi.mocked(dispatchNl2AgentAction).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAction = resolve as (value: never) => void;
+        })
+    );
     const { result } = renderHook(useLifecycleWithWorkflow, {
       wrapper: wrapperFor(vi.fn(async () => undefined)),
     });
+    await waitFor(() =>
+      expect(result.current.workflow.sessionState).toBeTruthy()
+    );
 
-    await act(async () => {
-      await expect(
-        result.current.lifecycle.execute(action, {
-          blockInput: true,
-          retainInputBlockOnError: true,
-        })
-      ).rejects.toThrow("registration unavailable");
+    let execution: Promise<unknown> | undefined;
+    act(() => {
+      execution = result.current.lifecycle.execute(action, {
+        blockInput: true,
+        continueAfterSuccess: false,
+      });
     });
+    expect(result.current.lifecycle.pending).toBe(true);
     expect(result.current.workflow.busy).toBe(true);
 
     await act(async () => {
-      await result.current.lifecycle.retry();
+      resolveAction?.({
+        action_id: "action-1",
+        action: "save_identity",
+        status: "applied",
+        workflow_revision: 19,
+        result: {},
+      } as never);
+      await execution;
     });
+    expect(result.current.lifecycle.pending).toBe(false);
     expect(result.current.workflow.busy).toBe(false);
   });
 
-  it("releases an input blocker for a deterministic registration failure", async () => {
-    const conflict = new Error("workflow conflict");
-    const action = vi.fn<() => Promise<never>>().mockRejectedValue(conflict);
-    const { result } = renderHook(useLifecycleWithWorkflow, {
-      wrapper: wrapperFor(vi.fn(async () => undefined)),
-    });
-
-    await act(async () => {
-      await expect(
-        result.current.lifecycle.execute(action, {
-          blockInput: true,
-          retainInputBlockOnError: (error) => error !== conflict,
-        })
-      ).rejects.toThrow("workflow conflict");
-    });
-
-    expect(result.current.workflow.busy).toBe(false);
-  });
-
-  it("limits failed hidden continuations to two attempts", async () => {
+  it("limits failed structured continuations to two attempts", async () => {
     const onContinue = vi.fn(async () => {
       throw new Error("continuation unavailable");
     });
@@ -201,7 +188,12 @@ describe("useNl2AgentCardLifecycle", () => {
     });
 
     await act(async () => {
-      await result.current.workflow.continueWithText("continue");
+      await result.current.workflow.continueWithAction({
+        actionId: "action-1",
+        action: "save_identity",
+        displayText: "Saved",
+        workflowRevision: 19,
+      });
     });
     await act(async () => {
       await result.current.workflow.retryContinuation();
@@ -214,19 +206,5 @@ describe("useNl2AgentCardLifecycle", () => {
     expect(result.current.workflow.continuationError).toBe(
       "continuation unavailable"
     );
-  });
-
-  it("rejects actions for a card outside the active draft scope", async () => {
-    const { result } = renderHook(useLifecycleWithWorkflow, {
-      wrapper: wrapperFor(vi.fn(async () => undefined)),
-    });
-
-    expect(() =>
-      result.current.workflow.registerOnlineRecommendations(99, {
-        recommendation_batch_id: "batch-a",
-        resource_type: "mcp",
-        item_keys: [],
-      })
-    ).toThrow("does not belong to the active session");
   });
 });

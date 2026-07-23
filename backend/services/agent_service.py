@@ -91,7 +91,6 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
     get_conversation_service,
     get_current_run_user_message_id,
     get_latest_assistant_message,
@@ -3493,13 +3492,18 @@ async def run_agent_stream(
         conversation_id=agent_request.conversation_id,
     )
 
-    nl2agent_user_action = getattr(agent_request, "nl2agent_user_action", None)
-    if is_nl2agent_run and nl2agent_user_action is not None:
-        from services.nl2agent_runtime_service import NL2AGENT_CHAT_INJECTION_TEXT
+    nl2agent_action_context = getattr(agent_request, "nl2agent_action_context", None)
+    if is_nl2agent_run and nl2agent_action_context is not None:
+        from services.nl2agent_runtime_service import validate_nl2agent_action_context
 
-        # The persisted message remains human-readable while the model receives
-        # the server-owned control directive for the authoritative state check.
-        agent_request.query = NL2AGENT_CHAT_INJECTION_TEXT
+        agent_request.query = validate_nl2agent_action_context(
+            context=nl2agent_action_context,
+            draft_agent_id=draft_agent_id,
+            conversation_id=agent_request.conversation_id,
+            tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
+        )
+        skip_user_save = True
     elif is_nl2agent_run:
         from services.nl2agent_runtime_service import process_requirements_revision_text
 

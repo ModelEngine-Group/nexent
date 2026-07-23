@@ -10,7 +10,7 @@ import type { ThreadMessage } from "@assistant-ui/react";
 
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
-import { parseNl2AgentUserAction } from "@/lib/chat/nl2agentContinuation";
+import { parseNl2AgentActionContext } from "@/lib/chat/nl2agentContinuation";
 import log from "@/lib/logger";
 
 // Backend SSE chunk format
@@ -746,10 +746,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     const query =
       lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
-    const lastUserAction =
+    const lastActionContext =
       lastUserIndex >= 0
-        ? parseNl2AgentUserAction(
-            messages[lastUserIndex].metadata?.custom?.nl2agentUserAction
+        ? parseNl2AgentActionContext(
+            messages[lastUserIndex].metadata?.custom?.nl2agentActionContext
           )
         : undefined;
 
@@ -788,11 +788,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: false,
     };
-    if (!isResume && lastUserAction) {
-      requestBody.nl2agent_user_action = {
-        action_id: lastUserAction.actionId,
-        action: lastUserAction.action,
-        display_text: lastUserAction.displayText,
+    if (!isResume && lastActionContext) {
+      requestBody.nl2agent_action_context = {
+        action_id: lastActionContext.actionId,
+        action: lastActionContext.action,
+        display_text: lastActionContext.displayText,
+        workflow_revision: lastActionContext.workflowRevision,
       };
     }
     const numericServerThreadId = Number(serverThreadId);

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated, Optional, Any, List, Dict, Literal
+from typing import Annotated, Optional, Any, List, Dict, Literal, Union
 from uuid import UUID
 
 from pydantic import (
@@ -328,22 +328,30 @@ class ToolParamsRequest(BaseModel):
     )
 
 
-Nl2AgentUserActionType = Literal[
+Nl2AgentActionType = Literal[
     "confirm_requirements",
     "save_model_selection",
     "apply_local_resources",
     "skip_local_resources",
+    "install_mcp",
+    "bind_mcp_tools",
+    "skip_mcp_tools",
+    "install_web_skill",
     "complete_online_configuration",
     "save_identity",
+    "finalize",
 ]
 
 
-class Nl2AgentUserAction(BaseModel):
-    """A persisted user-facing action that advances an NL2AGENT workflow."""
+class Nl2AgentActionContext(BaseModel):
+    """A server-validated action reference used for the next NL2AGENT turn."""
+
+    model_config = ConfigDict(extra="forbid")
 
     action_id: UUID
-    action: Nl2AgentUserActionType
+    action: Nl2AgentActionType
     display_text: str = Field(min_length=1, max_length=500)
+    workflow_revision: int = Field(strict=True, ge=0)
 
 
 class AgentRequest(BaseModel):
@@ -356,7 +364,7 @@ class AgentRequest(BaseModel):
     # Target draft agent being built by NL2AGENT. When set, NL2AGENT builtin
     # tools operate on this draft instead of the running NL2AGENT agent.
     draft_agent_id: Optional[int] = None
-    nl2agent_user_action: Optional[Nl2AgentUserAction] = None
+    nl2agent_action_context: Optional[Nl2AgentActionContext] = None
     model_id: Optional[int] = None
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
@@ -377,9 +385,9 @@ class AgentRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_nl2agent_user_action(self):
+    def validate_nl2agent_action_context(self):
         """Keep structured actions bound to one attachment-free NL2AGENT turn."""
-        action = self.nl2agent_user_action
+        action = self.nl2agent_action_context
         if action is None:
             return self
         if (
@@ -387,11 +395,11 @@ class AgentRequest(BaseModel):
             or isinstance(self.draft_agent_id, bool)
             or self.draft_agent_id <= 0
         ):
-            raise ValueError("nl2agent_user_action requires a valid draft_agent_id")
+            raise ValueError("nl2agent_action_context requires a valid draft_agent_id")
         if self.minio_files:
-            raise ValueError("nl2agent_user_action does not accept attachments")
+            raise ValueError("nl2agent_action_context does not accept attachments")
         if self.query.strip() != action.display_text.strip():
-            raise ValueError("query must match nl2agent_user_action.display_text")
+            raise ValueError("query must match nl2agent_action_context.display_text")
         return self
 
 
@@ -546,8 +554,29 @@ Nl2AgentJsonPositiveIntKey = Annotated[
 ]
 
 
-class Nl2AgentApplyLocalResourcesRequest(_StrictNl2AgentRequest):
-    """Request body for bulk-binding local tools and skills to a draft agent."""
+class Nl2AgentRequirementsSummaryPayload(_StrictNl2AgentRequest):
+    """The five-field requirements summary visible in a confirmation card."""
+
+    goal: str = Field(..., min_length=1, max_length=500)
+    audience_or_scenario: str = Field(..., min_length=1, max_length=500)
+    primary_input: str = Field(..., min_length=1, max_length=1000)
+    expected_output: str = Field(..., min_length=1, max_length=1000)
+    key_constraints: str = Field(..., min_length=1, max_length=2000)
+
+
+class Nl2AgentConfirmRequirementsActionPayload(_StrictNl2AgentRequest):
+    summary: Nl2AgentRequirementsSummaryPayload
+
+
+class Nl2AgentSaveModelSelectionActionPayload(_StrictNl2AgentRequest):
+    primary_model_id: Nl2AgentPositiveInt
+    fallback_model_ids: List[Nl2AgentPositiveInt] = Field(
+        default_factory=list, max_length=4
+    )
+
+
+class Nl2AgentApplyLocalResourcesActionPayload(_StrictNl2AgentRequest):
+    """Select resources only from one server-recorded recommendation batch."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
     tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
@@ -557,114 +586,46 @@ class Nl2AgentApplyLocalResourcesRequest(_StrictNl2AgentRequest):
     )
 
 
-class Nl2AgentRecommendationBatchRequest(_StrictNl2AgentRequest):
-    """Register a local-resource recommendation card rendered by the client."""
-
-    recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
-    tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
-    skill_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
-
-
-class Nl2AgentRecommendationSkipRequest(_StrictNl2AgentRequest):
-    """Explicitly skip one rendered local-resource recommendation batch."""
+class Nl2AgentSkipLocalResourcesActionPayload(_StrictNl2AgentRequest):
+    """Skip one server-recorded local recommendation batch."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
 
 
-class Nl2AgentOnlineRecommendationBatchRequest(_StrictNl2AgentRequest):
-    """Register a rendered MCP or web-Skill recommendation batch."""
+class Nl2AgentInstallMcpActionPayload(_StrictNl2AgentRequest):
+    """Install one MCP recommendation without accepting a client URL."""
 
     recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
-    resource_type: Literal["mcp", "skill"]
-    item_keys: List[Nl2AgentItemKey] = Field(default_factory=list, max_length=100)
-
-
-class Nl2AgentRequirementsSummaryRequest(_StrictNl2AgentRequest):
-    """Register the read-only requirements summary rendered by NL2AGENT."""
-
-    goal: str = Field(..., min_length=1, max_length=500)
-    audience_or_scenario: str = Field(..., min_length=1, max_length=500)
-    primary_input: str = Field(..., min_length=1, max_length=1000)
-    expected_output: str = Field(..., min_length=1, max_length=1000)
-    key_constraints: str = Field(..., min_length=1, max_length=2000)
-
-
-class Nl2AgentRequirementsConfirmRequest(_StrictNl2AgentRequest):
-    """Confirm the currently registered NL2AGENT requirements summary."""
-
-    fingerprint: str = Field(..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
-
-
-class Nl2AgentCardDeliveryRequest(_StrictNl2AgentRequest):
-    """Report final-message rendering success or failure for one NL2AGENT card."""
-
-    message_id: Nl2AgentPositiveInt
-    card_type: Literal[
-        "requirements_summary",
-        "model_selection",
-        "local_resources",
-        "web_mcp",
-        "web_skill",
-        "agent_identity",
-        "final_review",
-    ]
-    status: Literal["rendered", "failed"]
-    card_key: Optional[str] = Field(
-        default=None,
-        max_length=300,
-        description=(
-            "The recommendation_batch_id for local or online resource cards; "
-            "omit for all other card types."
-        ),
-    )
-    reason: Optional[
-        Literal[
-            "truncated_fence",
-            "invalid_json",
-            "invalid_schema",
-            "missing_card",
-        ]
-    ] = None
-
-
-class Nl2AgentModelSelectionRequest(_StrictNl2AgentRequest):
-    """Persist the ordered LLM selection for an NL2AGENT draft."""
-
-    primary_model_id: Nl2AgentPositiveInt
-    fallback_model_ids: List[Nl2AgentPositiveInt] = Field(
-        default_factory=list, max_length=4
-    )
-
-
-class Nl2AgentIdentityRequest(_StrictNl2AgentRequest):
-    """Persist the user-confirmed display name for an NL2AGENT draft."""
-
-    display_name: str = Field(..., min_length=1, max_length=50)
-
-
-class Nl2AgentMcpInstallRequest(_StrictNl2AgentRequest):
-    """Install a recommended MCP using user-confirmed configuration."""
-
-    recommendation_id: str = Field(..., min_length=1, max_length=300)
+    recommendation_id: Nl2AgentItemKey
     option_id: str = Field(default="remote", min_length=1, max_length=100)
     config_values: Dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
-class Nl2AgentMcpBindToolsRequest(_StrictNl2AgentRequest):
-    """Bind selected tools from an installed MCP to an NL2AGENT draft."""
-
+class Nl2AgentBindMcpToolsActionPayload(_StrictNl2AgentRequest):
+    recommendation_id: Nl2AgentItemKey
     tool_ids: List[Nl2AgentPositiveInt] = Field(default_factory=list, max_length=100)
 
 
-class Nl2AgentInstallWebSkillRequest(_StrictNl2AgentRequest):
-    """Request body for installing a single official/web skill into the tenant."""
+class Nl2AgentSkipMcpToolsActionPayload(_StrictNl2AgentRequest):
+    recommendation_id: Nl2AgentItemKey
 
-    skill_id: Optional[Nl2AgentPositiveInt] = None
-    skill_name: Optional[str] = Field(default=None, min_length=1, max_length=300)
+
+class Nl2AgentInstallWebSkillActionPayload(_StrictNl2AgentRequest):
+    """Install one Skill from a server-recorded recommendation batch."""
+
+    recommendation_batch_id: str = Field(..., min_length=1, max_length=128)
+    item_key: Nl2AgentItemKey
     config_values: Dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
-class Nl2AgentFinalizeRequest(_StrictNl2AgentRequest):
+class Nl2AgentEmptyActionPayload(_StrictNl2AgentRequest):
+    """An action with no client-controlled domain identifiers."""
+
+
+class Nl2AgentSaveIdentityActionPayload(_StrictNl2AgentRequest):
+    display_name: str = Field(..., min_length=1, max_length=50)
+
+class Nl2AgentFinalizeActionPayload(_StrictNl2AgentRequest):
     """Unsaved descriptive, prompt, and runtime fields for draft publication."""
 
     description: Optional[str] = Field(default=None, max_length=500)
@@ -696,6 +657,93 @@ class Nl2AgentFinalizeRequest(_StrictNl2AgentRequest):
             return None
         return AgentVerificationConfig.model_validate(value).model_dump()
     enable_context_manager: bool = Field(default=True)
+
+
+class _Nl2AgentActionRequestBase(_StrictNl2AgentRequest):
+    action_id: UUID
+    expected_revision: int = Field(strict=True, ge=0)
+    display_text: str = Field(..., min_length=1, max_length=500)
+
+
+class Nl2AgentConfirmRequirementsActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["confirm_requirements"]
+    payload: Nl2AgentConfirmRequirementsActionPayload
+
+
+class Nl2AgentSaveModelSelectionActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["save_model_selection"]
+    payload: Nl2AgentSaveModelSelectionActionPayload
+
+
+class Nl2AgentApplyLocalResourcesActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["apply_local_resources"]
+    payload: Nl2AgentApplyLocalResourcesActionPayload
+
+
+class Nl2AgentSkipLocalResourcesActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["skip_local_resources"]
+    payload: Nl2AgentSkipLocalResourcesActionPayload
+
+
+class Nl2AgentInstallMcpActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["install_mcp"]
+    payload: Nl2AgentInstallMcpActionPayload
+
+
+class Nl2AgentBindMcpToolsActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["bind_mcp_tools"]
+    payload: Nl2AgentBindMcpToolsActionPayload
+
+
+class Nl2AgentSkipMcpToolsActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["skip_mcp_tools"]
+    payload: Nl2AgentSkipMcpToolsActionPayload
+
+
+class Nl2AgentInstallWebSkillActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["install_web_skill"]
+    payload: Nl2AgentInstallWebSkillActionPayload
+
+
+class Nl2AgentCompleteOnlineConfigurationActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["complete_online_configuration"]
+    payload: Nl2AgentEmptyActionPayload = Field(default_factory=Nl2AgentEmptyActionPayload)
+
+
+class Nl2AgentSaveIdentityActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["save_identity"]
+    payload: Nl2AgentSaveIdentityActionPayload
+
+
+class Nl2AgentFinalizeActionRequest(_Nl2AgentActionRequestBase):
+    action: Literal["finalize"]
+    payload: Nl2AgentFinalizeActionPayload
+
+
+Nl2AgentActionRequest = Annotated[
+    Union[
+        Nl2AgentConfirmRequirementsActionRequest,
+        Nl2AgentSaveModelSelectionActionRequest,
+        Nl2AgentApplyLocalResourcesActionRequest,
+        Nl2AgentSkipLocalResourcesActionRequest,
+        Nl2AgentInstallMcpActionRequest,
+        Nl2AgentBindMcpToolsActionRequest,
+        Nl2AgentSkipMcpToolsActionRequest,
+        Nl2AgentInstallWebSkillActionRequest,
+        Nl2AgentCompleteOnlineConfigurationActionRequest,
+        Nl2AgentSaveIdentityActionRequest,
+        Nl2AgentFinalizeActionRequest,
+    ],
+    Field(discriminator="action"),
+]
+
+
+class Nl2AgentActionResponse(_StrictNl2AgentRequest):
+    action_id: UUID
+    action: Nl2AgentActionType
+    status: Literal["applied", "pending", "replayed"]
+    workflow_revision: int = Field(ge=0)
+    result: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PromptTemplateContentRequest(BaseModel):

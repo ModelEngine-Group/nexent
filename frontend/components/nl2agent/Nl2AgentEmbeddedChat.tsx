@@ -56,20 +56,12 @@ const EmbeddedRuntimeContent = ({
 
   const continueConversation = useCallback(
     async (request: Nl2AgentContinuationRequest) => {
-      const text =
-        request.kind === "user_action"
-          ? request.action.displayText
-          : request.text;
       await runtime.thread.append({
         role: "user",
-        content: [{ type: "text", text }],
-        ...(request.kind === "user_action"
-          ? {
-              metadata: {
-                custom: { nl2agentUserAction: request.action },
-              },
-            }
-          : {}),
+        content: [{ type: "text", text: request.context.displayText }],
+        metadata: {
+          custom: { nl2agentActionContext: request.context },
+        },
         runConfig: runtime.thread.composer.getState().runConfig,
       });
     },

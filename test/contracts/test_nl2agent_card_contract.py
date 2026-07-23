@@ -8,9 +8,9 @@ from jsonschema import Draft7Validator, RefResolver
 import yaml
 
 from consts.model import (
-    Nl2AgentFinalizeRequest,
-    Nl2AgentRecommendationBatchRequest,
-    Nl2AgentRequirementsSummaryRequest,
+    Nl2AgentFinalizeActionPayload,
+    Nl2AgentRequirementsSummaryPayload,
+    Nl2AgentSkipLocalResourcesActionPayload,
 )
 
 
@@ -214,9 +214,9 @@ def _non_null_schema(schema: dict) -> dict:
 
 
 def test_card_constraints_equal_http_model_constraints() -> None:
-    requirements_http = Nl2AgentRequirementsSummaryRequest.model_json_schema()
-    batch_http = Nl2AgentRecommendationBatchRequest.model_json_schema()
-    finalize_http = Nl2AgentFinalizeRequest.model_json_schema()
+    requirements_http = Nl2AgentRequirementsSummaryPayload.model_json_schema()
+    batch_http = Nl2AgentSkipLocalResourcesActionPayload.model_json_schema()
+    finalize_http = Nl2AgentFinalizeActionPayload.model_json_schema()
 
     for field_name in (
         "goal",
