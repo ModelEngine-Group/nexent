@@ -426,9 +426,6 @@ class CoreAgent(CodeAgent):
         # The factory injects exactly one independent runtime.  CoreAgent has
         # no legacy/managed fallback branch and cannot assemble context itself.
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
-        self.context_manager: Any = getattr(
-            self.context_runtime, "context_manager", None
-        )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -645,6 +642,25 @@ Additional Args:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
+    @staticmethod
+    def _ensure_context_within_hard_budget(final_context: Any) -> None:
+        """Stop before the provider call when safe compaction cannot fit input."""
+        evidence = final_context.evidence
+        if evidence.over_hard_budget is True:
+            raise ValueError(
+                "Context input remains over the model hard budget after compaction: "
+                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
+            )
+
+    def _emit_history_summary_event(self) -> None:
+        payload = self.context_runtime.consume_history_summary_event()
+        if isinstance(payload, dict):
+            self.observer.add_message(
+                self.agent_name,
+                ProcessType.HISTORY_SUMMARY,
+                json.dumps(payload, ensure_ascii=False),
+            )
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -659,18 +675,15 @@ Additional Args:
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
-        # is already the COMPRESSED payload, so using it here made save%
-        # structurally ~0%. Use the ContextManager's truly-uncompressed memory
-        # token count (computed in compress_if_needed from the raw memory) as the
-        # baseline; fall back to the (compressed) input size when no
-        # ContextManager is active -- the legacy path does not compress, so 0% is
-        # correct there.
-        uncompressed_tokens = None
-        if self.context_manager is not None:
-            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        # is already the compressed payload, so use the ContextManager's raw
+        # memory token count when compression produced one. When compression is
+        # disabled, the final input size is the correct zero-savings baseline.
+        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
         if uncompressed_tokens:
             self._last_uncompressed_est = uncompressed_tokens
         else:
@@ -871,7 +884,8 @@ Additional Args:
             if postcheck.severity == "warning":
                 self._append_verification_feedback(memory_step, postcheck)
 
-        # Guardrail checkpoint ②: screen tool output; block downgrades to mask (tool already ran), redact before memory. Never raises, never loops.
+        # Guardrail checkpoint ②: screen tool output; block downgrades to mask
+        # because the tool already ran, then redact before memory.
         guardrail_engine = getattr(verification_controller, "guardrail_engine", None) if verification_controller else None
         if guardrail_engine:
             decision = guardrail_engine.check_output(
@@ -884,12 +898,6 @@ Additional Args:
             if decision.effective_action == "mask" and decision.cleaned_content is not None:
                 memory_step.observations = decision.cleaned_content
                 self._append_verification_feedback(memory_step, decision.verification_result)
-
-        # Pre-truncate observations when ContextManager is enabled. Keeps the
-        # head + tail of long outputs around a truncation marker so downstream
-        # compression sees bounded-length step records and the model can still
-        # search/read for the elided portion.
-        self.context_runtime.truncate_observation(memory_step)
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -970,9 +978,13 @@ You have been provided with these additional arguments, that you can access usin
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
-            return self._run_stream(task=self.task, max_steps=max_steps, images=images)
+            return self._run_stream_with_context_evidence(
+                task=self.task, max_steps=max_steps, images=images
+            )
         run_start_time = time.time()
-        steps = list(self._run_stream(task=self.task, max_steps=max_steps, images=images))
+        steps = list(self._run_stream_with_context_evidence(
+            task=self.task, max_steps=max_steps, images=images
+        ))
 
         # Outputs are returned only at the end. We only look at the last step.
         assert isinstance(steps[-1], FinalAnswerStep)
@@ -1012,6 +1024,25 @@ You have been provided with these additional arguments, that you can access usin
             )
 
         return output
+
+    def _run_stream_with_context_evidence(
+        self,
+        *,
+        task: str,
+        max_steps: int,
+        images: list["PIL.Image.Image"] | None = None,
+    ):
+        """Finalize exactly one context evidence record for a complete loop."""
+
+        status = "error"
+        try:
+            yield from self._run_stream(task=task, max_steps=max_steps, images=images)
+            status = "cancelled" if self.stop_event.is_set() else "completed"
+        except GeneratorExit:
+            status = "cancelled"
+            raise
+        finally:
+            self.context_runtime.finalize_evidence(status=status)
 
     def __call__(self, task: str, **kwargs):
         """Adds additional prompting for the managed agent, runs it, and wraps the output.
@@ -1293,6 +1324,8 @@ You have been provided with these additional arguments, that you can access usin
             task=task,
             final_answer_templates=self.prompt_templates,
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
 
         # Create the final memory step with error
@@ -1469,4 +1502,3 @@ You have been provided with these additional arguments, that you can access usin
             )
         except Exception as e:
             self.logger.log(f"Plan finalization failed: {e}", level=LogLevel.WARN)
-

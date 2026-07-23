@@ -1,12 +1,35 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text as sa_text
 
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpMarketRecord
 
 logger = logging.getLogger("market_mcp_db")
+
+
+def _apply_group_permission_filter(query, user_id: str, user_group_ids: List[int]):
+    """Apply group-based visibility filter to a market record query.
+
+    Users see MCPs where:
+    - They are the creator, OR
+    - The MCP has no group restriction (group_ids IS NULL/empty), OR
+    - They belong to at least one of the MCP's allowed groups
+    """
+    conditions = [
+        McpMarketRecord.user_id == user_id,
+        McpMarketRecord.group_ids.is_(None),
+        McpMarketRecord.group_ids == "",
+    ]
+    if user_group_ids:
+        group_ids_str = ",".join(str(g) for g in user_group_ids)
+        conditions.append(
+            sa_text(
+                f"string_to_array(group_ids, ',') && ARRAY[{group_ids_str}]::text[]"
+            )
+        )
+    return query.filter(or_(*conditions))
 
 
 def get_mcp_market_records(
@@ -17,6 +40,8 @@ def get_mcp_market_records(
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
+    user_id: str | None = None,
+    user_group_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """Cursor-paginated listing of shared (approved) market records scoped to a tenant."""
     with get_db_session() as session:
@@ -53,6 +78,9 @@ def get_mcp_market_records(
 
         if cursor_id is not None:
             query = query.filter(McpMarketRecord.market_id < cursor_id)
+
+        if user_id is not None and user_group_ids is not None:
+            query = _apply_group_permission_filter(query, user_id, user_group_ids)
 
         rows: List[McpMarketRecord] = (
             query.order_by(McpMarketRecord.market_id.desc())
@@ -148,6 +176,9 @@ def update_mcp_market_record(
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
     transport_type: str | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     """Update editable fields on a market record (does not change status)."""
     update_fields: Dict[str, Any] = {"updated_by": user_id}
@@ -165,6 +196,12 @@ def update_mcp_market_record(
         update_fields["config_json"] = config_json
     if transport_type is not None:
         update_fields["transport_type"] = transport_type
+    if group_ids is not None:
+        update_fields["group_ids"] = group_ids
+    if ingroup_permission is not None:
+        update_fields["ingroup_permission"] = ingroup_permission
+    if shared_fields is not None:
+        update_fields["shared_fields"] = shared_fields
 
     with get_db_session() as session:
         session.query(McpMarketRecord).filter(

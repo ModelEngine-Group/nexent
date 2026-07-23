@@ -17,6 +17,8 @@ import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
+import type { Skill } from "@/types/agentConfig";
+import type { MyEditableSkillItem } from "@/types/skillRepository";
 
 import { Wrench, RefreshCw, Lightbulb, Plug, BlocksIcon, Globe } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -36,6 +38,9 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
+    null
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
   const [showA2ADiscovery, setShowA2ADiscovery] = useState(false);
@@ -82,6 +87,11 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const handleSkillBuildSuccess = useCallback(() => {
     invalidateSkills();
   }, [invalidateSkills]);
+
+  const handleEditSkill = useCallback((skill: Skill) => {
+    setEditingSkill({ ...skill, repository_info: [] });
+    setIsSkillModalOpen(true);
+  }, []);
 
   return (
     <>
@@ -254,6 +264,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 isCreatingMode={isCreatingMode}
                 currentAgentId={currentAgentId ?? undefined}
                 isReadOnly={isReadOnly}
+                onEditSkill={handleEditSkill}
               />
             </Col>
           </Row>
@@ -279,7 +290,11 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
 
       <SkillBuildModal
         isOpen={isSkillModalOpen}
-        onCancel={() => setIsSkillModalOpen(false)}
+        editingSkill={editingSkill}
+        onCancel={() => {
+          setIsSkillModalOpen(false);
+          setEditingSkill(null);
+        }}
         onSuccess={handleSkillBuildSuccess}
       />
 

@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSkills } from "@/services/agentConfigService";
 import { useMemo } from "react";
 import { Skill, SkillGroup } from "@/types/agentConfig";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useTranslation } from "react-i18next";
 
 const OFFICIAL_SKILL_SOURCES = new Set(["official", "官方"]);
@@ -17,7 +16,6 @@ export function useSkillList(options?: {
   staleTime?: number;
 }) {
   const queryClient = useQueryClient();
-  const { user } = useAuthorizationContext();
   const { t } = useTranslation("common");
 
   const query = useQuery({
@@ -34,14 +32,7 @@ export function useSkillList(options?: {
   });
 
   const skills = query.data ?? [];
-  const currentUserId = user?.id ?? null;
-
-  const availableSkills = useMemo(() => {
-    return skills.filter((skill: Skill) => {
-      if (isOfficialSkill(skill)) return true;
-      return Boolean(currentUserId && skill.created_by === currentUserId);
-    });
-  }, [skills, currentUserId]);
+  const availableSkills = skills;
 
   const groupedSkills = useMemo(() => {
     const groups: SkillGroup[] = [];

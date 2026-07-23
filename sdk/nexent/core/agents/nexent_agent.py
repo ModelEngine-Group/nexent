@@ -1,24 +1,29 @@
-import json
+from __future__ import annotations
+
 import functools
 import inspect
+import json
 import logging
 import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
-
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
-from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
+from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+
+if TYPE_CHECKING:
+    from .context import ContextItemInput
+
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -41,6 +46,11 @@ def _tool_name(tool_obj: Any) -> str:
         or getattr(tool_obj, "__name__", None)
         or type(tool_obj).__name__
     )
+
+
+def _has_host_tools(tools: List[Any]) -> bool:
+    """Return whether the agent has tools marked for host-process execution."""
+    return any(getattr(tool, "_nexent_execute_on_host", False) for tool in tools)
 
 
 def _is_retriever_tool(tool_obj: Any) -> bool:
@@ -143,9 +153,11 @@ class NexentAgent:
                  model_config_list: List[ModelConfig],
                  stop_event: Event,
                  mcp_tool_collection=None,
-                 redis_client=None):
+                 redis_client=None,
+                 sandbox_config=None,
+                 minio_client=None):
         """
-        init the agent create factory
+        Initialize the NexentAgent factory.
 
         Args:
             observer: MessageObserver instance
@@ -153,6 +165,10 @@ class NexentAgent:
             stop_event: Threading event for stop control
             mcp_tool_collection: Optional MCP tool collection
             redis_client: Redis client for plan persistence
+            sandbox_config: Optional SandboxConfig for sandbox isolation.
+                When None, uses LocalPythonExecutor (backwards-compatible).
+            minio_client: Optional MinIO client for output file sync.
+                Required when sandbox_config.auto_sync_outputs is True.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -162,6 +178,8 @@ class NexentAgent:
         self.stop_event = stop_event
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
+        self.sandbox_config = sandbox_config
+        self.minio_client = minio_client
 
         self.agent = None
 
@@ -326,50 +344,42 @@ class NexentAgent:
         params = tool_config.params or {}
 
         if class_name == "RunSkillScriptTool":
-            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
+            from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
             metadata = tool_config.metadata or {}
-            get_run_skill_script_tool(
+            return RunSkillScriptTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 observer=self.observer,
             )
-            from nexent.core.tools.run_skill_script_tool import run_skill_script
-            return run_skill_script
         elif class_name == "ReadSkillMdTool":
-            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
+            from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
             metadata = tool_config.metadata or {}
-            get_read_skill_md_tool(
+            return ReadSkillMdTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.read_skill_md_tool import read_skill_md
-            return read_skill_md
         elif class_name == "WriteSkillFileTool":
-            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+            from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
             metadata = tool_config.metadata or {}
-            get_write_skill_file_tool(
+            return WriteSkillFileTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.write_skill_file_tool import write_skill_file
-            return write_skill_file
         elif class_name == "ReadSkillConfigTool":
-            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+            from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
             metadata = tool_config.metadata or {}
-            get_read_skill_config_tool(
+            return ReadSkillConfigTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.read_skill_config_tool import read_skill_config
-            return read_skill_config
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
             return CreatePlanTool()
@@ -397,11 +407,30 @@ class NexentAgent:
                 tool_obj = self.create_builtin_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
+            if source in {"local", "builtin", "mcp"}:
+                try:
+                    setattr(tool_obj, "_nexent_execute_on_host", True)
+                except (AttributeError, TypeError):
+                    pass
             return tool_obj
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
-    def create_single_agent(self, agent_config: AgentConfig):
+    def create_single_agent(
+        self,
+        agent_config: AgentConfig,
+        _managed_context: bool = False,
+        *,
+        context_items_override: Sequence["ContextItemInput"] | None = None,
+    ) -> CoreAgent:
+        """
+        Build a CoreAgent from ``agent_config``.
+
+        Args:
+            agent_config: AgentConfig describing this agent.
+            _managed_context: Internal flag.  When True, skip sandbox creation so that
+                managed sub-agents share the parent's python_executor (smolagents contract).
+        """
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
 
@@ -431,9 +460,11 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create internal managed agents recursively
+                # Recurse for managed agents.  Mark _managed_context=True so they
+                # do NOT create their own sandbox (smolagents contract: managed
+                # sub-agents share the parent's python_executor).
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config)
+                    self.create_single_agent(sub_agent_config, _managed_context=True)
                     for sub_agent_config in agent_config.managed_agents
                 ]
             except Exception as e:
@@ -455,25 +486,75 @@ class NexentAgent:
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Choose one context runtime at construction time.  The managed and
-            # legacy implementations do not call one another after this point.
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config and ctx_config.enabled:
-                from .agent_context import ContextManager
-                from ..context_runtime.managed.runtime import ManagedContextRuntime
+            # ContextManager is the only production context assembly path.
+            # ContextPolicy controls whether adaptive compaction is active.
+            from .context import ContextManager, ContextManagerConfig, ManagedContextRuntime
 
-                context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps,
-                )
-                context_runtime = ManagedContextRuntime(
-                    context_manager,
-                    components=getattr(agent_config, 'context_components', None) or [],
-                )
-            else:
-                from ..context_runtime.legacy.runtime import LegacyContextRuntime
+            ctx_config = (
+                getattr(agent_config, "context_manager_config", None)
+                or ContextManagerConfig()
+            )
+            context_manager = ContextManager(
+                config=ctx_config,
+                max_steps=agent_config.max_steps,
+            )
+            context_items = (
+                list(context_items_override)
+                if context_items_override is not None
+                else (getattr(agent_config, "context_items", None) or [])
+            )
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                items=context_items,
+            )
 
-                context_runtime = LegacyContextRuntime()
+            # Build the code executor unless this is a managed sub-agent that
+            # shares the parent's executor. Generated Python remains in the
+            # configured sandbox; host-marked tools are exposed through proxies.
+            python_executor = None
+            if not _managed_context and self.sandbox_config is not None:
+                from .sandbox import build_python_executor, SandboxLevel
+                has_managed = bool(
+                    agent_config.managed_agents
+                    or getattr(agent_config, "external_a2a_agents", [])
+                )
+                python_executor = build_python_executor(
+                    config=self.sandbox_config,
+                    logger_=logger,
+                    managed_agents_exist=has_managed,
+                    host_tools_exist=_has_host_tools(tool_list),
+                )
+                # Eager warm-up for remote executors (skip for LOCAL which is instant).
+                if self.sandbox_config.level != SandboxLevel.LOCAL:
+                    try:
+                        warm_start = time.time()
+                        python_executor("[0, None]")
+                        warm_dur = time.time() - warm_start
+                        backend = getattr(python_executor, "_nexent_backend", "unknown")
+                        if backend == "local":
+                            logger.warning(
+                                "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
+                                "(scope=%s, warm-up %.2fs)",
+                                self.sandbox_config.level.value,
+                                self.sandbox_config.scope.value,
+                                warm_dur,
+                            )
+                        else:
+                            logger.info(
+                                "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
+                                warm_dur,
+                                backend,
+                                self.sandbox_config.level.value,
+                                self.sandbox_config.scope.value,
+                            )
+                    except Exception as warm_err:
+                        logger.warning(
+                            "Sandbox warm-up failed (%s): %s",
+                            self.sandbox_config.level.value,
+                            warm_err,
+                        )
+                # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                self._sandbox_scope = self.sandbox_config.scope.value
 
             # Create the agent
             agent = CoreAgent(
@@ -491,6 +572,7 @@ class NexentAgent:
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
+                executor=python_executor,
             )
             agent.stop_event = self.stop_event
 
@@ -593,11 +675,15 @@ class NexentAgent:
                             ).get("estimated_input_tokens")
 
                         token_threshold = None
-                        if (
-                            hasattr(self.agent, "context_manager")
-                            and self.agent.context_manager is not None
-                        ):
-                            token_threshold = self.agent.context_manager.config.token_threshold
+                        context_window_tokens = None
+                        hard_input_budget_tokens = None
+                        context_processing_mode = None
+                        context_runtime = getattr(self.agent, "context_runtime", None)
+                        if context_runtime is not None:
+                            token_threshold = context_runtime.token_threshold
+                            context_window_tokens = context_runtime.context_window_tokens
+                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
                             "step_number": step_log.step_number,
@@ -607,6 +693,14 @@ class NexentAgent:
                             "total_output_tokens": total_output_tokens,
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
+                            "context_window_tokens": context_window_tokens,
+                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "context_processing_mode": context_processing_mode,
+                            "output_finish_reason": getattr(
+                                getattr(self.agent, "model", None),
+                                "last_finish_reason",
+                                None,
+                            ),
                         }
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
@@ -644,6 +738,7 @@ class NexentAgent:
 
                 finally:
                     self._log_step_metrics()
+                    self._cleanup_sandbox()
 
             if final_answer_for_trace is not None:
                 if hasattr(self.agent, "step_metrics"):
@@ -732,8 +827,9 @@ class NexentAgent:
             f"est_raw_i={total_raw:>{w_raw}}  save={total_save_str:>{w_save}} | "
             f"hit={hit_total_str:>{w_hit}}"
         )
-        if self.agent.context_manager:
-            lines.append(f"Context Manager Global: {self.agent.context_manager.get_all_compression_stats()}")
+        context_runtime = getattr(self.agent, "context_runtime", None)
+        if context_runtime is not None:
+            lines.append(f"Context Manager Global: {context_runtime.global_compression_stats()}")
 
         lines.append(
             "-----"
@@ -743,3 +839,57 @@ class NexentAgent:
         # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+
+    def _cleanup_sandbox(self) -> None:
+        """
+        Clean up the sandbox executor after an agent run.
+
+        For ``scope=session``: the executor is immediately destroyed.
+        For ``scope=system``: the executor is returned to the warm pool for reuse.
+
+        Must run AFTER any output-sync logic, because the container filesystem
+        is inaccessible after the executor is released / destroyed.
+        """
+        executor = getattr(self.agent, "python_executor", None)
+        if executor is None:
+            return
+
+        scope = getattr(self, "_sandbox_scope", None)
+
+        # Sync outputs to MinIO before destroying the container.
+        if (
+            self.sandbox_config is not None
+            and self.sandbox_config.auto_sync_outputs
+            and self.minio_client is not None
+        ):
+            from .sandbox import _sync_outputs_to_minio
+            agent_run_id = getattr(self.agent, "agent_run_id", None) or "unknown"
+            try:
+                uploaded = _sync_outputs_to_minio(
+                    output_dir=self.sandbox_config.output_dir,
+                    agent_run_id=agent_run_id,
+                    minio_client=self.minio_client,
+                    bucket="nexent-artifacts",
+                    logger_=logger,
+                )
+                if uploaded:
+                    logger.info(
+                        "Synced %d output file(s) to MinIO for run %s",
+                        len(uploaded),
+                        agent_run_id,
+                    )
+            except Exception as exc:
+                logger.error("Output sync to MinIO failed: %s", exc)
+
+        # Release or destroy the executor.
+        if scope == "system":
+            # Return to pool for reuse.
+            from .sandbox import release_python_executor
+            release_python_executor(executor, logger)
+        else:
+            # Session scope or unknown — destroy the container.
+            from .sandbox import cleanup_executor
+            cleanup_executor(executor, logger, timeout=5.0)
+
+        # Clear the reference so GC can collect the wrapper objects.
+        self.agent.python_executor = None

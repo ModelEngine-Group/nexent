@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
+from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     MCPConnectionError,
     McpNameConflictError,
@@ -36,8 +37,11 @@ from database.remote_mcp_db import (
     clear_mcp_record_market_id,
     get_mcp_record_by_id_and_tenant,
     update_mcp_record_market_id_by_id,
+    update_mcp_record_manage_fields_by_id,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
 
@@ -110,11 +114,27 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         STATUS_SHARED: "approved",
         STATUS_REJECTED: "rejected",
     }
+    # Look up authorization_token and custom_headers from the source MCP record
+    source_authorization_token = None
+    source_custom_headers = None
+    source_mcp_id = row.get("source_mcp_id")
+    if source_mcp_id is not None:
+        try:
+            from database.remote_mcp_db import get_mcp_record_by_id_and_tenant
+            mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=source_mcp_id, tenant_id=row.get("tenant_id", ""))
+            if mcp_record:
+                source_authorization_token = mcp_record.get("authorization_token")
+                source_custom_headers = mcp_record.get("custom_headers")
+        except Exception:
+            pass
     return {
         "communityId": row.get("market_id"),
         "marketId": row.get("market_id"),
         "reviewId": row.get("market_id"),
-        "sourceMcpId": row.get("source_mcp_id"),
+        "sourceMcpId": source_mcp_id,
+        "sharedFields": row.get("shared_fields"),
+        "authorizationToken": source_authorization_token,
+        "customHeaders": source_custom_headers,
         "name": row.get("mcp_name"),
         "description": row.get("description"),
         "status": "active" if raw_status == STATUS_SHARED else "inactive",
@@ -130,6 +150,8 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "reviewType": "initial_listing",
         "installCount": row.get("download_count") or 0,
         "authorDisplayName": _resolve_author_display_name(row.get("user_id")),
+        "groupIds": row.get("group_ids"),
+        "ingroupPermission": row.get("ingroup_permission"),
     }
 
 
@@ -192,13 +214,22 @@ def _validate_market_status_transition(
 async def list_community_mcp_services(
     *,
     tenant_id: str,
+    user_id: str,
     search: str | None = None,
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
-    """List shared (approved) community MCP services scoped to a tenant."""
+    """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
+    user_role = _get_user_role(user_id)
+    user_group_ids = None
+    if user_role not in CAN_EDIT_ALL_USER_ROLES:
+        try:
+            user_group_ids = list(query_group_ids_by_user(user_id) or [])
+        except Exception as e:
+            logger.warning(f"Failed to query user group ids: user_id={user_id}, err={e}")
+
     db_result = get_mcp_market_records(
         tenant_id=tenant_id,
         search=search,
@@ -206,6 +237,8 @@ async def list_community_mcp_services(
         transport_type=transport_type,
         cursor=cursor,
         limit=limit,
+        user_id=user_id if user_role not in CAN_EDIT_ALL_USER_ROLES else None,
+        user_group_ids=user_group_ids,
     )
     return {
         "count": db_result.get("count", 0),
@@ -228,6 +261,9 @@ async def publish_community_mcp_service(
     tags: List[str] | None = None,
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
+    group_ids: List[int] | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> int:
     """Submit a local MCP service for review.
 
@@ -273,10 +309,32 @@ async def publish_community_mcp_service(
             "submitted_by": _resolve_user_email(user_id),
             "tags": final_tags,
             "description": final_description,
+            "group_ids": convert_list_to_string(group_ids) if group_ids else None,
+            "ingroup_permission": ingroup_permission,
+            "shared_fields": shared_fields,
         },
         tenant_id=tenant_id,
         user_id=user_id,
     )
+
+    # Update shared_fields on the source MCP record
+    if shared_fields is not None:
+        update_mcp_record_manage_fields_by_id(
+            mcp_id=mcp_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=source_record.get("mcp_name", ""),
+            server_url=source_record.get("mcp_server", ""),
+            description=source_record.get("description") or "",
+            tags=source_record.get("tags"),
+            source=source_record.get("source") or "local",
+            authorization_token=source_record.get("authorization_token"),
+            custom_headers=source_record.get("custom_headers"),
+            config_json=source_record.get("config_json"),
+            market_id=source_record.get("market_id"),
+            shared_fields=shared_fields,
+        )
+
     return market_id
 
 
@@ -292,6 +350,9 @@ async def update_community_mcp_service(
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
     transport_type: str | None = None,
+    group_ids: List[int] | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     """Update a published market MCP and set it back to pending_review for re-approval."""
     current = get_mcp_market_record_by_id(market_id=market_id)
@@ -326,6 +387,9 @@ async def update_community_mcp_service(
         mcp_server=mcp_server,
         config_json=next_config_json,
         transport_type=next_transport_type,
+        group_ids=convert_list_to_string(group_ids) if group_ids else None,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
     # Set back to pending_review for re-approval
@@ -335,6 +399,24 @@ async def update_community_mcp_service(
         review_status=STATUS_PENDING_REVIEW,
         submitted_by=_resolve_user_email(user_id),
     )
+
+    # Update shared_fields on the source MCP record
+    if shared_fields is not None and current.get("source_mcp_id"):
+        update_mcp_record_manage_fields_by_id(
+            mcp_id=current["source_mcp_id"],
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=current.get("mcp_name") or "",
+            server_url=current.get("mcp_server") or "",
+            description=current.get("description") or "",
+            tags=current.get("tags"),
+            source="local",
+            authorization_token=None,
+            custom_headers=None,
+            config_json=current.get("config_json"),
+            market_id=market_id,
+            shared_fields=shared_fields,
+        )
 
 
 async def change_mcp_market_status(

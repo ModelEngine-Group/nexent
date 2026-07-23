@@ -298,6 +298,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     enabled BOOLEAN DEFAULT FALSE,
     is_main_agent BOOLEAN NOT NULL DEFAULT TRUE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
+    context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),

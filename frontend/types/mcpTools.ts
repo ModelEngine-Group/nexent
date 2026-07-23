@@ -150,6 +150,11 @@ export interface CommunityMcpCard {
   reviewType?: "initial_listing" | "version_update";
   previousVersion?: string;
   pendingVersion?: string;
+  groupIds?: string;
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
+  authorizationToken?: string;
+  customHeaders?: Record<string, string>;
 }
 
 export interface McpServiceItem {
@@ -179,6 +184,9 @@ export interface McpServiceItem {
   reviewStatus?: "pending" | "approved" | "rejected" | "offline";
   reviewType?: "initial_listing" | "version_update";
   permission?: "EDIT" | "READ_ONLY";
+  groupIds?: string;
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 export interface McpTagStat {
@@ -201,6 +209,9 @@ export interface AddMcpServicePayload {
   registry_json?: Record<string, unknown>;
   enabled?: boolean;
   market_id?: number;
+  group_ids?: string;
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 }
 
 export interface UpdateMcpServicePayload {
@@ -214,6 +225,9 @@ export interface UpdateMcpServicePayload {
   config_json?: Record<string, unknown>;
   version?: string;
   community_id?: number;
+  group_ids?: string;
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 }
 
 export interface ToggleMcpServicePayload {
@@ -259,6 +273,9 @@ export interface LocalAddMcpDraft {
   uploadImageFile?: File | null;
   tags: string[];
   version?: string;
+  groupIds?: number[];
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 /**

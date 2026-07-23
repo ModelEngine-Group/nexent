@@ -67,26 +67,45 @@ export function PaginationBar({
   onPageChange: (page: number) => void;
 }) {
   const { t } = useTranslation("common");
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  if (total <= pageSize) return null;
+  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+  if (totalPages <= 1) return null;
 
   return (
-    <div className="flex items-center justify-end gap-2">
+    <div className="flex items-center justify-center gap-1.5 pt-2">
       <Button
-        icon={<ChevronLeft className="size-4" />}
+        type="default"
+        className="flex size-9 items-center justify-center rounded-lg p-0"
         aria-label={t("skillRepository.pagination.prev")}
         disabled={page <= 1}
-        onClick={() => onPageChange(page - 1)}
-      />
-      <span className="min-w-[72px] text-center text-sm text-muted-foreground">
-        {page} / {totalPages}
-      </span>
+        onClick={() => onPageChange(Math.max(1, page - 1))}
+      >
+        <ChevronLeft className="size-4" aria-hidden />
+      </Button>
+      {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+        (pageNumber) => (
+          <Button
+            key={pageNumber}
+            type={pageNumber === page ? "primary" : "default"}
+            className="flex size-9 items-center justify-center rounded-lg p-0"
+            onClick={() => onPageChange(pageNumber)}
+            aria-label={t("skillRepository.pagination.page", {
+              page: pageNumber,
+            })}
+            aria-current={pageNumber === page ? "page" : undefined}
+          >
+            {pageNumber}
+          </Button>
+        )
+      )}
       <Button
-        icon={<ChevronRight className="size-4" />}
+        type="default"
+        className="flex size-9 items-center justify-center rounded-lg p-0"
         aria-label={t("skillRepository.pagination.next")}
         disabled={page >= totalPages}
-        onClick={() => onPageChange(page + 1)}
-      />
+        onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+      >
+        <ChevronRight className="size-4" aria-hidden />
+      </Button>
     </div>
   );
 }
