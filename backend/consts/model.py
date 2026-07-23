@@ -1336,6 +1336,8 @@ class SkillCreateRequest(BaseModel):
     tool_names: Optional[List[str]] = []
     tags: Optional[List[str]] = []
     source: Optional[str] = "custom"
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[Dict[str, str]]] = Field(
@@ -1361,6 +1363,8 @@ class SkillUpdateRequest(BaseModel):
     tool_names: Optional[List[str]] = None
     tags: Optional[List[str]] = None
     source: Optional[str] = None
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[SkillFileData]] = Field(
@@ -1379,6 +1383,8 @@ class SkillResponse(BaseModel):
     tool_ids: List[int]
     tags: List[str]
     source: str
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     created_by: Optional[str] = None

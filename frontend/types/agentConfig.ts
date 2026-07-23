@@ -271,6 +271,9 @@ export interface Skill {
   config_schemas?: SkillParam[] | null;
   config_values?: Record<string, any> | null;
   tool_ids?: number[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
+  permission?: "EDIT" | "READ_ONLY";
   created_by?: string | null;
   updated_by?: string | null;
   update_time?: string;

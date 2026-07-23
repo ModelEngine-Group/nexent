@@ -142,6 +142,8 @@ class MockSkillCreateRequest(BaseModel):
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[Dict[str, str]]] = None
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
 
 class MockSkillFileData(BaseModel):
     path: str
@@ -158,6 +160,8 @@ class MockSkillUpdateRequest(BaseModel):
     config_schemas: Optional[Dict[str, Any]] = None
     config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[MockSkillFileData]] = None
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
 
 class MockSkillResponse(BaseModel):
     skill_id: Optional[int] = None
@@ -198,6 +202,13 @@ services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("tas
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+
+
+def setup_function():
+    """Restore module-level service stubs after tests that isolate imports."""
+    sys.modules['services'] = services_mock
+    sys.modules['services.skill_service'] = services_skill_service_mock
+    sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
@@ -267,7 +278,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.return_value = [
+                mock_service.list_visible_skills.return_value = [
                     {"skill_id": 1, "name": "skill1", "description": "Desc1"},
                     {"skill_id": 2, "name": "skill2", "description": "Desc2"}
                 ]
@@ -290,7 +301,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.return_value = []
+                mock_service.list_visible_skills.return_value = []
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -310,7 +321,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.side_effect = SkillException("Database error")
+                mock_service.list_visible_skills.side_effect = SkillException("Database error")
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -327,7 +338,7 @@ class TestListSkillsEndpoint:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.return_value = [
+                mock_service.list_visible_skills.return_value = [
                     {"skill_id": 10, "name": "admin_skill", "description": "Admin desc"}
                 ]
 
@@ -345,7 +356,10 @@ class TestListSkillsEndpoint:
                 assert "skills" in data
                 assert len(data["skills"]) == 1
                 # Verify the service was called with the target tenant_id, not super_tenant
-                mock_service.list_skills.assert_called_once_with(tenant_id="target_tenant")
+                mock_service.list_visible_skills.assert_called_once_with(
+                    tenant_id="target_tenant",
+                    user_id="super_user",
+                )
 
 
 # ===== Create Skill Endpoint Tests =====
@@ -905,6 +919,29 @@ description: Updated description
 
                 assert response.status_code == 404
 
+    def test_update_skill_from_file_forbidden(self, mocker):
+        from backend.apps.skill_app import ForbiddenError
+
+        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+                mock_auth.return_value = ("user123", "tenant123")
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.update_skill_from_file.side_effect = ForbiddenError(
+                    "Not authorized"
+                )
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+                response = client.put(
+                    "/skills/test/upload",
+                    files={"file": ("test.md", b"# Skill", "text/markdown")},
+                    headers={"Authorization": "Bearer token123"},
+                )
+
+                assert response.status_code == 403
+
 
 # ===== Update Skill Instance Endpoint Tests =====
 class TestUpdateSkillInstanceEndpoint:
@@ -1095,7 +1132,7 @@ class TestErrorHandling:
             with patch('backend.apps.skill_app.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.list_skills.side_effect = Exception("Unexpected error")
+                mock_service.list_visible_skills.side_effect = Exception("Unexpected error")
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -2271,7 +2308,7 @@ class TestInstallSkillsEndpoint:
         """Test successful skill installation."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = ["skill1", "skill2"]
 
                 app = FastAPI()
@@ -2298,7 +2335,7 @@ class TestInstallSkillsEndpoint:
         """Test installing empty skill list."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = []
 
                 app = FastAPI()
@@ -2337,7 +2374,7 @@ class TestInstallSkillsEndpoint:
         """Test super admin installing skills for a specific tenant via tenant_id query param."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("super_user", "super_tenant")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = ["skill1"]
 
                 app = FastAPI()
@@ -2364,7 +2401,7 @@ class TestInstallSkillsEndpoint:
         """Test installing skills with error."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.side_effect = Exception("Installation failed")
 
                 app = FastAPI()
@@ -2824,6 +2861,8 @@ class TestBuildSkillUpdateData:
         request.config_schemas = {"key": "value"}
         request.config_values = {"param": "val"}
         request.files = [mock_file_data]
+        request.group_ids = [10, 20]
+        request.ingroup_permission = "READ_ONLY"
 
         result = _build_skill_update_data(request)
 
@@ -2835,6 +2874,8 @@ class TestBuildSkillUpdateData:
         assert result["config_schemas"] == {"key": "value"}
         assert result["config_values"] == {"param": "val"}
         assert result["files"] == [{"path": "test.py", "content": "code"}]
+        assert result["group_ids"] == [10, 20]
+        assert result["ingroup_permission"] == "READ_ONLY"
 
     def test_build_skill_update_data_with_partial_fields(self, mocker):
         """Test _build_skill_update_data with only some fields provided."""
@@ -2849,6 +2890,8 @@ class TestBuildSkillUpdateData:
         request.config_schemas = None
         request.config_values = None
         request.files = None
+        request.group_ids = None
+        request.ingroup_permission = None
 
         result = _build_skill_update_data(request)
 
@@ -2869,6 +2912,8 @@ class TestBuildSkillUpdateData:
         request.config_schemas = None
         request.config_values = None
         request.files = []  # Empty list is not None, so it gets included
+        request.group_ids = None
+        request.ingroup_permission = None
 
         result = _build_skill_update_data(request)
 

@@ -162,6 +162,10 @@ TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp",
 consts_const_mock.CONTAINER_SKILLS_PATH = TEST_LOCAL_SKILLS_DIR
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
+consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
+consts_const_mock.PERMISSION_EDIT = "EDIT"
+consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
+consts_const_mock.PERMISSION_READ = "READ_ONLY"
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 
 class SkillException(Exception):
@@ -231,6 +235,10 @@ utils_skill_params_utils_mock.params_dict_to_roundtrip_yaml_text = MagicMock(ret
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
 utils_prompt_template_utils_mock.get_skill_creation_simple_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('utils.content_classifier_utils')
+utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock.convert_list_to_string = MagicMock(
+    side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
+)
 
 class MockContentClassifier:
     def classify(self, content):
@@ -241,6 +249,7 @@ sys.modules['utils'] = utils_mock
 sys.modules['utils.skill_params_utils'] = utils_skill_params_utils_mock
 sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
 sys.modules['utils.content_classifier_utils'] = utils_content_classifier_utils_mock
+sys.modules['utils.str_utils'] = utils_str_utils_mock
 
 # Set up database mocks
 database_mock = types.ModuleType('database')
@@ -251,6 +260,12 @@ database_client_mock.filter_property = MagicMock()
 
 database_db_models_mock = types.ModuleType('database.db_models')
 database_db_models_mock.SkillInfo = MagicMock()
+database_group_db_mock = types.ModuleType('database.group_db')
+database_group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
+database_user_tenant_db_mock = types.ModuleType('database.user_tenant_db')
+database_user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(
+    return_value={"user_role": "DEV"}
+)
 
 # Create mock skill_db module with functions
 database_skill_db_mock = types.ModuleType('database.skill_db')
@@ -340,6 +355,8 @@ sys.modules['database'] = database_mock
 sys.modules['database.client'] = database_client_mock
 sys.modules['database.skill_db'] = database_skill_db_mock
 sys.modules['database.db_models'] = database_db_models_mock
+sys.modules['database.group_db'] = database_group_db_mock
+sys.modules['database.user_tenant_db'] = database_user_tenant_db_mock
 setattr(database_mock, 'skill_db', database_skill_db_mock)
 
 # Mock nexent.core.agents.run_agent for create_skill_from_request
@@ -386,6 +403,148 @@ def create_test_service(tenant_id="test-tenant"):
 
 
 # ===== Helper Functions Tests =====
+class TestSkillGroupPermissions:
+    def test_group_permission_helpers_handle_edit_read_only_and_private(self):
+        group_skill = {
+            "created_by": "creator",
+            "group_ids": "10,invalid,20",
+            "ingroup_permission": "EDIT",
+        }
+
+        assert skill_service._to_group_id_set(group_skill["group_ids"]) == {10, 20}
+        assert skill_service.can_view_skill(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) is True
+        assert skill_service.resolve_skill_permission(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) == "EDIT"
+
+        group_skill["ingroup_permission"] = "READ_ONLY"
+        assert skill_service.resolve_skill_permission(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) == "READ_ONLY"
+
+        group_skill["ingroup_permission"] = "PRIVATE"
+        assert skill_service.can_view_skill(
+            skill=group_skill,
+            user_id="member",
+            user_role="DEV",
+            user_group_ids={10},
+        ) is False
+
+    def test_group_permission_helpers_preserve_creator_and_admin_access(self):
+        private_skill = {
+            "created_by": "creator",
+            "group_ids": [],
+            "ingroup_permission": "PRIVATE",
+        }
+
+        assert skill_service.can_view_skill(
+            skill=private_skill,
+            user_id="creator",
+            user_role="DEV",
+            user_group_ids=set(),
+        ) is True
+        assert skill_service.resolve_skill_permission(
+            skill=private_skill,
+            user_id="admin",
+            user_role="ADMIN",
+            user_group_ids=set(),
+        ) == "EDIT"
+
+    def test_group_permission_helpers_reject_unmatched_groups_and_normalize_lists(self):
+        skill = {
+            "created_by": "creator",
+            "group_ids": [10, "20", "invalid"],
+            "ingroup_permission": "EDIT",
+        }
+
+        assert skill_service._to_group_id_set(skill["group_ids"]) == {10, 20}
+        assert skill_service._to_group_id_set(None) == set()
+        assert skill_service.can_view_skill(
+            skill=skill,
+            user_id="outsider",
+            user_role="DEV",
+            user_group_ids={30},
+        ) is False
+        assert skill_service.resolve_skill_permission(
+            skill=skill,
+            user_id="outsider",
+            user_role="DEV",
+            user_group_ids={30},
+        ) == "READ_ONLY"
+
+    def test_default_group_permission_does_not_override_explicit_values(self, mocker):
+        skill_data = {
+            "group_ids": [99],
+            "ingroup_permission": "READ_ONLY",
+        }
+        query_groups = mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+            return_value=[10],
+        )
+
+        skill_service._apply_default_skill_permission_fields(skill_data, "user-1")
+
+        assert skill_data == {
+            "group_ids": [99],
+            "ingroup_permission": "READ_ONLY",
+        }
+        query_groups.assert_not_called()
+
+    def test_default_group_permission_uses_creator_groups(self, mocker):
+        skill_data = {}
+        mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+            return_value=[10, 20],
+        )
+
+        skill_service._apply_default_skill_permission_fields(skill_data, "user-1")
+
+        assert skill_data == {
+            "group_ids": "10,20",
+            "ingroup_permission": "EDIT",
+        }
+
+    def test_default_group_permission_skips_anonymous_user(self, mocker):
+        query_groups = mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+        )
+
+        skill_data = {}
+        skill_service._apply_default_skill_permission_fields(skill_data, None)
+
+        assert skill_data == {}
+        query_groups.assert_not_called()
+
+    def test_can_edit_skill_requires_user_and_allows_group_editor(self, mocker):
+        skill = {
+            "created_by": "owner",
+            "group_ids": [10],
+            "ingroup_permission": "EDIT",
+        }
+        mocker.patch(
+            "backend.services.skill_service.get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        )
+        mocker.patch(
+            "backend.services.skill_service.query_group_ids_by_user",
+            return_value=[10],
+        )
+
+        assert skill_service._can_edit_skill(skill, None) is False
+        assert skill_service._can_edit_skill(skill, "group-editor") is True
+
+
 class TestNormalizeZipEntryPath:
     """Test _normalize_zip_entry_path function."""
 
@@ -571,6 +730,96 @@ class TestSkillServiceListSkills:
 
         with pytest.raises(Exception):
             service.list_skills()
+
+    def test_list_skills_filters_by_creator_group_and_private_permission(self, mocker):
+        mocker.patch(
+            'backend.services.skill_service.skill_db.list_skills',
+            return_value=[
+                {
+                    "skill_id": 1,
+                    "name": "own-private",
+                    "created_by": "user-1",
+                    "group_ids": [],
+                    "ingroup_permission": "PRIVATE",
+                },
+                {
+                    "skill_id": 2,
+                    "name": "group-read-only",
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "READ_ONLY",
+                },
+                {
+                    "skill_id": 3,
+                    "name": "group-edit",
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "EDIT",
+                },
+                {
+                    "skill_id": 4,
+                    "name": "group-private",
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "PRIVATE",
+                },
+                {
+                    "skill_id": 5,
+                    "name": "different-group",
+                    "created_by": "user-2",
+                    "group_ids": [20],
+                    "ingroup_permission": "EDIT",
+                },
+            ],
+        )
+        mocker.patch(
+            'backend.services.skill_service.query_group_ids_by_user',
+            return_value=[10],
+        )
+        mocker.patch(
+            'backend.services.skill_service.get_user_tenant_by_user_id',
+            return_value={"user_role": "DEV"},
+        )
+
+        result = create_test_service().list_visible_skills(user_id="user-1")
+
+        assert [skill["name"] for skill in result] == [
+            "own-private",
+            "group-read-only",
+            "group-edit",
+        ]
+        assert [skill["permission"] for skill in result] == [
+            "EDIT",
+            "READ_ONLY",
+            "EDIT",
+        ]
+
+    def test_list_skills_admin_can_view_all_tenant_skills(self, mocker):
+        mocker.patch(
+            'backend.services.skill_service.skill_db.list_skills',
+            return_value=[
+                {
+                    "skill_id": 1,
+                    "name": "private-skill",
+                    "created_by": "user-2",
+                    "group_ids": [],
+                    "ingroup_permission": "PRIVATE",
+                }
+            ],
+        )
+        mocker.patch(
+            'backend.services.skill_service.query_group_ids_by_user',
+            return_value=[],
+        )
+        mocker.patch(
+            'backend.services.skill_service.get_user_tenant_by_user_id',
+            return_value={"user_role": "ADMIN"},
+        )
+
+        result = create_test_service().list_visible_skills(user_id="admin-1")
+
+        assert len(result) == 1
+        assert result[0]["permission"] == "EDIT"
 
 
 class TestSkillServiceGetSkill:
@@ -857,6 +1106,26 @@ class TestSkillServiceUpdateSkill:
             result = service.update_skill("existing", {"description": "updated"}, tenant_id="test-tenant")
 
             assert result["description"] == "updated"
+
+    def test_update_skill_rejects_user_without_edit_permission(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
+        )
+        mocker.patch(
+            "backend.services.skill_service._can_edit_skill",
+            return_value=False,
+        )
+
+        service = SkillService(tenant_id="test-tenant")
+
+        with pytest.raises(skill_service.ForbiddenError):
+            service.update_skill(
+                "existing",
+                {"description": "updated"},
+                tenant_id="test-tenant",
+                user_id="viewer",
+            )
 
     def test_update_skill_with_params(self, mocker):
         mocker.patch(
@@ -1938,6 +2207,55 @@ description: Updated via MD
         result = service.update_skill_from_file("existing", content, file_type="md", tenant_id="test-tenant")
 
         assert result["description"] == "updated"
+
+    def test_update_from_file_rejects_user_without_edit_permission(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
+        )
+        mocker.patch(
+            "backend.services.skill_service._can_edit_skill",
+            return_value=False,
+        )
+
+        service = SkillService(tenant_id="test-tenant")
+
+        with pytest.raises(skill_service.ForbiddenError):
+            service.update_skill_from_file(
+                "existing",
+                b"---\nname: existing\n---",
+                tenant_id="test-tenant",
+                user_id="viewer",
+            )
+
+    def test_update_from_file_allows_user_with_edit_permission(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
+        )
+        can_edit = mocker.patch(
+            "backend.services.skill_service._can_edit_skill",
+            return_value=True,
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.update_skill",
+            return_value={"skill_id": 1, "name": "existing"},
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_ids_by_names",
+            return_value=[],
+        )
+        service = SkillService(tenant_id="test-tenant")
+        service.skill_manager = MagicMock()
+        service._enrich_configs_from_yaml = lambda result: result
+        service.update_skill_from_file(
+            "existing",
+            b"---\nname: existing\n---\n# Content",
+            file_type="md",
+            user_id="group-editor",
+        )
+
+        can_edit.assert_called_once()
 
     def test_update_from_zip(self, mocker):
         import zipfile
@@ -5808,4 +6126,3 @@ class TestTooltipForCommentedMapKey:
         """Test with non-dict/cm value."""
         result = skill_service._tooltip_for_commented_map_key("not a map", [], 0, "key")
         assert result is None
-
