@@ -119,7 +119,8 @@ export const KnowledgeBaseContext = createContext<{
     group_ids?: number[],
     embeddingModel?: string,
     is_multimodal?: boolean,
-    preserve_source_file?: boolean
+    preserve_source_file?: boolean,
+    quota_limit_bytes?: number | null,
   ) => Promise<KnowledgeBase | null>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
@@ -350,7 +351,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       group_ids?: number[],
       embeddingModel?: string,
       is_multimodal?: boolean,
-      preserve_source_file?: boolean
+      preserve_source_file?: boolean,
+      quota_limit_bytes?: number | null,
     ) => {
       try {
         const selectedEmbeddingModel = embeddingModel?.trim() || "";
@@ -375,6 +377,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           group_ids,
           is_multimodal: resolvedIsMultimodal,
           preserve_source_file,
+          quota_limit_bytes,
         });
         return newKB;
       } catch (error) {

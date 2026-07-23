@@ -24,6 +24,13 @@ class MessageRecord(TypedDict):
     opinion_flag: Optional[str]
 
 
+def _serialize_unit_content(content: Any) -> str:
+    """Serialize structured unit content for the text database column."""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
 class SearchRecord(TypedDict):
     message_id: int
     source_type: str
@@ -51,6 +58,47 @@ class ConversationHistory(TypedDict):
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
     image_records: List[ImageRecord]
+
+
+HISTORY_SUMMARY_UNIT_TYPE = "history_summary"
+
+
+class HistorySummaryPersistenceError(ValueError):
+    """Raised when a history-summary candidate violates persistence rules."""
+
+
+def _parse_history_summary_content(content: Any) -> Optional[Dict[str, Any]]:
+    """Return a valid summary payload, or ``None`` for malformed/stale units."""
+    try:
+        payload = json.loads(content) if isinstance(content, str) else content
+        if not isinstance(payload, dict) or not isinstance(payload.get("summary"), dict):
+            return None
+        boundary = payload.get("covered_through_message_id")
+        if isinstance(boundary, bool) or int(boundary) <= 0:
+            return None
+        payload["covered_through_message_id"] = int(boundary)
+        return payload
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _get_user_tenant(user_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve tenant ownership lazily to keep database modules decoupled."""
+    from .user_tenant_db import get_user_tenant_by_user_id
+
+    return get_user_tenant_by_user_id(user_id)
+
+
+def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
+    """Resolve legacy empty tenant fields consistently with authentication."""
+    from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+
+    tenant_id = user_tenant.get("tenant_id")
+    if tenant_id:
+        return tenant_id
+    if (user_tenant.get("user_role") or "").upper() == ASSET_OWNER_ROLE:
+        return ASSET_OWNER_TENANT_ID
+    return DEFAULT_TENANT_ID
 
 
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
@@ -175,7 +223,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "conversation_id": conversation_id,
                 "unit_index": idx,
                 "unit_type": unit['type'],
-                "unit_content": unit['content'],
+                "unit_content": _serialize_unit_content(unit['content']),
                 "delete_flag": 'N'
             }
 
@@ -194,10 +242,9 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
 
 
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
-                        unit_type: str, unit_content: str,
+                        unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,
-                        unit_status: str = 'completed',
-                        step_index: Optional[int] = None) -> int:
+                        unit_status: str = 'completed') -> int:
     """
     Insert a single ConversationMessageUnit row.
 
@@ -209,7 +256,6 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Reserved parameter for created_by and updated_by fields
         unit_status: Lifecycle status (streaming / completed)
-        step_index: Optional ReAct step sequence number within this message
 
     Returns:
         int: Newly created unit ID (auto-increment ID)
@@ -224,12 +270,10 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "conversation_id": conversation_id,
             "unit_index": unit_index,
             "unit_type": unit_type,
-            "unit_content": unit_content,
+            "unit_content": _serialize_unit_content(unit_content),
             "unit_status": unit_status,
             "delete_flag": 'N',
         }
-        if step_index is not None:
-            row_data["step_index"] = step_index
         if user_id:
             row_data["created_by"] = user_id
             row_data["updated_by"] = user_id
@@ -318,7 +362,7 @@ def update_message_unit_status(unit_id: int, status: str,
         )
 
 
-def update_message_unit_content(unit_id: int, content: str,
+def update_message_unit_content(unit_id: int, content: Any,
                                 user_id: Optional[str] = None) -> None:
     """
     Update the unit_content field of a message unit.
@@ -331,7 +375,7 @@ def update_message_unit_content(unit_id: int, content: str,
     with get_db_session() as session:
         unit_id = int(unit_id)
         update_data = {
-            "unit_content": content,
+            "unit_content": _serialize_unit_content(content),
             "update_time": func.current_timestamp(),
         }
         if user_id:
@@ -344,17 +388,29 @@ def update_message_unit_content(unit_id: int, content: str,
         )
 
 
-def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_conversation(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Get conversation details
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for created_by and updated_by fields
+        user_id: User that must own the conversation
+        tenant_id: Tenant that the owning user must currently belong to
 
     Returns:
         Optional[Dict[str, Any]]: Conversation details, or None if it doesn't exist
     """
+    if tenant_id and not user_id:
+        raise ValueError("user_id is required when tenant_id is provided")
+    if tenant_id:
+        user_tenant = _get_user_tenant(user_id)
+        if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+            return None
+
     with get_db_session() as session:
         # Ensure conversation_id is integer type
         conversation_id = int(conversation_id)
@@ -369,7 +425,6 @@ def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Opt
             stmt = stmt.where(
                 ConversationRecord.created_by == user_id
             )
-
         # Execute the query
         record = session.scalars(stmt).first()
         return None if record is None else as_dict(record)
@@ -426,39 +481,6 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         records = session.scalars(stmt).all()
 
         # Convert SQLAlchemy model instances to dictionaries
-        return list(map(as_dict, records))
-
-
-def get_message_units_by_message(conversation_id: int, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """
-    Get all units for a conversation, optionally filtered by message_id.
-    Used by HistoryProjector to reconstruct ReAct execution timeline.
-
-    Args:
-        conversation_id: Conversation ID (integer)
-        message_id: Optional message ID to filter by. If None, returns all units.
-
-    Returns:
-        List[Dict[str, Any]]: List of message units, ordered by message_id, step_index, unit_index
-    """
-    with get_db_session() as session:
-        conversation_id = int(conversation_id)
-
-        stmt = select(ConversationMessageUnit).where(
-            ConversationMessageUnit.conversation_id == conversation_id,
-            ConversationMessageUnit.delete_flag == 'N'
-        )
-
-        if message_id is not None:
-            stmt = stmt.where(ConversationMessageUnit.message_id == message_id)
-
-        stmt = stmt.order_by(
-            asc(ConversationMessageUnit.message_id),
-            asc(ConversationMessageUnit.step_index),
-            asc(ConversationMessageUnit.unit_index)
-        )
-
-        records = session.scalars(stmt).all()
         return list(map(as_dict, records))
 
 
@@ -802,7 +824,10 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.conversation_id == conversation_id,
 
             ConversationMessage.delete_flag == 'N'
-        ).order_by(ConversationMessage.message_index)
+        ).order_by(
+            asc(ConversationMessage.message_index),
+            asc(ConversationMessage.message_id),
+        )
 
         message_records = session.execute(query).all()
 
@@ -1292,6 +1317,22 @@ def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str]
         return result
 
 
+def get_latest_user_message_id(conversation_id: int, user_id: str) -> Optional[int]:
+    """Return the latest user message in a non-deleted conversation owned by user."""
+    with get_db_session() as session:
+        stmt = select(ConversationMessage.message_id).join(
+            ConversationRecord,
+            ConversationMessage.conversation_id == ConversationRecord.conversation_id,
+        ).where(
+            ConversationMessage.conversation_id == int(conversation_id),
+            ConversationMessage.message_role == 'user',
+            ConversationMessage.delete_flag == 'N',
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == 'N',
+        ).order_by(desc(ConversationMessage.message_index)).limit(1)
+        return session.execute(stmt).scalar()
+
+
 def get_latest_assistant_message(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Get the latest assistant message for a conversation, including its status field.
@@ -1407,3 +1448,198 @@ def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[st
         record.minio_files = json.dumps(existing, ensure_ascii=False)
 
         return True
+
+
+def save_history_summary(
+    conversation_id: int, user_id: str, tenant_id: str,
+    summary: Dict[str, Any], covered_through_message_id: int,
+    previous_summary_unit_id: Optional[int] = None,
+    trigger: Optional[str] = None,
+) -> int:
+    """Persist a validated checkpoint on its last covered assistant message."""
+    if not user_id or not tenant_id or not isinstance(summary, dict):
+        raise HistorySummaryPersistenceError(
+            "user_id, tenant_id and an object summary are required")
+    conversation_id = int(conversation_id)
+    covered_through_message_id = int(covered_through_message_id)
+    user_tenant = _get_user_tenant(user_id)
+    if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+        raise HistorySummaryPersistenceError("conversation is not accessible")
+
+    with get_db_session() as session:
+        owner = session.execute(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == 'N')).first()
+        if not owner:
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+
+        covered = session.execute(select(
+            ConversationMessage.message_id, ConversationMessage.message_index,
+            ConversationMessage.message_role, ConversationMessage.status,
+        ).where(
+            ConversationMessage.message_id == covered_through_message_id,
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == 'N')).first()
+        if (not covered or covered.message_role != 'assistant'
+                or covered.status != 'completed'):
+            raise HistorySummaryPersistenceError(
+                "coverage must end at a completed assistant message")
+
+        previous_boundary_index = -1
+        if previous_summary_unit_id is not None:
+            previous = session.execute(select(
+                ConversationMessageUnit.unit_content,
+                ConversationMessage.message_index,
+            ).join(ConversationMessage,
+                   ConversationMessage.message_id == ConversationMessageUnit.message_id).where(
+                ConversationMessageUnit.unit_id == int(previous_summary_unit_id),
+                ConversationMessageUnit.conversation_id == conversation_id,
+                ConversationMessageUnit.unit_type == HISTORY_SUMMARY_UNIT_TYPE,
+                ConversationMessageUnit.unit_status == 'completed',
+                ConversationMessageUnit.delete_flag == 'N',
+                ConversationMessage.delete_flag == 'N')).first()
+            if not previous or not _parse_history_summary_content(previous.unit_content):
+                raise HistorySummaryPersistenceError("previous summary is invalid")
+            previous_boundary_index = previous.message_index
+            if previous_boundary_index >= covered.message_index:
+                raise HistorySummaryPersistenceError("summary coverage must advance")
+
+        incomplete_count = session.scalar(select(func.count()).select_from(
+            ConversationMessage).where(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.message_index > previous_boundary_index,
+                ConversationMessage.message_index <= covered.message_index,
+                ConversationMessage.status != 'completed',
+                ConversationMessage.delete_flag == 'N'))
+        if incomplete_count:
+            raise HistorySummaryPersistenceError(
+                "history summaries may cover completed messages only")
+
+        max_index = session.scalar(select(func.max(
+            ConversationMessageUnit.unit_index)).where(
+                ConversationMessageUnit.message_id == covered_through_message_id,
+                ConversationMessageUnit.delete_flag == 'N'))
+        payload: Dict[str, Any] = {
+            "summary": summary,
+            "covered_through_message_id": covered_through_message_id,
+        }
+        if previous_summary_unit_id is not None:
+            payload["previous_summary_unit_id"] = int(previous_summary_unit_id)
+        if trigger:
+            payload["trigger"] = trigger
+        row = add_creation_tracking({
+            "message_id": covered_through_message_id,
+            "conversation_id": conversation_id,
+            "unit_index": (max_index if max_index is not None else -1) + 1,
+            "unit_type": HISTORY_SUMMARY_UNIT_TYPE,
+            "unit_content": json.dumps(payload, ensure_ascii=False),
+            "unit_status": 'completed', "delete_flag": 'N',
+        }, user_id)
+        return session.execute(insert(ConversationMessageUnit).values(**row).returning(
+            ConversationMessageUnit.unit_id)).scalar_one()
+
+
+def get_historical_context(
+    conversation_id: int, current_user_message_id: int,
+    user_id: str, tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Load the authorized latest checkpoint and completed turns before a run."""
+    if not user_id or not tenant_id:
+        return None
+    user_tenant = _get_user_tenant(user_id)
+    if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+        return None
+    conversation_id = int(conversation_id)
+    current_user_message_id = int(current_user_message_id)
+    with get_db_session() as session:
+        current = session.execute(select(
+            ConversationMessage.message_id, ConversationMessage.message_index,
+        ).join(ConversationRecord,
+               ConversationRecord.conversation_id == ConversationMessage.conversation_id).where(
+            ConversationMessage.message_id == current_user_message_id,
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_role == 'user',
+            ConversationMessage.delete_flag == 'N',
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == 'N')).first()
+        if not current:
+            return None
+
+        candidates = session.execute(select(
+            ConversationMessageUnit.unit_id,
+            ConversationMessageUnit.unit_content,
+            ConversationMessageUnit.unit_index,
+            ConversationMessage.message_index,
+        ).join(ConversationMessage,
+               ConversationMessage.message_id == ConversationMessageUnit.message_id).where(
+            ConversationMessageUnit.conversation_id == conversation_id,
+            ConversationMessageUnit.unit_type == HISTORY_SUMMARY_UNIT_TYPE,
+            ConversationMessageUnit.unit_status == 'completed',
+            ConversationMessageUnit.delete_flag == 'N',
+            ConversationMessage.status == 'completed',
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.message_index < current.message_index,
+        ).order_by(desc(ConversationMessage.message_index),
+                   desc(ConversationMessageUnit.unit_index))).all()
+
+        summary_record = None
+        summary_payload = None
+        boundary_index = -1
+        for candidate in candidates:
+            payload = _parse_history_summary_content(candidate.unit_content)
+            if not payload:
+                continue
+            boundary = session.execute(select(
+                ConversationMessage.message_index,
+                ConversationMessage.message_role,
+                ConversationMessage.status,
+            ).where(
+                ConversationMessage.message_id == payload["covered_through_message_id"],
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.delete_flag == 'N')).first()
+            if (boundary and boundary.message_role == 'assistant'
+                    and boundary.status == 'completed'
+                    and boundary.message_index == candidate.message_index
+                    and boundary.message_index < current.message_index):
+                summary_record, summary_payload = candidate, payload
+                boundary_index = boundary.message_index
+                break
+
+        messages = session.execute(select(
+            ConversationMessage.message_id,
+            ConversationMessage.message_index,
+            ConversationMessage.message_role,
+            ConversationMessage.message_content,
+            ConversationMessage.minio_files,
+        ).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_index > boundary_index,
+            ConversationMessage.message_index < current.message_index,
+            ConversationMessage.status == 'completed',
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.message_role.in_(['user', 'assistant']),
+        ).order_by(asc(ConversationMessage.message_index))).all()
+
+        turns: List[Dict[str, Any]] = []
+        pending_user = None
+        for message in messages:
+            if message.message_role == 'user':
+                pending_user = message
+            elif pending_user is not None:
+                turns.append({
+                    "user_message": pending_user.message_content or "",
+                    "assistant_final_answer": message.message_content or "",
+                    "attachments": pending_user.minio_files,
+                    "user_message_id": pending_user.message_id,
+                    "assistant_message_id": message.message_id,
+                })
+                pending_user = None
+
+        summary_result = None
+        if summary_record and summary_payload:
+            summary_result = {
+                "unit_id": summary_record.unit_id,
+                **summary_payload,
+            }
+        return {"history_summary": summary_result, "conversation_turns": turns}

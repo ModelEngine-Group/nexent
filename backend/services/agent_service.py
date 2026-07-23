@@ -13,6 +13,8 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.context_input import ContextInput
+from nexent.core.agents.context import ContextItemInput
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -23,7 +25,7 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
-from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
+from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -36,7 +38,6 @@ from consts.model import (
     ExportAndImportDataFormat,
     MCPInfo,
     MessageRequest,
-    MessageUnit,
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
@@ -61,7 +62,7 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_by_model_id_ignore_delete, get_model_id_by_display_name, get_valid_model_ids
+from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -90,8 +91,12 @@ from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
     generate_conversation_title_service,
+    get_conversation_service,
+    get_current_run_user_message_id,
     get_latest_assistant_message,
     get_last_unit_for_message,
+    load_historical_context,
+    persist_history_summary_candidate,
     save_conversation_user,
     save_message,
     save_message_unit,
@@ -121,6 +126,7 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+_channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -220,14 +226,19 @@ def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> lis
 
 
 async def _process_skill_file_uploads(
-    content: str,
+    payloads: list[dict] | str,
     user_id: str,
     tenant_id: str,
 ) -> list[dict]:
     """Upload generated skill files to storage and return upload metadata."""
 
     upload_results: list[dict] = []
-    for payload in _extract_skill_file_upload_payloads(content):
+    structured_payloads = (
+        payloads
+        if isinstance(payloads, list)
+        else _extract_skill_file_upload_payloads(payloads)
+    )
+    for payload in structured_payloads:
         absolute_path = str(payload.get("absolute_path") or "").strip()
         file_name = str(
             payload.get("file_name")
@@ -285,7 +296,7 @@ async def _process_skill_file_uploads(
                     absolute_path,
                     error_message,
                 )
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "[skill-file] failed to upload file file_name=%s absolute_path=%s",
                 file_name,
@@ -923,9 +934,8 @@ async def _stream_agent_chunks(
     # so that units saved incrementally have a valid message_id to reference.
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
-        history_items = getattr(agent_request, "history", None) or []
         user_role_count = sum(
-            1 for item in history_items
+            1 for item in (getattr(agent_request, "history", None) or ())
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
@@ -945,12 +955,6 @@ async def _stream_agent_chunks(
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True)
-
-    # History projection tracking state
-    current_step_id: int = 0
-    pending_tool_content: Optional[str] = None  # Buffered tool content for merge
-    pending_tool_step: Optional[int] = None  # Step index of buffered tool
-    pending_tool_unit_index: Optional[int] = None  # Unit index assigned to buffered tool
 
     # Tracks the unit currently being accumulated in memory. Each entry is
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
@@ -992,9 +996,6 @@ async def _stream_agent_chunks(
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
 
-                if chunk_type == ProcessType.STEP_COUNT.value:
-                    current_step_id += 1
-
                 # Add unit_index to the chunk data for frontend resume skip logic.
                 # This allows frontend to accurately skip chunks that were already persisted.
                 # For mergeable types (continuing chunks), use the current unit's index.
@@ -1018,6 +1019,34 @@ async def _stream_agent_chunks(
 
             if chunk_type == "final_answer":
                 captured_final_answer = chunk_content
+
+            if chunk_type == ProcessType.SKILL_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    absolute_path = str(artifact.get("absolute_path") or "").strip()
+                    if not absolute_path or absolute_path in captured_skill_files:
+                        continue
+                    captured_skill_files[absolute_path] = artifact
+
+                logger.info(
+                    "[skill-file] received structured artifacts count=%s current_total=%s",
+                    len(artifacts),
+                    len(captured_skill_files),
+                )
+                continue
 
             should_parse_skill_file = (
                 chunk_type in {"execution_logs", "parse"}
@@ -1075,9 +1104,7 @@ async def _stream_agent_chunks(
                     # loop is async but the DB operations are I/O-bound with network
                     # latency, synchronous writes here are acceptably fast and guarantee
                     # that each chunk is fully persisted before the next chunk arrives.
-                    old_len = len(current_unit["content"])
                     current_unit["content"] += chunk_content
-                    new_len = len(current_unit["content"])
                     update_unit_content(
                         current_unit["unit_id"],
                         current_unit["content"],
@@ -1132,17 +1159,24 @@ async def _stream_agent_chunks(
                     # and inserts each search result as a source_search row
                     # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        placeholder_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type="search_content_placeholder",
-                            unit_content='{"placeholder": true}',
-                            user_id=user_id,
-                            unit_status="completed",
-                            step_index=current_step_id,
-                        ).result()
+                        try:
+                            placeholder_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type="search_content_placeholder",
+                                unit_content='{"placeholder": true}',
+                                user_id=user_id,
+                                unit_status="completed",
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist search_content placeholder: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                            placeholder_unit_id = None
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
@@ -1187,89 +1221,46 @@ async def _stream_agent_chunks(
                         yield f"data: {chunk}\n\n"
                         continue
 
-                    # Handle tool call merging: buffer TOOL, merge with EXECUTION_LOGS
-                    if chunk_type == ProcessType.TOOL.value:
-                        pending_tool_content = chunk_content
-                        pending_tool_step = current_step_id
-                        pending_tool_unit_index = next_unit_index
-                        next_unit_index += 1
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
-                    if chunk_type == ProcessType.EXECUTION_LOGS.value and pending_tool_content is not None:
-                        merged_content = json.dumps({
-                            "tool_call": pending_tool_content,
-                            "execution_result": chunk_content,
-                        })
-                        if streaming_message_id is not None:
+                    # Default path: insert a new unit row with unit_status='streaming'.
+                    # history_summary is already persisted once by the canonical
+                    # checkpoint sink on its covered assistant message. The stream
+                    # event is display-only and must not create a duplicate unit on
+                    # the currently-running assistant message.
+                    if chunk_type == "history_summary":
+                        current_unit = None
+                    elif streaming_message_id is not None and chunk_type not in (
+                        "search_content_placeholder",
+                    ):
+                        try:
                             new_unit_id = submit(
                                 save_message_unit,
                                 message_id=streaming_message_id,
                                 conversation_id=agent_request.conversation_id,
-                                unit_index=pending_tool_unit_index,
-                                unit_type="tool_call",
-                                unit_content=merged_content,
+                                unit_index=next_unit_index,
+                                unit_type=chunk_type,
+                                unit_content=chunk_content,
                                 user_id=user_id,
-                                unit_status="completed",
-                                step_index=pending_tool_step,
+                                unit_status="streaming",
                             ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist streaming message unit: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                        else:
                             current_unit = {
-                                "type": "tool_call",
-                                "content": merged_content,
+                                "type": chunk_type,
+                                "content": chunk_content,
                                 "unit_id": new_unit_id,
-                                "unit_index": pending_tool_unit_index,
-                                "mergeable": False,
+                                "unit_index": next_unit_index,
+                                "mergeable": mergeable,
                             }
-                        pending_tool_content = None
-                        pending_tool_step = None
-                        pending_tool_unit_index = None
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
-                    # Default path: insert a new unit row with unit_status='streaming'.
-                    if streaming_message_id is not None and chunk_type not in (
-                        "search_content_placeholder",
-                    ):
-                        new_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type=chunk_type,
-                            unit_content=chunk_content,
-                            user_id=user_id,
-                            unit_status="streaming",
-                            step_index=current_step_id,
-                        ).result()
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": chunk_content,
-                            "unit_id": new_unit_id,
-                            "unit_index": next_unit_index,
-                            "mergeable": mergeable,
-                        }
-                        next_unit_index += 1
+                            next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
-
-        # Flush any buffered tool content that didn't receive execution_logs
-        if pending_tool_content is not None and streaming_message_id is not None:
-            submit(
-                save_message_unit,
-                message_id=streaming_message_id,
-                conversation_id=agent_request.conversation_id,
-                unit_index=pending_tool_unit_index,
-                unit_type="tool",
-                unit_content=pending_tool_content,
-                user_id=user_id,
-                unit_status="completed",
-                step_index=pending_tool_step,
-            ).result()
-            pending_tool_content = None
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
         await channel.publish(_safe_agent_stream_error_chunk())
@@ -1333,15 +1324,14 @@ async def _stream_agent_chunks(
                     user_id=user_id
                 )
             )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
         try:
-            skill_file_content_local = "\n".join(
-                json.dumps(payload, ensure_ascii=False)
-                for payload in captured_skill_files.values()
-            )
-            if skill_file_content_local:
+            skill_file_payloads = list(captured_skill_files.values())
+            if skill_file_payloads:
                 skill_file_uploads = await _process_skill_file_uploads(
-                    content=skill_file_content_local,
+                    payloads=skill_file_payloads,
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
@@ -1477,7 +1467,29 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             tenant_id=tenant_id,
             version_no=version_no
         )
-        agent_info["skills"] = instances
+        # Keep disabled instances for their saved configuration, but do not
+        # return them as selected skills in the agent configuration.
+        instances = [
+            instance for instance in instances if instance.get("enabled", True)
+        ]
+
+        # Fallback: verify each instance's skill_id still exists in ag_skill_info_t
+        valid_skill_ids = skill_db.get_valid_skill_ids(
+            tenant_id=tenant_id,
+            skill_ids=[inst.get("skill_id") for inst in instances if isinstance(inst, dict)]
+        )
+        filtered = []
+        for inst in instances:
+            skill_id = inst.get("skill_id")
+            if skill_id in valid_skill_ids:
+                filtered.append(inst)
+            else:
+                logger.warning(
+                    "Filtering out stale skill instance: agent_id=%s, skill_id=%s (not found in ag_skill_info_t)",
+                    agent_id, skill_id,
+                )
+        agent_info["skills"] = filtered
+
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
@@ -1661,8 +1673,10 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
                 "requested_output_tokens": request.requested_output_tokens,
+                "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
+                "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
@@ -1812,7 +1826,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 tenant_id=tenant_id,
                 user_id=user_id
             )
-    except ValueError as e:
+    except ValueError:
         # Re-raise ValueError (circular dependency) as-is
         raise
     except Exception as e:
@@ -1880,10 +1894,6 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
-        # Memory cleanup for the deleted agent's short-term records will be
-        # performed by the new Memory system's ``forgetting`` flow once it
-        # lands; the previous dual-level ``clear_memory`` call has been
-        # removed alongside the legacy mem0 path.
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
@@ -2144,8 +2154,10 @@ async def export_agent_by_agent_id(
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
+                                          is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
+                                          context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
                                               "duty_prompt"),
                                           constraint_prompt=agent_info.get(
@@ -2306,8 +2318,10 @@ async def import_agent_by_agent_id(
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
+                                         "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
+                                         "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
@@ -2484,6 +2498,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
@@ -2682,6 +2697,44 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
+def _build_authorized_context_input(agent_run_info, historical_context=None) -> ContextInput:
+    """Freeze configured context and authorized history into one item snapshot."""
+    if historical_context is None:
+        fallback_turns = []
+        pending_user = None
+        for index, entry in enumerate(agent_run_info.history or ()):
+            if entry.role == MESSAGE_ROLE["USER"]:
+                pending_user = (index, entry)
+            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
+                user_index, user_entry = pending_user
+                fallback_turns.append({
+                    "user_message": user_entry.content,
+                    "assistant_final_answer": entry.content,
+                    "attachments": [],
+                    "user_message_id": -(user_index + 1),
+                    "assistant_message_id": -(index + 1),
+                })
+                pending_user = None
+        historical_context = {"conversation_turns": fallback_turns}
+    history_items = []
+    summary = historical_context.get("history_summary")
+    if summary:
+        history_items.append(ContextItemInput(
+            id=f"history_summary:{summary['unit_id']}", type="history_summary",
+            content=summary, source=("conversation_history",),
+        ))
+    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
+        history_items.append(ContextItemInput(
+            id=f"conversation_turn:{turn['user_message_id']}:{turn['assistant_message_id']}",
+            type="conversation_turn", content=turn,
+            source=("conversation_history",),
+            metadata={"layout_order": order},
+        ))
+    return ContextInput(
+        items=tuple(agent_run_info.agent_config.context_items or ()) + tuple(history_items),
+    )
+
+
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -2710,27 +2763,37 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
-        conversation_id=agent_request.conversation_id,
+        context_policy=agent_request.context_policy,
+        enable_planning=agent_request.enable_plan,
     )
 
-    # Mount conversation-level reusable ContextManager if enabled
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = get_current_run_user_message_id(
+            agent_request.conversation_id, user_id
+        )
+        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
+            current_message_id = None
+            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
+    agent_run_info.context_input = _build_authorized_context_input(
+        agent_run_info, historical_context
+    )
+
+    # ContextManager is created exactly once by the SDK Agent creation entry.
+    # The application boundary only injects the persistence callback into its
+    # configuration before the worker thread starts.
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
-    if cm_config and cm_config.enabled:
-        from nexent.core.agents.context.history_projector import HistoryProjector
-        from services.conversation_management_service import get_message_units_by_message_id
-
-        cm_config.history_projector = HistoryProjector(
-            query_units_fn=get_message_units_by_message_id
+    if cm_config:
+        cm_config.history_summary_sink = (
+            (lambda candidate: persist_history_summary_candidate(
+                agent_request.conversation_id, candidate, user_id, tenant_id
+            )) if historical_context is not None else None
         )
-
-        cm = agent_run_manager.get_or_create_context_manager(
-            conversation_id=str(agent_request.conversation_id),
-            config=cm_config,
-            max_steps=agent_run_info.agent_config.max_steps
-        )
-        agent_run_info.context_manager = cm
-
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)
     return agent_run_info, memory_context
@@ -2743,7 +2806,8 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
-        submit(save_conversation_user, agent_request, user_id, tenant_id)
+        # Historical checkpoint lookup for this run needs the current message boundary.
+        save_conversation_user(agent_request, user_id, tenant_id)
         return
 
     if target == MESSAGE_ROLE["ASSISTANT"]:
@@ -2862,7 +2926,8 @@ async def generate_stream(
             # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
 
-        if enable_memory and memory_enabled_runtime:
+        if memory_enabled:
+            # Emit completion token once memory is ready
             await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
             yield f"data: {_memory_token(msg_done)}\n\n"
 
@@ -2923,8 +2988,8 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
-        if task_id is not None:
-            preprocess_manager.unregister_preprocess_task(task_id)
+        # Always unregister preprocess task
+        preprocess_manager.unregister_preprocess_task(task_id)
 
 
 def _detect_resume_position(
@@ -3047,6 +3112,19 @@ async def run_agent_stream(
             agent_request.conversation_id,
             resolved_user_id,
         )
+
+    if (
+        not agent_request.is_debug
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+    ):
+        conversation = get_conversation_service(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+        )
+        if conversation is None:
+            raise ForbiddenError("Conversation is not accessible to the current identity")
 
     if (
         not agent_request.is_debug
@@ -3298,29 +3376,96 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk()
-        finally:
-            # Auto-generate title for new conversations after stream completes
-            if is_new_conversation:
-                try:
-                    await generate_conversation_title_service(
-                        conversation_id=agent_request.conversation_id,
-                        question=agent_request.query,
-                        user_id=resolved_user_id,
-                        tenant_id=resolved_tenant_id,
-                        language=language,
-                    )
-                except Exception as title_exc:
-                    logger.warning(
-                        "Failed to auto-generate title for conversation_id=%s: %r",
-                        agent_request.conversation_id,
-                        title_exc,
-                    )
+
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    if agent_request.conversation_id is not None:
+        headers["conversation_id"] = str(agent_request.conversation_id)
 
     return StreamingResponse(
         stream_with_agent_context(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=headers,
     )
+
+
+async def run_agent_background(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    skip_user_save: bool = False,
+) -> Dict[str, Any]:
+    """
+    Run an agent without returning an SSE response.
+
+    This path is used by background automation tasks. It reuses the same
+    preparation, monitoring, memory and message persistence flow as
+    run_agent_stream, but consumes generated chunks internally.
+    """
+    if not agent_request.conversation_id:
+        raise ValueError("conversation_id is required for background agent runs")
+
+    if not agent_request.is_debug and not skip_user_save:
+        save_messages(
+            agent_request,
+            target=MESSAGE_ROLE["USER"],
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+
+    memory_ctx_preview = build_memory_context(
+        user_id, tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
+    )
+    memory_enabled = memory_ctx_preview.user_config.memory_switch
+
+    agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        query=agent_request.query,
+        is_debug=agent_request.is_debug,
+        language=language,
+        memory_enabled=memory_enabled,
+        history_count=len(agent_request.history) if agent_request.history else 0,
+        minio_files_count=len(agent_request.minio_files) if agent_request.minio_files else 0,
+        extra_metadata={
+            "background": True,
+            "skip_user_save": skip_user_save,
+            "agent_share_option": getattr(
+                memory_ctx_preview.user_config,
+                "agent_share_option",
+                "unknown",
+            ),
+        },
+    ))
+
+    if memory_enabled and not agent_request.is_debug:
+        stream_gen = generate_stream_with_memory(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+    else:
+        stream_gen = generate_stream_no_memory(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+
+    chunks = 0
+    with agent_monitoring_context(agent_metadata):
+        async for _ in stream_gen:
+            chunks += 1
+
+    latest_message = get_latest_assistant_message(agent_request.conversation_id, user_id)
+    return {
+        "conversation_id": agent_request.conversation_id,
+        "assistant_message_id": latest_message.get("message_id") if latest_message else None,
+        "chunks": chunks,
+    }
 
 
 def stop_agent_tasks(conversation_id: int, user_id: str):
@@ -3349,6 +3494,10 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message, "already_stopped": True}
+
+
+def is_agent_running(conversation_id: int, user_id: str) -> bool:
+    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:
@@ -3629,3 +3778,95 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+# =============================================================================
+# Sandbox Policy Builder
+# =============================================================================
+
+
+def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
+    """
+    Assemble a sandbox policy dict from ``NEXENT_SANDBOX_*`` environment variables.
+
+    This is the canonical factory used by the backend service layer to resolve
+    ``SandboxConfig`` for every agent run.  It is called before constructing
+    ``AgentRunInfo`` so that the resolved config flows into ``NexentAgent``.
+
+    Resolution order:
+      1. ``AgentConfig.sandbox_policy`` from the DB (takes precedence).
+      2. ``NEXENT_SANDBOX_*`` environment variables (fallback when DB has no policy).
+
+    Args:
+        tenant_id: tenant identifier (reserved for future per-tenant overrides).
+        agent_type: agent type string (reserved for future per-type overrides).
+
+    Returns:
+        A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
+    """
+    from nexent.core.agents.sandbox import SandboxConfig
+    from consts.const import (
+        NEXENT_SANDBOX_DEFAULT_LEVEL,
+        NEXENT_SANDBOX_DEFAULT_SCOPE,
+        NEXENT_SANDBOX_DOCKER_IMAGE,
+        NEXENT_SANDBOX_MEMORY_LIMIT_MB,
+        NEXENT_SANDBOX_CPU_QUOTA,
+        NEXENT_SANDBOX_TIMEOUT_S,
+        NEXENT_SANDBOX_NETWORK_DISABLED,
+        NEXENT_SANDBOX_SHELL_POLICY,
+        NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+    )
+
+    level = NEXENT_SANDBOX_DEFAULT_LEVEL
+    if level == "local":
+        return None
+
+    return {
+        "level": level,
+        "scope": NEXENT_SANDBOX_DEFAULT_SCOPE,
+        "docker_image": NEXENT_SANDBOX_DOCKER_IMAGE,
+        "memory_limit_mb": NEXENT_SANDBOX_MEMORY_LIMIT_MB,
+        "cpu_quota": NEXENT_SANDBOX_CPU_QUOTA,
+        "timeout_seconds": NEXENT_SANDBOX_TIMEOUT_S,
+        "network_disabled": NEXENT_SANDBOX_NETWORK_DISABLED,
+        "shell_policy": NEXENT_SANDBOX_SHELL_POLICY,
+        "auto_sync_outputs": NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+    }
+
+
+def get_sandbox_minio_client() -> Optional[Any]:
+    """
+    Build and return a MinIO client for sandbox output sync.
+
+    Returns None when MinIO is not configured (safe no-op).
+
+    The caller is responsible for managing the client lifecycle — this function
+    returns a fresh client on each call so the caller can call ``close()`` on it
+    after the run finishes.
+    """
+    from consts.const import (
+        NEXENT_SANDBOX_OUTPUT_BUCKET,
+        MINIO_ENDPOINT,
+        MINIO_ACCESS_KEY,
+        MINIO_SECRET_KEY,
+        MINIO_SECURE,
+    )
+
+    if not MINIO_ENDPOINT:
+        return None
+
+    try:
+        from nexent.storage import MinIOStorageClient
+    except ImportError:
+        return None
+
+    client = MinIOStorageClient(
+        endpoint=MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY or "",
+        secret_key=MINIO_SECRET_KEY or "",
+        region=None,
+        default_bucket=NEXENT_SANDBOX_OUTPUT_BUCKET,
+        secure=MINIO_SECURE,
+    )
+    return client
+

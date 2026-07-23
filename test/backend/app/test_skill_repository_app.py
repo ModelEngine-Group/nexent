@@ -95,6 +95,7 @@ def test_list_skill_repository_listings_api_passes_filters(mocker, mock_auth_hea
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     mock_list.assert_called_once_with(
         "tenant-1",
+        user_id="user-1",
         status="pending_review",
         skill_id=3,
         category_id=2,

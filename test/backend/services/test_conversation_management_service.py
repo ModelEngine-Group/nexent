@@ -59,7 +59,6 @@ sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
 # Stub backend.agents.agent_run_manager to avoid importing the real module
 agent_run_manager_mod = types.ModuleType("backend.agents.agent_run_manager")
 mock_agent_run_manager = MagicMock()
-mock_agent_run_manager.clear_conversation_context_manager = MagicMock()
 agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
 agent_run_manager_mod.AgentRunManager = object
 sys.modules["backend.agents"] = types.ModuleType("backend.agents")
@@ -207,6 +206,7 @@ from backend.services.conversation_management_service import (
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
+        get_conversation_service,
         get_conversation_list_service,
         rename_conversation_service,
         delete_conversation_service,
@@ -526,6 +526,19 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result[1]["title"], "Chat 2")
         mock_get_conversation_list.assert_called_once_with(self.user_id)
 
+    @patch('backend.services.conversation_management_service.get_conversation')
+    def test_get_conversation_service_preserves_authorization_scope(self, mock_get_conversation):
+        mock_get_conversation.return_value = {"conversation_id": 123}
+
+        result = get_conversation_service(123, self.user_id, "tenant-1")
+
+        self.assertEqual(result, {"conversation_id": 123})
+        mock_get_conversation.assert_called_once_with(
+            conversation_id=123,
+            user_id=self.user_id,
+            tenant_id="tenant-1",
+        )
+
     @patch('backend.services.conversation_management_service.rename_conversation')
     def test_rename_conversation_service(self, mock_rename_conversation):
         # Setup
@@ -633,6 +646,128 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(len(final_answer_units), 1)
         self.assertEqual(
             final_answer_units[0]["content"], "The capital of France is Paris.")
+
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_returns_history_summary_unit(
+            self, mock_get_conversation_history):
+        """History API preserves summary units for frontend event rendering."""
+        summary_content = ('{"summary":{"task_overview":"done"},'
+                           '"covered_through_message_id":24}')
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123, "create_time": "2023-04-01",
+            "message_records": [{
+                "message_id": 24, "role": "assistant", "message_content": "answer",
+                "units": [{
+                    "unit_id": 1001, "unit_type": "history_summary",
+                    "unit_content": summary_content, "unit_index": 2,
+                    "unit_status": "completed",
+                }],
+                "opinion_flag": None,
+            }],
+            "search_records": [], "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        summary_units = [
+            unit for unit in result[0]["message"][0]["message"]
+            if unit["type"] == "history_summary"]
+        self.assertEqual(summary_units, [{
+            "type": "history_summary", "content": summary_content,
+            "unit_index": 2, "unit_status": "completed",
+        }])
+
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_skips_misplaced_history_summary_unit(
+            self, mock_get_conversation_history):
+        """Display-only duplicates attached after their coverage are ignored."""
+        summary_content = ('{"summary":{"task_overview":"done"},'
+                           '"covered_through_message_id":24}')
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123, "create_time": "2023-04-01",
+            "message_records": [{
+                "message_id": 28, "role": "assistant", "message_content": "answer",
+                "units": [{
+                    "unit_id": 1002, "unit_type": "history_summary",
+                    "unit_content": summary_content, "unit_index": 2,
+                    "unit_status": "completed",
+                }],
+                "opinion_flag": None,
+            }],
+            "search_records": [], "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        summary_units = [
+            unit for unit in result[0]["message"][0]["message"]
+            if unit["type"] == "history_summary"]
+        self.assertEqual(summary_units, [])
+
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_restores_tool_metadata(
+            self, mock_get_conversation_history):
+        """Tool units should expose persisted metadata needed by the history UI."""
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123, "create_time": "2023-04-01",
+            "message_records": [{
+                "message_id": 2, "role": "assistant", "message_content": "Done",
+                "units": [{
+                    "unit_id": 100, "unit_type": "tool",
+                    "unit_content": json.dumps({
+                        "content": "Searching...", "tool_name": "web_search",
+                        "tool_arguments": {"query": "Paris"}, "role": "tool",
+                    }),
+                    "unit_index": 2, "unit_status": "completed",
+                }, {
+                    "unit_id": 101, "unit_type": "final_answer",
+                    "unit_content": "Done", "unit_index": 3,
+                    "unit_status": "completed",
+                }],
+                "opinion_flag": None,
+            }],
+            "search_records": [], "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        tool_unit = result[0]["message"][0]["message"][0]
+        self.assertEqual(tool_unit["content"], "Searching...")
+        self.assertEqual(tool_unit["tool_name"], "web_search")
+        self.assertEqual(tool_unit["tool_arguments"], {"query": "Paris"})
+        self.assertEqual(tool_unit["role"], "tool")
+        self.assertEqual(tool_unit["unit_index"], 2)
+        self.assertEqual(tool_unit["unit_status"], "completed")
+
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_preserves_invalid_tool_json(
+            self, mock_get_conversation_history):
+        """Tool units with invalid JSON should retain their original content."""
+        invalid_tool_content = "{invalid tool payload"
+        mock_get_conversation_history.return_value = {
+            "conversation_id": 123, "create_time": "2023-04-01",
+            "message_records": [{
+                "message_id": 2, "role": "assistant", "message_content": "Done",
+                "units": [{
+                    "unit_id": 100, "unit_type": "tool",
+                    "unit_content": invalid_tool_content,
+                    "unit_index": 2, "unit_status": "completed",
+                }, {
+                    "unit_id": 101, "unit_type": "final_answer",
+                    "unit_content": "Done", "unit_index": 3,
+                    "unit_status": "completed",
+                }],
+                "opinion_flag": None,
+            }],
+            "search_records": [], "image_records": [],
+        }
+
+        result = get_conversation_history_service(123, self.user_id)
+
+        tool_unit = result[0]["message"][0]["message"][0]
+        self.assertEqual(tool_unit["content"], invalid_tool_content)
+        self.assertNotIn("tool_name", tool_unit)
+        self.assertNotIn("tool_arguments", tool_unit)
 
     @patch('backend.services.conversation_management_service.get_conversation')
     @patch('backend.services.conversation_management_service.get_source_searches_by_message')
@@ -1099,9 +1234,8 @@ class TestRenameConversationService(unittest.TestCase):
 class TestDeleteConversationService(unittest.TestCase):
     """Test delete_conversation_service function."""
 
-    @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_not_found_raises(self, mock_delete, mock_mgr):
+    def test_delete_not_found_raises(self, mock_delete):
         """Should raise exception when conversation not found."""
         mock_delete.return_value = False
         from backend.services.conversation_management_service import delete_conversation_service
@@ -1110,21 +1244,18 @@ class TestDeleteConversationService(unittest.TestCase):
             delete_conversation_service(123, "user-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
-    @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_clears_context_manager(self, mock_delete, mock_mgr):
-        """Should call clear_conversation_context_manager after successful delete."""
+    def test_delete_succeeds_without_runtime_context_cleanup(self, mock_delete):
+        """Run-scoped ContextManagers require no conversation deletion cleanup."""
         mock_delete.return_value = True
         from backend.services.conversation_management_service import delete_conversation_service
 
         result = delete_conversation_service(123, "user-1")
 
         self.assertTrue(result)
-        mock_mgr.clear_conversation_context_manager.assert_called_once_with(123)
 
-    @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
-    def test_delete_exception(self, mock_delete, mock_mgr):
+    def test_delete_exception(self, mock_delete):
         """Should re-raise exception from database layer."""
         mock_delete.side_effect = Exception("DB error")
         from backend.services.conversation_management_service import delete_conversation_service

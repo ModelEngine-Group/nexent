@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -15,6 +15,7 @@ from consts.exceptions import (
     McpValidationError,
     McpNameConflictError,
     McpPortConflictError,
+    UnauthorizedError,
 )
 from consts.model import (
     MCPConfigRequest,
@@ -24,6 +25,7 @@ from consts.model import (
     EnableMcpServiceRequest,
     DisableMcpServiceRequest,
     HealthcheckMcpServiceRequest,
+    TestMcpConnectionRequest,
     ListMcpServicesQuery,
 )
 from services.remote_mcp_service import (
@@ -35,12 +37,14 @@ from services.remote_mcp_service import (
     attach_mcp_container_permissions,
     get_mcp_record_by_id,
     list_mcp_service_tools_by_id,
+    refresh_mcp_service_tool_count,
     add_mcp_service,
     add_container_mcp_service,
     update_mcp_service,
     update_mcp_service_enabled,
     delete_mcp_service,
     check_mcp_service_health,
+    test_mcp_connection,
     check_container_port_conflict,
     suggest_container_port,
 )
@@ -51,6 +55,8 @@ from utils.auth_utils import get_current_user_info
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")
 
+_MCP_SERVICE_ID_DESC = Query(..., description="MCP service ID")
+
 
 # ---------------------------------------------------------------------------
 # Tools Endpoint
@@ -58,7 +64,7 @@ logger = logging.getLogger("remote_mcp_app")
 
 @router.get("/tools")
 async def get_tools_from_mcp(
-    mcp_id: int = Query(..., description="MCP service ID"),
+    mcp_id: int = _MCP_SERVICE_ID_DESC,
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
@@ -97,6 +103,46 @@ async def get_tools_from_mcp(
 
 
 # ---------------------------------------------------------------------------
+# Tool Count Refresh Endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/refresh-tools")
+async def refresh_mcp_tools_endpoint(
+    mcp_id: int = _MCP_SERVICE_ID_DESC,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
+    """Connect to the MCP server, fetch tool names, and persist them to the record."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        await refresh_mcp_service_tool_count(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            mcp_id=mcp_id,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Tool count refreshed", "status": "success"}
+        )
+    except McpNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except McpValidationError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except MCPConnectionError as e:
+        logger.exception(f"Failed to refresh tool count for mcp_id={mcp_id}")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="MCP connection failed"
+        )
+    except Exception as e:
+        logger.error(f"Failed to refresh MCP tool count: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to refresh MCP tool count"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Add Endpoints
 # ---------------------------------------------------------------------------
 
@@ -125,7 +171,12 @@ async def add_mcp_service_endpoint(
             custom_headers=payload.custom_headers,
             container_config=payload.container_config,
             registry_json=payload.registry_json,
+            config_json=payload.config_json,
+            market_id=payload.market_id,
             enabled=payload.enabled if payload.enabled is not None else False,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -138,7 +189,10 @@ async def add_mcp_service_endpoint(
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="MCP name already exists")
     except MCPConnectionError as e:
         logger.error(f"Failed to add MCP service: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="MCP connection failed")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=str(e) or "MCP connection failed"
+        )
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -171,8 +225,12 @@ async def add_container_mcp_service_endpoint(
             tags=payload.tags,
             authorization_token=payload.authorization_token,
             registry_json=payload.registry_json,
+            market_id=payload.market_id,
             port=payload.port,
             mcp_config=payload.mcp_config,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -205,7 +263,7 @@ async def add_container_mcp_service_endpoint(
         logger.error(f"MCP connection failed when adding container service: {e}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed"
+            detail=str(e) or "MCP connection failed"
         )
     except Exception as e:
         logger.error(f"Failed to add container MCP service: {e}")
@@ -241,7 +299,12 @@ async def update_mcp_service_endpoint(
             server_url=payload.server_url,
             authorization_token=payload.authorization_token,
             custom_headers=payload.custom_headers,
+            config_json=payload.config_json,
             tags=payload.tags,
+            market_id=payload.market_id,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -384,6 +447,11 @@ async def get_mcp_list(
                 "enable_upload_image": ENABLE_UPLOAD_IMAGE,
                 "status": "success"
             }
+        )
+    except UnauthorizedError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(e)
         )
     except Exception as e:
         logger.error(f"Failed to get MCP list: {e}")
@@ -553,7 +621,7 @@ async def get_container_logs(
 
 @router.get("/healthcheck")
 async def check_mcp_health(
-    mcp_id: int = Query(..., description="MCP service ID"),
+    mcp_id: int = _MCP_SERVICE_ID_DESC,
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
@@ -586,6 +654,43 @@ async def check_mcp_health(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to check MCP health"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test Connection Endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/test-connection")
+async def test_mcp_connection_endpoint(
+    payload: TestMcpConnectionRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None
+):
+    """Lightweight MCP connectivity test. Performs only the initialize handshake.
+
+    This is faster than a full health check (which calls list_tools()) and is
+    intended for pre-install validation in the Quick Add modal.
+    """
+    try:
+        get_current_user_info(authorization, http_request)
+
+        success = await test_mcp_connection(
+            server_url=payload.server_url,
+            authorization_token=payload.authorization_token,
+            custom_headers=payload.custom_headers,
+        )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"success": success}
+        )
+    except Exception as e:
+        logger.exception("MCP test connection failed")
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"success": False, "error": str(e) or "Connection failed"}
         )
 
 

@@ -41,6 +41,8 @@ export interface SkillFormData {
   source: string;
   tags: string[];
   content: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
 }
 
 /**

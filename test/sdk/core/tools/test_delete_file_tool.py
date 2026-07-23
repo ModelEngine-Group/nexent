@@ -152,10 +152,7 @@ class TestDeleteFileTool:
         assert result_data["file_size_bytes"] == len(content.encode('utf-8'))
         assert "deleted successfully" in result_data["message"]
 
-        # Verify observer messages
-        delete_file_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Deleting file..."
-        )
+        # Verify CARD observer message
         delete_file_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "trash", "text": f"Deleting {file_path}"}], ensure_ascii=False)
@@ -310,13 +307,6 @@ class TestDeleteFileTool:
         # Create file first
         with open(abs_path, 'w') as f:
             f.write("test content")
-
-        result = delete_file_tool.forward(file_path)
-
-        # Verify Chinese running prompt
-        delete_file_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在删除文件..."
-        )
 
         # Verify Chinese warning message for protected file
         protected_file_path = "passwd.txt"

@@ -1,6 +1,7 @@
 """Unit tests for backend.database.skill_db module."""
 import sys
 import os
+import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../sdk"))
@@ -45,11 +46,18 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
+utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
+utils_str_utils_mock.convert_string_to_list = (
+    lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
+)
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['utils.str_utils'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
 sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
 
 from backend.database.skill_db import (
     _params_value_for_db,
@@ -115,6 +123,8 @@ class MockSkillInfo:
         self.config_schemas = kwargs.get('config_schemas', {})
         self.config_values = kwargs.get('config_values', {})
         self.source = kwargs.get('source', 'custom')
+        self.group_ids = kwargs.get('group_ids', '')
+        self.ingroup_permission = kwargs.get('ingroup_permission')
         self.created_by = kwargs.get('created_by', 'creator1')
         self.create_time = kwargs.get('create_time', datetime.now())
         self.updated_by = kwargs.get('updated_by', 'updater1')
@@ -1053,7 +1063,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = [skill1, skill2]
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -1072,6 +1082,10 @@ class TestListSkills:
         assert result[0]['name'] == 'skill1'
         assert result[0]['tool_ids'] == [1, 2]
         assert result[1]['tool_ids'] == []
+        mock_filter.order_by.assert_called_once_with(
+            db_models_mock.SkillInfo.create_time.desc(),
+            db_models_mock.SkillInfo.skill_id.desc(),
+        )
 
     def test_list_skills_empty(self, monkeypatch, mock_session):
         """Test listing when no skills exist."""
@@ -1080,7 +1094,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = []
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -2273,6 +2287,20 @@ class TestBuildSkillUpdateValues:
         result = _build_skill_update_values(data, "admin")
         assert "config_schemas" in result
         assert "config_values" in result
+
+    def test_group_permission_fields(self):
+        result = _build_skill_update_values(
+            {"group_ids": [10, 20], "ingroup_permission": "READ_ONLY"},
+            "admin",
+        )
+
+        assert result["group_ids"] == "10,20"
+        assert result["ingroup_permission"] == "READ_ONLY"
+
+    def test_group_ids_string_is_preserved(self):
+        result = _build_skill_update_values({"group_ids": "10,20"}, "admin")
+
+        assert result["group_ids"] == "10,20"
 
     def test_empty_skill_data(self):
         result = _build_skill_update_values({}, "user1")

@@ -8,6 +8,10 @@ images:
     repository: "nexent/nexent-mcp"
     tag: "latest"
     pullPolicy: IfNotPresent
+  sandbox:
+    repository: "nexent/nexent-sandbox"
+    tag: "latest"
+    pullPolicy: IfNotPresent
 
 # SQL content is rendered by deploy/k8s/deploy.sh from deploy/sql/
 # directory. Keep this empty in chart defaults to avoid maintaining a second SQL
@@ -54,6 +58,7 @@ config:
     endpoint: "http://nexent-minio:9000"
     region: "cn-north-1"
     defaultBucket: "nexent"
+    secure: "true"
   elasticsearch:
     host: "http://nexent-elasticsearch:9200"
     javaOpts: "-Xms2g -Xmx2g"
@@ -159,6 +164,8 @@ config:
     sslVerify: "true"
     caBundle: ""
     callbackBaseUrl: "http://localhost:30000"
+    # Supported values: disabled, button, force.
+    loginMode: "button"
   cas:
     enabled: "false"
     serverUrl: ""
@@ -182,6 +189,28 @@ config:
     logoutUrl: ""
     sslVerify: "true"
     caBundle: ""
+  sandbox:
+    # Default sandbox isolation level: local / docker / wasm.
+    # 'local' preserves backward-compatibility for existing deployments.
+    defaultLevel: "local"
+    # Default sandbox container lifecycle scope: session / system.
+    # session = one container per agent_run, destroyed on run end (strictest isolation).
+    # system  = persistent warm pool shared by all runs (lowest cold-start latency).
+    defaultScope: "session"
+    # Sandbox resource limits.
+    memoryLimitMb: "512"
+    cpuQuota: "1.0"
+    # Sandbox execution timeout per step (seconds).
+    timeoutSeconds: "30"
+    # Sandbox network policy: enabled / disabled.
+    network: "disabled"
+    # Shell execution policy: disabled / restricted / boxed.
+    # 'disabled' is recommended — blocks subprocess/os shell calls at AST-parse time.
+    shellPolicy: "disabled"
+    # MinIO bucket for sandbox output file sync.
+    outputBucket: "nexent-artifacts"
+    # Automatically sync sandbox output files to MinIO after each run.
+    autoSyncOutputs: "true"
 
 # Secrets used by common templates
 secrets:

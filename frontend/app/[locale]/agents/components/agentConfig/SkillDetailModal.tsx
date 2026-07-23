@@ -11,6 +11,7 @@ import type {
   SkillFormData,
 } from "@/types/skill";
 import {
+  fetchSkillById,
   fetchSkillFileContent,
   fetchSkillFiles,
   SkillFilesAccessDeniedError,
@@ -26,6 +27,22 @@ interface SkillDetailModalProps {
 }
 
 const OFFICIAL_SOURCES = new Set(["official", "\u5b98\u65b9"]);
+
+async function loadSkillFileTabs(skillName: string): Promise<SkillFileContent[]> {
+  const files = await fetchSkillFiles(skillName);
+  const paths = flattenSkillFiles(normalizeSkillFiles(files), skillName);
+  return Promise.all(
+    paths.map(async (path) => {
+      try {
+        const content = await fetchSkillFileContent(skillName, path);
+        return { path, content: content || "" };
+      } catch (error) {
+        log.error("Failed to load skill file content:", error);
+        return { path, content: "" };
+      }
+    })
+  );
+}
 
 export default function SkillDetailModal({
   skill,
@@ -59,30 +76,29 @@ export default function SkillDetailModal({
     const loadFiles = async () => {
       setLoading(true);
       try {
-        const files = await fetchSkillFiles(skill.name);
-        const flatFiles = flattenSkillFiles(
-          normalizeSkillFiles(files),
-          skill.name
+        const detailResult = await fetchSkillById(
+          skill.skill_id,
+          skill.tenant_id
         );
-        if (flatFiles.length === 0) {
-          return;
+        const detail =
+          detailResult.success && detailResult.data ? detailResult.data : skill;
+        const skillName = detail.name?.trim() || skill.name;
+        if (!cancelled) {
+          form.setFieldsValue({
+            name: skillName,
+            description: detail.description || "",
+            source: formatSource(detail.source, t),
+            tags: Array.isArray(detail.tags) ? detail.tags : [],
+            content: detail.content || "",
+          });
         }
 
-        const tabs = await Promise.all(
-          flatFiles.map(async (path) => {
-            try {
-              const content = await fetchSkillFileContent(skill.name, path);
-              return { path, content: content || "" };
-            } catch (error) {
-              log.error("Failed to load skill file content:", error);
-              return { path, content: "" };
-            }
-          })
-        );
+        const tabs = await loadSkillFileTabs(skillName);
 
-        if (!cancelled) {
-          setSkillTabs(sortSkillTabs(tabs));
-          setActiveSkillTab(sortSkillTabs(tabs)[0]?.path || "SKILL.md");
+        if (!cancelled && tabs.length > 0) {
+          const sortedTabs = sortSkillTabs(tabs);
+          setSkillTabs(sortedTabs);
+          setActiveSkillTab(sortedTabs[0]?.path || "SKILL.md");
         }
       } catch (error) {
         if (cancelled) return;
@@ -104,7 +120,7 @@ export default function SkillDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [open, skill?.skill_id, form, t]);
+  }, [open, skill, form, t]);
 
   const handleClose = () => {
     setSkillTabs([{ path: "SKILL.md", content: "" }]);

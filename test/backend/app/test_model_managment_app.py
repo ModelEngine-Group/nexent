@@ -1533,7 +1533,8 @@ async def test_manage_healthcheck_success(client, auth_header, user_credentials,
 
     request_data = {
         "tenant_id": "target_tenant",
-        "display_name": "test-model"
+        "display_name": "test-model",
+        "model_type": "llm"
     }
     response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
@@ -1541,7 +1542,29 @@ async def test_manage_healthcheck_success(client, auth_header, user_credentials,
     data = response.json()
     assert "Successfully checked model connectivity" in data["message"]
     assert data["data"]["connectivity"] is True
-    mock_check.assert_called_once_with("test-model", "target_tenant")
+    mock_check.assert_called_once_with("test-model", "target_tenant", "llm")
+
+
+@pytest.mark.asyncio
+async def test_manage_healthcheck_without_model_type_is_backward_compatible(
+    client, auth_header, user_credentials, mocker
+):
+    """Test model connectivity check still accepts requests without model_type."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    mock_check = mocker.patch(
+        'backend.apps.model_managment_app.check_model_connectivity',
+        return_value={"connectivity": True, "connect_status": "available"}
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "display_name": "test-model"
+    }
+    response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    mock_check.assert_called_once_with("test-model", "target_tenant", None)
 
 
 @pytest.mark.asyncio

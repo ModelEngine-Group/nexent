@@ -112,18 +112,81 @@ const createNewStep = (
   title,
   content,
   expanded: true,
-  contents: [{
-    id,
-    type: unitType as any,
-    content,
-    expanded: true,
-    timestamp: Date.now(),
-  }],
+  contents: [
+    {
+      id,
+      type: unitType as any,
+      content,
+      expanded: true,
+      timestamp: Date.now(),
+    },
+  ],
   metrics: null,
-  thinking: { content: '', expanded: true },
-  code: { content: '', expanded: true },
-  output: { content: '', expanded: true },
+  thinking: { content: "", expanded: true },
+  code: { content: "", expanded: true },
+  output: { content: "", expanded: true },
 });
+
+type HistorySummaryPayload = {
+  covered_through_message_id?: number;
+};
+
+export const upsertHistorySummaryInMessages = (
+  messages: ChatMessageType[],
+  content: string
+): ChatMessageType[] => {
+  let payload: HistorySummaryPayload;
+  try {
+    payload = JSON.parse(content) as HistorySummaryPayload;
+  } catch {
+    return messages;
+  }
+
+  const coverage = payload.covered_through_message_id;
+  if (typeof coverage !== "number") return messages;
+
+  const messageIndex = messages.findIndex(
+    (message) =>
+      message.role === MESSAGE_ROLES.ASSISTANT &&
+      message.message_id === coverage
+  );
+  if (messageIndex < 0) return messages;
+
+  const stepId = `history-summary-${coverage}`;
+  const contentId = `${stepId}-content`;
+  const updatedMessages = [...messages];
+  const targetMessage = { ...updatedMessages[messageIndex] };
+  const steps = [...(targetMessage.steps || [])];
+  const existingStepIndex = steps.findIndex((step) => step.id === stepId);
+  const summaryStep: AgentStep = {
+    id: stepId,
+    title: "History Summary",
+    content: "",
+    expanded: true,
+    contents: [
+      {
+        id: contentId,
+        type: chatConfig.messageTypes.HISTORY_SUMMARY,
+        content,
+        expanded: false,
+        timestamp: Date.now(),
+      },
+    ],
+    metrics: null,
+    thinking: { content: "", expanded: true },
+    code: { content: "", expanded: true },
+    output: { content: "", expanded: true },
+  };
+
+  if (existingStepIndex >= 0) {
+    steps[existingStepIndex] = summaryStep;
+  } else {
+    steps.push(summaryStep);
+  }
+  targetMessage.steps = steps;
+  updatedMessages[messageIndex] = targetMessage;
+  return updatedMessages;
+};
 
 // Helper to finalize current step and prepare for next
 const finalizeCurrentStep = (state: ReconstructionState): void => {
@@ -141,13 +204,16 @@ const getStepNumber = (state: ReconstructionState): number =>
   state.stepCounter > 0 ? state.stepCounter : state.steps.length + 1;
 
 // Helper to process model output type units
-const processModelOutputUnit = (unit: StreamingUnit, state: ReconstructionState): void => {
+const processModelOutputUnit = (
+  unit: StreamingUnit,
+  state: ReconstructionState
+): void => {
   const stepNum = getStepNumber(state);
   state.currentStep = createNewStep(
     stepNum,
     state.steps.length,
     `step-${stepNum}`,
-    '',
+    "",
     unit.unit_content,
     chatConfig.messageTypes.MODEL_OUTPUT
   );
@@ -158,21 +224,34 @@ const processModelOutputUnit = (unit: StreamingUnit, state: ReconstructionState)
 };
 
 // Helper to get output subtype
-const getOutputSubType = (unitType: string): "thinking" | "deep_thinking" | undefined => {
+const getOutputSubType = (
+  unitType: string
+): "thinking" | "deep_thinking" | undefined => {
   switch (unitType) {
-    case 'model_output_thinking': return 'thinking';
-    case 'model_output_deep_thinking': return 'deep_thinking';
-    default: return undefined;
+    case "model_output_thinking":
+      return "thinking";
+    case "model_output_deep_thinking":
+      return "deep_thinking";
+    default:
+      return undefined;
   }
 };
 
 // Helper to append or create content block for thinking/code units
-const processThinkingCodeUnit = (unit: StreamingUnit, state: ReconstructionState): void => {
+const processThinkingCodeUnit = (
+  unit: StreamingUnit,
+  state: ReconstructionState
+): void => {
   const outputSubType = getOutputSubType(unit.unit_type);
-  const lastContentBlock = state.currentStep?.contents[state.currentStep.contents.length - 1];
+  const lastContentBlock =
+    state.currentStep?.contents[state.currentStep.contents.length - 1];
   const lastContentBlockType = lastContentBlock?.type;
-  const shouldAppend = lastContentBlock && lastContentBlockType === unit.unit_type;
-  const unitType = unit.unit_type as typeof chatConfig.messageTypes.MODEL_OUTPUT_THINKING | typeof chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING | typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+  const shouldAppend =
+    lastContentBlock && lastContentBlockType === unit.unit_type;
+  const unitType = unit.unit_type as
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_THINKING
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE;
 
   if (!state.currentStep) {
     const stepNumNew = getStepNumber(state);
@@ -180,8 +259,8 @@ const processThinkingCodeUnit = (unit: StreamingUnit, state: ReconstructionState
       stepNumNew,
       state.steps.length,
       `step-${stepNumNew}`,
-      '',
-      '',
+      "",
+      "",
       unit.unit_type
     );
     state.currentStep.contents[0].id = `model-${unit.unit_index}`;
@@ -207,22 +286,24 @@ const processThinkingCodeUnit = (unit: StreamingUnit, state: ReconstructionState
 // Check if unit type should be skipped during reconstruction
 const isSkippedUnitType = (unitType: string): boolean => {
   const skippedTypes = [
-    'search_content_placeholder',
-    'token_count',
-    'parse',
-    'execution_logs',
-    'agent_new_run',
-    'tool',
-    'tool_call',
-    'verification',
-    'memory_search',
-    'max_steps_reached',
-    'card',
+    "search_content_placeholder",
+    "token_count",
+    "parse",
+    "execution_logs",
+    "agent_new_run",
+    "tool",
+    "verification",
+    "memory_search",
+    "max_steps_reached",
+    "card",
   ];
   return skippedTypes.includes(unitType);
 };
 
-export function reconstructFromStreamingMessage(streamingMessage: StreamingMessage, maxUnitIndex?: number): {
+export function reconstructFromStreamingMessage(
+  streamingMessage: StreamingMessage,
+  maxUnitIndex?: number
+): {
   currentStep: AgentStep | null;
   lastContentType: string | null;
   lastModelOutputIndex: number;
@@ -235,7 +316,7 @@ export function reconstructFromStreamingMessage(streamingMessage: StreamingMessa
     lastContentType: null,
     lastModelOutputIndex: -1,
     lastCodeOutputIndex: -1,
-    finalAnswer: streamingMessage.message_content || '',
+    finalAnswer: streamingMessage.message_content || "",
     steps: [],
     stepCounter: 0,
   };
@@ -253,22 +334,22 @@ export function reconstructFromStreamingMessage(streamingMessage: StreamingMessa
 
     // Handle unit types
     switch (unit.unit_type) {
-      case 'step_count':
+      case "step_count":
         state.stepCounter++;
         finalizeCurrentStep(state);
         break;
 
-      case 'model_output':
+      case "model_output":
         processModelOutputUnit(unit, state);
         break;
 
-      case 'model_output_thinking':
-      case 'model_output_deep_thinking':
-      case 'model_output_code':
+      case "model_output_thinking":
+      case "model_output_deep_thinking":
+      case "model_output_code":
         processThinkingCodeUnit(unit, state);
         break;
 
-      case 'final_answer':
+      case "final_answer":
         state.finalAnswer = unit.unit_content;
         break;
 
@@ -384,7 +465,10 @@ export const handleStreamResponse = async (
 
       for (const line of lines) {
         // Handle stream_status event header (used in resume mode)
-        if (line.startsWith("event: stream_status") || line.startsWith("event:stream_status")) {
+        if (
+          line.startsWith("event: stream_status") ||
+          line.startsWith("event:stream_status")
+        ) {
           isInStreamStatusBlock = true;
           continue;
         }
@@ -400,8 +484,11 @@ export const handleStreamResponse = async (
             // Handle stream_status data - contains resume information
             // The data format is {"status": "resumed", "last_unit_index": N}
             // Check both the isInStreamStatusBlock flag and the status field
-            if ((isInStreamStatusBlock && jsonData.status === 'resumed') ||
-                (jsonData.status === 'resumed' && typeof jsonData.last_unit_index === 'number')) {
+            if (
+              (isInStreamStatusBlock && jsonData.status === "resumed") ||
+              (jsonData.status === "resumed" &&
+                typeof jsonData.last_unit_index === "number")
+            ) {
               // Extract last_unit_index from the status message
               skipUntilUnitIndex = jsonData.last_unit_index as number;
               isInStreamStatusBlock = false;
@@ -418,7 +505,10 @@ export const handleStreamResponse = async (
             if (resumeConfig) {
               // Extract unit_index from the chunk data
               const chunkUnitIndex = (jsonData as any).unit_index;
-              if (typeof chunkUnitIndex === 'number' && chunkUnitIndex <= skipUntilUnitIndex) {
+              if (
+                typeof chunkUnitIndex === "number" &&
+                chunkUnitIndex <= skipUntilUnitIndex
+              ) {
                 // This chunk was already processed before disconnect (unit_index <= last processed index)
                 continue;
               }
@@ -428,9 +518,9 @@ export const handleStreamResponse = async (
               const messageType = jsonData.type;
 
               // Handle conversation_created event - notify frontend of new conversation ID
-              if (messageType === 'conversation_created') {
+              if (messageType === "conversation_created") {
                 const convId = jsonData.content?.conversation_id;
-                if (typeof convId === 'number') {
+                if (typeof convId === "number") {
                   onConversationCreated(convId);
                 }
                 continue;
@@ -441,25 +531,36 @@ export const handleStreamResponse = async (
               // In resume mode, skip metadata messages to prevent creating duplicate steps or indicators.
               // Steps are already reconstructed from the persisted streaming message.
               // TOKEN_COUNT metrics should be matched with existing steps by step_number.
-              if (resumeConfig && (
-                messageType === chatConfig.messageTypes.STEP_COUNT ||
-                messageType === chatConfig.messageTypes.TOKEN_COUNT ||
-                messageType === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER ||
-                messageType === chatConfig.messageTypes.PARSE ||
-                messageType === chatConfig.messageTypes.EXECUTION_LOGS ||
-                messageType === chatConfig.messageTypes.TOOL ||
-                messageType === chatConfig.messageTypes.TOOL_CALL ||
-                messageType === chatConfig.messageTypes.CARD ||
-                messageType === chatConfig.messageTypes.AGENT_NEW_RUN ||
-                messageType === chatConfig.messageTypes.VERIFICATION ||
-                messageType === chatConfig.messageTypes.MEMORY_SEARCH ||
-                messageType === chatConfig.messageTypes.MAX_STEPS_REACHED
-              )) {
+              if (
+                resumeConfig &&
+                (messageType === chatConfig.messageTypes.STEP_COUNT ||
+                  messageType === chatConfig.messageTypes.TOKEN_COUNT ||
+                  messageType ===
+                    chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER ||
+                  messageType === chatConfig.messageTypes.PARSE ||
+                  messageType === chatConfig.messageTypes.EXECUTION_LOGS ||
+                  messageType === chatConfig.messageTypes.TOOL ||
+                  messageType === chatConfig.messageTypes.CARD ||
+                  messageType === chatConfig.messageTypes.AGENT_NEW_RUN ||
+                  messageType === chatConfig.messageTypes.VERIFICATION ||
+                  messageType === chatConfig.messageTypes.MEMORY_SEARCH ||
+                  messageType === chatConfig.messageTypes.MAX_STEPS_REACHED)
+              ) {
                 continue;
               }
 
               // Process different types of messages
               switch (messageType) {
+                case chatConfig.messageTypes.HISTORY_SUMMARY:
+                  // The canonical checkpoint is persisted on the assistant
+                  // message it covers. This display-only stream event updates
+                  // that same message immediately without creating a second DB
+                  // unit on the currently-running message.
+                  setMessages((prev) =>
+                    upsertHistorySummaryInMessages(prev, messageContent)
+                  );
+                  break;
+
                 case chatConfig.messageTypes.STEP_COUNT:
                   // Increment the counter for each new step (for unique ID generation)
                   stepIdCounter.current += 1;
@@ -468,7 +569,9 @@ export const handleStreamResponse = async (
                   // TOKEN_COUNT sends step_number as an integer, so IDs must use only the digit
                   const stepTitle = messageContent.trim();
                   const stepNumMatch = stepTitle.match(/\d+/);
-                  const stepNumber = stepNumMatch ? stepNumMatch[0] : String(stepIdCounter.current);
+                  const stepNumber = stepNumMatch
+                    ? stepNumMatch[0]
+                    : String(stepIdCounter.current);
 
                   // Create a new step - use step number as part of ID for reliable matching
                   currentStep = {
@@ -531,13 +634,21 @@ export const handleStreamResponse = async (
                   }
 
                   // Determine subType for styling
-                  const subType = messageType === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ? "thinking" :
-                                 messageType === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING ? "deep_thinking" : undefined;
+                  const subType =
+                    messageType ===
+                    chatConfig.messageTypes.MODEL_OUTPUT_THINKING
+                      ? "thinking"
+                      : messageType ===
+                          chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING
+                        ? "deep_thinking"
+                        : undefined;
 
                   // Check if we have a matching content block to append to
                   // Only append if the last block has the EXACT same type
-                  const lastContentBlock = currentStep.contents[lastModelOutputIndex];
-                  const shouldAppend = lastContentBlock && lastContentBlock.type === messageType;
+                  const lastContentBlock =
+                    currentStep.contents[lastModelOutputIndex];
+                  const shouldAppend =
+                    lastContentBlock && lastContentBlock.type === messageType;
 
                   if (shouldAppend) {
                     // Same type - append to existing block
@@ -591,8 +702,12 @@ export const handleStreamResponse = async (
                     }
 
                     // If we have a main content block, append to it
-                    if (lastModelOutputIndex >= 0 && currentStep.contents[lastModelOutputIndex]) {
-                      currentStep.contents[lastModelOutputIndex].content += processedContent;
+                    if (
+                      lastModelOutputIndex >= 0 &&
+                      currentStep.contents[lastModelOutputIndex]
+                    ) {
+                      currentStep.contents[lastModelOutputIndex].content +=
+                        processedContent;
                     } else {
                       // Create new main content block for code
                       currentStep.contents.push({
@@ -862,61 +977,6 @@ export const handleStreamResponse = async (
                   // Execution result message, skip
                   break;
 
-                case chatConfig.messageTypes.TOOL_CALL: {
-                  if (!currentStep) {
-                    currentStep = {
-                      id: `step-tool-call-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 9)}`,
-                      title: "Tool Call",
-                      content: "",
-                      expanded: true,
-                      contents: [],
-                      metrics: null,
-                      thinking: { content: "", expanded: true },
-                      code: { content: "", expanded: true },
-                      output: { content: "", expanded: true },
-                    };
-                  }
-
-                  try {
-                    const toolCallData = JSON.parse(messageContent);
-                    currentStep.contents.push({
-                      id: `executing-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
-                      type: chatConfig.messageTypes.EXECUTING,
-                      content: toolCallData.tool_call || "",
-                      expanded: true,
-                      timestamp: Date.now(),
-                      isLoading: true,
-                    });
-                    currentStep.contents.push({
-                      id: `execution-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
-                      type: chatConfig.messageTypes.EXECUTION,
-                      content: toolCallData.execution_result || "",
-                      expanded: true,
-                      timestamp: Date.now(),
-                    });
-                  } catch {
-                    currentStep.contents.push({
-                      id: `executing-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
-                      type: chatConfig.messageTypes.EXECUTING,
-                      content: messageContent,
-                      expanded: true,
-                      timestamp: Date.now(),
-                      isLoading: true,
-                    });
-                  }
-
-                  lastContentType = chatConfig.contentTypes.EXECUTION;
-                  break;
-                }
-
                 case chatConfig.messageTypes.AGENT_NEW_RUN:
                   // If there's no currentStep, create one
                   if (!currentStep) {
@@ -1055,7 +1115,7 @@ export const handleStreamResponse = async (
                           try {
                             const evt = new Event("nexent:new-memory");
                             window.dispatchEvent(evt);
-                          } catch (_) { }
+                          } catch (_) {}
                           break;
                         case "<MEM_FAILED>":
                           m.message = t("chatStreamHandler.memoryFailed");
@@ -1162,7 +1222,8 @@ export const handleStreamResponse = async (
                   // Process skill-generated file uploads (e.g., documents created by skills)
                   try {
                     const skillFilesData = JSON.parse(messageContent);
-                    const skillUploads = skillFilesData.skill_file_uploads || [];
+                    const skillUploads =
+                      skillFilesData.skill_file_uploads || [];
 
                     // Convert uploads to AttachmentItem format
                     const newAttachments = skillUploads
@@ -1172,7 +1233,10 @@ export const handleStreamResponse = async (
                         name: upload.file_name || "document",
                         size: upload.file_size || 0,
                         object_name: upload.object_name,
-                        url: upload.preview_url || upload.presigned_url || upload.object_name,
+                        url:
+                          upload.preview_url ||
+                          upload.presigned_url ||
+                          upload.object_name,
                         contentType: upload.mime_type,
                       }));
 
@@ -1180,11 +1244,17 @@ export const handleStreamResponse = async (
                       setMessages((prev) => {
                         const newMessages = [...prev];
                         const lastMsg = newMessages[newMessages.length - 1];
-                        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+                        if (
+                          lastMsg &&
+                          lastMsg.role === MESSAGE_ROLES.ASSISTANT
+                        ) {
                           const existingAttachments = lastMsg.attachments || [];
                           newMessages[newMessages.length - 1] = {
                             ...lastMsg,
-                            attachments: [...existingAttachments, ...newAttachments],
+                            attachments: [
+                              ...existingAttachments,
+                              ...newAttachments,
+                            ],
                           };
                         }
                         return newMessages;
@@ -1231,9 +1301,14 @@ export const handleStreamResponse = async (
 
                     // Apply any pending metrics to existing steps
                     pendingMetrics.forEach((metrics, stepId) => {
-                      const pendingStepIndex = steps.findIndex((s) => s.id === stepId);
+                      const pendingStepIndex = steps.findIndex(
+                        (s) => s.id === stepId
+                      );
                       if (pendingStepIndex >= 0) {
-                        steps[pendingStepIndex] = { ...steps[pendingStepIndex], metrics };
+                        steps[pendingStepIndex] = {
+                          ...steps[pendingStepIndex],
+                          metrics,
+                        };
                         pendingMetrics.delete(stepId);
                       }
                     });
@@ -1250,7 +1325,7 @@ export const handleStreamResponse = async (
                 return newMessages;
               });
             }
-          } catch (parseError) { }
+          } catch (parseError) {}
         }
       }
     }

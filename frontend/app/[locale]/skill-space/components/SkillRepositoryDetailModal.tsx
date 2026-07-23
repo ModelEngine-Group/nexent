@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Button, Empty, Modal, Spin } from "antd";
 import { Bot, CalendarDays, Download, UserRound } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { StatusTag } from "./SkillRepositoryCard";
 import { formatRepositoryDate } from "./skillRepositoryShared";
@@ -26,7 +27,8 @@ export function SkillRepositoryDetailModal({
   onClose: () => void;
   onRetry: () => void;
 }) {
-  const author = detail?.submitted_by?.trim() || "未知作者";
+  const { t } = useTranslation("common");
+  const author = detail?.author?.trim();
   const updatedAt =
     formatRepositoryDate(detail?.updated_at) ||
     formatRepositoryDate(detail?.created_at) ||
@@ -51,9 +53,9 @@ export function SkillRepositoryDetailModal({
         </div>
       ) : isError ? (
         <div className="flex min-h-[260px] flex-col items-center justify-center gap-3">
-          <Empty description="详情加载失败" />
+          <Empty description={t("skillRepository.detail.loadError")} />
           <Button type="primary" onClick={onRetry}>
-            重试
+            {t("skillRepository.common.retry")}
           </Button>
         </div>
       ) : detail ? (
@@ -65,24 +67,26 @@ export function SkillRepositoryDetailModal({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="min-w-0 truncate text-xl font-semibold text-slate-900 dark:text-slate-100">
-                  {detail.name || "未命名 Skill"}
+                  {detail.name || t("skillRepository.common.untitled")}
                 </h2>
                 <StatusTag status={detail.status} />
               </div>
-              <p className="mt-1 flex min-w-0 items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
-                <UserRound className="size-3.5 shrink-0" aria-hidden />
-                <span className="truncate">{author}</span>
-              </p>
+              {author ? (
+                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
+                  <UserRound className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{author}</span>
+                </p>
+              ) : null}
             </div>
           </header>
 
           <p className="whitespace-pre-wrap text-sm leading-7 text-slate-600 dark:text-slate-300">
-            {detail.description || "暂无描述"}
+            {detail.description || t("skillRepository.common.noDescription")}
           </p>
 
           <section className="space-y-2">
             <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-              标签
+              {t("skillRepository.detail.tags")}
             </h3>
             {tags.length > 0 ? (
               <div className="flex flex-wrap gap-2">
@@ -96,25 +100,27 @@ export function SkillRepositoryDetailModal({
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-400">暂无标签</p>
+              <p className="text-sm text-slate-400">
+                {t("skillRepository.detail.noTags")}
+              </p>
             )}
           </section>
 
           <div className="grid grid-cols-2 divide-x divide-slate-200 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
             <StatItem
               icon={<Download className="size-4" aria-hidden />}
-              label="安装次数"
+              label={t("skillRepository.detail.downloads")}
               value={(detail.downloads ?? 0).toLocaleString()}
             />
             <StatItem
               icon={<CalendarDays className="size-4" aria-hidden />}
-              label="更新时间"
+              label={t("skillRepository.detail.updatedAt")}
               value={updatedAt}
             />
           </div>
         </div>
       ) : (
-        <Empty description="暂无详情" />
+        <Empty description={t("skillRepository.detail.empty")} />
       )}
     </Modal>
   );

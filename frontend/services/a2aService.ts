@@ -532,9 +532,14 @@ export const a2aClientService = {
       const data = await response.json();
 
       if (response.ok && data.status === 'success') {
+        const testResult = data.data;
         return {
-          success: true,
-          message: data.data?.message || t('a2a.service.testConnectionSuccess')
+          success: testResult?.success === true,
+          message: testResult?.message || (
+            testResult?.success === true
+              ? t('a2a.service.testConnectionSuccess')
+              : t('a2a.service.testConnectionFailed')
+          )
         };
       }
 

@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
   ConversationListItem,
+  ApiConversationDetail,
   ApiConversationResponse,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
@@ -33,6 +34,23 @@ export const conversationService = {
     }
 
     throw new ApiError(data.code, data.message);
+  },
+
+  // Get conversation detail
+  async getById(conversationId: string): Promise<ApiConversationDetail> {
+    const response = await fetch(API_ENDPOINTS.conversation.detail(Number(conversationId)), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    const data = (await response.json()) as ApiConversationResponse;
+    const conversationData = data.data?.[0];
+
+    if (data.code === 0 && conversationData) {
+      return conversationData;
+    }
+
+    throw new Error(`Conversation ${conversationId} not found`);
   },
 
   // Create new conversation
