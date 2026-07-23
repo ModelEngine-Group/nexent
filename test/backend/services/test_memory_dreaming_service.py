@@ -192,9 +192,8 @@ def test_ac008_failure_is_audited(monkeypatch):
     monkeypatch.setattr(
         "services.memory_dreaming_service.memory_dreaming_db.finish_audit", finish
     )
+    service = MemoryDreamingService(record_service=MagicMock())
     with pytest.raises(DreamingRunError):
-        MemoryDreamingService(record_service=MagicMock()).run(
-            tenant_id="t", user_id="u", agent_id="a"
-        )
+        service.run(tenant_id="t", user_id="u", agent_id="a")
     assert finish.call_args.kwargs["status"] == "failed"
     assert "ValueError" in finish.call_args.kwargs["error"]

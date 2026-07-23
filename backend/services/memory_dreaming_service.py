@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from consts.const import (
@@ -24,6 +24,10 @@ from services.memory_record_service import get_memory_record_service
 logger = logging.getLogger("memory_dreaming_service")
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class DreamingRunError(RuntimeError):
     pass
 
@@ -39,7 +43,7 @@ class MemoryDreamingService:
             tenant_id,
             user_id,
             agent_id,
-            since=datetime.utcnow() - timedelta(days=max(1, window_days)),
+            since=_utcnow() - timedelta(days=max(1, window_days)),
         )
         by_id = {int(item["memory_id"]): item for item in stats}
         for item in stats:
@@ -98,7 +102,7 @@ class MemoryDreamingService:
                     candidate.memory_id, tenant_id, phase="rem"
                 )
                 candidate.rem_hits += 1
-                candidate.last_rem_at = datetime.utcnow()
+                candidate.last_rem_at = _utcnow()
             candidates.append(candidate)
         return candidates
 
