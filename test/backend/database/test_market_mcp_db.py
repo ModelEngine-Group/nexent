@@ -55,6 +55,7 @@ class _MockColumn:
     def __add__(self, other): return MagicMock()
     def __radd__(self, other): return MagicMock()
     def __hash__(self): return 0
+    def is_(self, other): return MagicMock()
     def desc(self): return MagicMock()
     def ilike(self, key): return True
     def any(self, val): return MagicMock()
@@ -74,6 +75,7 @@ for _col in [
     'mcp_server', 'registry_json', 'config_json', 'source',
     'created_by', 'updated_by',
     'review_status', 'submitted_by', 'source_mcp_id',
+    'group_ids', 'ingroup_permission',
 ]:
     setattr(_MockMcpMarketRecord, _col, _MockColumn())
 
@@ -92,6 +94,7 @@ from backend.database.market_mcp_db import (
     list_mcp_market_records_by_tenant_and_user,
     increment_mcp_market_download_count,
     get_mcp_market_tag_stats_by_tenant,
+    _apply_group_permission_filter,
     update_mcp_market_status,
     list_mcp_market_records_by_status,
 )
@@ -329,6 +332,73 @@ class TestUpdateMcpMarketRecord:
             registry_json={"key": "v"}, mcp_server="http://srv",
             config_json={"cfg": "val"}, transport_type="url",
         )
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_with_shared_fields(self, mock_session):
+        """Test update_mcp_market_record with shared_fields."""
+        session = MockSession()
+        session.update = MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_record(
+            market_id=1, user_id="uid",
+            shared_fields={"serverUrl": True, "authorizationToken": False},
+        )
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_with_group_permissions(self, mock_session):
+        """Test update_mcp_market_record with group_ids and ingroup_permission."""
+        session = MockSession()
+        session.update = MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_record(
+            market_id=1, user_id="uid",
+            group_ids="2,4",
+            ingroup_permission="EDIT",
+        )
+
+
+class TestApplyGroupPermissionFilter:
+    """Test _apply_group_permission_filter directly with mocked or_."""
+
+    @patch('backend.database.market_mcp_db.or_')
+    def test_without_user_groups(self, mock_or):
+        """_apply_group_permission_filter should build 3 conditions when user_group_ids is empty."""
+        from backend.database.market_mcp_db import _apply_group_permission_filter
+        query = MagicMock()
+        result = _apply_group_permission_filter(query, "uid", [])
+        # filter should be called once with or_ result
+        assert query.filter.called
+
+    @patch('backend.database.market_mcp_db.or_')
+    def test_with_user_groups(self, mock_or):
+        """_apply_group_permission_filter should handle user_group_ids provided."""
+        from backend.database.market_mcp_db import _apply_group_permission_filter
+        query = MagicMock()
+        result = _apply_group_permission_filter(query, "uid", [2, 4])
+        assert query.filter.called
+
+    def test_without_user_id_skipped(self):
+        """get_mcp_market_records should skip filter when user_id is None."""
+        from backend.database.market_mcp_db import get_mcp_market_records
+        with patch('backend.database.market_mcp_db.get_db_session') as mock_session:
+            session = MockSession()
+            mock_session.return_value = session
+            result = get_mcp_market_records(tenant_id="tid")
+            assert result is not None
+
+    @patch('backend.database.market_mcp_db.or_')
+    def test_with_user_id_and_groups(self, mock_or):
+        """get_mcp_market_records should apply filter when user_id and user_group_ids provided."""
+        from backend.database.market_mcp_db import get_mcp_market_records
+        with patch('backend.database.market_mcp_db.get_db_session') as mock_session:
+            session = MockSession()
+            mock_session.return_value = session
+            result = get_mcp_market_records(
+                tenant_id="tid", user_id="uid", user_group_ids=[2, 4],
+            )
+            assert result is not None
 
 
 class TestDeleteMcpMarketRecord:

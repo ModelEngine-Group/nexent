@@ -1,9 +1,13 @@
+"use client";
+
 import { useEffect, useState } from "react";
-import { Form, Input, Modal } from "antd";
+import { Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { McpTransportType } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { Can } from "@/components/permission/Can";
 import TagEditor from "./shared/TagEditor";
 
 export interface PublishOverride {
@@ -15,12 +19,19 @@ export interface PublishOverride {
   serverUrl: string;
   /** Container config JSON text; only used when publishing a container MCP. */
   containerConfigJson?: string;
+  /** Group IDs that can access this MCP. */
+  groupIds?: number[];
+  /** Permission level: EDIT, READ_ONLY, PRIVATE. */
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Field-level sharing flags. */
+  sharedFields?: Record<string, boolean>;
 }
 
 interface PublishConfirmModalProps {
   open: boolean;
   source: McpServiceItem | null;
   publishing: boolean;
+  tenantId: string | null;
   onCancel: () => void;
   onConfirm: (override: PublishOverride) => Promise<boolean | void> | void;
 }
@@ -33,6 +44,7 @@ export default function PublishConfirmModal({
   open,
   source,
   publishing,
+  tenantId,
   onCancel,
   onConfirm,
 }: PublishConfirmModalProps) {
@@ -46,7 +58,13 @@ export default function PublishConfirmModal({
     tags: [],
     serverUrl: "",
     containerConfigJson: "",
+    groupIds: [],
+    ingroupPermission: "READ_ONLY",
+    sharedFields: {},
   });
+
+  const { data: groupData } = useGroupList(tenantId);
+  const groups = groupData?.groups || [];
 
   useEffect(() => {
     if (!open || !source) return;
@@ -61,6 +79,9 @@ export default function PublishConfirmModal({
       tags: source.tags || [],
       serverUrl: source.serverUrl || "",
       containerConfigJson,
+      groupIds: [],
+      ingroupPermission: "READ_ONLY",
+      sharedFields: {},
     };
     setDraft(next);
     form.setFieldsValue(next);
@@ -70,6 +91,15 @@ export default function PublishConfirmModal({
     setDraft((prev) => ({ ...prev, ...partial }));
   };
 
+  const handlePermissionChange = (value: string) => {
+    const permission = value as "EDIT" | "READ_ONLY" | "PRIVATE";
+    patch({ ingroupPermission: permission });
+    if (permission === "PRIVATE") {
+      patch({ groupIds: [] });
+      form.setFieldsValue({ group_ids: [] });
+    }
+  };
+
   const handleOk = async () => {
     if (!source) return;
     try {
@@ -77,6 +107,8 @@ export default function PublishConfirmModal({
     } catch {
       return;
     }
+
+    const isPrivate = draft.ingroupPermission === "PRIVATE";
     await onConfirm({
       name: draft.name.trim(),
       description: draft.description,
@@ -90,8 +122,13 @@ export default function PublishConfirmModal({
         source?.transportType === McpTransportType.CONTAINER
           ? draft.containerConfigJson?.trim() ?? ""
           : undefined,
+      groupIds: isPrivate ? [] : draft.groupIds,
+      ingroupPermission: draft.ingroupPermission,
+      sharedFields: draft.sharedFields,
     });
   };
+
+  const isGroupSelectDisabled = draft.ingroupPermission === "PRIVATE";
 
   return (
     <Modal
@@ -163,40 +200,69 @@ export default function PublishConfirmModal({
         </Form.Item>
 
         {source?.transportType !== McpTransportType.CONTAINER ? (
-          <Form.Item
-            label={t("mcpTools.detail.serverUrl")}
-            name="serverUrl"
-            rules={rules.httpUrl}
-          >
-            <Input
-              value={draft.serverUrl}
-              onChange={(event) => {
-                patch({ serverUrl: event.target.value });
-                form.setFieldValue("serverUrl", event.target.value);
-              }}
-              className="rounded-md"
-            />
-          </Form.Item>
+          <div className="flex items-center gap-2">
+            <Form.Item
+              label={t("mcpTools.detail.serverUrl")}
+              name="serverUrl"
+              rules={rules.httpUrl}
+              className="mb-0 flex-1"
+            >
+              <Input
+                value={draft.serverUrl}
+                onChange={(event) => {
+                  patch({ serverUrl: event.target.value });
+                  form.setFieldValue("serverUrl", event.target.value);
+                }}
+                className="w-full rounded-md"
+              />
+            </Form.Item>
+            <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300"
+                checked={draft.sharedFields?.["serverUrl"] ?? false}
+                onChange={(e) => {
+                  const next = { ...(draft.sharedFields || {}), serverUrl: e.target.checked };
+                  patch({ sharedFields: next });
+                }}
+              />
+              共享
+            </label>
+          </div>
         ) : null}
 
         {source?.transportType === McpTransportType.CONTAINER ? (
-          <Form.Item
-            label={t("mcpTools.addModal.containerConfig")}
-            name="containerConfigJson"
-            rules={rules.containerConfig}
-            className="mb-0 text-sm text-slate-500"
-          >
-            <Input.TextArea
-              value={draft.containerConfigJson ?? ""}
-              onChange={(event) => {
-                patch({ containerConfigJson: event.target.value });
-                form.setFieldValue("containerConfigJson", event.target.value);
-              }}
-              rows={6}
-              className="mt-2 rounded-md font-mono text-sm"
-              placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
-            />
-          </Form.Item>
+          <div className="flex items-center gap-2">
+            <Form.Item
+              label={t("mcpTools.addModal.containerConfig")}
+              name="containerConfigJson"
+              rules={rules.containerConfig}
+              className="mb-0 flex-1 text-sm text-slate-500"
+            >
+              <Input.TextArea
+                value={draft.containerConfigJson ?? ""}
+                onChange={(event) => {
+                  patch({ containerConfigJson: event.target.value });
+                  form.setFieldValue("containerConfigJson", event.target.value);
+                }}
+                rows={6}
+                className="mt-2 w-full rounded-md font-mono text-sm"
+                placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+              />
+            </Form.Item>
+            <label className="flex shrink-0 items-center gap-1 self-start pt-3 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300"
+                checked={draft.sharedFields?.["containerConfigJson"] ?? false}
+                onChange={(e) => {
+                  const next = { ...(draft.sharedFields || {}), containerConfigJson: e.target.checked };
+                  patch({ sharedFields: next });
+                }}
+              />
+              共享
+            </label>
+          </div>
         ) : null}
 
         <TagEditor
@@ -212,6 +278,47 @@ export default function PublishConfirmModal({
           }
           removeAriaKey="mcpTools.detail.removeTagAria"
         />
+
+        <Can permission="kb.groups:read">
+          <Form.Item
+            name="ingroup_permission"
+            label={t("tenantResources.knowledgeBase.permission")}
+          >
+            <Select
+              value={draft.ingroupPermission}
+              onChange={handlePermissionChange}
+              options={[
+                { value: "READ_ONLY", label: t("knowledgeBase.ingroup.permission.READ_ONLY") },
+                { value: "EDIT", label: t("knowledgeBase.ingroup.permission.EDIT") },
+                { value: "PRIVATE", label: t("knowledgeBase.ingroup.permission.PRIVATE") },
+              ]}
+            />
+          </Form.Item>
+        </Can>
+
+        <Can permission="group:read">
+          <Form.Item
+            name="group_ids"
+            label={t("tenantResources.knowledgeBase.groupNames")}
+          >
+            <Select
+              mode="multiple"
+              placeholder={
+                isGroupSelectDisabled
+                  ? t("knowledgeBase.create.permission.groupPlaceholder")
+                  : t("tenantResources.knowledgeBase.groupNames")
+              }
+              value={isGroupSelectDisabled ? [] : draft.groupIds}
+              options={groups.map((group: { group_id: number; group_name: string }) => ({
+                label: group.group_name,
+                value: group.group_id,
+              }))}
+              disabled={isGroupSelectDisabled}
+              onChange={(values: number[]) => patch({ groupIds: values })}
+              className="rounded-md"
+            />
+          </Form.Item>
+        </Can>
       </Form>
     </Modal>
   );

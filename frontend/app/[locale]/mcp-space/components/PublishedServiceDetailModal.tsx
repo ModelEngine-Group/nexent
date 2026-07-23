@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { App, Button, Form, Input, Modal } from "antd";
+import { App, Button, Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   Globe,
@@ -33,6 +33,9 @@ import {
 import TransportIcon from "./shared/TransportIcon";
 import JsonPreviewModal from "./shared/JsonPreviewModal";
 import TagEditor from "./shared/TagEditor";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { Can } from "@/components/permission/Can";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface PublishedServiceDetailModalProps {
   open: boolean;
@@ -60,6 +63,10 @@ export default function PublishedServiceDetailModal({
     edit;
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
   const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+  const { data: groupData } = useGroupList(tenantId);
+  const groups = groupData?.groups || [];
 
   const { websiteUrl, repositoryUrl } = extractRegistryLinks(
     (service?.registryJson || undefined) as Record<string, unknown> | undefined
@@ -91,6 +98,8 @@ export default function PublishedServiceDetailModal({
       name: draft.name,
       description: draft.description,
       version: draft.version,
+      ingroup_permission: draft.ingroupPermission ?? "READ_ONLY",
+      group_ids: draft.groupIds ? draft.groupIds.split(",").map(Number) : [],
     });
   }, [open, draft, form]);
 
@@ -100,6 +109,8 @@ export default function PublishedServiceDetailModal({
       name: draft.name,
       description: draft.description,
       version: draft.version,
+      ingroup_permission: draft.ingroupPermission ?? "READ_ONLY",
+      group_ids: draft.groupIds ? draft.groupIds.split(",").map(Number) : [],
     });
     setIsEditing(true);
   };
@@ -112,6 +123,15 @@ export default function PublishedServiceDetailModal({
       version: draft.version,
     });
     setIsEditing(false);
+  };
+
+  const handlePermissionChange = (value: string) => {
+    const permission = value as "EDIT" | "READ_ONLY" | "PRIVATE";
+    updateDraft({ ingroupPermission: permission });
+    if (permission === "PRIVATE") {
+      updateDraft({ groupIds: "" });
+      form.setFieldsValue({ group_ids: [] });
+    }
   };
 
   const handleSave = async () => {
@@ -382,6 +402,62 @@ export default function PublishedServiceDetailModal({
                 placeholderKey="mcpTools.detail.tagInputPlaceholder"
                 loading={edit.tagSaving}
               />
+            </section>
+
+            {/* Permissions Section */}
+            <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+              <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
+                <Server className="h-4 w-4 text-slate-400" />
+                {t("tenantResources.knowledgeBase.permission")}
+              </h3>
+              {isEditing ? (
+                <div className="space-y-4">
+                  <Can permission="kb.groups:read">
+                    <Form.Item name="ingroup_permission" className="mb-0">
+                      <Select
+                        value={draft.ingroupPermission ?? "READ_ONLY"}
+                        onChange={handlePermissionChange}
+                        options={[
+                          { value: "READ_ONLY", label: t("knowledgeBase.ingroup.permission.READ_ONLY") },
+                          { value: "EDIT", label: t("knowledgeBase.ingroup.permission.EDIT") },
+                          { value: "PRIVATE", label: t("knowledgeBase.ingroup.permission.PRIVATE") },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Can>
+                  <Can permission="group:read">
+                    <Form.Item name="group_ids" className="mb-0">
+                      <Select
+                        mode="multiple"
+                        placeholder={t("tenantResources.knowledgeBase.groupNames")}
+                        value={draft.ingroupPermission === "PRIVATE" ? [] : (draft.groupIds ? draft.groupIds.split(",").map(Number) : [])}
+                        options={groups.map((g: { group_id: number; group_name: string }) => ({
+                          label: g.group_name,
+                          value: g.group_id,
+                        }))}
+                        disabled={draft.ingroupPermission === "PRIVATE"}
+                        onChange={(values: number[]) => updateDraft({ groupIds: values.join(",") })}
+                      />
+                  </Form.Item>
+                  </Can>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-700">
+                  {draft.ingroupPermission === "PRIVATE" ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-600">
+                      {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                    </span>
+                  ) : draft.groupIds ? (
+                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600">
+                      {t("knowledgeBase.ingroup.permission.READ_ONLY")}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-600">
+                      {t("knowledgeBase.ingroup.permission.READ_ONLY")}
+                    </span>
+                  )}
+                </div>
+              )}
             </section>
           </div>
         </Form>

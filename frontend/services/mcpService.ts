@@ -55,6 +55,9 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           version: server.version,
           market_id: server.market_id,
           is_listed_in_repository: server.is_listed_in_repository,
+          group_ids: server.group_ids,
+          ingroup_permission: server.ingroup_permission,
+          shared_fields: server.shared_fields,
         };
       });
 

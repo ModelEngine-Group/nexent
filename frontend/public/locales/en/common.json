@@ -2674,6 +2674,7 @@
 
   "mcpTools.repository.downloadCount": "Downloads",
   "mcpTools.repository.empty": "No matching repository MCP tools found.",
+  "mcpTools.repository.installHint": "MCP services in the same tenant must be \"installed\" before they can be enabled.",
   "mcpTools.repository.install": "Install",
   "mcpTools.repository.installed": "Installed",
   "mcpTools.repository.offline": "Take Down",
@@ -2727,6 +2728,7 @@
   "mcpTools.mine.confirmApplyListing": "Are you sure you want to submit {{name}} for listing?",
   "mcpTools.mine.deleteSuccess": "MCP service deleted",
   "mcpTools.mine.deleteFailed": "Failed to delete MCP service",
+  "mcpTools.mine.publishHint": "MCP services added via remote link or container can be published to the repository",
   "mcpTools.mine.deleteConfirmTitle": "Delete this MCP service?",
   "mcpTools.mine.deleteConfirmDescription": "After deletion, {{name}} will no longer appear in your list.",
   "mcpTools.mine.submitVersionUpdateSuccess": "Version update has been submitted for review",

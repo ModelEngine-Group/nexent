@@ -90,6 +90,7 @@ async def list_community_mcp_services_api(
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
         data = await list_community_mcp_services(
             tenant_id=tenant_id,
+            user_id=user_id,
             search=query.search,
             tag=query.tag,
             transport_type=query.transport_type,
@@ -214,6 +215,9 @@ async def publish_community_mcp_service_api(
             tags=payload.tags,
             mcp_server=payload.mcp_server,
             config_json=payload.config_json,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -257,6 +261,9 @@ async def update_community_mcp_service_legacy_api(
             mcp_server=payload.mcp_server,
             config_json=payload.config_json,
             transport_type=payload.transport_type,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -386,6 +393,9 @@ async def create_community_mcp_service_api(
             tags=payload.tags,
             mcp_server=payload.mcp_server,
             config_json=payload.config_json,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -430,6 +440,9 @@ async def update_community_mcp_service_api(
             mcp_server=payload.mcp_server,
             config_json=payload.config_json,
             transport_type=payload.transport_type,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:

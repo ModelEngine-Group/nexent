@@ -1420,6 +1420,9 @@ class AddMcpServiceRequest(BaseModel):
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
+    group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
+    ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod
@@ -1440,6 +1443,9 @@ class AddContainerMcpServiceRequest(BaseModel):
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     port: int = Field(..., ge=1, le=65535, description="Host port for the container")
     mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
+    group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
+    ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "description", "authorization_token", mode="before")
     @classmethod
@@ -1461,6 +1467,9 @@ class UpdateMcpServiceRequest(BaseModel):
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON")
     version: Optional[str] = Field(None, description="MCP version")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
+    group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
+    ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
     @classmethod
@@ -1577,6 +1586,9 @@ class CommunityPublishRequest(BaseModel):
     tags: Optional[List[str]] = Field(None, description="Tags override")
     mcp_server: Optional[str] = Field(None, max_length=500, description="Remote MCP server URL override (URL / HTTP / SSE transports)")
     config_json: Optional[Dict[str, Any]] = Field(None, description="Container MCP configuration JSON override")
+    group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
+    ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "description", "mcp_server", mode="before")
     @classmethod
@@ -1600,6 +1612,9 @@ class CommunityUpdateRequest(BaseModel):
         None,
         description="Container MCP configuration JSON (omit to leave unchanged)",
     )
+    group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
+    ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
+    shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
     @field_validator("name", "description", "mcp_server", "transport_type", mode="before")
     @classmethod

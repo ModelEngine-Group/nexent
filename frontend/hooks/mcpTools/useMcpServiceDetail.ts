@@ -85,6 +85,8 @@ export function useMcpServiceDetail({
         version: currentDraft.version,
         authorization_token: (currentDraft.authorizationToken ?? "").trim() || undefined,
         custom_headers: currentDraft.customHeaders,
+        group_ids: currentDraft.groupIds ?? undefined,
+        ingroup_permission: currentDraft.ingroupPermission ?? undefined,
       });
       // Update local state
       setDraft((prev) => {
@@ -220,14 +222,12 @@ export function useMcpServiceDetail({
         authorization_token: nextToken || undefined,
         custom_headers: currentDraft.customHeaders,
         config_json: currentDraft.configJson,
+        group_ids: currentDraft.groupIds ?? undefined,
+        ingroup_permission: currentDraft.ingroupPermission ?? undefined,
+        shared_fields: currentDraft.sharedFields ?? undefined,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();
-      await refreshToolListWithToast({
-        message,
-        t,
-        toastKey: "mcp-tools-refresh-tools-save",
-      });
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to save service", { error });
       message.error(t("mcpTools.service.saveFailed"));
@@ -270,6 +270,9 @@ export function useMcpServiceDetail({
       tags?: string[];
       serverUrl?: string;
       containerConfigJson?: string;
+      groupIds?: number[];
+      ingroupPermission?: string;
+      sharedFields?: Record<string, boolean>;
     }) => {
       if (!selectedService || selectedService.mcpId < 0) return false;
       setPublishing(true);
@@ -306,6 +309,9 @@ export function useMcpServiceDetail({
           tags: editedTags,
           ...(!isContainer ? { mcp_server: editedServerUrl } : {}),
           ...(parsedConfig ? { config_json: parsedConfig } : {}),
+          ...(override?.groupIds !== undefined ? { group_ids: override.groupIds } : {}),
+          ...(override?.ingroupPermission !== undefined ? { ingroup_permission: override.ingroupPermission } : {}),
+          ...(override?.sharedFields !== undefined ? { shared_fields: override.sharedFields } : {}),
         });
 
         message.success(t("mcpTools.community.publishSuccess"));

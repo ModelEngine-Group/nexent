@@ -1,7 +1,7 @@
 import { Button, Dropdown, type MenuProps } from "antd";
 import { ArrowDownFromLine, Clock, Edit3, MoreHorizontal, Power, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { McpServiceStatus, McpSource } from "@/const/mcpTools";
+import { McpServiceStatus, McpDeploymentType } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import {
   formatRegistryDate,
@@ -65,7 +65,10 @@ export default function MineMcpServiceCard({
   const reviewStatus = onlineService?.reviewStatus || service.reviewStatus;
   const isPending = reviewStatus === "pending";
   const isInRepository = isLocal
-    ? Boolean(localService?.isListedInRepository)
+    ? Boolean(onlineService) && onlineService?.reviewStatus === "approved"
+    : reviewStatus === "approved";
+  const hasOnlineRecord = isLocal
+    ? Boolean(onlineService) && (onlineService?.reviewStatus === "approved" || onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
   const updatedAt = formatRegistryDate(service.updatedAt || "");
@@ -73,9 +76,7 @@ export default function MineMcpServiceCard({
 
   // Owned = user-created MCP can be published/updated; community-installed
   // or registry-installed MCPs only permit deletion.
-  const isOwned = item.kind === "community" || (
-    localService?.permission === "EDIT" && localService?.source === McpSource.LOCAL
-  );
+  const isOwned = item.kind === "community" || localService?.permission === "EDIT";
 
   const actionItems: MenuProps["items"] = (() => {
     if (!isOwned) {
@@ -99,16 +100,11 @@ export default function MineMcpServiceCard({
         icon: <Clock className="h-3.5 w-3.5" />,
         onClick: () => onViewReviewProgress?.(item, onlineService),
       });
-    } else if (reviewStatus === "approved") {
-      items.push({
-        key: "submit-version-update",
-        label: t("mcpTools.mine.submitVersionUpdate"),
-        icon: <RefreshCw className="h-3.5 w-3.5" />,
-        disabled: publishing,
-        onClick: () => onSubmitVersionUpdate(item, onlineService),
-      });
-    } else {
-      // never submitted, rejected, or offline → apply for listing
+    } else if (
+      deploymentType === McpDeploymentType.REMOTE_LINK ||
+      deploymentType === McpDeploymentType.CONTAINER
+    ) {
+      // only remote link and container MCPs can be published to community
       items.push({
         key: "apply-for-listing",
         label: t("mcpTools.mine.applyForListing"),
@@ -118,10 +114,10 @@ export default function MineMcpServiceCard({
       });
     }
 
-    if (isInRepository) {
+    if (hasOnlineRecord) {
       items.push({
         key: "unpublish-online-version",
-        label: t("mcpTools.mine.unpublishOnlineVersion"),
+        label: isPending ? "撤回审核" : t("mcpTools.mine.unpublishOnlineVersion"),
         icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
         danger: true,
         disabled: unpublishing,
