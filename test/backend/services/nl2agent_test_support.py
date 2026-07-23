@@ -284,22 +284,41 @@ def mock_nl2agent_seed_defaults(monkeypatch):
             "official_skills": [],
         },
     }
-    cache_catalogs = nl2agent_session_catalog.set_nl2agent_session_catalogs
-
     def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
         if tenant_id == "tenant_1" and draft_agent_id == 202:
             durable_snapshot["session_catalogs"] = deepcopy(catalogs)
-        return cache_catalogs(tenant_id, draft_agent_id, catalogs)
 
     monkeypatch.setattr(
         nl2agent_session_catalog,
         "set_nl2agent_session_catalogs",
         set_session_catalogs,
+        raising=False,
     )
     monkeypatch.setattr(
         nl2agent_runtime_service,
         "set_nl2agent_session_catalogs",
         set_session_catalogs,
+        raising=False,
+    )
+
+    def create_session_snapshot(**kwargs):
+        durable_snapshot.update(
+            tenant_id=kwargs["tenant_id"],
+            user_id=kwargs["user_id"],
+            runner_agent_id=kwargs["runner_agent_id"],
+            draft_agent_id=kwargs["draft_agent_id"],
+            conversation_id=kwargs["conversation_id"],
+            status="active",
+            workflow_revision=kwargs["workflow_state"]["revision"],
+            workflow_state=deepcopy(kwargs["workflow_state"]),
+            session_catalogs=deepcopy(kwargs["session_catalogs"]),
+        )
+        return deepcopy(durable_snapshot)
+
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
+        "create_nl2agent_session",
+        MagicMock(side_effect=create_session_snapshot),
     )
 
     def load_durable_session(tenant_id, draft_agent_id, **_kwargs):

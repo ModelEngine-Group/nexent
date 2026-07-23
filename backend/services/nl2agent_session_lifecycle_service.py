@@ -1,18 +1,11 @@
 """Discovery, lifecycle, and retention policy for durable NL2AGENT sessions."""
 
 import json
-import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
-from agents.nl2agent_session_catalog import (
-    delete_nl2agent_session_catalogs,
-    enter_revision_mode,
-)
-from agents.nl2agent_session_store import (
-    parse_session_state,
-    recover_committed_cache_best_effort,
-)
+from agents.nl2agent_session_catalog import enter_revision_mode
+from agents.nl2agent_session_store import parse_session_state
 from agents.nl2agent_workflow import (
     WORKFLOW_SCHEMA_VERSION,
     evaluate_workflow,
@@ -40,9 +33,6 @@ from database.nl2agent_session_db import (
     resume_nl2agent_session,
     update_nl2agent_session_status,
 )
-
-logger = logging.getLogger(__name__)
-
 
 def _positive_identifier(value: int, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -192,7 +182,6 @@ def resume_session(
                 "The NL2AGENT session changed while editing was being resumed."
             )
         record = current
-    recover_committed_cache_best_effort(tenant_id, draft_agent_id)
     return {**_public_session(record), "status": NL2AGENT_SESSION_ACTIVE}
 
 
@@ -215,7 +204,7 @@ def list_active_sessions(
 def abandon_session(
     *, draft_agent_id: int, tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
-    """Move an owned active session to abandoned and evict its cache."""
+    """Move an owned active session to abandoned."""
     draft_agent_id = _positive_identifier(draft_agent_id, "draft_agent_id")
     record = get_nl2agent_session(
         tenant_id,
@@ -245,7 +234,7 @@ def abandon_session_by_conversation(
 def _abandon_record(
     record: Dict[str, Any], *, tenant_id: str, user_id: str
 ) -> Dict[str, Any]:
-    """Apply the shared active-to-abandoned transition and cache eviction."""
+    """Apply the shared active-to-abandoned transition."""
     draft_agent_id = int(record["draft_agent_id"])
     changed = update_nl2agent_session_status(
         tenant_id=tenant_id,
@@ -255,16 +244,6 @@ def _abandon_record(
     )
     if not changed:
         raise Nl2AgentDraftNotFoundError()
-    try:
-        delete_nl2agent_session_catalogs(tenant_id, draft_agent_id)
-    except Exception:
-        logger.warning(
-            "Failed to evict abandoned NL2AGENT session cache: "
-            "tenant_id=%s draft_agent_id=%s",
-            tenant_id,
-            draft_agent_id,
-            exc_info=True,
-        )
     return {
         **_public_session(record),
         "status": NL2AGENT_SESSION_ABANDONED,

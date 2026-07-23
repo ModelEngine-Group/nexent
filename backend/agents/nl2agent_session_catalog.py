@@ -124,7 +124,6 @@ _validate_identifiers = _session_store.validate_identifiers
 initialize_nl2agent_session_state = _session_store.initialize_session_state
 get_nl2agent_session_state = _session_store.get_session_state
 _mutate_session_state = _session_store.mutate_session_state
-set_nl2agent_session_catalogs = _session_store.set_session_catalogs
 get_nl2agent_session_catalogs = _session_store.get_session_catalogs
 
 
@@ -1187,13 +1186,6 @@ def get_nl2agent_search_catalogs(
         installed_skill_names,
     )
     return catalogs
-
-
-def delete_nl2agent_session_catalogs(
-    tenant_id: Optional[str], draft_agent_id: Optional[int]
-) -> None:
-    """Compatibility hook; PostgreSQL transaction rollback owns initialization cleanup."""
-    _validate_identifiers(tenant_id, draft_agent_id)
 
 
 def acquire_mcp_installation_lock(

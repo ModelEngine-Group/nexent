@@ -4,10 +4,13 @@ import socket
 import ssl
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from consts.exceptions import Nl2AgentValidationError
+from services import nl2agent_mcp_url_security as security
 from services.nl2agent_mcp_url_security import (
+    _PinnedAsyncHttpTransport,
     _PinnedNetworkBackend,
     build_pinned_httpx_client_factory,
     resolve_remote_mcp_target,
@@ -16,31 +19,75 @@ from services.nl2agent_mcp_url_security import (
 
 
 def _resolver(*addresses):
-    return lambda *_args: [
-        (socket.AF_INET6 if ":" in address else socket.AF_INET, 0, 0, "", (address, 443))
-        for address in addresses
-    ]
+    def resolve(_hostname, port, *_args):
+        return [
+            (
+                socket.AF_INET6 if ":" in address else socket.AF_INET,
+                socket.SOCK_STREAM,
+                0,
+                "",
+                (address, port),
+            )
+            for address in addresses
+        ]
+
+    return resolve
 
 
 @pytest.mark.parametrize(
-    "url",
+    "url, message",
     [
-        "http://127.0.0.1/mcp",
-        "http://10.0.0.5/mcp",
-        "http://169.254.169.254/latest/meta-data",
-        "http://[::1]/mcp",
+        ("http://127.0.0.1/mcp", "restricted"),
+        ("http://[::1]/mcp", "restricted"),
+        ("http://169.254.1.1/mcp", "restricted"),
+        ("http://169.254.169.254/latest/meta-data", "metadata"),
+        ("http://169.254.170.2/credentials", "metadata"),
+        ("http://[fd00:ec2::254]/mcp", "metadata"),
+        ("http://0.0.0.0/mcp", "restricted"),
+        ("http://224.0.0.1/mcp", "restricted"),
     ],
 )
-def test_private_and_metadata_destinations_are_rejected(url):
+def test_dangerous_destinations_are_always_rejected(url, message):
+    with pytest.raises(Nl2AgentValidationError, match=message):
+        validate_remote_mcp_url(url, allow_private_networks=True)
+
+
+@pytest.mark.parametrize(
+    "address", ["10.0.0.5", "172.16.0.5", "192.168.1.5", "fd12::5"]
+)
+def test_private_destinations_are_allowed_by_default(address):
+    assert (
+        validate_remote_mcp_url(
+            "https://mcp.internal/service",
+            resolver=_resolver(address),
+        )
+        == "https://mcp.internal/service"
+    )
+
+
+@pytest.mark.parametrize(
+    "address", ["10.0.0.5", "172.16.0.5", "192.168.1.5", "fd12::5"]
+)
+def test_explicit_public_only_policy_rejects_private_destinations(address):
     with pytest.raises(Nl2AgentValidationError, match="non-public"):
         validate_remote_mcp_url(
-            url,
+            "https://mcp.internal/service",
             allow_private_networks=False,
-            resolver=_resolver(url.split("//", 1)[1].split("/", 1)[0].strip("[]")),
+            resolver=_resolver(address),
         )
 
 
-def test_mixed_public_and_private_dns_answers_are_rejected():
+def test_environment_policy_false_rejects_private_destinations(monkeypatch):
+    monkeypatch.setattr(security, "NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS", False)
+
+    with pytest.raises(Nl2AgentValidationError, match="non-public"):
+        validate_remote_mcp_url(
+            "https://mcp.internal/service",
+            resolver=_resolver("10.0.0.5"),
+        )
+
+
+def test_mixed_public_and_private_dns_answers_are_rejected_in_public_only_mode():
     with pytest.raises(Nl2AgentValidationError, match="non-public"):
         validate_remote_mcp_url(
             "https://mcp.example/service",
@@ -49,29 +96,38 @@ def test_mixed_public_and_private_dns_answers_are_rejected():
         )
 
 
-def test_public_dns_answers_and_explicit_private_opt_in_are_supported():
-    assert validate_remote_mcp_url(
-        "https://mcp.example/service",
-        resolver=_resolver("93.184.216.34"),
-    ) == "https://mcp.example/service"
-    assert validate_remote_mcp_url(
-        "http://localhost/mcp",
-        allow_private_networks=True,
-        resolver=lambda *_args: (_ for _ in ()).throw(AssertionError()),
-    ) == "http://localhost/mcp"
+def test_public_dns_answers_are_supported():
+    assert (
+        validate_remote_mcp_url(
+            "https://mcp.example/service",
+            allow_private_networks=False,
+            resolver=_resolver("93.184.216.34"),
+        )
+        == "https://mcp.example/service"
+    )
 
 
-def test_credentials_and_dns_failures_are_rejected():
-    with pytest.raises(Nl2AgentValidationError, match="must not contain credentials"):
-        validate_remote_mcp_url("https://user:password@mcp.example/service")
+@pytest.mark.parametrize(
+    "url, message",
+    [
+        ("https://user:password@mcp.example/service", "must not contain credentials"),
+        ("ftp://mcp.example/service", "must be HTTP or HTTPS"),
+        ("http://mcp.example:0/service", "invalid port"),
+        ("http://mcp.example:70000/service", "invalid port"),
+    ],
+)
+def test_invalid_url_shapes_are_rejected(url, message):
+    with pytest.raises(Nl2AgentValidationError, match=message):
+        validate_remote_mcp_url(url, resolver=_resolver("93.184.216.34"))
 
+
+def test_dns_failures_are_rejected():
     def failed_resolver(*_args):
         raise socket.gaierror("not found")
 
     with pytest.raises(Nl2AgentValidationError, match="resolved safely"):
         validate_remote_mcp_url(
             "https://missing.example/service",
-            allow_private_networks=False,
             resolver=failed_resolver,
         )
 
@@ -97,7 +153,7 @@ async def test_connection_uses_validated_address_without_resolving_hostname_agai
 
 
 @pytest.mark.asyncio
-async def test_redirect_to_unvalidated_origin_is_blocked():
+async def test_pinned_backend_rejects_an_unvalidated_origin():
     target = resolve_remote_mcp_target(
         "https://mcp.example/service",
         resolver=_resolver("93.184.216.34"),
@@ -109,7 +165,62 @@ async def test_redirect_to_unvalidated_origin_is_blocked():
 
 
 @pytest.mark.asyncio
-async def test_pinned_factory_resolves_even_when_private_networks_are_allowed():
+async def test_initial_connection_revalidates_dns_to_prevent_rebinding():
+    answers = iter(("93.184.216.34", "10.0.0.5"))
+
+    def rebinding_resolver(*args):
+        return _resolver(next(answers))(*args)
+
+    factory = build_pinned_httpx_client_factory(
+        "https://mcp.example/service",
+        allow_private_networks=False,
+        resolver=rebinding_resolver,
+    )
+    client = factory()
+    try:
+        with pytest.raises(Nl2AgentValidationError, match="non-public"):
+            await client.get("https://mcp.example/service")
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redirect_target_is_resolved_and_rejected(monkeypatch):
+    targets = []
+
+    class RedirectingPinnedTransport:
+        def __init__(self, target):
+            targets.append(target)
+
+        async def handle_async_request(self, request):
+            return httpx.Response(
+                302,
+                headers={"location": "http://169.254.169.254/latest/meta-data"},
+                request=request,
+            )
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(
+        security, "_PinnedAsyncHttpTransport", RedirectingPinnedTransport
+    )
+    factory = build_pinned_httpx_client_factory(
+        "https://mcp.example/service",
+        resolver=_resolver("93.184.216.34"),
+    )
+    client = factory(follow_redirects=True)
+    try:
+        with pytest.raises(Nl2AgentValidationError, match="metadata"):
+            await client.get("https://mcp.example/service")
+    finally:
+        await client.aclose()
+
+    assert [target.hostname for target in targets] == ["mcp.example"]
+
+
+@pytest.mark.asyncio
+async def test_pinned_factory_resolves_private_addresses_when_allowed():
     calls = []
 
     def resolver(*args):
@@ -124,21 +235,19 @@ async def test_pinned_factory_resolves_even_when_private_networks_are_allowed():
     client = factory()
 
     assert calls
-    assert client._transport._pool._network_backend._target.addresses == (
-        "10.0.0.5",
-    )
+    assert isinstance(client._transport, security._ValidatingAsyncHttpTransport)
     await client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_pinned_factory_preserves_tls_certificate_verification():
-    factory = build_pinned_httpx_client_factory(
+async def test_pinned_transport_preserves_tls_certificate_verification():
+    target = resolve_remote_mcp_target(
         "https://mcp.example/service",
         resolver=_resolver("93.184.216.34"),
     )
-    client = factory()
-    ssl_context = client._transport._pool._ssl_context
+    transport = _PinnedAsyncHttpTransport(target)
+    ssl_context = transport._pool._ssl_context
 
     assert ssl_context.verify_mode == ssl.CERT_REQUIRED
     assert ssl_context.check_hostname is True
-    await client.aclose()
+    await transport.aclose()

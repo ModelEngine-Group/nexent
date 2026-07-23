@@ -1,4 +1,4 @@
-"""NL2AGENT workflow actions backed by authoritative database and Redis state."""
+"""NL2AGENT workflow actions backed by authoritative PostgreSQL state."""
 
 import logging
 from copy import deepcopy

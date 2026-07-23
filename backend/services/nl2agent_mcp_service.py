@@ -514,11 +514,6 @@ async def _install_remote(
         raise Nl2AgentValidationError(
             "MCP server URL contains unresolved configuration variables."
         )
-    parsed_url = urlparse(str(server_url))
-    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-        raise Nl2AgentValidationError(
-            "MCP server URL must be a valid HTTP or HTTPS URL."
-        )
     server_url = dependencies.discovery.validate_remote_url(str(server_url))
     if existing_mcp_id is not None:
         dependencies.provider.update_remote_mcp(

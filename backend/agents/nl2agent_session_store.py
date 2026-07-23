@@ -72,21 +72,6 @@ def persist_workflow_state(
     )
 
 
-def recover_durable_session(
-    tenant_id: str, draft_agent_id: int
-) -> Optional[Dict[str, Any]]:
-    snapshot = load_durable_session(tenant_id, draft_agent_id)
-    return snapshot
-
-
-def refresh_cache_best_effort(snapshot: Optional[Dict[str, Any]]) -> None:
-    """Retained as a no-op compatibility hook; PostgreSQL is authoritative."""
-
-
-def recover_committed_cache_best_effort(tenant_id: str, draft_agent_id: int) -> None:
-    """Retained as a no-op compatibility hook; PostgreSQL is authoritative."""
-
-
 def validate_identifiers(
     tenant_id: Optional[str], draft_agent_id: Optional[int]
 ) -> tuple[str, int]:
@@ -141,7 +126,7 @@ def parse_session_state(
 def get_session_state(
     tenant_id: Optional[str], draft_agent_id: Optional[int]
 ) -> Dict[str, Any]:
-    """Load the authoritative database workflow and repair its cache projection."""
+    """Load the authoritative database workflow."""
     tenant, draft_id = validate_identifiers(tenant_id, draft_agent_id)
     try:
         snapshot = load_durable_session(tenant, draft_id)
@@ -218,7 +203,6 @@ def mutate_session_state(
         if not persist_workflow_state(tenant_id, draft_agent_id, **persist_kwargs):
             _recover_active_session_after_conflict(tenant_id, draft_agent_id)
             continue
-        recover_committed_cache_best_effort(tenant_id, draft_agent_id)
         return deepcopy(result)
     raise Nl2AgentStateConflictError(
         f"NL2AGENT session state changed concurrently for tenant={tenant_id}, draft_agent_id={draft_agent_id}."
@@ -239,17 +223,6 @@ def validate_catalogs(catalogs: Any) -> Dict[str, List[Dict[str, Any]]]:
             )
         payload[key] = deepcopy(value)
     return payload
-
-
-def set_session_catalogs(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    catalogs: Dict[str, List[Dict[str, Any]]],
-) -> None:
-    """Validate catalogs; creation persists them in the session transaction."""
-    tenant, draft_id = validate_identifiers(tenant_id, draft_agent_id)
-    payload = validate_catalogs(catalogs)
-    return None
 
 
 def get_session_catalogs(

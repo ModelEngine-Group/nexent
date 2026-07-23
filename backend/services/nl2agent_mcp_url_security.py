@@ -1,11 +1,4 @@
-"""Network destination policy for NL2AGENT remote MCP installation.
-
-This module currently accepts any network address returned by DNS for the
-configured MCP URL, including private, loopback, link-local, and IPv6 ULA
-addresses. The historical ``is_global`` private-network check has been
-short-circuited so that internal MCP deployments work without toggling the
-``NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS`` environment variable.
-"""
+"""Network destination policy for NL2AGENT remote MCP connections."""
 
 import ipaddress
 import socket
@@ -22,6 +15,11 @@ from consts.exceptions import Nl2AgentValidationError
 
 
 AddressResolver = Callable[..., list[Any]]
+_METADATA_ADDRESSES = {
+    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("169.254.170.2"),
+    ipaddress.ip_address("fd00:ec2::254"),
+}
 
 
 @dataclass(frozen=True)
@@ -47,9 +45,18 @@ def _parse_remote_mcp_url(url: str) -> tuple[str, str, int]:
             "MCP server URL must be HTTP or HTTPS and must not contain credentials."
         )
     try:
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        parsed_port = parsed.port
     except ValueError as exc:
-        raise Nl2AgentValidationError("MCP server URL contains an invalid port.") from exc
+        raise Nl2AgentValidationError(
+            "MCP server URL contains an invalid port."
+        ) from exc
+    port = (
+        parsed_port
+        if parsed_port is not None
+        else (443 if parsed.scheme == "https" else 80)
+    )
+    if not 1 <= port <= 65535:
+        raise Nl2AgentValidationError("MCP server URL contains an invalid port.")
     try:
         hostname = str(ipaddress.ip_address(parsed.hostname))
     except ValueError:
@@ -62,41 +69,91 @@ def _parse_remote_mcp_url(url: str) -> tuple[str, str, int]:
     return normalized, hostname, port
 
 
+def _allow_private_networks(configured: bool | None) -> bool:
+    return NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS if configured is None else configured
+
+
+def _validate_resolved_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    *,
+    allow_private_networks: bool,
+) -> None:
+    if address in _METADATA_ADDRESSES:
+        raise Nl2AgentValidationError(
+            "MCP server URL resolves to a cloud metadata endpoint."
+        )
+    if (
+        address.is_loopback
+        or address.is_link_local
+        or address.is_unspecified
+        or address.is_multicast
+        or address.is_reserved
+    ):
+        raise Nl2AgentValidationError(
+            "MCP server URL resolves to a restricted network address."
+        )
+    if not allow_private_networks and not address.is_global:
+        raise Nl2AgentValidationError(
+            "MCP server URL resolves to a non-public network address."
+        )
+    if allow_private_networks and not (address.is_global or address.is_private):
+        raise Nl2AgentValidationError(
+            "MCP server URL resolves to a restricted network address."
+        )
+
+
 def resolve_remote_mcp_target(
     url: str,
     *,
-    allow_private_networks: bool = NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS,
+    allow_private_networks: bool | None = None,
     resolver: AddressResolver = socket.getaddrinfo,
 ) -> ResolvedMcpTarget:
     """Resolve and validate the exact addresses an MCP connection may use."""
     normalized, hostname, port = _parse_remote_mcp_url(url)
+    private_networks_allowed = _allow_private_networks(allow_private_networks)
     try:
-        address_info = resolver(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
-    except OSError as exc:
-        raise Nl2AgentValidationError(
-            "MCP server hostname could not be resolved safely."
-        ) from exc
-    if not address_info:
-        raise Nl2AgentValidationError(
-            "MCP server hostname could not be resolved safely."
-        )
+        literal_address = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal_address = None
+    if literal_address is None:
+        try:
+            address_info = resolver(
+                hostname,
+                port,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
+            )
+        except OSError as exc:
+            raise Nl2AgentValidationError(
+                "MCP server hostname could not be resolved safely."
+            ) from exc
+        if not address_info:
+            raise Nl2AgentValidationError(
+                "MCP server hostname could not be resolved safely."
+            )
+        raw_addresses = []
+        for entry in address_info:
+            try:
+                raw_addresses.append(entry[4][0])
+            except (IndexError, TypeError) as exc:
+                raise Nl2AgentValidationError(
+                    "MCP server hostname returned an invalid network address."
+                ) from exc
+    else:
+        raw_addresses = [str(literal_address)]
 
     addresses: list[str] = []
-    for entry in address_info:
+    for raw_address in raw_addresses:
         try:
-            address = ipaddress.ip_address(entry[4][0])
-        except (IndexError, TypeError, ValueError) as exc:
+            address = ipaddress.ip_address(raw_address)
+        except ValueError as exc:
             raise Nl2AgentValidationError(
                 "MCP server hostname returned an invalid network address."
             ) from exc
-        if not allow_private_networks and not address.is_global:
-            raise Nl2AgentValidationError(
-                f"MCP server URL {normalized!r} (hostname={hostname!r}, "
-                f"port={port}) resolves to non-public network "
-                f"address={str(address)!r}. Set "
-                f"NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS=true to allow private "
-                f"networks, or update the registered MCP URL."
-            )
+        _validate_resolved_address(
+            address,
+            allow_private_networks=private_networks_allowed,
+        )
         canonical = str(address)
         if canonical not in addresses:
             addresses.append(canonical)
@@ -119,8 +176,13 @@ class _PinnedNetworkBackend(httpcore.AsyncNetworkBackend):
         socket_options: Iterable[Any] | None = None,
     ) -> httpcore.AsyncNetworkStream:
         requested_host = host.decode("ascii") if isinstance(host, bytes) else str(host)
-        if requested_host.casefold() != self._target.hostname.casefold() or port != self._target.port:
-            raise OSError("MCP redirect target is outside the validated network destination.")
+        if (
+            requested_host.casefold() != self._target.hostname.casefold()
+            or port != self._target.port
+        ):
+            raise OSError(
+                "MCP redirect target is outside the validated network destination."
+            )
         last_error: OSError | None = None
         for address in self._target.addresses:
             try:
@@ -154,14 +216,48 @@ class _PinnedAsyncHttpTransport(httpx.AsyncHTTPTransport):
         )
 
 
+class _ValidatingAsyncHttpTransport(httpx.AsyncBaseTransport):
+    """Resolve and pin every initial or redirected HTTP request destination."""
+
+    def __init__(
+        self,
+        *,
+        allow_private_networks: bool | None,
+        resolver: AddressResolver,
+    ) -> None:
+        self._allow_private_networks = allow_private_networks
+        self._resolver = resolver
+        self._transports: list[_PinnedAsyncHttpTransport] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        target = resolve_remote_mcp_target(
+            str(request.url),
+            allow_private_networks=self._allow_private_networks,
+            resolver=self._resolver,
+        )
+        transport = _PinnedAsyncHttpTransport(target)
+        self._transports.append(transport)
+        try:
+            return await transport.handle_async_request(request)
+        except BaseException:
+            self._transports.remove(transport)
+            await transport.aclose()
+            raise
+
+    async def aclose(self) -> None:
+        transports, self._transports = self._transports, []
+        for transport in transports:
+            await transport.aclose()
+
+
 def build_pinned_httpx_client_factory(
     url: str,
     *,
-    allow_private_networks: bool = True,
+    allow_private_networks: bool | None = None,
     resolver: AddressResolver = socket.getaddrinfo,
 ) -> Callable[..., httpx.AsyncClient]:
-    """Return an MCP client factory pinned to one validated DNS snapshot."""
-    target = resolve_remote_mcp_target(
+    """Return an MCP client factory that validates and pins every destination."""
+    resolve_remote_mcp_target(
         url,
         allow_private_networks=allow_private_networks,
         resolver=resolver,
@@ -182,7 +278,10 @@ def build_pinned_httpx_client_factory(
             auth=auth,
             follow_redirects=follow_redirects,
             trust_env=False,
-            transport=_PinnedAsyncHttpTransport(target),
+            transport=_ValidatingAsyncHttpTransport(
+                allow_private_networks=allow_private_networks,
+                resolver=resolver,
+            ),
             **extra_kwargs,
         )
 
@@ -192,15 +291,12 @@ def build_pinned_httpx_client_factory(
 def validate_remote_mcp_url(
     url: str,
     *,
-    allow_private_networks: bool = True,
+    allow_private_networks: bool | None = None,
     resolver: AddressResolver = socket.getaddrinfo,
 ) -> str:
-    """Reject URLs that can directly address non-public networks."""
-    normalized, _, _ = _parse_remote_mcp_url(url)
-    if allow_private_networks:
-        return normalized
+    """Validate one MCP URL using the connection-time destination policy."""
     return resolve_remote_mcp_target(
-        normalized,
-        allow_private_networks=False,
+        url,
+        allow_private_networks=allow_private_networks,
         resolver=resolver,
     ).url

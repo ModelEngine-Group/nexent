@@ -234,9 +234,6 @@ def test_resume_session_reactivates_completed_session(monkeypatch):
     )
     update = MagicMock(return_value=True)
     monkeypatch.setattr(lifecycle, "resume_nl2agent_session", update)
-    cache = MagicMock()
-    monkeypatch.setattr(lifecycle, "recover_committed_cache_best_effort", cache)
-
     result = lifecycle.resume_session(
         draft_agent_id=202,
         tenant_id="tenant-a",
@@ -252,7 +249,6 @@ def test_resume_session_reactivates_completed_session(monkeypatch):
     assert call["workflow_state"]["revision"] == 8
     assert call["workflow_state"]["revision_mode"] is True
     assert "final_review" in call["workflow_state"]["card_delivery"]
-    cache.assert_called_once_with("tenant-a", 202)
 
 
 def test_resume_session_accepts_concurrent_reactivation(monkeypatch):
@@ -271,10 +267,6 @@ def test_resume_session_accepts_concurrent_reactivation(monkeypatch):
         "resume_nl2agent_session",
         MagicMock(return_value=False),
     )
-    monkeypatch.setattr(
-        lifecycle, "recover_committed_cache_best_effort", MagicMock()
-    )
-
     result = lifecycle.resume_session(
         draft_agent_id=202,
         tenant_id="tenant-a",
@@ -307,13 +299,11 @@ def test_list_active_sessions_rejects_non_integer_limit():
         )
 
 
-def test_abandon_session_is_owner_scoped_and_evicts_cache(monkeypatch):
+def test_abandon_session_is_owner_scoped(monkeypatch):
     lookup = MagicMock(return_value=_record())
     update = MagicMock(return_value=True)
-    evict = MagicMock()
     monkeypatch.setattr(lifecycle, "get_nl2agent_session", lookup)
     monkeypatch.setattr(lifecycle, "update_nl2agent_session_status", update)
-    monkeypatch.setattr(lifecycle, "delete_nl2agent_session_catalogs", evict)
 
     result = lifecycle.abandon_session(
         draft_agent_id=202,
@@ -329,7 +319,6 @@ def test_abandon_session_is_owner_scoped_and_evicts_cache(monkeypatch):
         status="abandoned",
         user_id="user-a",
     )
-    evict.assert_called_once_with("tenant-a", 202)
 
 
 def test_abandon_session_rejects_terminal_session(monkeypatch):
@@ -350,10 +339,8 @@ def test_abandon_session_rejects_terminal_session(monkeypatch):
 def test_abandon_session_by_conversation_is_owner_scoped(monkeypatch):
     lookup = MagicMock(return_value=_record())
     update = MagicMock(return_value=True)
-    evict = MagicMock()
     monkeypatch.setattr(lifecycle, "get_nl2agent_session_by_conversation", lookup)
     monkeypatch.setattr(lifecycle, "update_nl2agent_session_status", update)
-    monkeypatch.setattr(lifecycle, "delete_nl2agent_session_catalogs", evict)
 
     result = lifecycle.abandon_session_by_conversation(
         conversation_id=902,
@@ -370,7 +357,6 @@ def test_abandon_session_by_conversation_is_owner_scoped(monkeypatch):
         status="abandoned",
         user_id="user-a",
     )
-    evict.assert_called_once_with("tenant-a", 202)
 
 
 def test_abandon_session_by_conversation_ignores_normal_conversation(monkeypatch):

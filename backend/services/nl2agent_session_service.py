@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SessionInitializationDependencies:
-    """Database, Redis, and catalog operations required to start a session."""
+    """Database and catalog operations required to start a session."""
 
     search_agent_id_by_name: Callable[..., int]
     provision_builder: Callable[..., Optional[int]]
@@ -26,8 +26,6 @@ class SessionInitializationDependencies:
     create_conversation: Callable[..., Dict[str, Any]]
     create_session_snapshot: Callable[..., Dict[str, Any]]
     initialize_session_state: Callable[..., Any]
-    set_session_catalogs: Callable[..., Any]
-    delete_session_catalogs: Callable[..., Any]
     new_uuid: Callable[..., Any]
     builder_agent_name: str
     draft_name_prefix: str
@@ -40,7 +38,7 @@ async def start_session(
     tenant_id: str,
     language: str,
 ) -> Dict[str, Any]:
-    """Create a draft and Conversation, then atomically hand off Redis state."""
+    """Create a draft, Conversation, workflow, and catalogs in one transaction."""
     del language
     builder_agent_id = _resolve_builder_agent_id(
         dependencies,
@@ -111,11 +109,6 @@ async def start_session(
                 db_session=db_session,
             )
     except Exception as exc:
-        _compensate_session_catalogs(
-            dependencies,
-            tenant_id=tenant_id,
-            draft_agent_id=draft_agent_id,
-        )
         if isinstance(exc, AgentRunException):
             raise
         logger.exception(
@@ -123,21 +116,6 @@ async def start_session(
             tenant_id,
         )
         raise Nl2AgentOperationError("Failed to initialize NL2AGENT session.") from exc
-
-    try:
-        dependencies.set_session_catalogs(
-            tenant_id,
-            draft_agent_id,
-            session_catalogs,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to warm disposable NL2AGENT catalogs after durable creation: "
-            "tenant_id=%s draft_agent_id=%s",
-            tenant_id,
-            draft_agent_id,
-            exc_info=True,
-        )
 
     if resource_missing_names:
         logger.warning(
@@ -211,22 +189,3 @@ def _ensure_builder_ready(
         raise Nl2AgentOperationError(
             "NL2AGENT default agent is not ready. Restart the config service and retry."
         ) from exc
-
-
-def _compensate_session_catalogs(
-    dependencies: SessionInitializationDependencies,
-    *,
-    tenant_id: str,
-    draft_agent_id: Optional[int],
-) -> None:
-    if not draft_agent_id:
-        return
-    try:
-        dependencies.delete_session_catalogs(tenant_id, draft_agent_id)
-    except Exception:
-        logger.exception(
-            "Failed to compensate NL2AGENT Redis initialization: "
-            "tenant_id=%s draft_agent_id=%s",
-            tenant_id,
-            draft_agent_id,
-        )

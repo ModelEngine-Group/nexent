@@ -1,4 +1,3 @@
-import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from unittest.mock import MagicMock
@@ -47,15 +46,15 @@ def durable_session(monkeypatch):
         "persist_workflow_state",
         MagicMock(side_effect=persist_workflow_state),
     )
-    cache_catalogs = catalog_module.set_nl2agent_session_catalogs
-
     def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
         if tenant_id == "tenant_1" and draft_agent_id == 202:
             durable_snapshot["session_catalogs"] = deepcopy(catalogs)
-        return cache_catalogs(tenant_id, draft_agent_id, catalogs)
 
     monkeypatch.setattr(
-        catalog_module, "set_nl2agent_session_catalogs", set_session_catalogs
+        catalog_module,
+        "set_nl2agent_session_catalogs",
+        set_session_catalogs,
+        raising=False,
     )
     return durable_snapshot
 

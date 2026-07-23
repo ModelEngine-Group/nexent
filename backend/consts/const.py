@@ -337,12 +337,8 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
-# NOTE: The NL2AGENT MCP client factory now defaults to allowing private
-# networks, so this flag has no effect on the current code path. It is
-# kept here for backward compatibility with deployment templates that
-# still set the environment variable.
 NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS = os.getenv(
-    "NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS", "false"
+    "NL2AGENT_ALLOW_PRIVATE_MCP_NETWORKS", "true"
 ).lower() in ("true", "1", "yes", "on")
 NL2AGENT_ABANDONED_RETENTION_DAYS = max(
     1, int(os.getenv("NL2AGENT_ABANDONED_RETENTION_DAYS", "30"))

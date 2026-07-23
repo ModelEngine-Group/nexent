@@ -33,7 +33,6 @@ from agents.nl2agent_session_catalog import (
     complete_online_installation,
     confirm_requirements_summary,
     confirm_agent_identity,
-    delete_nl2agent_session_catalogs,
     get_nl2agent_session_catalogs,
     get_installation_operation,
     get_nl2agent_session_state,
@@ -51,7 +50,6 @@ from agents.nl2agent_session_catalog import (
     reserve_recommendation_batch_apply,
     reserve_mcp_binding_operation,
     reserve_online_installation,
-    set_nl2agent_session_catalogs,
     set_model_selection_confirmed,
     transition_installation_operation,
     summarize_workflow_state,
@@ -302,8 +300,6 @@ def _session_initialization_dependencies() -> SessionInitializationDependencies:
         create_conversation=create_conversation,
         create_session_snapshot=create_nl2agent_session,
         initialize_session_state=initialize_nl2agent_session_state,
-        set_session_catalogs=set_nl2agent_session_catalogs,
-        delete_session_catalogs=delete_nl2agent_session_catalogs,
         new_uuid=uuid.uuid4,
         builder_agent_name=NL2AGENT_AGENT_NAME,
         draft_name_prefix=DRAFT_AGENT_NAME_PREFIX,
@@ -429,7 +425,7 @@ async def select_models(
     """Validate and persist an ordered model selection on a draft agent."""
     _require_workflow_action(agent_id, tenant_id, user_id, "select_models")
     try:
-        workflow_state = assert_requirements_confirmed(tenant_id, agent_id)
+        assert_requirements_confirmed(tenant_id, agent_id)
     except AppException:
         raise
     except Exception as exc:

@@ -82,6 +82,20 @@ def test_state_and_catalogs_are_read_only_from_postgresql(monkeypatch):
     assert load.call_count == 3
 
 
+def test_postgresql_failure_does_not_fall_back_to_a_cache(monkeypatch):
+    monkeypatch.setattr(
+        session_store,
+        "load_durable_session",
+        MagicMock(side_effect=RuntimeError("postgres unavailable")),
+    )
+
+    with pytest.raises(session_store.Nl2AgentSessionCatalogError, match="Failed to load"):
+        session_store.get_session_state("tenant_1", 202)
+
+    assert not hasattr(session_store, "refresh_cache_best_effort")
+    assert not hasattr(session_store, "recover_committed_cache_best_effort")
+
+
 def test_workflow_mutation_advances_database_revision_once(monkeypatch):
     durable = _snapshot()
 
