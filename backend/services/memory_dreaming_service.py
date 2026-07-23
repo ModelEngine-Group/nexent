@@ -82,6 +82,12 @@ class MemoryDreamingService:
             candidate = build_candidate(
                 record, float(evidence.get("total_retrieval_score") or 0)
             )
+            candidate.already_promoted = (
+                memory_record_db.find_by_idempotency(
+                    tenant_id, f"dreaming:{candidate.memory_id}"
+                )
+                is not None
+            )
             memory_record_db.update_memory_record(
                 candidate.memory_id,
                 tenant_id,
