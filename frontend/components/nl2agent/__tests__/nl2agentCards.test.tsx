@@ -16,6 +16,7 @@ import {
   renderStructuredNl2AgentEnvelope,
   type StructuredNl2AgentCard,
 } from "../cardRegistry";
+import { CatalogSnapshotIdentifier } from "../CatalogSnapshotIdentifier";
 import {
   canPublishFinalReview,
   FinalizeCard,
@@ -142,7 +143,14 @@ describe("structured NL2AGENT card registry", () => {
     assertElement(direct[1]);
     assert.equal(direct[1].type, ModelSelectionCard);
     assertElement(direct[2]);
-    assert.equal(direct[2].type, LocalResourcesCard);
+    assert.equal(direct[2].type, "div");
+    const localChildren = React.Children.toArray(
+      direct[2].props.children as React.ReactNode
+    );
+    assertElement(localChildren[0]);
+    assert.equal(localChildren[0].type, CatalogSnapshotIdentifier);
+    assertElement(localChildren[1]);
+    assert.equal(localChildren[1].type, LocalResourcesCard);
     assertElement(direct[3]);
     const mcpChildren = React.Children.toArray(
       direct[3].props.children as React.ReactNode

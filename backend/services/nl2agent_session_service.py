@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from consts.exceptions import AgentRunException, Nl2AgentOperationError
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,8 @@ async def start_session(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    draft_name = f"{dependencies.draft_name_prefix}{dependencies.new_uuid().hex[:8]}"
+    session_identifier = dependencies.new_uuid().hex
+    draft_name = f"{dependencies.draft_name_prefix}{session_identifier[:8]}"
     agent_payload = {
         "name": draft_name,
         "display_name": "Draft Agent (NL2AGENT)",
@@ -61,9 +63,18 @@ async def start_session(
         "is_new": False,
         "is_main_agent": True,
     }
-    session_catalogs, resource_missing_names = await dependencies.load_session_catalogs(
+    loaded_catalogs, resource_missing_names = await dependencies.load_session_catalogs(
         tenant_id
     )
+    try:
+        session_catalogs = create_catalog_snapshot(
+            loaded_catalogs,
+            catalog_version=f"catalog_{session_identifier}",
+        )
+    except (TypeError, ValueError) as exc:
+        raise Nl2AgentOperationError(
+            "NL2AGENT catalog snapshot could not be created."
+        ) from exc
     draft_agent_id: Optional[int] = None
     conversation_id: Optional[int] = None
     try:

@@ -7,6 +7,19 @@ import pytest
 
 from consts.exceptions import Nl2AgentDraftNotFoundError, Nl2AgentValidationError
 from services import nl2agent_session_lifecycle_service as lifecycle
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
+
+
+_CATALOG_SNAPSHOT = create_catalog_snapshot(
+    {
+        "tool_catalog": [],
+        "skill_catalog": [],
+        "registry_results": [],
+        "community_results": [],
+        "official_skills": [],
+    },
+    catalog_version="catalog_11111111111111111111111111111111",
+)
 
 
 def _workflow_state(*, revision_mode=False):
@@ -59,6 +72,7 @@ def _record(**overrides):
         "create_time": datetime(2026, 7, 1),
         "update_time": datetime(2026, 7, 2),
         "workflow_state": _workflow_state(),
+        "session_catalogs": _CATALOG_SNAPSHOT,
         **overrides,
     }
 
@@ -250,6 +264,24 @@ def test_resume_session_reactivates_completed_session(monkeypatch):
     assert call["workflow_state"]["revision"] == 8
     assert call["workflow_state"]["revision_mode"] is True
     assert "card_delivery" not in call["workflow_state"]
+
+
+def test_resume_session_rejects_legacy_session_without_catalog_snapshot(monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "get_nl2agent_session",
+        MagicMock(return_value=_record(status="completed", session_catalogs={})),
+    )
+
+    with pytest.raises(
+        lifecycle.Nl2AgentWorkflowConflictError,
+        match="catalog snapshot is malformed",
+    ):
+        lifecycle.resume_session(
+            draft_agent_id=202,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
 
 
 def test_resume_session_accepts_concurrent_reactivation(monkeypatch):

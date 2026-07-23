@@ -13,6 +13,7 @@ from consts.exceptions import (
     Nl2AgentWorkflowConflictError,
 )
 from consts.model import Nl2AgentActionContext, Nl2AgentActionRequest
+from utils.nl2agent_catalog_snapshot import recommendation_matches_snapshot
 from utils.nl2agent_observability import record_action, record_cas_conflict
 
 
@@ -26,6 +27,7 @@ class Nl2AgentActionDependencies:
     update_action_message: Callable[..., bool]
     summarize_workflow_state: Callable[[Dict[str, Any]], Dict[str, Any]]
     get_session_catalogs: Callable[[str, int], Dict[str, Any]]
+    get_session_catalog_snapshot: Callable[[str, int], Dict[str, Any]]
     confirm_requirements: Callable[..., Dict[str, Any]]
     save_model_selection: Callable[..., Awaitable[Dict[str, Any]]]
     apply_local_resources: Callable[..., Awaitable[Dict[str, Any]]]
@@ -115,6 +117,7 @@ def _validate_stage(
     request: Nl2AgentActionRequest,
     workflow_state: Dict[str, Any],
     summary: Dict[str, Any],
+    catalog_snapshot: Dict[str, Any] | None = None,
 ) -> None:
     if request.action == "confirm_requirements":
         if not (
@@ -131,12 +134,13 @@ def _validate_stage(
             f"Action '{request.action}' is not allowed during stage "
             f"'{summary.get('current_stage')}'."
         )
-    _validate_recommendation_proof(request, workflow_state)
+    _validate_recommendation_proof(request, workflow_state, catalog_snapshot)
 
 
 def _validate_recommendation_proof(
     request: Nl2AgentActionRequest,
     workflow_state: Dict[str, Any],
+    catalog_snapshot: Dict[str, Any] | None,
 ) -> None:
     payload = request.payload
     recommendations = workflow_state.get("recommendations") or {}
@@ -146,6 +150,7 @@ def _validate_recommendation_proof(
             raise Nl2AgentWorkflowConflictError(
                 "The local recommendation batch is not part of this session."
             )
+        _validate_batch_catalog_snapshot(batch, catalog_snapshot)
     elif request.action == "install_mcp":
         batch = recommendations.get(payload.recommendation_batch_id) or {}
         if batch.get("resource_type") != "mcp" or payload.recommendation_id not in set(
@@ -154,6 +159,7 @@ def _validate_recommendation_proof(
             raise Nl2AgentWorkflowConflictError(
                 "The MCP recommendation is not part of this session batch."
             )
+        _validate_batch_catalog_snapshot(batch, catalog_snapshot)
     elif request.action == "install_web_skill":
         batch = recommendations.get(payload.recommendation_batch_id) or {}
         if batch.get("resource_type") != "skill" or payload.item_key not in set(
@@ -162,6 +168,7 @@ def _validate_recommendation_proof(
             raise Nl2AgentWorkflowConflictError(
                 "The Skill recommendation is not part of this session batch."
             )
+        _validate_batch_catalog_snapshot(batch, catalog_snapshot)
     elif request.action in {"bind_mcp_tools", "skip_mcp_tools"}:
         workflow = (workflow_state.get("mcp_workflows") or {}).get(
             payload.recommendation_id
@@ -170,6 +177,23 @@ def _validate_recommendation_proof(
             raise Nl2AgentWorkflowConflictError(
                 "The installed MCP workflow is not part of this session."
             )
+
+
+def _validate_batch_catalog_snapshot(
+    batch: Dict[str, Any],
+    catalog_snapshot: Dict[str, Any] | None,
+) -> None:
+    try:
+        matches = catalog_snapshot is not None and recommendation_matches_snapshot(
+            batch,
+            catalog_snapshot,
+        )
+    except (TypeError, ValueError, KeyError):
+        matches = False
+    if not matches:
+        raise Nl2AgentWorkflowConflictError(
+            "The recommendation batch belongs to a stale or different catalog snapshot."
+        )
 
 
 def _skill_key(item: Dict[str, Any]) -> str | None:
@@ -349,7 +373,18 @@ async def _dispatch_nl2agent_action(
         )
     workflow_state = dict(session.get("workflow_state") or {})
     summary = dependencies.summarize_workflow_state(workflow_state)
-    _validate_stage(request, workflow_state, summary)
+    catalog_snapshot = (
+        dependencies.get_session_catalog_snapshot(tenant_id, draft_agent_id)
+        if request.action
+        in {
+            "apply_local_resources",
+            "skip_local_resources",
+            "install_mcp",
+            "install_web_skill",
+        }
+        else None
+    )
+    _validate_stage(request, workflow_state, summary, catalog_snapshot)
 
     claimed_message, claimed = dependencies.claim_action_message(
         conversation_id=conversation_id,

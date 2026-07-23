@@ -271,14 +271,12 @@ def test_cleanup_soft_deletes_only_selected_abandoned_roots(monkeypatch):
             tenant_id="tenant-a",
             draft_agent_id=11,
             conversation_id=21,
-            catalog_snapshot_id="digest-a",
             delete_flag="N",
         ),
         SimpleNamespace(
             tenant_id="tenant-a",
             draft_agent_id=12,
             conversation_id=22,
-            catalog_snapshot_id="digest-b",
             delete_flag="N",
         ),
     ]
@@ -347,7 +345,6 @@ def test_stale_active_sessions_are_abandoned_in_a_bounded_batch(monkeypatch):
 def test_completed_cleanup_soft_deletes_selected_sessions(monkeypatch):
     record = SimpleNamespace(
         tenant_id="tenant-a",
-        catalog_snapshot_id="digest",
         delete_flag="N",
         updated_by="user-a",
     )

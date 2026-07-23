@@ -10,6 +10,10 @@ from agents.nl2agent_workflow import (
     RecommendationBatch,
     state_to_dict,
 )
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
+
+
+_CATALOG_VERSION = "catalog_11111111111111111111111111111111"
 
 
 def _catalogs():
@@ -33,7 +37,9 @@ def _snapshot(*, revision=0, status="active"):
         "status": status,
         "workflow_revision": revision,
         "workflow_state": state_to_dict(state),
-        "session_catalogs": _catalogs(),
+        "session_catalogs": create_catalog_snapshot(
+            _catalogs(), catalog_version=_CATALOG_VERSION
+        ),
     }
 
 
@@ -160,7 +166,7 @@ def test_terminal_session_rejects_mutation(monkeypatch):
 
 
 def test_catalog_validation_returns_a_deep_copy():
-    source = _catalogs()
+    source = create_catalog_snapshot(_catalogs(), catalog_version=_CATALOG_VERSION)
     validated = session_store.validate_catalogs(source)
     source["tool_catalog"][0]["tool_id"] = 99
     assert validated["tool_catalog"] == [{"tool_id": 1}]

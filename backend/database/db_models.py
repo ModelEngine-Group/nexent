@@ -684,7 +684,11 @@ class Nl2AgentSession(TableBase):
     status = Column(String(20), nullable=False, default="active", doc="Session lifecycle status")
     workflow_schema_version = Column(Integer, nullable=False, doc="Workflow payload schema version")
     workflow_revision = Column(Integer, nullable=False, default=0, doc="Workflow optimistic-lock revision")
-    session_catalogs = Column(JSONB, nullable=False, doc="Immutable normalized provider catalogs")
+    session_catalogs = Column(
+        JSONB,
+        nullable=False,
+        doc="Immutable catalog version, SHA-256 hash, and normalized provider catalogs",
+    )
     workflow_state = Column(JSONB, nullable=False, doc="Authoritative workflow state snapshot")
 
 

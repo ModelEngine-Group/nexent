@@ -4,6 +4,19 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 from backend.scripts import check_nl2agent_cutover as cutover
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
+
+
+_CATALOG_SNAPSHOT = create_catalog_snapshot(
+    {
+        "tool_catalog": [],
+        "skill_catalog": [],
+        "registry_results": [],
+        "community_results": [],
+        "official_skills": [],
+    },
+    catalog_version="catalog_11111111111111111111111111111111",
+)
 
 
 def test_session_evaluation_rejects_v2_and_legacy_keys():
@@ -38,6 +51,7 @@ def test_v3_sessions_and_bound_builder_conversations_pass():
                     "session_id": 8,
                     "status": "active",
                     "workflow_schema_version": 3,
+                    "session_catalogs": _CATALOG_SNAPSHOT,
                     "workflow_state": {"schema_version": 3},
                 }
             ]
@@ -50,6 +64,24 @@ def test_v3_sessions_and_bound_builder_conversations_pass():
         )
         == []
     )
+
+
+def test_active_v3_session_without_valid_catalog_snapshot_blocks_cutover():
+    issues = cutover.evaluate_session_rows(
+        [
+            {
+                "session_id": 8,
+                "status": "active",
+                "workflow_schema_version": 3,
+                "session_catalogs": {},
+                "workflow_state": {"schema_version": 3},
+            }
+        ]
+    )
+
+    assert [issue.code for issue in issues] == [
+        "active_catalog_snapshot_invalid"
+    ]
 
 
 def test_orphan_builder_conversation_blocks_cutover():

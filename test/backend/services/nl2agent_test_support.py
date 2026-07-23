@@ -13,6 +13,7 @@ from agents import nl2agent_session_catalog
 from agents import nl2agent_session_store
 from agents.nl2agent_session_catalog import (
     get_nl2agent_session_catalogs,
+    get_nl2agent_session_catalog_snapshot,
 )
 from consts.exceptions import (
     AgentRunException,
@@ -43,6 +44,7 @@ from services.nl2agent_resource_service import (
     redact_tool_parameter_defaults,
 )
 from services.nl2agent_seed_service import NL2AGENT_VERIFICATION_CONFIG
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +65,7 @@ def _active_nl2agent_session(monkeypatch):
 
 
 class _FixedUuid:
-    hex = "abcdef1234567890"
+    hex = "abcdef1234567890abcdef1234567890"
 
 
 class _ImmediateInstallationContext:
@@ -194,6 +196,7 @@ _EXPECTED_SESSION_CATALOGS = {
     "community_results": _COMMUNITY_RESULTS,
     "official_skills": _OFFICIAL_SKILLS,
 }
+_TEST_CATALOG_VERSION = "catalog_11111111111111111111111111111111"
 
 _REQUIREMENTS_SUMMARY = {
     "goal": "Build a document assistant",
@@ -367,17 +370,27 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "status": "active",
         "workflow_revision": 0,
         "workflow_state": initial_state,
-        "session_catalogs": {
-            "tool_catalog": [],
-            "skill_catalog": [],
-            "registry_results": [],
-            "community_results": [],
-            "official_skills": [],
-        },
+        "session_catalogs": create_catalog_snapshot(
+            {
+                "tool_catalog": [],
+                "skill_catalog": [],
+                "registry_results": [],
+                "community_results": [],
+                "official_skills": [],
+            },
+            catalog_version=_TEST_CATALOG_VERSION,
+        ),
     }
     def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
         if tenant_id == "tenant_1" and draft_agent_id == 202:
-            durable_snapshot["session_catalogs"] = deepcopy(catalogs)
+            durable_snapshot["session_catalogs"] = (
+                deepcopy(catalogs)
+                if "catalog_version" in catalogs
+                else create_catalog_snapshot(
+                    catalogs,
+                    catalog_version=_TEST_CATALOG_VERSION,
+                )
+            )
 
     monkeypatch.setattr(
         nl2agent_session_catalog,

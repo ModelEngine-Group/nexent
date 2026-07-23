@@ -189,6 +189,8 @@ def test_nl2agent_search_tools_record_exact_trusted_batch(
         "recommendation_batch_id"
     ]
     assert recorded[0]["resource_type"] == resource_type
+    assert "catalog_version" not in recorded[0]
+    assert "catalog_hash" not in recorded[0]
     if resource_type == "local":
         assert recorded[0]["tool_ids"] == []
         assert recorded[0]["skill_ids"] == []

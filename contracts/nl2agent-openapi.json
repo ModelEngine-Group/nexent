@@ -3038,6 +3038,18 @@
             "title": "Applied Tool Ids",
             "type": "array"
           },
+          "catalog_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Catalog Hash",
+            "type": "string"
+          },
+          "catalog_version": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Catalog Version",
+            "type": "string"
+          },
           "item_keys": {
             "items": {
               "maxLength": 300,

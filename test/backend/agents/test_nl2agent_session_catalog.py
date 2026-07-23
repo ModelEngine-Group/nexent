@@ -6,6 +6,10 @@ import pytest
 
 from agents import nl2agent_session_catalog as catalog_module
 from agents import nl2agent_session_store as session_store
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
+
+
+CATALOG_VERSION = "catalog_11111111111111111111111111111111"
 
 
 @pytest.fixture
@@ -22,7 +26,9 @@ def durable_session(monkeypatch):
         "status": "active",
         "workflow_revision": 0,
         "workflow_state": initial_state,
-        "session_catalogs": _catalogs(),
+        "session_catalogs": create_catalog_snapshot(
+            _catalogs(), catalog_version=CATALOG_VERSION
+        ),
         "installation_operations": [],
     }
 
@@ -55,7 +61,10 @@ def durable_session(monkeypatch):
 
     def set_session_catalogs(tenant_id, draft_agent_id, catalogs):
         if tenant_id == "tenant_1" and draft_agent_id == 202:
-            durable_snapshot["session_catalogs"] = deepcopy(catalogs)
+            durable_snapshot["session_catalogs"] = create_catalog_snapshot(
+                catalogs,
+                catalog_version=CATALOG_VERSION,
+            )
 
     monkeypatch.setattr(
         catalog_module,
@@ -261,9 +270,19 @@ def test_malformed_catalogs_are_rejected_from_database(durable_session, monkeypa
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
-        match="field 'tool_catalog' is malformed",
+        match="snapshot is malformed",
     ):
         catalog_module.get_nl2agent_session_catalogs("tenant_1", 202)
+
+
+def test_catalog_snapshot_hash_mismatch_is_rejected_from_database(durable_session):
+    durable_session["session_catalogs"]["tool_catalog"] = [{"tool_id": 99}]
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="snapshot is malformed",
+    ):
+        catalog_module.get_nl2agent_session_catalog_snapshot("tenant_1", 202)
 
 
 def test_recommendation_batch_registration_is_idempotent_and_requires_resolution(
@@ -273,6 +292,12 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
     second = _register_local_batch("batch_1", [3, 1], [7])
     assert first == second
     assert first["status"] == "recommendations_ready"
+    recorded = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
+        "recommendations"
+    ]["batch_1"]
+    snapshot = catalog_module.get_nl2agent_session_catalog_snapshot("tenant_1", 202)
+    assert recorded["catalog_version"] == snapshot["catalog_version"]
+    assert recorded["catalog_hash"] == snapshot["catalog_hash"]
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError, match="Apply or skip"
@@ -281,6 +306,36 @@ def test_recommendation_batch_registration_is_idempotent_and_requires_resolution
 
     _complete_local_apply("batch_1", [1], [7])
     catalog_module.assert_resource_review_complete("tenant_1", 202)
+
+
+@pytest.mark.parametrize("change", ["version", "content"])
+def test_recommendation_apply_rejects_stale_catalog_snapshot(
+    durable_session,
+    change,
+):
+    _register_local_batch("batch_1", [1], [])
+    catalogs = _catalogs()
+    version = "catalog_22222222222222222222222222222222"
+    if change == "content":
+        catalogs["tool_catalog"] = [{"tool_id": 99}]
+        version = CATALOG_VERSION
+    durable_session["session_catalogs"] = create_catalog_snapshot(
+        catalogs,
+        catalog_version=version,
+    )
+
+    with pytest.raises(
+        catalog_module.Nl2AgentSessionCatalogError,
+        match="stale or different catalog snapshot",
+    ):
+        catalog_module.reserve_recommendation_batch_apply(
+            "tenant_1",
+            202,
+            "batch_1",
+            "operation-1",
+            [1],
+            [],
+        )
 
 
 def test_local_apply_and_skip_cannot_both_reserve_the_same_batch(durable_session):

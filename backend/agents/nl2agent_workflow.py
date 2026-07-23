@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from utils.nl2agent_catalog_snapshot import (
+    CATALOG_HASH_PATTERN,
+    CATALOG_VERSION_PATTERN,
+)
 
 
 WORKFLOW_SCHEMA_VERSION = 3
@@ -53,6 +58,8 @@ class RecommendationBatch(BaseModel):
 
     resource_type: Literal["local", "mcp", "skill"]
     status: Literal["searched", "presented", "applying", "applied", "skipped", "completed"]
+    catalog_version: str = Field(default="", max_length=64)
+    catalog_hash: str = Field(default="", max_length=64)
     tool_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
     skill_ids: List[PositiveStrictInt] = Field(default_factory=list, max_length=100)
     item_keys: List[BoundedItemKey] = Field(default_factory=list, max_length=100)
@@ -63,6 +70,26 @@ class RecommendationBatch(BaseModel):
         default_factory=list, max_length=100
     )
     operation_id: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("catalog_version")
+    @classmethod
+    def validate_catalog_version(cls, value: str) -> str:
+        if value and not CATALOG_VERSION_PATTERN.fullmatch(value):
+            raise ValueError("catalog_version is malformed")
+        return value
+
+    @field_validator("catalog_hash")
+    @classmethod
+    def validate_catalog_hash(cls, value: str) -> str:
+        if value and not CATALOG_HASH_PATTERN.fullmatch(value):
+            raise ValueError("catalog_hash is malformed")
+        return value
+
+    @model_validator(mode="after")
+    def validate_catalog_identity_pair(self) -> "RecommendationBatch":
+        if bool(self.catalog_version) != bool(self.catalog_hash):
+            raise ValueError("catalog_version and catalog_hash must be provided together")
+        return self
 
 
 class McpWorkflow(BaseModel):

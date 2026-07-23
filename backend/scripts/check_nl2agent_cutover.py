@@ -16,6 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 from agents.nl2agent_workflow import WORKFLOW_SCHEMA_VERSION  # noqa: E402
 from database.client import db_client  # noqa: E402
 from database.db_models import AgentInfo, ConversationRecord, Nl2AgentSession  # noqa: E402
+from utils.nl2agent_catalog_snapshot import catalog_identity  # noqa: E402
 
 
 LEGACY_WORKFLOW_KEYS = frozenset({"card_delivery", "online_installations"})
@@ -68,10 +69,11 @@ def evaluate_session_rows(rows: Iterable[Mapping[str, Any]]) -> list[CutoverIssu
             if isinstance(workflow_state, Mapping)
             else None
         )
-        if row.get("status") == "active" and (
-            row.get("workflow_schema_version") != WORKFLOW_SCHEMA_VERSION
-            or state_version != WORKFLOW_SCHEMA_VERSION
-        ):
+        active_schema_valid = (
+            row.get("workflow_schema_version") == WORKFLOW_SCHEMA_VERSION
+            and state_version == WORKFLOW_SCHEMA_VERSION
+        )
+        if row.get("status") == "active" and not active_schema_valid:
             issues.append(
                 CutoverIssue(
                     code="active_schema_mismatch",
@@ -80,6 +82,18 @@ def evaluate_session_rows(rows: Iterable[Mapping[str, Any]]) -> list[CutoverIssu
                     detail=f"active Session is not workflow schema v{WORKFLOW_SCHEMA_VERSION}",
                 )
             )
+        if row.get("status") == "active" and active_schema_valid:
+            try:
+                catalog_identity(row.get("session_catalogs"))
+            except (KeyError, TypeError, ValueError):
+                issues.append(
+                    CutoverIssue(
+                        code="active_catalog_snapshot_invalid",
+                        subject="session",
+                        identifier=session_id,
+                        detail="active Session lacks a valid immutable catalog snapshot",
+                    )
+                )
         legacy_keys = sorted(_legacy_keys(workflow_state))
         if legacy_keys:
             issues.append(
@@ -117,6 +131,7 @@ def inspect_nl2agent_cutover(db_session) -> list[CutoverIssue]:
                 Nl2AgentSession.session_id,
                 Nl2AgentSession.status,
                 Nl2AgentSession.workflow_schema_version,
+                Nl2AgentSession.session_catalogs,
                 Nl2AgentSession.workflow_state,
             ).where(Nl2AgentSession.delete_flag != "Y")
         )

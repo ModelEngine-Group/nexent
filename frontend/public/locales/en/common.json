@@ -3749,6 +3749,7 @@
   "nl2agent.finalize.historyExpired": "The editable NL2AGENT session has expired",
   "nl2agent.finalize.historyExpiredDescription": "The proposal saved in this conversation remains available, but its persisted workflow can no longer be resumed.",
   "nl2agent.builder.open": "Agent Builder",
+  "nl2agent.catalogSnapshot.label": "Catalog snapshot",
   "nl2agent.finalize.publish": "Apply to configuration",
   "nl2agent.finalize.published": "Configuration applied successfully!",
   "nl2agent.action.confirmRequirements": "Requirements confirmed",

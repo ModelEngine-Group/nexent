@@ -33,6 +33,11 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
         "draft_name": "draft_abcdef12",
     }
     assert get_nl2agent_session_catalogs("tenant_1", 202) == _EXPECTED_SESSION_CATALOGS
+    catalog_snapshot = get_nl2agent_session_catalog_snapshot("tenant_1", 202)
+    assert catalog_snapshot["catalog_version"] == (
+        "catalog_abcdef1234567890abcdef1234567890"
+    )
+    assert len(catalog_snapshot["catalog_hash"]) == 64
     assert result["draft_agent_id"] != result["nl2agent_agent_id"]
 
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
@@ -107,8 +112,8 @@ async def test_start_session_keeps_installable_and_recoverable_official_skills(
         )
 
     assert get_nl2agent_session_catalogs("tenant_1", 202)["official_skills"] == [
-        official_skills[0],
         official_skills[2],
+        official_skills[0],
     ]
     assert "tenant_id=tenant_1" in caplog.text
     assert "draft_agent_id=202" in caplog.text

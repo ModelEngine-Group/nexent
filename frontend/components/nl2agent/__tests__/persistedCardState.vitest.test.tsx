@@ -74,6 +74,9 @@ describe("persisted NL2AGENT card state", () => {
             resource_type: "skill",
             item_keys: ["skill:12"],
             status: "completed",
+            catalog_version: "catalog_0123456789abcdef0123456789abcdef",
+            catalog_hash:
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           },
         },
         mcp_workflows: {
@@ -151,6 +154,11 @@ describe("persisted NL2AGENT card state", () => {
     expect(installedButton).toBeDisabled();
     expect(installedButton.closest(".pointer-events-none")).toHaveClass(
       "opacity-60"
+    );
+    expect(
+      screen.getByTestId("catalog-snapshot-skill_batch")
+    ).toHaveTextContent(
+      "catalog_0123456789abcdef0123456789abcdef · sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     );
     await waitFor(() =>
       expect(getNl2AgentSessionState).toHaveBeenCalledTimes(1)

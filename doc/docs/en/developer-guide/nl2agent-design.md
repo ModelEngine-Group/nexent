@@ -45,17 +45,21 @@ The model still uses controlled `nl2agent-*` fenced JSON as an internal model-to
 
 Lifecycle endpoints remain separate from business actions:
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /nl2agent/session/start` | Create the Draft, hidden Builder Conversation, and v3 Session |
-| `POST /nl2agent/session/{draft_agent_id}/resume` | Enter revision mode for a resumable Session |
-| `POST /nl2agent/session/{draft_agent_id}/abandon` | Abandon an active Session |
-| `GET /nl2agent/session/{draft_agent_id}` | Read the public Session summary |
-| `GET /nl2agent/session/{draft_agent_id}/state` | Read the authoritative Draft/workflow projection |
+| Endpoint                                          | Purpose                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| `POST /nl2agent/session/start`                    | Create the Draft, hidden Builder Conversation, and v3 Session |
+| `POST /nl2agent/session/{draft_agent_id}/resume`  | Enter revision mode for a resumable Session                   |
+| `POST /nl2agent/session/{draft_agent_id}/abandon` | Abandon an active Session                                     |
+| `GET /nl2agent/session/{draft_agent_id}`          | Read the public Session summary                               |
+| `GET /nl2agent/session/{draft_agent_id}/state`    | Read the authoritative Draft/workflow projection              |
 
 Session status is `active`, `completed`, or `abandoned`. Only active Sessions accept business actions. Completed history is read-only until resume reopens editing.
 
-Session creation stores a normalized, redacted resource catalog in `session_catalogs`. Runtime state and catalogs are never recovered from Redis.
+Session creation stores a normalized, redacted resource catalog in `session_catalogs` together with an immutable `catalog_version` and SHA-256 `catalog_hash`. Canonicalization stabilizes dictionary fields and top-level catalog-item ordering, applies NFKC/trim to strings, and preserves the business order of nested arrays.
+
+SDK search results cannot provide snapshot identifiers. The backend binds every persisted recommendation batch to the current Session version/hash, and the Dispatcher revalidates both before local-resource apply/skip, MCP install, and web Skill install. Missing, stale, cross-Session, or content-mismatched identities return `409`. A catalog change requires a new Session; active Sessions are never refreshed implicitly.
+
+The frontend only displays version/hash from read-only Session state. It does not treat them as trust input or send them in action payloads. Card Envelopes and the `nl2agent_message` protocol do not contain these identifiers, so snapshot pinning does not change the Card Event contract. Runtime state and catalogs are never recovered from Redis.
 
 ## 4. Workflow v3
 
@@ -126,12 +130,12 @@ The `action_id` receipt is stored in `conversation_message_t.message_metadata`. 
 
 Error semantics:
 
-| HTTP | Meaning |
-|---|---|
-| 401/403 | Authentication or tenant/user/Draft/Conversation mismatch |
-| 409 | Revision CAS, stage, Session status, or action fingerprint conflict |
-| 422 | Action payload violates its contract |
-| 502/503 | MCP/Skill provider or durable operation failure |
+| HTTP    | Meaning                                                             |
+| ------- | ------------------------------------------------------------------- |
+| 401/403 | Authentication or tenant/user/Draft/Conversation mismatch           |
+| 409     | Revision CAS, stage, Session status, or action fingerprint conflict |
+| 422     | Action payload violates its contract                                |
+| 502/503 | MCP/Skill provider or durable operation failure                     |
 
 The removed fine-grained requirements/model/resource/MCP/Skill/identity/finalize write endpoints have no deprecated adapter.
 
@@ -234,9 +238,12 @@ python backend/scripts/check_nl2agent_cutover.py
 The command returns non-zero when:
 
 - an active Session is not schema v3;
+- an active v3 Session lacks a valid catalog version/hash or its catalog content does not match the hash;
 - workflow state still contains `card_delivery` or `online_installations`;
 - an NL2AGENT Builder Conversation is not bound to a non-deleted v3 Session;
 - PostgreSQL cannot be inspected.
+
+A completed Session created by an older build without catalog snapshot identity remains read-only; resume fails closed. Create a new Session to continue editing instead of backfilling or recomputing an identity for the old Session.
 
 For cleanup, first write target Session/Conversation IDs to a temporary table and verify counts. Apply `delete_flag` updates in one transaction under database-administrator control and retain the audit record.
 
@@ -260,15 +267,16 @@ Rollback rules:
 
 ## 12. Primary implementation locations
 
-| Responsibility | File |
-|---|---|
-| HTTP and error mapping | `backend/apps/nl2agent_app.py` |
-| Action Dispatcher | `backend/services/nl2agent_action_service.py` |
-| v3 workflow | `backend/agents/nl2agent_workflow.py` |
-| PostgreSQL state/CAS | `backend/agents/nl2agent_session_store.py` |
-| Atomic message finalize | `backend/services/nl2agent_message_service.py` |
-| Card contract/parser | `backend/consts/nl2agent_card.py`, `backend/utils/nl2agent_card_validation.py` |
-| Installation runner | `backend/services/nl2agent_installation_runner.py` |
-| MCP URL security | `backend/services/nl2agent_mcp_url_security.py` |
+| Responsibility                     | File                                                                                      |
+| ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| HTTP and error mapping             | `backend/apps/nl2agent_app.py`                                                            |
+| Action Dispatcher                  | `backend/services/nl2agent_action_service.py`                                             |
+| v3 workflow                        | `backend/agents/nl2agent_workflow.py`                                                     |
+| PostgreSQL state/CAS               | `backend/agents/nl2agent_session_store.py`                                                |
+| Catalog snapshot/hash              | `backend/utils/nl2agent_catalog_snapshot.py`                                              |
+| Atomic message finalize            | `backend/services/nl2agent_message_service.py`                                            |
+| Card contract/parser               | `backend/consts/nl2agent_card.py`, `backend/utils/nl2agent_card_validation.py`            |
+| Installation runner                | `backend/services/nl2agent_installation_runner.py`                                        |
+| MCP URL security                   | `backend/services/nl2agent_mcp_url_security.py`                                           |
 | Structured frontend event/Registry | `frontend/lib/chat/nl2agentCardEvent.ts`, `frontend/components/nl2agent/cardRegistry.tsx` |
-| Cutover guard | `backend/scripts/check_nl2agent_cutover.py` |
+| Cutover guard                      | `backend/scripts/check_nl2agent_cutover.py`                                               |

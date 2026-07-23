@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from agents.nl2agent_session_catalog import enter_revision_mode
-from agents.nl2agent_session_store import parse_session_state
+from agents.nl2agent_session_store import parse_session_state, validate_catalog_snapshot
 from agents.nl2agent_workflow import (
     WORKFLOW_SCHEMA_VERSION,
     evaluate_workflow,
@@ -144,6 +144,9 @@ def resume_session(
         draft_agent_id=draft_agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
+    )
+    validate_catalog_snapshot(
+        record.get("session_catalogs") or record.get("catalog_snapshot")
     )
     if record.get("status") == NL2AGENT_SESSION_ACTIVE:
         enter_revision_mode(tenant_id, draft_agent_id)

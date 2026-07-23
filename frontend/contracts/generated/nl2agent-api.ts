@@ -1645,6 +1645,16 @@ export interface components {
       applied_skill_ids?: number[];
       /** Applied Tool Ids */
       applied_tool_ids?: number[];
+      /**
+       * Catalog Hash
+       * @default
+       */
+      catalog_hash?: string;
+      /**
+       * Catalog Version
+       * @default
+       */
+      catalog_version?: string;
       /** Item Keys */
       item_keys?: string[];
       /** Operation Id */

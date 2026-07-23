@@ -20,6 +20,7 @@ from agents.nl2agent_workflow import (
 )
 from utils.nl2agent_catalog_snapshot import (
     mcp_recommendation_id,
+    recommendation_matches_snapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ initialize_nl2agent_session_state = _session_store.initialize_session_state
 get_nl2agent_session_state = _session_store.get_session_state
 _mutate_session_state = _session_store.mutate_session_state
 get_nl2agent_session_catalogs = _session_store.get_session_catalogs
+get_nl2agent_session_catalog_snapshot = _session_store.get_session_catalog_snapshot
 
 
 def summarize_workflow_state(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -564,9 +566,12 @@ def _record_trusted_search_batch(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     if not recommendation_batch_id:
         raise Nl2AgentSessionCatalogError("recommendation_batch_id is required.")
+    catalog_snapshot = get_nl2agent_session_catalog_snapshot(tenant, draft_id)
     batch = RecommendationBatch(
         resource_type=resource_type,
         status="searched",
+        catalog_version=catalog_snapshot["catalog_version"],
+        catalog_hash=catalog_snapshot["catalog_hash"],
         tool_ids=_ordered_unique(tool_ids or [], int),
         skill_ids=_ordered_unique(skill_ids or [], int),
         item_keys=_ordered_unique(
@@ -589,6 +594,8 @@ def _record_trusted_search_batch(
             or existing.tool_ids != batch.tool_ids
             or existing.skill_ids != batch.skill_ids
             or existing.item_keys != batch.item_keys
+            or existing.catalog_version != batch.catalog_version
+            or existing.catalog_hash != batch.catalog_hash
         ):
             raise Nl2AgentSessionCatalogError(
                 "Trusted search batch contents changed for the same identifier."
@@ -602,10 +609,32 @@ def _record_trusted_search_batch(
 
 def _recommendation_batch_response(batch: RecommendationBatch) -> Dict[str, Any]:
     """Project the aggregate into the stable local-card response contract."""
-    payload = batch.model_dump(mode="json", exclude={"operation_id", "resource_type", "item_keys"})
+    payload = batch.model_dump(
+        mode="json",
+        exclude={
+            "operation_id",
+            "resource_type",
+            "item_keys",
+            "catalog_version",
+            "catalog_hash",
+        },
+    )
     if payload.get("status") == "presented":
         payload["status"] = "recommendations_ready"
     return payload
+
+
+def _assert_batch_matches_catalog_snapshot(
+    batch: RecommendationBatch,
+    catalog_snapshot: Dict[str, Any],
+) -> None:
+    if not recommendation_matches_snapshot(
+        batch.model_dump(mode="json"),
+        catalog_snapshot,
+    ):
+        raise Nl2AgentSessionCatalogError(
+            "Recommendation batch belongs to a stale or different catalog snapshot."
+        )
 
 
 def resolve_recommendation_batch(
@@ -622,6 +651,7 @@ def resolve_recommendation_batch(
             "Applied batches must use the reservation completion workflow."
         )
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    catalog_snapshot = get_nl2agent_session_catalog_snapshot(tenant, draft_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendations.get(recommendation_batch_id)
@@ -629,6 +659,7 @@ def resolve_recommendation_batch(
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch was not registered."
             )
+        _assert_batch_matches_catalog_snapshot(batch, catalog_snapshot)
         if batch.status == "skipped":
             return _recommendation_batch_response(batch)
         if batch.status not in {"searched", "presented"}:
@@ -655,6 +686,7 @@ def reserve_recommendation_batch_apply(
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     selected_tool_ids = sorted(set(map(int, tool_ids or [])))
     selected_skill_ids = sorted(set(map(int, skill_ids or [])))
+    catalog_snapshot = get_nl2agent_session_catalog_snapshot(tenant, draft_id)
 
     def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
         batch = state.recommendations.get(recommendation_batch_id)
@@ -662,6 +694,7 @@ def reserve_recommendation_batch_apply(
             raise Nl2AgentSessionCatalogError(
                 "Recommendation batch was not registered."
             )
+        _assert_batch_matches_catalog_snapshot(batch, catalog_snapshot)
         if not set(selected_tool_ids).issubset(set(batch.tool_ids)) or not set(
             selected_skill_ids
         ).issubset(set(batch.skill_ids)):

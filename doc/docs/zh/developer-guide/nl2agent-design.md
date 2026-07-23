@@ -45,17 +45,21 @@ tenant_id + user_id + runner_agent_id + draft_agent_id + conversation_id
 
 独立生命周期接口：
 
-| 接口 | 作用 |
-|---|---|
-| `POST /nl2agent/session/start` | 创建 Draft、隐藏 Builder Conversation 和 v3 Session |
-| `POST /nl2agent/session/{draft_agent_id}/resume` | 将可恢复 Session 进入 revision mode |
-| `POST /nl2agent/session/{draft_agent_id}/abandon` | 放弃 active Session |
-| `GET /nl2agent/session/{draft_agent_id}` | 读取 Session 摘要 |
-| `GET /nl2agent/session/{draft_agent_id}/state` | 读取权威 Draft/workflow 投影 |
+| 接口                                              | 作用                                                |
+| ------------------------------------------------- | --------------------------------------------------- |
+| `POST /nl2agent/session/start`                    | 创建 Draft、隐藏 Builder Conversation 和 v3 Session |
+| `POST /nl2agent/session/{draft_agent_id}/resume`  | 将可恢复 Session 进入 revision mode                 |
+| `POST /nl2agent/session/{draft_agent_id}/abandon` | 放弃 active Session                                 |
+| `GET /nl2agent/session/{draft_agent_id}`          | 读取 Session 摘要                                   |
+| `GET /nl2agent/session/{draft_agent_id}/state`    | 读取权威 Draft/workflow 投影                        |
 
 Session 状态为 `active`、`completed` 或 `abandoned`。只有 `active` 可以执行业务动作。completed 历史只读，resume 后才可继续编辑。
 
-Session 创建时将规范化、脱敏的资源目录存入 `session_catalogs`。运行期间不从 Redis 恢复目录或 workflow。
+Session 创建时将规范化、脱敏的资源目录存入 `session_catalogs`，并同时写入不可变的 `catalog_version` 和 SHA-256 `catalog_hash`。规范化会稳定字典字段和顶层目录条目的顺序，并对字符串执行 NFKC/trim；嵌套数组保留业务顺序。
+
+SDK 搜索结果不接受客户端提供的快照标识。后端在持久化 recommendation batch 时绑定当前 Session 的 version/hash；Dispatcher 在本地资源 apply/skip、MCP install 和 Web Skill install 前重新校验两者。缺失、过期、跨 Session 或内容 hash 不一致均返回 `409`。目录需要改变时必须创建新 Session，不在 active Session 内隐式刷新。
+
+前端只从只读 Session state 展示 version/hash，不能把它们作为信任来源，也不会把它们写入 action payload。Card Envelope 和 `nl2agent_message` 协议不包含该标识，因此本机制不改变 Card Event 合同。运行期间不从 Redis 恢复目录或 workflow。
 
 ## 4. Workflow v3
 
@@ -134,12 +138,12 @@ POST /nl2agent/session/{draft_agent_id}/actions
 
 错误语义：
 
-| HTTP | 含义 |
-|---|---|
-| 401/403 | 鉴权、租户、用户、Draft 或 Conversation 不匹配 |
-| 409 | revision CAS、阶段、Session 状态或 action 指纹冲突 |
-| 422 | action payload 不符合合同 |
-| 502/503 | MCP/Skill provider 或持久化操作失败 |
+| HTTP    | 含义                                               |
+| ------- | -------------------------------------------------- |
+| 401/403 | 鉴权、租户、用户、Draft 或 Conversation 不匹配     |
+| 409     | revision CAS、阶段、Session 状态或 action 指纹冲突 |
+| 422     | action payload 不符合合同                          |
+| 502/503 | MCP/Skill provider 或持久化操作失败                |
 
 旧 requirements/model/resource/MCP/Skill/identity/finalize 细粒度写接口没有 deprecated adapter。
 
@@ -248,9 +252,12 @@ python backend/scripts/check_nl2agent_cutover.py
 检查脚本在以下情况返回非零：
 
 - active Session 不是 schema v3；
+- active v3 Session 缺少有效的 catalog version/hash，或目录内容与 hash 不一致；
 - workflow 中仍有 `card_delivery` 或 `online_installations`；
 - NL2AGENT Builder Conversation 未绑定到非删除的 v3 Session；
 - PostgreSQL 无法读取。
+
+较早构建创建、但没有 catalog snapshot identity 的 completed Session 只能保留为只读历史；resume 会失败关闭。需要继续编辑时应新建 Session，不能为旧 Session 补写或重算快照。
 
 清理操作建议先将目标 Session/Conversation ID 写入临时表并核对数量，再在单事务中更新 `delete_flag`。生产变更必须由数据库管理员执行并保留审计记录。
 
@@ -274,15 +281,16 @@ git push origin dyx/nl2a-branch-lite
 
 ## 12. 主要实现位置
 
-| 责任 | 文件 |
-|---|---|
-| HTTP 和错误映射 | `backend/apps/nl2agent_app.py` |
-| Action Dispatcher | `backend/services/nl2agent_action_service.py` |
-| v3 workflow | `backend/agents/nl2agent_workflow.py` |
-| PostgreSQL 状态/CAS | `backend/agents/nl2agent_session_store.py` |
-| Atomic message finalize | `backend/services/nl2agent_message_service.py` |
-| Card contract/parser | `backend/consts/nl2agent_card.py`, `backend/utils/nl2agent_card_validation.py` |
-| Installation runner | `backend/services/nl2agent_installation_runner.py` |
-| MCP URL security | `backend/services/nl2agent_mcp_url_security.py` |
+| 责任                    | 文件                                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| HTTP 和错误映射         | `backend/apps/nl2agent_app.py`                                                            |
+| Action Dispatcher       | `backend/services/nl2agent_action_service.py`                                             |
+| v3 workflow             | `backend/agents/nl2agent_workflow.py`                                                     |
+| PostgreSQL 状态/CAS     | `backend/agents/nl2agent_session_store.py`                                                |
+| Catalog snapshot/hash   | `backend/utils/nl2agent_catalog_snapshot.py`                                              |
+| Atomic message finalize | `backend/services/nl2agent_message_service.py`                                            |
+| Card contract/parser    | `backend/consts/nl2agent_card.py`, `backend/utils/nl2agent_card_validation.py`            |
+| Installation runner     | `backend/services/nl2agent_installation_runner.py`                                        |
+| MCP URL security        | `backend/services/nl2agent_mcp_url_security.py`                                           |
 | 前端结构化事件/Registry | `frontend/lib/chat/nl2agentCardEvent.ts`, `frontend/components/nl2agent/cardRegistry.tsx` |
-| Cutover guard | `backend/scripts/check_nl2agent_cutover.py` |
+| Cutover guard           | `backend/scripts/check_nl2agent_cutover.py`                                               |

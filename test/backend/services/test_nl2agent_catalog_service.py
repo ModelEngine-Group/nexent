@@ -6,8 +6,82 @@ import json
 from nexent.core.tools.nl2agent.search_web_skills_tool import (
     get_search_web_skills_tool,
 )
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
 
 from test.backend.services.nl2agent_test_support import *  # noqa: F403
+
+
+def _snapshot_catalogs(tool_catalog):
+    return {
+        "tool_catalog": tool_catalog,
+        "skill_catalog": [],
+        "registry_results": [],
+        "community_results": [],
+        "official_skills": [],
+    }
+
+
+def test_catalog_snapshot_hash_is_normalized_and_version_independent():
+    first = create_catalog_snapshot(
+        _snapshot_catalogs(
+            [
+                {
+                    "tool_id": 2,
+                    "name": " beta ",
+                    "metadata": {"b": 2, "a": 1, "label": "Ａ"},
+                },
+                {"tool_id": 1, "name": " alpha "},
+            ]
+        ),
+        catalog_version="catalog_11111111111111111111111111111111",
+    )
+    equivalent = create_catalog_snapshot(
+        _snapshot_catalogs(
+            [
+                {"name": "alpha", "tool_id": 1},
+                {
+                    "metadata": {"a": 1, "b": 2, "label": "A"},
+                    "name": "beta",
+                    "tool_id": 2,
+                },
+            ]
+        ),
+        catalog_version="catalog_22222222222222222222222222222222",
+    )
+
+    assert first["catalog_hash"] == equivalent["catalog_hash"]
+    assert first["catalog_version"] != equivalent["catalog_version"]
+    assert first["tool_catalog"] == equivalent["tool_catalog"]
+
+
+def test_catalog_snapshot_preserves_semantically_ordered_nested_arrays():
+    first = create_catalog_snapshot(
+        _snapshot_catalogs(
+            [{"tool_id": 1, "parameters": [{"name": "first"}, {"name": "second"}]}]
+        ),
+        catalog_version="catalog_11111111111111111111111111111111",
+    )
+    reordered = create_catalog_snapshot(
+        _snapshot_catalogs(
+            [{"tool_id": 1, "parameters": [{"name": "second"}, {"name": "first"}]}]
+        ),
+        catalog_version="catalog_22222222222222222222222222222222",
+    )
+
+    assert first["catalog_hash"] != reordered["catalog_hash"]
+
+
+def test_catalog_snapshot_hash_changes_with_catalog_content():
+    first = create_catalog_snapshot(
+        _snapshot_catalogs([{"tool_id": 1, "name": "alpha"}]),
+        catalog_version="catalog_11111111111111111111111111111111",
+    )
+    changed = create_catalog_snapshot(
+        _snapshot_catalogs([{"tool_id": 1, "name": "changed"}]),
+        catalog_version="catalog_22222222222222222222222222222222",
+    )
+
+    assert first["catalog_hash"] != changed["catalog_hash"]
 
 
 def test_tool_catalog_redacts_sensitive_parameter_defaults():
@@ -222,6 +296,20 @@ def test_marketplace_metadata_redaction_removes_declared_and_container_secrets()
     assert sanitized["headers"][1]["default"] is None
     environment = sanitized["configJson"]["mcpServers"]["example"]["env"]
     assert environment == {"API_TOKEN": None, "REGION": "eu"}
+    snapshot = create_catalog_snapshot(
+        {
+            "tool_catalog": [],
+            "skill_catalog": [],
+            "registry_results": [sanitized],
+            "community_results": [],
+            "official_skills": [],
+        },
+        catalog_version="catalog_11111111111111111111111111111111",
+    )
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+    assert "registry-secret" not in serialized
+    assert "snake-case-secret" not in serialized
+    assert "community-secret" not in serialized
 
 
 @pytest.mark.asyncio

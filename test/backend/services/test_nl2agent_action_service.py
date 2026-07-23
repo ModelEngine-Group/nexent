@@ -15,10 +15,21 @@ from services.nl2agent_action_service import (
     dispatch_nl2agent_action,
     validate_nl2agent_action_context,
 )
+from utils.nl2agent_catalog_snapshot import create_catalog_snapshot
 
 
 ACTION_ID = "2f8567b1-7080-4d7e-9f57-fac9db39cd20"
 ACTION_ADAPTER = TypeAdapter(Nl2AgentActionRequest)
+CATALOG_SNAPSHOT = create_catalog_snapshot(
+    {
+        "tool_catalog": [{"tool_id": 1}],
+        "skill_catalog": [{"skill_id": 2}],
+        "registry_results": [{"name": "github"}],
+        "community_results": [],
+        "official_skills": [{"skill_id": 12, "skill_name": "code-review"}],
+    },
+    catalog_version="catalog_11111111111111111111111111111111",
+)
 
 
 def _workflow_state():
@@ -28,17 +39,23 @@ def _workflow_state():
             "local-batch": {
                 "resource_type": "local",
                 "status": "searched",
+                "catalog_version": CATALOG_SNAPSHOT["catalog_version"],
+                "catalog_hash": CATALOG_SNAPSHOT["catalog_hash"],
                 "tool_ids": [1],
                 "skill_ids": [2],
             },
             "mcp-batch": {
                 "resource_type": "mcp",
                 "status": "searched",
+                "catalog_version": CATALOG_SNAPSHOT["catalog_version"],
+                "catalog_hash": CATALOG_SNAPSHOT["catalog_hash"],
                 "item_keys": ["registry:github"],
             },
             "skill-batch": {
                 "resource_type": "skill",
                 "status": "searched",
+                "catalog_version": CATALOG_SNAPSHOT["catalog_version"],
+                "catalog_hash": CATALOG_SNAPSHOT["catalog_hash"],
                 "item_keys": ["skill:12"],
             },
         },
@@ -112,6 +129,9 @@ def _dependencies(*, allowed_actions=None, existing=None):
             return_value={
                 "official_skills": [{"skill_id": 12, "skill_name": "code-review"}]
             }
+        ),
+        get_session_catalog_snapshot=MagicMock(
+            return_value=deepcopy(CATALOG_SNAPSHOT)
         ),
         confirm_requirements=MagicMock(
             return_value={"status": "confirmed", "fingerprint": "a" * 64}
@@ -233,6 +253,103 @@ async def test_illegal_stage_does_not_claim_action():
             dependencies,
             draft_agent_id=202,
             request=_request("save_identity", {"display_name": "Agent"}),
+            tenant_id="tenant-1",
+            user_id="user-1",
+            locale="en",
+        )
+
+    dependencies.claim_action_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "payload"),
+    [
+        (
+            "apply_local_resources",
+            {
+                "recommendation_batch_id": "local-batch",
+                "tool_ids": [1],
+                "skill_ids": [2],
+                "tool_config_values": {},
+            },
+        ),
+        ("skip_local_resources", {"recommendation_batch_id": "local-batch"}),
+        (
+            "install_mcp",
+            {
+                "recommendation_batch_id": "mcp-batch",
+                "recommendation_id": "registry:github",
+                "option_id": "remote-0",
+                "config_values": {},
+            },
+        ),
+        (
+            "install_web_skill",
+            {
+                "recommendation_batch_id": "skill-batch",
+                "item_key": "skill:12",
+                "config_values": {},
+            },
+        ),
+    ],
+)
+async def test_recommendation_actions_reject_cross_session_catalog_version(
+    action,
+    payload,
+):
+    cross_session_snapshot = create_catalog_snapshot(
+        CATALOG_SNAPSHOT,
+        catalog_version="catalog_22222222222222222222222222222222",
+    )
+    dependencies = replace(
+        _dependencies(),
+        get_session_catalog_snapshot=MagicMock(
+            return_value=cross_session_snapshot
+        ),
+    )
+
+    with pytest.raises(
+        Nl2AgentWorkflowConflictError,
+        match="stale or different catalog snapshot",
+    ):
+        await dispatch_nl2agent_action(
+            dependencies,
+            draft_agent_id=202,
+            request=_request(action, payload),
+            tenant_id="tenant-1",
+            user_id="user-1",
+            locale="en",
+        )
+
+    dependencies.claim_action_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recommendation_action_rejects_changed_catalog_hash():
+    changed_snapshot = create_catalog_snapshot(
+        {
+            **CATALOG_SNAPSHOT,
+            "tool_catalog": [{"tool_id": 99}],
+        },
+        catalog_version=CATALOG_SNAPSHOT["catalog_version"],
+    )
+    dependencies = replace(
+        _dependencies(),
+        get_session_catalog_snapshot=MagicMock(return_value=changed_snapshot),
+    )
+
+    with pytest.raises(
+        Nl2AgentWorkflowConflictError,
+        match="stale or different catalog snapshot",
+    ):
+        await dispatch_nl2agent_action(
+            dependencies,
+            draft_agent_id=202,
+            request=_request(
+                "skip_local_resources",
+                {"recommendation_batch_id": "local-batch"},
+            ),
             tenant_id="tenant-1",
             user_id="user-1",
             locale="en",

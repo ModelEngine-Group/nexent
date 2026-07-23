@@ -16,17 +16,15 @@ from consts.exceptions import (
     Nl2AgentStateConflictError as _Nl2AgentStateConflictError,
     Nl2AgentWorkflowConflictError,
 )
+from utils.nl2agent_catalog_snapshot import (
+    CATALOG_KEYS,
+    catalog_identity,
+    snapshot_catalogs,
+)
 from utils.nl2agent_observability import record_cas_conflict
 
 logger = logging.getLogger(__name__)
 
-CATALOG_KEYS = (
-    "tool_catalog",
-    "skill_catalog",
-    "registry_results",
-    "community_results",
-    "official_skills",
-)
 CAS_MAX_RETRIES = 5
 
 
@@ -215,42 +213,46 @@ def mutate_session_state(
     )
 
 
-def validate_catalogs(catalogs: Any) -> Dict[str, List[Dict[str, Any]]]:
-    if not isinstance(catalogs, dict):
+def validate_catalog_snapshot(catalogs: Any) -> Dict[str, Any]:
+    """Validate immutable snapshot metadata and its normalized catalog content."""
+    try:
+        version, digest = catalog_identity(catalogs)
+        payload = snapshot_catalogs(catalogs)
+    except (TypeError, ValueError, KeyError) as exc:
         raise Nl2AgentSessionCatalogError(
-            "NL2AGENT session catalog payload is malformed."
-        )
-    payload: Dict[str, List[Dict[str, Any]]] = {}
-    for key in CATALOG_KEYS:
-        value = catalogs.get(key)
-        if not isinstance(value, list):
-            raise Nl2AgentSessionCatalogError(
-                f"NL2AGENT session catalog field '{key}' is malformed."
-            )
-        payload[key] = deepcopy(value)
-    return payload
+            "NL2AGENT session catalog snapshot is malformed."
+        ) from exc
+    return {
+        "catalog_version": version,
+        "catalog_hash": digest,
+        **payload,
+    }
 
 
-def get_session_catalogs(
+def validate_catalogs(catalogs: Any) -> Dict[str, List[Dict[str, Any]]]:
+    """Project validated provider lists for existing catalog consumers."""
+    snapshot = validate_catalog_snapshot(catalogs)
+    return {key: deepcopy(snapshot[key]) for key in CATALOG_KEYS}
+
+
+def get_session_catalog_snapshot(
     tenant_id: Optional[str], draft_agent_id: Optional[int]
-) -> Dict[str, List[Dict[str, Any]]]:
-    """Load immutable catalogs directly from the authoritative session row."""
+) -> Dict[str, Any]:
+    """Load the complete immutable catalog identity and provider lists."""
     tenant, draft_id = validate_identifiers(tenant_id, draft_agent_id)
     snapshot = load_durable_session(tenant, draft_id)
     if snapshot is None:
         raise Nl2AgentSessionCatalogError(
             f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
         )
-    catalogs = validate_catalogs(
+    return validate_catalog_snapshot(
         snapshot.get("session_catalogs") or snapshot.get("catalog_snapshot")
     )
-    if catalogs is None:
-        logger.error(
-            "NL2AGENT catalogs are missing: tenant_id=%s draft_agent_id=%s",
-            tenant,
-            draft_id,
-        )
-        raise Nl2AgentSessionCatalogError(
-            f"NL2AGENT catalogs are missing for tenant={tenant}, draft_agent_id={draft_id}."
-        )
-    return validate_catalogs(catalogs)
+
+
+def get_session_catalogs(
+    tenant_id: Optional[str], draft_agent_id: Optional[int]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Load immutable catalogs directly from the authoritative session row."""
+    snapshot = get_session_catalog_snapshot(tenant_id, draft_agent_id)
+    return {key: deepcopy(snapshot[key]) for key in CATALOG_KEYS}

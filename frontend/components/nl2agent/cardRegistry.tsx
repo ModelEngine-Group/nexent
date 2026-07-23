@@ -17,6 +17,7 @@ import {
   toWebSkillCardItem,
   webSkillRecommendationKey,
 } from "./cardPayloadTypes";
+import { CatalogSnapshotIdentifier } from "./CatalogSnapshotIdentifier";
 import { FinalizeCard } from "./FinalizeCard";
 import { LocalResourcesCard } from "./LocalResourcesCard";
 import { ModelSelectionCard } from "./ModelSelectionCard";
@@ -51,6 +52,9 @@ export const OnlineRecommendationGroup: React.FC<{
     batch?.resource_type === resourceType && batch.status === "completed";
   return (
     <div className={completed ? "pointer-events-none opacity-60" : ""}>
+      <CatalogSnapshotIdentifier
+        recommendationBatchId={recommendationBatchId}
+      />
       {children}
     </div>
   );
@@ -77,18 +81,23 @@ const renderModelSelection: StructuredCardRenderer = (card, draftAgentId) =>
 const renderLocalResources: StructuredCardRenderer = (card, draftAgentId) => {
   if (card.card_type !== "local_resources") return null;
   return (
-    <LocalResourcesCard
-      agentId={draftAgentId}
-      recommendationBatchId={card.payload.recommendation_batch_id}
-      tools={card.payload.tools.map((item) => ({
-        ...item,
-        kind: "tool" as const,
-      }))}
-      skills={card.payload.skills.map((item) => ({
-        ...item,
-        kind: "skill" as const,
-      }))}
-    />
+    <div>
+      <CatalogSnapshotIdentifier
+        recommendationBatchId={card.payload.recommendation_batch_id}
+      />
+      <LocalResourcesCard
+        agentId={draftAgentId}
+        recommendationBatchId={card.payload.recommendation_batch_id}
+        tools={card.payload.tools.map((item) => ({
+          ...item,
+          kind: "tool" as const,
+        }))}
+        skills={card.payload.skills.map((item) => ({
+          ...item,
+          kind: "skill" as const,
+        }))}
+      />
+    </div>
   );
 };
 

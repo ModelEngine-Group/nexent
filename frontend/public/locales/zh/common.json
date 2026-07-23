@@ -3749,6 +3749,7 @@
   "nl2agent.finalize.historyExpired": "可编辑的 NL2AGENT 会话已过期",
   "nl2agent.finalize.historyExpiredDescription": "对话中保存的方案仍可查看，但其工作流状态已无法恢复。",
   "nl2agent.builder.open": "智能体生成助手",
+  "nl2agent.catalogSnapshot.label": "目录快照",
   "nl2agent.finalize.publish": "应用到配置",
   "nl2agent.finalize.published": "配置已成功应用",
   "nl2agent.action.confirmRequirements": "已确认需求",
