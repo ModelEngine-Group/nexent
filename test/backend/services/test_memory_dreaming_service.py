@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nexent.memory.dreaming import DreamingThresholds, select_candidates
 from services.memory_dreaming_service import DreamingRunError, MemoryDreamingService
 
 
@@ -85,6 +86,10 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "services.memory_dreaming_service.memory_record_db.list_memory_records",
         lambda *_args, **_kwargs: [record],
     )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_record_db.find_by_idempotency",
+        lambda *_args, **_kwargs: None,
+    )
     update_record = MagicMock(return_value=True)
     monkeypatch.setattr(
         "services.memory_dreaming_service.memory_record_db.update_memory_record",
@@ -116,6 +121,58 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         record_service.create_memory.call_args.kwargs["idempotency_key"] == "dreaming:7"
     )
     assert record_service.create_memory.call_args.kwargs["layer"] == "user"
+
+
+def test_ac006_already_promoted_candidate_is_not_written_again(monkeypatch):
+    service = MemoryDreamingService(record_service=MagicMock())
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_record_db.list_memory_records",
+        lambda *_args, **_kwargs: [
+            {
+                "memory_id": 9,
+                "tenant_id": "t",
+                "user_id": "u",
+                "agent_id": "a",
+                "content": "Always prefer stable transaction behavior",
+                "recall_count": 10,
+                "daily_count": 5,
+                "grounded_count": 2,
+                "last_recalled_at": datetime.utcnow().isoformat(),
+                "query_hashes": ["q1", "q2", "q3"],
+                "recall_days": ["2026-07-21", "2026-07-22", "2026-07-23"],
+                "light_hits": 3,
+                "rem_hits": 3,
+                "last_light_at": datetime.utcnow().isoformat(),
+                "last_rem_at": datetime.utcnow().isoformat(),
+                "concept_tags": ["preference", "transaction"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_record_db.find_by_idempotency",
+        lambda *_args, **_kwargs: {"memory_id": 99},
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_record_db.update_memory_record",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_record_db.apply_dreaming_phase",
+        lambda *_args, **_kwargs: True,
+    )
+    candidates = service._run_rem("t", "u", "a", {})
+    decisions = select_candidates(
+        candidates,
+        thresholds=DreamingThresholds(
+            min_score=0,
+            min_recall_count=0,
+            min_unique_queries=0,
+        ),
+    )
+    result = service._promote(decisions)
+    assert result[0]["event"] == "DEFER"
+    assert result[0]["reason"] == "already_promoted"
+    service.record_service.create_memory.assert_not_called()
 
 
 def test_ac008_failure_is_audited(monkeypatch):

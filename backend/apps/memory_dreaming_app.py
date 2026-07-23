@@ -20,7 +20,7 @@ class DreamingRunRequest(BaseModel):
 
 
 @router.post("/run")
-async def run_dreaming(
+def run_dreaming(
     payload: DreamingRunRequest,
     authorization: Optional[str] = Header(None),
 ):
@@ -38,7 +38,7 @@ async def run_dreaming(
 
 
 @router.get("/audit")
-async def list_dreaming_audits(
+def list_dreaming_audits(
     authorization: Optional[str] = Header(None),
     agent_id: Optional[str] = Query(default=None),
     run_id: Optional[int] = Query(default=None, ge=1),
