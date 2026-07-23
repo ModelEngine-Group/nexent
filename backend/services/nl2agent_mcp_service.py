@@ -1,6 +1,5 @@
 """MCP installation and tool-binding operations for NL2AGENT drafts."""
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -17,9 +16,14 @@ from consts.exceptions import (
     Nl2AgentValidationError,
 )
 from consts.model import MCPConfigRequest, ToolInstanceInfoRequest
+from services.nl2agent_installation_runner import (
+    DurableInstallationRunner,
+    InstallationRunContext,
+    InstallationRunRequest,
+    fingerprint_installation_request,
+)
 
 logger = logging.getLogger(__name__)
-_LOCK_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -29,15 +33,6 @@ class McpSessionDependencies:
     normalize_candidate: Callable[..., Dict[str, Any]]
     update_mcp_workflow: Callable[..., Any]
     recommendation_id: Callable[[str, Dict[str, Any]], str]
-
-
-@dataclass(frozen=True)
-class McpLockDependencies:
-    acquire_installation_lock: Callable[..., Optional[str]]
-    renew_installation_lock: Callable[..., bool]
-    release_installation_lock: Callable[..., Any]
-    get_installation_operation: Callable[..., Optional[Dict[str, Any]]]
-    transition_installation_operation: Callable[..., bool]
 
 
 @dataclass(frozen=True)
@@ -63,7 +58,7 @@ class McpInstallationDependencies:
     """Responsibility-grouped operations for the recoverable MCP installation saga."""
 
     session: McpSessionDependencies
-    lock: McpLockDependencies
+    runner: DurableInstallationRunner
     provider: McpProviderDependencies
     discovery: McpDiscoveryDependencies
 
@@ -75,15 +70,6 @@ def installation_key(
 ) -> str:
     """Create a stable idempotency key without including submitted secrets."""
     payload = f"{draft_agent_id}:{recommendation_id}:{option_id}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def installation_lock_key(
-    draft_agent_id: int,
-    recommendation_id: str,
-) -> str:
-    """Create one mutex scope shared by every option for a recommendation."""
-    payload = f"{draft_agent_id}:{recommendation_id}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -130,24 +116,28 @@ async def install_recommended_mcp(
 ) -> Dict[str, Any]:
     """Install an MCP and persist redacted success or failure state."""
     stable_key = installation_key(agent_id, recommendation_id, option_id)
-    lock_key = installation_lock_key(agent_id, recommendation_id)
-    lock_token = dependencies.lock.acquire_installation_lock(
-        tenant_id,
-        agent_id,
-        lock_key,
+    request = InstallationRunRequest(
+        installation_key=stable_key,
+        request_fingerprint=fingerprint_installation_request(
+            {
+                "recommendation_id": recommendation_id,
+                "option_id": option_id,
+                "config_values": config_values,
+            }
+        ),
+        resource_type="mcp",
+        failure_code="mcp_installation_failed",
+        failure_message="MCP installation failed; retry is allowed.",
     )
-    if not lock_token:
-        raise AgentRunException(
-            "This MCP installation is already in progress. Retry after it completes."
-        )
-    try:
-        durable_operation = dependencies.lock.get_installation_operation(
-            tenant_id, agent_id, stable_key
-        )
-        if durable_operation and durable_operation.get("status") == "completed":
-            return deepcopy(durable_operation.get("result") or {})
-        result = await _perform_with_lock_heartbeat(
+
+    async def execute(
+        context: InstallationRunContext,
+        checkpoint: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return await _perform_recommended_mcp_install(
             dependencies,
+            context=context,
+            checkpoint=checkpoint,
             agent_id=agent_id,
             recommendation_id=recommendation_id,
             option_id=option_id,
@@ -155,22 +145,10 @@ async def install_recommended_mcp(
             tenant_id=tenant_id,
             user_id=user_id,
             stable_key=stable_key,
-            lock_key=lock_key,
-            lock_token=lock_token,
         )
-        if not dependencies.lock.transition_installation_operation(
-            tenant_id,
-            agent_id,
-            stable_key,
-            lock_token,
-            "completed",
-            checkpoint={"provider_persisted": True, "discovery_completed": True},
-            result=result,
-        ):
-            raise Nl2AgentOperationError(
-                "MCP installation completed, but its durable operation lease was lost. Retry installation."
-            )
-        return result
+
+    try:
+        return await dependencies.runner.run(request, execute)
     except Exception as exc:
         try:
             dependencies.session.update_mcp_workflow(
@@ -187,97 +165,18 @@ async def install_recommended_mcp(
             )
         except Exception:
             logger.exception("Failed to persist NL2AGENT MCP failure state")
-        try:
-            dependencies.lock.transition_installation_operation(
-                tenant_id,
-                agent_id,
-                stable_key,
-                lock_token,
-                "failed",
-                checkpoint={"retryable": True},
-                error={
-                    "code": "installation_failed",
-                    "message": "MCP installation failed; retry is allowed.",
-                },
-            )
-        except Exception:
-            logger.exception("Failed to persist durable NL2AGENT MCP failure state")
         if isinstance(exc, AgentRunException):
             raise
         raise Nl2AgentExternalServiceError(
             "MCP installation failed during connection or tool discovery."
         ) from exc
-    finally:
-        try:
-            dependencies.lock.release_installation_lock(
-                tenant_id,
-                agent_id,
-                lock_key,
-                lock_token,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to release MCP installation lock without changing the operation result",
-                exc_info=True,
-            )
-
-
-async def _perform_with_lock_heartbeat(
-    dependencies: McpInstallationDependencies,
-    *,
-    agent_id: int,
-    recommendation_id: str,
-    option_id: str,
-    config_values: Dict[str, Any],
-    tenant_id: str,
-    user_id: str,
-    stable_key: str,
-    lock_key: str,
-    lock_token: str,
-) -> Dict[str, Any]:
-    """Run installation while renewing its ownership lease."""
-
-    async def heartbeat() -> None:
-        while True:
-            await asyncio.sleep(_LOCK_HEARTBEAT_INTERVAL_SECONDS)
-            if not dependencies.lock.renew_installation_lock(
-                tenant_id, agent_id, lock_key, lock_token
-            ):
-                raise AgentRunException(
-                    "MCP installation lock ownership was lost. Retry installation."
-                )
-
-    operation = asyncio.create_task(
-        _perform_recommended_mcp_install(
-            dependencies,
-            agent_id=agent_id,
-            recommendation_id=recommendation_id,
-            option_id=option_id,
-            config_values=config_values,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            stable_key=stable_key,
-        )
-    )
-    renewal = asyncio.create_task(heartbeat())
-    try:
-        done, _ = await asyncio.wait(
-            {operation, renewal}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if operation in done:
-            return await operation
-        operation.cancel()
-        await asyncio.gather(operation, return_exceptions=True)
-        await renewal
-        raise AgentRunException("MCP installation lock renewal stopped unexpectedly.")
-    finally:
-        renewal.cancel()
-        await asyncio.gather(renewal, return_exceptions=True)
 
 
 async def _perform_recommended_mcp_install(
     dependencies: McpInstallationDependencies,
     *,
+    context: InstallationRunContext,
+    checkpoint: Dict[str, Any],
     agent_id: int,
     recommendation_id: str,
     option_id: str,
@@ -347,41 +246,53 @@ async def _perform_recommended_mcp_install(
     mcp_id = int(record["mcp_id"]) if record else None
     persisted_source = "mcp_registry" if source == "registry" else source
 
-    if option.get("type") == "remote":
-        mcp_id = await _install_remote(
-            dependencies,
-            option=option,
-            raw=raw,
-            name=name,
-            description=description,
-            persisted_source=persisted_source,
-            persisted_registry_json=persisted_registry_json,
-            resolved_values=resolved_values,
-            authorization_token=authorization_token,
-            custom_headers=custom_headers,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            existing_mcp_id=mcp_id,
-        )
+    checkpoint_mcp_id = checkpoint.get("mcp_id")
+    if checkpoint.get("provider_persisted") and checkpoint_mcp_id is not None:
+        mcp_id = int(checkpoint_mcp_id)
     else:
-        mcp_id = await _install_container(
-            dependencies,
-            option=option,
-            option_id=option_id,
-            raw=raw,
-            name=name,
-            description=description,
-            persisted_source=persisted_source,
-            persisted_registry_json=persisted_registry_json,
-            resolved_values=resolved_values,
-            authorization_token=authorization_token,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            existing_mcp_id=mcp_id,
+        if option.get("type") == "remote":
+            mcp_id = await _install_remote(
+                dependencies,
+                option=option,
+                raw=raw,
+                name=name,
+                description=description,
+                persisted_source=persisted_source,
+                persisted_registry_json=persisted_registry_json,
+                resolved_values=resolved_values,
+                authorization_token=authorization_token,
+                custom_headers=custom_headers,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                existing_mcp_id=mcp_id,
+            )
+        else:
+            mcp_id = await _install_container(
+                dependencies,
+                option=option,
+                option_id=option_id,
+                raw=raw,
+                name=name,
+                description=description,
+                persisted_source=persisted_source,
+                persisted_registry_json=persisted_registry_json,
+                resolved_values=resolved_values,
+                authorization_token=authorization_token,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                existing_mcp_id=mcp_id,
+            )
+        await context.save_checkpoint(
+            {
+                "provider_persisted": True,
+                "mcp_id": int(mcp_id),
+            }
         )
 
     return await _discover_and_complete(
         dependencies,
+        context=context,
+        checkpoint=checkpoint,
         agent_id=agent_id,
         recommendation_id=recommendation_id,
         option_id=option_id,
@@ -707,6 +618,8 @@ def _merge_environment(
 async def _discover_and_complete(
     dependencies: McpInstallationDependencies,
     *,
+    context: InstallationRunContext,
+    checkpoint: Dict[str, Any],
     agent_id: int,
     recommendation_id: str,
     option_id: str,
@@ -719,6 +632,26 @@ async def _discover_and_complete(
     tenant_id: str,
     user_id: str,
 ) -> Dict[str, Any]:
+    checkpoint_result = checkpoint.get("result")
+    if checkpoint.get("discovery_completed") and isinstance(checkpoint_result, dict):
+        result = deepcopy(checkpoint_result)
+        dependencies.session.update_mcp_workflow(
+            tenant_id,
+            agent_id,
+            recommendation_id,
+            option_id=option_id,
+            status="connected",
+            installation_key=stable_key,
+            mcp_id=int(result["mcp_id"]),
+            discovered_tool_ids=[
+                int(tool["tool_id"])
+                for tool in result.get("tools", [])
+                if isinstance(tool, dict) and tool.get("tool_id") is not None
+            ],
+            bound_tool_ids=[],
+            error=None,
+        )
+        return result
     record = dependencies.provider.get_mcp_record(
         mcp_id=int(mcp_id),
         tenant_id=tenant_id,
@@ -769,7 +702,7 @@ async def _discover_and_complete(
         bound_tool_ids=[],
         error=None,
     )
-    return {
+    result = {
         "agent_id": agent_id,
         "mcp_id": resolved_mcp_id,
         "status": "connected",
@@ -782,21 +715,30 @@ async def _discover_and_complete(
             for tool in tools
         ],
     }
+    await context.save_checkpoint(
+        {
+            "provider_persisted": True,
+            "mcp_id": resolved_mcp_id,
+            "discovery_completed": True,
+            "result": result,
+        }
+    )
+    return result
 
 
 @dataclass(frozen=True)
 class McpBindingDependencies:
     """Persistence operations required to resolve MCP tool binding."""
 
+    runner: DurableInstallationRunner
     get_owned_draft: Callable[..., Dict[str, Any]]
     get_mcp_record: Callable[..., Dict[str, Any] | None]
+    get_mcp_workflow: Callable[..., tuple[str, Dict[str, Any]]]
     query_tools_by_ids: Callable[..., List[Dict[str, Any]]]
     bind_tool: Callable[..., Any]
     delete_tool_instances: Callable[..., Any]
     get_db_session: Callable[..., Any]
-    reserve_binding: Callable[..., Dict[str, Any]]
     complete_binding: Callable[..., Dict[str, Any]]
-    release_binding: Callable[..., Dict[str, Any]]
 
 
 async def bind_mcp_tools(
@@ -829,62 +771,65 @@ async def bind_mcp_tools(
         raise Nl2AgentValidationError(
             "One or more tools do not belong to the selected MCP."
         )
-    operation_id = (
-        "bind:" + hashlib.sha256(json.dumps(sorted(valid)).encode("utf-8")).hexdigest()
+    _, workflow = dependencies.get_mcp_workflow(tenant_id, agent_id, mcp_id)
+    if not set(valid).issubset(set(workflow.get("discovered_tool_ids") or [])):
+        raise Nl2AgentValidationError(
+            "One or more tools were not discovered by the selected MCP installation."
+        )
+    request = InstallationRunRequest(
+        installation_key=f"mcp-binding:{mcp_id}",
+        request_fingerprint=fingerprint_installation_request(
+            {"mcp_id": mcp_id, "tool_ids": sorted(valid), "mode": "bind"}
+        ),
+        resource_type="mcp_binding",
+        failure_code="mcp_binding_failed",
+        failure_message="MCP tool binding failed; retry is allowed.",
     )
-    workflow = dependencies.reserve_binding(
-        tenant_id,
-        agent_id,
-        mcp_id,
-        operation_id,
-        sorted(valid),
-    )
-    recommendation_id = str(workflow["recommendation_id"])
-    try:
-        with dependencies.get_db_session() as db_session:
-            for tool_id in valid:
-                dependencies.bind_tool(
-                    ToolInstanceInfoRequest(
-                        tool_id=tool_id,
-                        agent_id=agent_id,
-                        params={},
-                        enabled=True,
-                        version_no=0,
-                    ),
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    version_no=0,
-                    db_session=db_session,
-                )
-    except Exception as exc:
+
+    async def execute(
+        context: InstallationRunContext,
+        checkpoint: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not checkpoint.get("database_bound"):
+            try:
+                with dependencies.get_db_session() as db_session:
+                    for tool_id in valid:
+                        dependencies.bind_tool(
+                            ToolInstanceInfoRequest(
+                                tool_id=tool_id,
+                                agent_id=agent_id,
+                                params={},
+                                enabled=True,
+                                version_no=0,
+                            ),
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            version_no=0,
+                            db_session=db_session,
+                        )
+            except Exception as exc:
+                raise Nl2AgentOperationError("Failed to bind MCP tools.") from exc
+            await context.save_checkpoint({"database_bound": True})
         try:
-            dependencies.release_binding(
+            dependencies.complete_binding(
                 tenant_id,
                 agent_id,
-                recommendation_id,
-                operation_id,
+                mcp_id,
+                sorted(valid),
+                "tools_bound",
             )
-        except Exception:
-            logger.exception("Failed to release MCP tool binding reservation")
-        raise Nl2AgentOperationError("Failed to bind MCP tools.") from exc
-    try:
-        dependencies.complete_binding(
-            tenant_id,
-            agent_id,
-            recommendation_id,
-            operation_id,
-            "tools_bound",
-        )
-    except Exception as exc:
-        logger.exception("MCP tools were committed but workflow completion failed")
-        raise Nl2AgentOperationError(
-            "MCP tools were saved, but workflow state could not be reconciled. Retry binding."
-        ) from exc
-    return {
-        "agent_id": agent_id,
-        "mcp_id": mcp_id,
-        "bound_tool_ids": sorted(valid),
-    }
+        except Exception as exc:
+            logger.exception("MCP tools were committed but workflow completion failed")
+            raise Nl2AgentOperationError(
+                "MCP tools were saved, but workflow state could not be reconciled. Retry binding."
+            ) from exc
+        return {
+            "agent_id": agent_id,
+            "mcp_id": mcp_id,
+            "bound_tool_ids": sorted(valid),
+        }
+
+    return await dependencies.runner.run(request, execute)
 
 
 async def skip_mcp_tool_binding(
@@ -899,51 +844,54 @@ async def skip_mcp_tool_binding(
     dependencies.get_owned_draft(agent_id, tenant_id)
     if not dependencies.get_mcp_record(mcp_id=mcp_id, tenant_id=tenant_id):
         raise AgentRunException("Installed MCP not found.")
-    operation_id = "skip:" + hashlib.sha256(str(mcp_id).encode("utf-8")).hexdigest()
-    workflow = dependencies.reserve_binding(
-        tenant_id,
-        agent_id,
-        mcp_id,
-        operation_id,
-        [],
+    _, workflow = dependencies.get_mcp_workflow(tenant_id, agent_id, mcp_id)
+    request = InstallationRunRequest(
+        installation_key=f"mcp-binding:{mcp_id}",
+        request_fingerprint=fingerprint_installation_request(
+            {"mcp_id": mcp_id, "mode": "skip"}
+        ),
+        resource_type="mcp_binding",
+        failure_code="mcp_binding_skip_failed",
+        failure_message="MCP tool binding skip failed; retry is allowed.",
     )
-    recommendation_id = str(workflow["recommendation_id"])
-    try:
-        with dependencies.get_db_session() as db_session:
-            dependencies.delete_tool_instances(
-                agent_id=agent_id,
-                tool_ids=workflow.get("discovered_tool_ids", []),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0,
-                db_session=db_session,
-            )
-    except Exception as exc:
+
+    async def execute(
+        context: InstallationRunContext,
+        checkpoint: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not checkpoint.get("database_bound"):
+            try:
+                with dependencies.get_db_session() as db_session:
+                    dependencies.delete_tool_instances(
+                        agent_id=agent_id,
+                        tool_ids=workflow.get("discovered_tool_ids", []),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        version_no=0,
+                        db_session=db_session,
+                    )
+            except Exception as exc:
+                raise Nl2AgentOperationError(
+                    "Failed to skip MCP tool binding."
+                ) from exc
+            await context.save_checkpoint({"database_bound": True})
         try:
-            dependencies.release_binding(
+            dependencies.complete_binding(
                 tenant_id,
                 agent_id,
-                recommendation_id,
-                operation_id,
+                mcp_id,
+                [],
+                "binding_skipped",
             )
-        except Exception:
-            logger.exception("Failed to release MCP binding skip reservation")
-        raise Nl2AgentOperationError("Failed to skip MCP tool binding.") from exc
-    try:
-        dependencies.complete_binding(
-            tenant_id,
-            agent_id,
-            recommendation_id,
-            operation_id,
-            "binding_skipped",
-        )
-    except Exception as exc:
-        logger.exception("MCP skip committed but workflow completion failed")
-        raise Nl2AgentOperationError(
-            "MCP tools were removed, but workflow state could not be reconciled. Retry skip."
-        ) from exc
-    return {
-        "agent_id": agent_id,
-        "mcp_id": mcp_id,
-        "status": "binding_skipped",
-    }
+        except Exception as exc:
+            logger.exception("MCP skip committed but workflow completion failed")
+            raise Nl2AgentOperationError(
+                "MCP tools were removed, but workflow state could not be reconciled. Retry skip."
+            ) from exc
+        return {
+            "agent_id": agent_id,
+            "mcp_id": mcp_id,
+            "status": "binding_skipped",
+        }
+
+    return await dependencies.runner.run(request, execute)

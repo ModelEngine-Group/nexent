@@ -5,9 +5,7 @@ import json
 import logging
 import re
 import unicodedata
-import uuid
 from copy import deepcopy
-from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from agents import nl2agent_session_store as _session_store
@@ -15,7 +13,6 @@ from agents import nl2agent_session_store as _session_store
 from agents.nl2agent_workflow import (
     CardDelivery,
     McpWorkflow,
-    OnlineInstallation,
     RecommendationBatch,
     RequirementsReview,
     Nl2AgentWorkflowState,
@@ -28,7 +25,6 @@ from utils.nl2agent_catalog_snapshot import (
 
 logger = logging.getLogger(__name__)
 
-_INSTALLATION_LOCK_TTL_SECONDS = 5 * 60
 _REQUIREMENTS_FIELDS = (
     "goal",
     "audience_or_scenario",
@@ -504,7 +500,6 @@ def update_mcp_workflow(
         "mcp_id",
         "discovered_tool_ids",
         "bound_tool_ids",
-        "binding_operation_id",
         "error",
     }
 
@@ -532,14 +527,16 @@ def find_mcp_workflow_by_id(
     raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
 
 
-def reserve_mcp_binding_operation(
+def complete_mcp_binding_result(
     tenant_id: Optional[str],
     draft_agent_id: Optional[int],
     mcp_id: int,
-    operation_id: str,
     tool_ids: List[int],
+    status: str,
 ) -> Dict[str, Any]:
-    """Reserve one connected MCP for exactly one bind or skip operation."""
+    """Persist the business result after the durable binding runner completes."""
+    if status not in {"tools_bound", "binding_skipped"}:
+        raise Nl2AgentSessionCatalogError("Invalid MCP binding completion status.")
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
     selected_tool_ids = sorted(set(map(int, tool_ids or [])))
 
@@ -558,86 +555,16 @@ def reserve_mcp_binding_operation(
             raise Nl2AgentSessionCatalogError(
                 "Selected MCP tools were not discovered by this installation."
             )
-        if match.status == "binding":
-            if (
-                match.binding_operation_id == operation_id
-                and match.bound_tool_ids == selected_tool_ids
-            ):
-                return match.model_dump(mode="json")
-            raise Nl2AgentSessionCatalogError(
-                "MCP tool binding is reserved by another operation."
-            )
-        if match.status in {"tools_bound", "binding_skipped"}:
-            if (
-                match.binding_operation_id == operation_id
-                and match.bound_tool_ids == selected_tool_ids
-            ):
+        expected_tool_ids = [] if status == "binding_skipped" else selected_tool_ids
+        if match.status == status:
+            if match.bound_tool_ids == expected_tool_ids:
                 return match.model_dump(mode="json")
             raise Nl2AgentSessionCatalogError("MCP tool binding is already resolved.")
         if match.status != "connected":
             raise Nl2AgentSessionCatalogError("MCP tool binding is already resolved.")
-        match.status = "binding"
-        match.binding_operation_id = operation_id
-        match.bound_tool_ids = selected_tool_ids
+        match.status = status
+        match.bound_tool_ids = expected_tool_ids
         return match.model_dump(mode="json")
-
-    return _mutate_session_state(tenant, draft_id, mutate)
-
-
-def complete_mcp_binding_operation(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    recommendation_id: str,
-    operation_id: str,
-    status: str,
-) -> Dict[str, Any]:
-    """Complete an MCP bind/skip only for the reservation owner."""
-    if status not in {"tools_bound", "binding_skipped"}:
-        raise Nl2AgentSessionCatalogError("Invalid MCP binding completion status.")
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        workflow = state.mcp_workflows.get(recommendation_id)
-        if workflow is None:
-            raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
-        if workflow.status == status and workflow.binding_operation_id == operation_id:
-            return workflow.model_dump(mode="json")
-        if (
-            workflow.status != "binding"
-            or workflow.binding_operation_id != operation_id
-        ):
-            raise Nl2AgentSessionCatalogError(
-                "MCP binding reservation is no longer owned by this operation."
-            )
-        workflow.status = status
-        if status == "binding_skipped":
-            workflow.bound_tool_ids = []
-        return workflow.model_dump(mode="json")
-
-    return _mutate_session_state(tenant, draft_id, mutate)
-
-
-def release_mcp_binding_operation(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    recommendation_id: str,
-    operation_id: str,
-) -> Dict[str, Any]:
-    """Release an MCP binding reservation after a database failure."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        workflow = state.mcp_workflows.get(recommendation_id)
-        if workflow is None:
-            raise Nl2AgentSessionCatalogError("Installed MCP workflow was not found.")
-        if (
-            workflow.status == "binding"
-            and workflow.binding_operation_id == operation_id
-        ):
-            workflow.status = "connected"
-            workflow.binding_operation_id = None
-            workflow.bound_tool_ids = []
-        return workflow.model_dump(mode="json")
 
     return _mutate_session_state(tenant, draft_id, mutate)
 
@@ -647,7 +574,7 @@ def assert_mcp_workflows_resolved(tenant_id: str, draft_agent_id: int) -> None:
     unresolved = [
         workflow
         for workflow in state["mcp_workflows"].values()
-        if workflow.get("status") in {"connected", "binding"}
+        if workflow.get("status") == "connected"
     ]
     if unresolved:
         raise Nl2AgentSessionCatalogError(
@@ -703,6 +630,12 @@ def complete_online_configuration(
 ) -> List[str]:
     """Complete all rendered online recommendation batches for one draft."""
     tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
+    active_skill_operations = get_nl2agent_installation_operations(
+        tenant,
+        draft_id,
+        resource_type="skill",
+        statuses={"pending", "running"},
+    )
 
     def mutate(state: Nl2AgentWorkflowState) -> List[str]:
         batches = {
@@ -716,16 +649,13 @@ def complete_online_configuration(
                 "Show online resource recommendations for both MCP and Skill before completing configuration."
             )
         if any(
-            workflow.status in {"installing", "connected", "binding"}
+            workflow.status in {"installing", "connected"}
             for workflow in state.mcp_workflows.values()
         ):
             raise Nl2AgentSessionCatalogError(
                 "Bind discovered MCP tools or explicitly skip tool binding before completing online configuration."
             )
-        if any(
-            installation.status == "installing"
-            for installation in state.online_installations.values()
-        ):
+        if active_skill_operations:
             raise Nl2AgentSessionCatalogError(
                 "Wait for every online Skill installation to finish before completing online configuration."
             )
@@ -736,82 +666,6 @@ def complete_online_configuration(
         return sorted(batches)
 
     return _mutate_session_state(tenant, draft_id, mutate)
-
-
-def reserve_online_installation(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-    operation_id: str,
-) -> Dict[str, Any]:
-    """Reserve one online installation inside the workflow CAS."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        _ensure_workflow_action_allowed(
-            evaluate_workflow(state).model_dump(mode="json"),
-            "configure_online_resources",
-        )
-        existing = state.online_installations.get(installation_key)
-        if existing is not None:
-            if existing.operation_id == operation_id:
-                return existing.model_dump(mode="json")
-            raise Nl2AgentSessionCatalogError(
-                "Online resource installation is owned by another operation."
-            )
-        state.online_installations[installation_key] = OnlineInstallation(
-            status="installing",
-            operation_id=operation_id,
-        )
-        return state.online_installations[installation_key].model_dump(mode="json")
-
-    return _mutate_session_state(tenant, draft_id, mutate)
-
-
-def complete_online_installation(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-    operation_id: str,
-    result: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Complete only the operation that owns an online installation."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-
-    def mutate(state: Nl2AgentWorkflowState) -> Dict[str, Any]:
-        installation = state.online_installations.get(installation_key)
-        if installation is None or installation.operation_id != operation_id:
-            raise Nl2AgentSessionCatalogError(
-                "Online installation reservation is no longer owned by this operation."
-            )
-        if installation.status == "completed":
-            return installation.model_dump(mode="json")
-        installation.status = "completed"
-        installation.result = deepcopy(result)
-        return installation.model_dump(mode="json")
-
-    return _mutate_session_state(tenant, draft_id, mutate)
-
-
-def release_online_installation(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-    operation_id: str,
-) -> None:
-    """Release a failed online installation if the operation still owns it."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-
-    def mutate(state: Nl2AgentWorkflowState) -> None:
-        installation = state.online_installations.get(installation_key)
-        if (
-            installation is not None
-            and installation.status == "installing"
-            and installation.operation_id == operation_id
-        ):
-            del state.online_installations[installation_key]
-
-    _mutate_session_state(tenant, draft_id, mutate)
 
 
 def assert_online_configuration_complete(tenant_id: str, draft_agent_id: int) -> None:
@@ -1146,12 +1000,42 @@ def assert_resource_review_complete(tenant_id: str, draft_agent_id: int) -> None
         )
 
 
+def get_nl2agent_installation_operations(
+    tenant_id: str,
+    draft_agent_id: int,
+    *,
+    resource_type: Optional[str] = None,
+    statuses: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Read operation-table state through the complete authoritative Session scope."""
+    snapshot = _session_store.load_durable_session(tenant_id, draft_agent_id)
+    if snapshot is None:
+        raise Nl2AgentSessionCatalogError(
+            f"No NL2AGENT session for tenant={tenant_id!r}, draft_agent_id={draft_agent_id}."
+        )
+    from database.nl2agent_installation_db import list_installation_operations
+    from database.nl2agent_session_db import Nl2AgentSessionIdentity
+
+    identity = Nl2AgentSessionIdentity(
+        tenant_id=tenant_id,
+        user_id=str(snapshot["user_id"]),
+        runner_agent_id=int(snapshot["runner_agent_id"]),
+        draft_agent_id=draft_agent_id,
+        conversation_id=int(snapshot["conversation_id"]),
+    )
+    return list_installation_operations(
+        identity=identity,
+        resource_type=resource_type,
+        statuses=statuses,
+    )
+
+
 def _installed_skill_references(
-    installations: Dict[str, Any],
+    installations: List[Dict[str, Any]],
 ) -> tuple[set[int], set[str]]:
     installed_ids: set[int] = set()
     installed_names: set[str] = set()
-    for installation in installations.values():
+    for installation in installations:
         if installation.get("status") != "completed":
             continue
         result = installation.get("result") or {}
@@ -1209,7 +1093,7 @@ def get_nl2agent_search_catalogs(
         recommendation_id
         for recommendation_id, workflow in state.get("mcp_workflows", {}).items()
         if workflow.get("status")
-        in {"installing", "connected", "binding", "tools_bound", "binding_skipped"}
+        in {"installing", "connected", "tools_bound", "binding_skipped"}
     }
     for source, catalog_key in (
         ("registry", "registry_results"),
@@ -1222,7 +1106,12 @@ def get_nl2agent_search_catalogs(
         ]
 
     installed_skill_ids, installed_skill_names = _installed_skill_references(
-        state.get("online_installations", {})
+        get_nl2agent_installation_operations(
+            tenant,
+            draft_id,
+            resource_type="skill",
+            statuses={"completed"},
+        )
     )
     _mark_installed_official_skills(
         catalogs["official_skills"],
@@ -1230,138 +1119,3 @@ def get_nl2agent_search_catalogs(
         installed_skill_names,
     )
     return catalogs
-
-
-def acquire_mcp_installation_lock(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-) -> Optional[str]:
-    """Claim a durable installation lease and return its ownership token."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    from database.nl2agent_installation_db import (
-        InstallationLeaseConflictError,
-        claim_installation_operation,
-    )
-    from database.nl2agent_session_db import Nl2AgentSessionIdentity, get_nl2agent_session
-
-    session = get_nl2agent_session(tenant, draft_id)
-    if session is None:
-        return None
-    token = uuid.uuid4().hex
-    operation_id = hashlib.sha256(
-        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
-    ).hexdigest()
-    identity = Nl2AgentSessionIdentity(
-        tenant_id=tenant,
-        user_id=str(session["user_id"]),
-        runner_agent_id=int(session["runner_agent_id"]),
-        draft_agent_id=draft_id,
-        conversation_id=int(session["conversation_id"]),
-    )
-    try:
-        claim_installation_operation(
-            identity=identity,
-            operation_id=operation_id,
-            installation_key=installation_key,
-            request_fingerprint=operation_id,
-            resource_type=("skill" if installation_key.startswith("skill:") else "mcp"),
-            lease_owner=token,
-            lease_expires_at=datetime.utcnow() + timedelta(seconds=_INSTALLATION_LOCK_TTL_SECONDS),
-        )
-    except InstallationLeaseConflictError:
-        return None
-    return token
-
-
-def _installation_identity(tenant_id: str, draft_agent_id: int):
-    """Resolve the complete active Session identity for an installation operation."""
-    from database.nl2agent_session_db import Nl2AgentSessionIdentity, get_nl2agent_session
-
-    session = get_nl2agent_session(tenant_id, draft_agent_id)
-    if session is None:
-        return None
-    return Nl2AgentSessionIdentity(
-        tenant_id=tenant_id,
-        user_id=str(session["user_id"]),
-        runner_agent_id=int(session["runner_agent_id"]),
-        draft_agent_id=draft_agent_id,
-        conversation_id=int(session["conversation_id"]),
-    )
-
-
-def get_installation_operation(
-    tenant_id: Optional[str], draft_agent_id: Optional[int], installation_key: str
-) -> Optional[Dict[str, Any]]:
-    """Load a durable installation outcome through the active Session identity."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    identity = _installation_identity(tenant, draft_id)
-    if identity is None:
-        return None
-    from database.nl2agent_installation_db import get_installation_operation as load
-
-    return load(identity=identity, installation_key=installation_key)
-
-
-def transition_installation_operation(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-    token: str,
-    status: str,
-    *,
-    checkpoint: Optional[Dict[str, Any]] = None,
-    result: Optional[Dict[str, Any]] = None,
-    error: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """Persist a secret-free checkpoint or outcome for the current lease owner."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    from database.nl2agent_installation_db import transition_installation_operation as persist
-
-    operation_id = hashlib.sha256(
-        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
-    ).hexdigest()
-    return persist(
-        operation_id=operation_id,
-        lease_owner=token,
-        status=status,
-        checkpoint=checkpoint,
-        result=result,
-        error=error,
-    )
-
-
-def release_mcp_installation_lock(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-    token: str,
-) -> None:
-    """Release a durable installation lease only for its owner."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    from database.nl2agent_installation_db import release_installation_lease
-
-    operation_id = hashlib.sha256(
-        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
-    ).hexdigest()
-    release_installation_lease(operation_id=operation_id, lease_owner=token)
-
-
-def renew_mcp_installation_lock(
-    tenant_id: Optional[str],
-    draft_agent_id: Optional[int],
-    installation_key: str,
-    token: str,
-) -> bool:
-    """Extend a durable installation lease only while the caller owns it."""
-    tenant, draft_id = _validate_identifiers(tenant_id, draft_agent_id)
-    from database.nl2agent_installation_db import renew_installation_operation
-
-    operation_id = hashlib.sha256(
-        f"{tenant}:{draft_id}:{installation_key}".encode("utf-8")
-    ).hexdigest()
-    return renew_installation_operation(
-        operation_id=operation_id,
-        lease_owner=token,
-        lease_expires_at=datetime.utcnow() + timedelta(seconds=_INSTALLATION_LOCK_TTL_SECONDS),
-    )

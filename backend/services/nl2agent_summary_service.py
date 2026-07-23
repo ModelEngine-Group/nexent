@@ -218,6 +218,8 @@ def _resolve_resource_type(
 
 def resolve_online_resource_provenance(
     workflow_state: Dict[str, Any],
+    *,
+    skill_installations: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple[Set[int], Set[int], Set[str]]:
     """Resolve resources bound through this session's online workflows."""
     online_tool_ids = {
@@ -228,7 +230,7 @@ def resolve_online_resource_provenance(
     }
     online_skill_ids: Set[int] = set()
     online_skill_names: Set[str] = set()
-    for installation in workflow_state.get("online_installations", {}).values():
+    for installation in skill_installations or []:
         if installation.get("status") != "completed":
             continue
         result = installation.get("result") or {}

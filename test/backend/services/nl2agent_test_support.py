@@ -15,6 +15,7 @@ from agents.nl2agent_session_catalog import (
     get_nl2agent_session_catalogs,
 )
 from consts.exceptions import (
+    AgentRunException,
     Nl2AgentExternalServiceError,
     Nl2AgentOperationError,
     Nl2AgentStaleCardError,
@@ -36,6 +37,7 @@ from nexent.core.tools.nl2agent.search_local_resources_tool import (
     get_search_local_resources_tool,
 )
 from services import nl2agent_catalog_service, nl2agent_mcp_service, nl2agent_runtime_service
+from services.nl2agent_installation_runner import InstallationRunRequest
 from services.nl2agent_resource_service import (
     _resolve_tool_config_values,
     redact_tool_parameter_defaults,
@@ -62,6 +64,65 @@ def _active_nl2agent_session(monkeypatch):
 
 class _FixedUuid:
     hex = "abcdef1234567890"
+
+
+class _ImmediateInstallationContext:
+    def __init__(self, operation):
+        self.operation = operation
+
+    async def save_checkpoint(self, values, *, replace=False):
+        checkpoint = deepcopy(values) if replace else {
+            **self.operation.get("checkpoint", {}),
+            **deepcopy(values),
+        }
+        self.operation["checkpoint"] = checkpoint
+        return deepcopy(checkpoint)
+
+
+class _ImmediateInstallationRunner:
+    """In-memory runner used by service tests that do not exercise lease timing."""
+
+    def __init__(self):
+        self.operations = {}
+
+    async def run(self, request: InstallationRunRequest, execute):
+        key = (request.resource_type, request.installation_key)
+        operation = self.operations.get(key)
+        if operation is not None:
+            if operation["request_fingerprint"] != request.request_fingerprint:
+                raise AgentRunException(
+                    "This installation key belongs to a different request."
+                )
+            if operation["status"] == "completed":
+                return deepcopy(operation["result"])
+        else:
+            operation = {
+                "installation_key": request.installation_key,
+                "request_fingerprint": request.request_fingerprint,
+                "resource_type": request.resource_type,
+                "status": "pending",
+                "checkpoint": {},
+                "result": None,
+            }
+            self.operations[key] = operation
+        operation["status"] = "running"
+        context = _ImmediateInstallationContext(operation)
+        try:
+            result = await execute(context, deepcopy(operation["checkpoint"]))
+        except Exception:
+            operation["status"] = "failed"
+            raise
+        operation["status"] = "completed"
+        operation["result"] = deepcopy(result)
+        return deepcopy(result)
+
+    def list_operations(self, *, resource_type=None, statuses=None):
+        return [
+            deepcopy(operation)
+            for operation in self.operations.values()
+            if (resource_type is None or operation["resource_type"] == resource_type)
+            and (not statuses or operation["status"] in statuses)
+        ]
 
 
 _RAW_TOOL_ROWS = [
@@ -271,6 +332,7 @@ def mock_nl2agent_seed_defaults(monkeypatch):
     durable_snapshot = {
         "tenant_id": "tenant_1",
         "user_id": "user_1",
+        "runner_agent_id": 101,
         "draft_agent_id": 202,
         "conversation_id": 902,
         "status": "active",
@@ -359,30 +421,34 @@ def mock_nl2agent_seed_defaults(monkeypatch):
         "get_db_session",
         MagicMock(return_value=transaction),
     )
+    installation_runner = _ImmediateInstallationRunner()
     monkeypatch.setattr(
         nl2agent_runtime_service,
-        "acquire_mcp_installation_lock",
-        MagicMock(return_value="durable-operation-owner"),
+        "build_default_installation_runner",
+        MagicMock(return_value=installation_runner),
+    )
+
+    def list_installation_operations(
+        _tenant_id,
+        _draft_agent_id,
+        *,
+        resource_type=None,
+        statuses=None,
+    ):
+        return installation_runner.list_operations(
+            resource_type=resource_type,
+            statuses=statuses,
+        )
+
+    monkeypatch.setattr(
+        nl2agent_session_catalog,
+        "get_nl2agent_installation_operations",
+        list_installation_operations,
     )
     monkeypatch.setattr(
         nl2agent_runtime_service,
-        "renew_mcp_installation_lock",
-        MagicMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "release_mcp_installation_lock",
-        MagicMock(),
-    )
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "get_installation_operation",
-        MagicMock(return_value={"status": "running"}),
-    )
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "transition_installation_operation",
-        MagicMock(return_value=True),
+        "get_nl2agent_installation_operations",
+        list_installation_operations,
     )
     monkeypatch.setattr(
         nl2agent_runtime_service,

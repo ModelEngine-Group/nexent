@@ -128,18 +128,18 @@ def test_resolve_online_resource_provenance_uses_bound_tenant_resources():
                 "mcp": {"status": "tools_bound", "bound_tool_ids": [10, 11]},
                 "skipped": {"status": "binding_skipped", "bound_tool_ids": [12]},
             },
-            "online_installations": {
-                "skill": {
-                    "status": "completed",
-                    "result": {
-                        "skill_id": 20,
-                        "installed_ids": [21],
-                        "installed_names": ["Writer"],
-                        "_source_skill_id": 999,
-                    },
-                }
-            },
-        }
+        },
+        skill_installations=[
+            {
+                "status": "completed",
+                "result": {
+                    "skill_id": 20,
+                    "installed_ids": [21],
+                    "installed_names": ["Writer"],
+                    "_source_skill_id": 999,
+                },
+            }
+        ],
     )
 
     assert tool_ids == {10, 11}

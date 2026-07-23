@@ -972,35 +972,6 @@ def test_idempotent_state_mutation_does_not_increment_revision():
 
 
 @pytest.mark.asyncio
-async def test_mcp_installation_stops_when_lock_renewal_is_lost(monkeypatch):
-    async def wait_forever(*args, **kwargs):
-        await asyncio.Event().wait()
-
-    dependencies = MagicMock()
-    dependencies.lock.renew_installation_lock.return_value = False
-    monkeypatch.setattr(nl2agent_mcp_service, "_LOCK_HEARTBEAT_INTERVAL_SECONDS", 0)
-    monkeypatch.setattr(
-        nl2agent_mcp_service,
-        "_perform_recommended_mcp_install",
-        wait_forever,
-    )
-
-    with pytest.raises(nl2agent_runtime_service.AgentRunException, match="ownership was lost"):
-        await nl2agent_mcp_service._perform_with_lock_heartbeat(
-            dependencies,
-            agent_id=202,
-            recommendation_id="registry:github",
-            option_id="remote",
-            config_values={},
-            tenant_id="tenant_1",
-            user_id="user_1",
-            stable_key="install-key",
-            lock_key="recommendation-lock-key",
-            lock_token="token",
-        )
-
-
-@pytest.mark.asyncio
 async def test_register_requirements_review_returns_normalized_state(monkeypatch):
     monkeypatch.setattr(
         nl2agent_runtime_service,

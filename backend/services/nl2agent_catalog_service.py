@@ -5,11 +5,9 @@ import hashlib
 import json
 import logging
 import re
-import threading
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from consts.exceptions import (
@@ -20,6 +18,13 @@ from consts.exceptions import (
     Nl2AgentValidationError,
 )
 from consts.model import SkillInstanceInfoRequest
+from services.nl2agent_installation_runner import (
+    DurableInstallationRunner,
+    InstallationRunContext,
+    InstallationRunRequest,
+    fingerprint_installation_request,
+    run_blocking_installation,
+)
 from utils.nl2agent_catalog_snapshot import mcp_recommendation_id
 
 logger = logging.getLogger(__name__)
@@ -33,7 +38,6 @@ _MARKETPLACE_MAX_ITEMS = 2_000
 _MARKETPLACE_MAX_BYTES = 5 * 1024 * 1024
 _MARKETPLACE_TIMEOUT_SECONDS = 15.0
 _LOCAL_CATALOG_MAX_ITEMS = 2_000
-_LOCK_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,7 @@ class CatalogDependencies:
 class SkillInstallationDependencies:
     """Trusted catalog and tenant installation operations for official Skills."""
 
+    runner: DurableInstallationRunner
     get_owned_draft: Callable[..., Dict[str, Any]]
     get_session_catalogs: Callable[..., SessionCatalogs]
     install_by_name: Callable[..., List[str]]
@@ -59,14 +64,6 @@ class SkillInstallationDependencies:
     get_installed_by_id: Callable[[int, str], Optional[CatalogItem]]
     get_official_configuration: Callable[[str, Optional[str]], CatalogItem]
     bind_skill: Callable[..., Any]
-    acquire_installation_lock: Callable[..., Optional[str]]
-    renew_installation_lock: Callable[..., bool]
-    release_installation_lock: Callable[..., Any]
-    get_installation_operation: Callable[..., Optional[Dict[str, Any]]]
-    transition_installation_operation: Callable[..., bool]
-    reserve_installation: Callable[..., Dict[str, Any]]
-    complete_installation: Callable[..., Dict[str, Any]]
-    release_installation: Callable[..., Any]
 
 
 async def _load_marketplace_pages(
@@ -339,10 +336,10 @@ def _require_installable_skill(
 def _skill_installation_keys(
     canonical_id: Optional[int],
     canonical_name: str,
-) -> tuple[str, str]:
+) -> str:
     identity = f"{canonical_id or ''}:{_normalized_skill_name(canonical_name)}"
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    return f"skill:{digest}", f"install-skill:{digest}"
+    return f"skill:{digest}"
 
 
 def _public_skill_install_result(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -538,73 +535,88 @@ async def install_web_skill(
     canonical_name = str(
         canonical.get("skill_name") or canonical.get("name") or ""
     ).strip()
-    installation_key, operation_id = _skill_installation_keys(
-        canonical_id,
-        canonical_name,
+    installation_key = _skill_installation_keys(canonical_id, canonical_name)
+    request = InstallationRunRequest(
+        installation_key=installation_key,
+        request_fingerprint=fingerprint_installation_request(
+            {
+                "skill_id": canonical_id,
+                "skill_name": canonical_name,
+                "locale": locale,
+                "config_values": config_values or {},
+            }
+        ),
+        resource_type="skill",
+        failure_code="skill_installation_failed",
+        failure_message="Skill installation failed; retry is allowed.",
     )
-    lock_token = dependencies.acquire_installation_lock(
-        tenant_id,
-        agent_id,
-        installation_key,
-    )
-    if not lock_token:
-        raise AgentRunException(
-            "This Skill installation is already in progress. Retry after it completes."
-        )
-    operation_committed = False
-    try:
-        durable_operation = dependencies.get_installation_operation(
-            tenant_id, agent_id, installation_key
-        )
-        if durable_operation and durable_operation.get("status") == "completed":
-            return _public_skill_install_result(durable_operation.get("result") or {})
-        reservation = dependencies.reserve_installation(
-            tenant_id,
-            agent_id,
-            installation_key,
-            operation_id,
-        )
-        if reservation.get("status") == "completed":
-            return _public_skill_install_result(reservation.get("result") or {})
+
+    async def execute(
+        context: InstallationRunContext,
+        checkpoint: Dict[str, Any],
+    ) -> Dict[str, Any]:
         static_configuration = dependencies.get_official_configuration(
             canonical_name, tenant_id
         )
-        if skill_name:
-            installer = partial(
-                _install_skill_by_name,
-                dependencies,
-                agent_id=agent_id,
-                canonical_name=canonical_name,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                locale=locale,
+        installed_skill = None
+        checkpoint_skill_id = checkpoint.get("skill_id")
+        if checkpoint.get("files_installed") and checkpoint_skill_id is not None:
+            if skill_name:
+                installed_skill = dependencies.get_installed_by_name(
+                    canonical_name, tenant_id
+                ) or dependencies.get_installed_by_id(
+                    int(checkpoint_skill_id), tenant_id
+                )
+            else:
+                installed_skill = dependencies.get_installed_by_id(
+                    int(checkpoint_skill_id), tenant_id
+                ) or dependencies.get_installed_by_name(canonical_name, tenant_id)
+        if installed_skill is None:
+            if skill_name:
+                result = await run_blocking_installation(
+                    _install_skill_by_name,
+                    dependencies,
+                    agent_id=agent_id,
+                    canonical_name=canonical_name,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    locale=locale,
+                )
+            else:
+                result = await run_blocking_installation(
+                    _install_skill_by_id,
+                    dependencies,
+                    agent_id=agent_id,
+                    canonical_id=canonical_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            installed_skill_id = int(result["skill_id"])
+            if skill_name:
+                installed_skill = dependencies.get_installed_by_name(
+                    canonical_name, tenant_id
+                ) or dependencies.get_installed_by_id(installed_skill_id, tenant_id)
+            else:
+                installed_skill = dependencies.get_installed_by_id(
+                    installed_skill_id, tenant_id
+                ) or dependencies.get_installed_by_name(canonical_name, tenant_id)
+            await context.save_checkpoint(
+                {
+                    "files_installed": True,
+                    "skill_id": installed_skill_id,
+                }
             )
         else:
-            installer = partial(
-                _install_skill_by_id,
-                dependencies,
-                agent_id=agent_id,
-                canonical_id=canonical_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-        result = await _install_skill_with_lock_heartbeat(
-            dependencies,
-            agent_id=agent_id,
-            installation_key=installation_key,
-            lock_token=lock_token,
-            installer=installer,
-            tenant_id=tenant_id,
-        )
-        installed_skill_id = int(result["skill_id"])
-        if skill_name:
-            installed_skill = dependencies.get_installed_by_name(
-                canonical_name, tenant_id
-            ) or dependencies.get_installed_by_id(installed_skill_id, tenant_id)
-        else:
-            installed_skill = dependencies.get_installed_by_id(
-                installed_skill_id, tenant_id
-            ) or dependencies.get_installed_by_name(canonical_name, tenant_id)
+            installed_skill_id = int(installed_skill["skill_id"])
+            result = {
+                "skill_id": installed_skill_id,
+                "installed": True,
+                **(
+                    {"installed_names": [canonical_name]}
+                    if skill_name
+                    else {"installed_ids": [installed_skill_id]}
+                ),
+            }
         if not installed_skill:
             raise Nl2AgentOperationError(
                 f"Installed skill {canonical_name} could not be resolved for binding."
@@ -622,133 +634,31 @@ async def install_web_skill(
             resolved_defaults,
             config_values or {},
         )
-        _bind_installed_skill(
-            dependencies,
-            agent_id=agent_id,
-            skill_id=installed_skill_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            skill_label=canonical_name,
-            config_values=resolved_config,
-        )
+        if not checkpoint.get("database_bound"):
+            _bind_installed_skill(
+                dependencies,
+                agent_id=agent_id,
+                skill_id=installed_skill_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                skill_label=canonical_name,
+                config_values=resolved_config,
+            )
+            await context.save_checkpoint(
+                {
+                    "database_bound": True,
+                    "skill_id": installed_skill_id,
+                }
+            )
         result["bound"] = True
-        operation_committed = True
-        try:
-            workflow_result = {
-                **deepcopy(result),
-                "_source_skill_id": canonical_id,
-                "_source_skill_name": canonical_name,
-            }
-            dependencies.complete_installation(
-                tenant_id,
-                agent_id,
-                installation_key,
-                operation_id,
-                workflow_result,
-            )
-            if not dependencies.transition_installation_operation(
-                tenant_id,
-                agent_id,
-                installation_key,
-                lock_token,
-                "completed",
-                checkpoint={"files_installed": True, "database_bound": True},
-                result=workflow_result,
-            ):
-                raise Nl2AgentOperationError(
-                    "The Skill was installed, but its durable operation lease was lost. Retry installation."
-                )
-        except Exception as exc:
-            raise Nl2AgentOperationError(
-                "The Skill was installed, but workflow state could not be reconciled. Retry installation."
-            ) from exc
-        return result
-    except Exception:
-        try:
-            dependencies.transition_installation_operation(
-                tenant_id,
-                agent_id,
-                installation_key,
-                lock_token,
-                "failed",
-                checkpoint={"retryable": True},
-                error={
-                    "code": "installation_failed",
-                    "message": "Skill installation failed; reconciliation is required.",
-                },
-            )
-        except Exception:
-            logger.exception("Failed to persist durable NL2AGENT Skill failure state")
-        if not operation_committed:
-            try:
-                dependencies.release_installation(
-                    tenant_id,
-                    agent_id,
-                    installation_key,
-                    operation_id,
-                )
-            except Exception:
-                logger.exception("Failed to release online Skill installation")
-        raise
-    finally:
-        try:
-            dependencies.release_installation_lock(
-                tenant_id,
-                agent_id,
-                installation_key,
-                lock_token,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to release Skill installation lock without changing the operation result",
-                exc_info=True,
-            )
+        return {
+            **deepcopy(result),
+            "_source_skill_id": canonical_id,
+            "_source_skill_name": canonical_name,
+        }
 
-
-async def _install_skill_with_lock_heartbeat(
-    dependencies: SkillInstallationDependencies,
-    *,
-    agent_id: int,
-    installation_key: str,
-    lock_token: str,
-    installer: Callable[[], Dict[str, Any]],
-    tenant_id: str,
-) -> Dict[str, Any]:
-    """Run a blocking Skill installer while renewing distributed lock ownership."""
-    stopped = threading.Event()
-    renewal_errors: List[Exception] = []
-
-    def heartbeat() -> None:
-        while not stopped.wait(_LOCK_HEARTBEAT_INTERVAL_SECONDS):
-            try:
-                renewed = dependencies.renew_installation_lock(
-                    tenant_id,
-                    agent_id,
-                    installation_key,
-                    lock_token,
-                )
-                if not renewed:
-                    raise AgentRunException(
-                        "Skill installation lock ownership was lost. Retry installation."
-                    )
-            except Exception as exc:
-                renewal_errors.append(exc)
-                return
-
-    renewal = threading.Thread(
-        target=heartbeat,
-        name="nl2agent-skill-lock-heartbeat",
-        daemon=True,
-    )
-    renewal.start()
-    try:
-        result = installer()
-    finally:
-        stopped.set()
-        renewal.join()
-    if renewal_errors:
-        raise renewal_errors[0]
-    return result
+    result = await dependencies.runner.run(request, execute)
+    return _public_skill_install_result(result)
 
 
 def _install_skill_by_name(

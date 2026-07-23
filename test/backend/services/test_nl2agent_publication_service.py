@@ -715,9 +715,6 @@ async def test_get_session_state_returns_generated_name_when_candidate_is_availa
         discovered_tool_ids=[],
         bound_tool_ids=[],
     )
-    nl2agent_session_catalog.reserve_mcp_binding_operation(
-        "tenant_1", 202, 5, "mcp-operation", []
-    )
 
     result = await nl2agent_runtime_service.get_session_state(202, "tenant_1", "user_1")
     Nl2AgentSessionStateResponse.model_validate(result)
@@ -848,15 +845,21 @@ async def test_get_session_state_resolves_names_and_resource_origins(monkeypatch
         status="tools_bound",
         bound_tool_ids=[12],
     )
-    reservation = nl2agent_session_catalog.reserve_online_installation(
-        "tenant_1", 202, "skill:official", "install-skill:official"
-    )
-    nl2agent_session_catalog.complete_online_installation(
-        "tenant_1",
-        202,
-        "skill:official",
-        reservation["operation_id"],
-        {"skill_id": 22, "skill_name": "Official Skill"},
+    monkeypatch.setattr(
+        nl2agent_runtime_service,
+        "get_nl2agent_installation_operations",
+        MagicMock(
+            return_value=[
+                {
+                    "resource_type": "skill",
+                    "status": "completed",
+                    "result": {
+                        "skill_id": 22,
+                        "skill_name": "Official Skill",
+                    },
+                }
+            ]
+        ),
     )
 
     result = await nl2agent_runtime_service.get_session_state(202, "tenant_1", "user_1")

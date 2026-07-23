@@ -359,7 +359,11 @@ async def get_session_state(
     )
     workflow_state = deepcopy(dependencies.get_session_state(tenant_id, agent_id))
     online_tool_ids, online_skill_ids, online_skill_names = (
-        dependencies.resolve_online_resource_provenance(workflow_state)
+        dependencies.resolve_online_resource_provenance(
+            workflow_state,
+            tenant_id=tenant_id,
+            draft_agent_id=agent_id,
+        )
     )
     models, invalid_model_references = dependencies.resolve_model_summaries(
         draft,
@@ -376,14 +380,9 @@ async def get_session_state(
         )
     )
     workflow_summary = dependencies.summarize_workflow_state(workflow_state)
-    workflow_state.pop("online_installations", None)
     for batch in workflow_state.get("recommendations", {}).values():
         batch.pop("operation_id", None)
     for workflow in workflow_state.get("mcp_workflows", {}).values():
-        workflow.pop("binding_operation_id", None)
-        if workflow.get("status") == "binding":
-            workflow["status"] = "connected"
-            workflow["bound_tool_ids"] = []
         discovered_ids = [
             int(tool_id) for tool_id in workflow.get("discovered_tool_ids", [])
         ]

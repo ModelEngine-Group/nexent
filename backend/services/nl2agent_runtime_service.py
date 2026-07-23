@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional
 from nexent.core.tools.nl2agent.search_web_mcps_tool import normalize_mcp_candidate
 
 from agents.nl2agent_session_catalog import (
-    acquire_mcp_installation_lock,
     apply_requirements_revision_text,
     assert_trusted_local_search_batch,
     assert_workflow_action_allowed,
@@ -29,30 +28,23 @@ from agents.nl2agent_session_catalog import (
     assert_resource_review_complete,
     complete_recommendation_batch_apply,
     complete_online_configuration as complete_online_configuration_state,
-    complete_mcp_binding_operation,
-    complete_online_installation,
+    complete_mcp_binding_result,
     confirm_requirements_from_summary,
     confirm_requirements_summary,
     confirm_agent_identity,
     get_nl2agent_session_catalogs,
-    get_installation_operation,
+    get_nl2agent_installation_operations,
     get_nl2agent_session_state,
     initialize_nl2agent_session_state,
     register_recommendation_batch,
     register_online_recommendation_batch,
     register_requirements_summary,
     record_card_delivery,
-    release_mcp_installation_lock,
-    release_mcp_binding_operation,
-    release_online_installation,
     release_recommendation_batch_apply,
-    renew_mcp_installation_lock,
     resolve_recommendation_batch,
     reserve_recommendation_batch_apply,
-    reserve_mcp_binding_operation,
-    reserve_online_installation,
     set_model_selection_confirmed,
-    transition_installation_operation,
+    find_mcp_workflow_by_id,
     summarize_workflow_state,
     update_mcp_workflow,
 )
@@ -93,6 +85,7 @@ from database.conversation_db import (
 from database.client import get_db_session
 from database.model_management_db import get_model_records
 from database.nl2agent_session_db import (
+    Nl2AgentSessionIdentity,
     create_nl2agent_session,
     get_nl2agent_session,
     update_nl2agent_session_status,
@@ -138,12 +131,15 @@ from services.nl2agent_mcp_service import (
     McpBindingDependencies,
     McpDiscoveryDependencies,
     McpInstallationDependencies,
-    McpLockDependencies,
     McpProviderDependencies,
     McpSessionDependencies,
     bind_mcp_tools as bind_mcp_tools_service,
     install_recommended_mcp as install_recommended_mcp_service,
     skip_mcp_tool_binding as skip_mcp_tool_binding_service,
+)
+from services.nl2agent_installation_runner import (
+    DurableInstallationRunner,
+    build_default_installation_runner,
 )
 from services.nl2agent_mcp_url_security import (
     build_pinned_httpx_client_factory,
@@ -584,6 +580,25 @@ def _resolve_resource_summaries(
     )
 
 
+def _resolve_online_resource_provenance(
+    workflow_state: Dict[str, Any],
+    *,
+    tenant_id: str,
+    draft_agent_id: int,
+):
+    """Combine workflow MCP results with completed Skill operation results."""
+    skill_installations = get_nl2agent_installation_operations(
+        tenant_id,
+        draft_agent_id,
+        resource_type="skill",
+        statuses={"completed"},
+    )
+    return resolve_online_resource_provenance(
+        workflow_state,
+        skill_installations=skill_installations,
+    )
+
+
 def _raise_for_invalid_resource_references(
     invalid_references: List[Dict[str, Any]],
 ) -> None:
@@ -591,7 +606,34 @@ def _raise_for_invalid_resource_references(
     raise_for_invalid_resource_references(invalid_references)
 
 
-def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
+def _installation_runner(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> DurableInstallationRunner:
+    """Build one request-scoped runner from the complete active Session identity."""
+    session = require_active_session(
+        draft_agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return build_default_installation_runner(
+        Nl2AgentSessionIdentity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            runner_agent_id=int(session["runner_agent_id"]),
+            draft_agent_id=agent_id,
+            conversation_id=int(session["conversation_id"]),
+        )
+    )
+
+
+def _mcp_installation_dependencies(
+    user_id: str,
+    tenant_id: str,
+    agent_id: int,
+) -> McpInstallationDependencies:
     """Build MCP installation dependencies from facade-level operations."""
     return McpInstallationDependencies(
         session=McpSessionDependencies(
@@ -601,12 +643,10 @@ def _mcp_installation_dependencies(user_id: str) -> McpInstallationDependencies:
             update_mcp_workflow=update_mcp_workflow,
             recommendation_id=_recommendation_id,
         ),
-        lock=McpLockDependencies(
-            acquire_installation_lock=acquire_mcp_installation_lock,
-            renew_installation_lock=renew_mcp_installation_lock,
-            release_installation_lock=release_mcp_installation_lock,
-            get_installation_operation=get_installation_operation,
-            transition_installation_operation=transition_installation_operation,
+        runner=_installation_runner(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
         ),
         provider=McpProviderDependencies(
             get_mcp_records=get_mcp_records_by_tenant,
@@ -636,7 +676,7 @@ async def install_recommended_mcp(
     """Delegate recoverable installation to the MCP service."""
     _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await install_recommended_mcp_service(
-        _mcp_installation_dependencies(user_id),
+        _mcp_installation_dependencies(user_id, tenant_id, agent_id),
         agent_id=agent_id,
         recommendation_id=recommendation_id,
         option_id=option_id,
@@ -646,18 +686,26 @@ async def install_recommended_mcp(
     )
 
 
-def _mcp_binding_dependencies(user_id: str) -> McpBindingDependencies:
+def _mcp_binding_dependencies(
+    user_id: str,
+    tenant_id: str,
+    agent_id: int,
+) -> McpBindingDependencies:
     """Build MCP binding dependencies from facade-level operations."""
     return McpBindingDependencies(
+        runner=_installation_runner(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        ),
         get_owned_draft=_owned_draft_reader(user_id),
         get_mcp_record=get_mcp_record_by_id_and_tenant,
+        get_mcp_workflow=find_mcp_workflow_by_id,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         bind_tool=create_or_update_tool_by_tool_info,
         delete_tool_instances=delete_tool_instances_by_ids,
         get_db_session=get_db_session,
-        reserve_binding=reserve_mcp_binding_operation,
-        complete_binding=complete_mcp_binding_operation,
-        release_binding=release_mcp_binding_operation,
+        complete_binding=complete_mcp_binding_result,
     )
 
 
@@ -671,7 +719,7 @@ async def bind_mcp_tools(
     """Delegate MCP tool binding to the MCP service."""
     _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await bind_mcp_tools_service(
-        _mcp_binding_dependencies(user_id),
+        _mcp_binding_dependencies(user_id, tenant_id, agent_id),
         agent_id=agent_id,
         mcp_id=mcp_id,
         tool_ids=tool_ids,
@@ -689,7 +737,7 @@ async def skip_mcp_tool_binding(
     """Delegate explicit MCP binding skip to the MCP service."""
     _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await skip_mcp_tool_binding_service(
-        _mcp_binding_dependencies(user_id),
+        _mcp_binding_dependencies(user_id, tenant_id, agent_id),
         agent_id=agent_id,
         mcp_id=mcp_id,
         tenant_id=tenant_id,
@@ -808,7 +856,7 @@ def _workflow_dependencies(user_id: str) -> WorkflowDependencies:
         query_enabled_skill_instances=query_enabled_skill_instances,
         resolve_model_summaries=_resolve_model_summaries,
         resolve_resource_summaries=_resolve_resource_summaries,
-        resolve_online_resource_provenance=resolve_online_resource_provenance,
+        resolve_online_resource_provenance=_resolve_online_resource_provenance,
         query_tools_by_ids=query_tools_by_ids_for_tenant,
         sanitize_tool_parameter_schema=redact_tool_parameter_defaults,
         normalize_model_ids=normalize_model_ids,
@@ -1010,9 +1058,18 @@ async def save_agent_identity(
     )
 
 
-def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependencies:
+def _skill_installation_dependencies(
+    user_id: str,
+    tenant_id: str,
+    agent_id: int,
+) -> SkillInstallationDependencies:
     """Build trusted Skill installation dependencies from facade operations."""
     return SkillInstallationDependencies(
+        runner=_installation_runner(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        ),
         get_owned_draft=_owned_draft_reader(user_id),
         get_session_catalogs=get_nl2agent_session_catalogs,
         install_by_name=install_skills_from_zip_for_tenant,
@@ -1021,14 +1078,6 @@ def _skill_installation_dependencies(user_id: str) -> SkillInstallationDependenc
         get_installed_by_id=get_tenant_skill_by_id,
         get_official_configuration=get_official_skill_configuration,
         bind_skill=create_or_update_skill_by_skill_info,
-        acquire_installation_lock=acquire_mcp_installation_lock,
-        renew_installation_lock=renew_mcp_installation_lock,
-        release_installation_lock=release_mcp_installation_lock,
-        get_installation_operation=get_installation_operation,
-        transition_installation_operation=transition_installation_operation,
-        reserve_installation=reserve_online_installation,
-        complete_installation=complete_online_installation,
-        release_installation=release_online_installation,
     )
 
 
@@ -1044,7 +1093,7 @@ async def install_web_skill(
     """Delegate trusted official Skill installation to the catalog service."""
     _require_workflow_action(agent_id, tenant_id, user_id, "configure_online_resources")
     return await install_web_skill_service(
-        _skill_installation_dependencies(user_id),
+        _skill_installation_dependencies(user_id, tenant_id, agent_id),
         agent_id=agent_id,
         skill_id=skill_id,
         tenant_id=tenant_id,
@@ -1064,7 +1113,7 @@ def get_web_skill_configuration(
 ) -> Dict[str, Any]:
     """Return trusted, redacted online Skill configuration metadata."""
     return get_web_skill_configuration_service(
-        _skill_installation_dependencies(user_id),
+        _skill_installation_dependencies(user_id, tenant_id, agent_id),
         agent_id=agent_id,
         tenant_id=tenant_id,
         skill_id=skill_id,

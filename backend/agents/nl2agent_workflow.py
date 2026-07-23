@@ -65,16 +65,6 @@ class RecommendationBatch(BaseModel):
     operation_id: Optional[str] = Field(default=None, max_length=128)
 
 
-class OnlineInstallation(BaseModel):
-    """Internal reservation for one online resource installation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal["installing", "completed"]
-    operation_id: str = Field(min_length=1, max_length=128)
-    result: Dict[str, Any] = Field(default_factory=dict, max_length=100)
-
-
 class McpWorkflow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -86,7 +76,6 @@ class McpWorkflow(BaseModel):
             "configuration_required",
             "installing",
             "connected",
-            "binding",
             "tools_bound",
             "binding_skipped",
             "failed",
@@ -99,7 +88,6 @@ class McpWorkflow(BaseModel):
     bound_tool_ids: List[PositiveStrictInt] = Field(
         default_factory=list, max_length=100
     )
-    binding_operation_id: Optional[str] = Field(default=None, max_length=128)
     error: Optional[str] = Field(default=None, max_length=1000)
 
 
@@ -130,9 +118,6 @@ class Nl2AgentWorkflowState(BaseModel):
     )
     identity_confirmed: bool = False
     mcp_workflows: Dict[str, McpWorkflow] = Field(
-        default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
-    )
-    online_installations: Dict[str, OnlineInstallation] = Field(
         default_factory=dict, max_length=MAX_WORKFLOW_COLLECTION_ITEMS
     )
     online_configuration_confirmed: bool = False
@@ -211,7 +196,7 @@ def _workflow_facts(state: Nl2AgentWorkflowState) -> _WorkflowFacts:
         mcp_registered="mcp" in online_types,
         skill_registered="skill" in online_types,
         unresolved_mcp_count=sum(
-            workflow.status in {"installing", "connected", "binding"}
+            workflow.status in {"installing", "connected"}
             for workflow in state.mcp_workflows.values()
         ),
     )

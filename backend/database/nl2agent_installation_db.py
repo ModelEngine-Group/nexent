@@ -1,7 +1,7 @@
 """Durable lease and checkpoint repository for NL2AGENT installations."""
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from sqlalchemy import func, text
 
@@ -12,6 +12,14 @@ from database.nl2agent_session_db import Nl2AgentSessionIdentity
 
 class InstallationLeaseConflictError(RuntimeError):
     """Raised when another worker owns a live operation lease."""
+
+
+class InstallationLeaseActiveError(InstallationLeaseConflictError):
+    """Raised when another worker still owns a non-expired lease."""
+
+
+class InstallationRequestConflictError(InstallationLeaseConflictError):
+    """Raised when one installation key is reused for a different request."""
 
 
 def _identity_filters(identity: Nl2AgentSessionIdentity):
@@ -25,20 +33,27 @@ def _identity_filters(identity: Nl2AgentSessionIdentity):
     )
 
 
-def get_installation_operation(
-    *, identity: Nl2AgentSessionIdentity, installation_key: str
-) -> Optional[Dict[str, Any]]:
-    """Read one operation only through its complete owning session identity."""
+def list_installation_operations(
+    *,
+    identity: Nl2AgentSessionIdentity,
+    resource_type: Optional[str] = None,
+    statuses: Optional[Iterable[str]] = None,
+) -> list[Dict[str, Any]]:
+    """List scoped operations for workflow projection without exposing credentials."""
     with get_db_session() as session:
-        record = (
-            session.query(Nl2AgentInstallationOperation)
-            .filter(
-                *_identity_filters(identity),
-                Nl2AgentInstallationOperation.installation_key == installation_key,
-            )
-            .first()
+        query = session.query(Nl2AgentInstallationOperation).filter(
+            *_identity_filters(identity)
         )
-        return as_dict(record) if record is not None else None
+        if resource_type is not None:
+            query = query.filter(
+                Nl2AgentInstallationOperation.resource_type == resource_type
+            )
+        normalized_statuses = tuple(statuses or ())
+        if normalized_statuses:
+            query = query.filter(
+                Nl2AgentInstallationOperation.status.in_(normalized_statuses)
+            )
+        return [as_dict(record) for record in query.all()]
 
 
 def claim_installation_operation(
@@ -69,7 +84,7 @@ def claim_installation_operation(
         now = datetime.utcnow()
         if record is not None:
             if record.request_fingerprint != request_fingerprint:
-                raise InstallationLeaseConflictError(
+                raise InstallationRequestConflictError(
                     "Installation key was already used for a different request."
                 )
             if record.status == "completed":
@@ -80,7 +95,7 @@ def claim_installation_operation(
                 and record.lease_expires_at > now
                 and record.lease_owner != lease_owner
             ):
-                raise InstallationLeaseConflictError("Installation is already in progress.")
+                raise InstallationLeaseActiveError("Installation is already in progress.")
             record.status = "running"
             record.lease_owner = lease_owner
             record.lease_expires_at = lease_expires_at
@@ -144,7 +159,7 @@ def transition_installation_operation(
     error: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Persist a secret-free checkpoint or terminal outcome for the lease owner."""
-    if status not in {"running", "completed", "failed"}:
+    if status not in {"pending", "running", "completed", "failed"}:
         raise ValueError("Invalid installation operation status")
     values: Dict[str, Any] = {"status": status, "update_time": func.now()}
     if checkpoint is not None:
@@ -162,6 +177,7 @@ def transition_installation_operation(
             session.query(Nl2AgentInstallationOperation)
             .filter(
                 Nl2AgentInstallationOperation.operation_id == operation_id,
+                Nl2AgentInstallationOperation.status == "running",
                 Nl2AgentInstallationOperation.lease_owner == lease_owner,
                 Nl2AgentInstallationOperation.delete_flag != "Y",
             )
@@ -182,7 +198,12 @@ def release_installation_lease(*, operation_id: str, lease_owner: str) -> bool:
                 Nl2AgentInstallationOperation.delete_flag != "Y",
             )
             .update(
-                {"lease_owner": None, "lease_expires_at": None, "update_time": func.now()},
+                {
+                    "status": "pending",
+                    "lease_owner": None,
+                    "lease_expires_at": None,
+                    "update_time": func.now(),
+                },
                 synchronize_session=False,
             )
         )

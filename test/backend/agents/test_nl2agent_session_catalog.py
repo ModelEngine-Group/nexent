@@ -15,11 +15,15 @@ def durable_session(monkeypatch):
     )
     durable_snapshot = {
         "tenant_id": "tenant_1",
+        "user_id": "user_1",
+        "runner_agent_id": 101,
         "draft_agent_id": 202,
+        "conversation_id": 902,
         "status": "active",
         "workflow_revision": 0,
         "workflow_state": initial_state,
         "session_catalogs": _catalogs(),
+        "installation_operations": [],
     }
 
     def load_durable_session(tenant_id, draft_agent_id):
@@ -55,6 +59,26 @@ def durable_session(monkeypatch):
         "set_nl2agent_session_catalogs",
         set_session_catalogs,
         raising=False,
+    )
+
+    def list_installation_operations(
+        _tenant_id,
+        _draft_agent_id,
+        *,
+        resource_type=None,
+        statuses=None,
+    ):
+        return [
+            deepcopy(operation)
+            for operation in durable_snapshot["installation_operations"]
+            if (resource_type is None or operation["resource_type"] == resource_type)
+            and (not statuses or operation["status"] in statuses)
+        ]
+
+    monkeypatch.setattr(
+        catalog_module,
+        "get_nl2agent_installation_operations",
+        list_installation_operations,
     )
     return durable_snapshot
 
@@ -164,16 +188,17 @@ def test_search_projection_hides_installed_mcp_and_marks_installed_skill(
         "mcp_workflows": {
             "registry:github": {"status": "tools_bound"},
         },
-        "online_installations": {
-            "skill:12": {
-                "status": "completed",
-                "result": {
-                    "skill_id": 112,
-                    "skill_name": "code-review",
-                },
-            }
-        },
     }
+    durable_session["installation_operations"] = [
+        {
+            "resource_type": "skill",
+            "status": "completed",
+            "result": {
+                "skill_id": 112,
+                "skill_name": "code-review",
+            },
+        }
+    ]
 
     projected = catalog_module.get_nl2agent_search_catalogs(
         "tenant_1", 202, workflow_state
@@ -430,7 +455,7 @@ def test_mcp_workflow_blocks_connected_and_resolves_after_binding_or_skip(durabl
     assert "config_values" not in workflow
 
 
-def test_mcp_bind_and_skip_reservations_are_mutually_exclusive(durable_session):
+def test_mcp_binding_result_contains_no_workflow_lock_state(durable_session):
     catalog_module.update_mcp_workflow(
         "tenant_1",
         202,
@@ -441,33 +466,13 @@ def test_mcp_bind_and_skip_reservations_are_mutually_exclusive(durable_session):
         bound_tool_ids=[],
     )
 
-    def reserve_bind():
-        return catalog_module.reserve_mcp_binding_operation(
-            "tenant_1", 202, 5, "bind-op", [11]
-        )
+    workflow = catalog_module.complete_mcp_binding_result(
+        "tenant_1", 202, 5, [11], "tools_bound"
+    )
 
-    def reserve_skip():
-        return catalog_module.reserve_mcp_binding_operation(
-            "tenant_1", 202, 5, "skip-op", []
-        )
-
-    successes = []
-    failures = []
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(reserve_bind), executor.submit(reserve_skip)]
-        for future in futures:
-            try:
-                successes.append(future.result())
-            except catalog_module.Nl2AgentSessionCatalogError as exc:
-                failures.append(exc)
-
-    assert len(successes) == 1
-    assert len(failures) == 1
-    workflow = catalog_module.get_nl2agent_session_state("tenant_1", 202)[
-        "mcp_workflows"
-    ]["registry:github"]
-    assert workflow["status"] == "binding"
-    assert workflow["binding_operation_id"] in {"bind-op", "skip-op"}
+    assert workflow["status"] == "tools_bound"
+    assert workflow["bound_tool_ids"] == [11]
+    assert "binding_operation_id" not in workflow
 
 
 def test_mcp_binding_reservation_rejects_tools_not_discovered(durable_session):
@@ -485,12 +490,14 @@ def test_mcp_binding_reservation_rejects_tools_not_discovered(durable_session):
         catalog_module.Nl2AgentSessionCatalogError,
         match="not discovered",
     ):
-        catalog_module.reserve_mcp_binding_operation(
-            "tenant_1", 202, 5, "bind-op", [12]
+        catalog_module.complete_mcp_binding_result(
+            "tenant_1", 202, 5, [12], "tools_bound"
         )
 
 
-def test_completed_mcp_binding_is_idempotent_only_for_its_owner(durable_session):
+def test_completed_mcp_binding_result_is_idempotent_only_for_same_selection(
+    durable_session,
+):
     catalog_module.update_mcp_workflow(
         "tenant_1",
         202,
@@ -500,24 +507,17 @@ def test_completed_mcp_binding_is_idempotent_only_for_its_owner(durable_session)
         discovered_tool_ids=[11],
         bound_tool_ids=[],
     )
-    catalog_module.reserve_mcp_binding_operation(
-        "tenant_1", 202, 5, "bind-op", [11]
+    catalog_module.complete_mcp_binding_result(
+        "tenant_1", 202, 5, [11], "tools_bound"
     )
-    catalog_module.complete_mcp_binding_operation(
-        "tenant_1", 202, "registry:github", "bind-op", "tools_bound"
-    )
-
-    retried = catalog_module.reserve_mcp_binding_operation(
-        "tenant_1", 202, 5, "bind-op", [11]
+    retried = catalog_module.complete_mcp_binding_result(
+        "tenant_1", 202, 5, [11], "tools_bound"
     )
     assert retried["status"] == "tools_bound"
-    catalog_module.complete_mcp_binding_operation(
-        "tenant_1", 202, "registry:github", "bind-op", "tools_bound"
-    )
 
     with pytest.raises(catalog_module.Nl2AgentSessionCatalogError, match="resolved"):
-        catalog_module.reserve_mcp_binding_operation(
-            "tenant_1", 202, 5, "other-op", [11]
+        catalog_module.complete_mcp_binding_result(
+            "tenant_1", 202, 5, [], "binding_skipped"
         )
 
 
@@ -563,9 +563,13 @@ def test_online_completion_blocks_only_unresolved_mcp_workflows(durable_session)
 
 def test_online_completion_blocks_active_skill_installation(durable_session):
     _prepare_online_review()
-    catalog_module.reserve_online_installation(
-        "tenant_1", 202, "skill:12", "install-skill:12"
-    )
+    durable_session["installation_operations"] = [
+        {
+            "resource_type": "skill",
+            "status": "running",
+            "result": None,
+        }
+    ]
 
     with pytest.raises(
         catalog_module.Nl2AgentSessionCatalogError,
@@ -573,29 +577,18 @@ def test_online_completion_blocks_active_skill_installation(durable_session):
     ):
         catalog_module.complete_online_configuration("tenant_1", 202)
 
-    catalog_module.complete_online_installation(
-        "tenant_1",
-        202,
-        "skill:12",
-        "install-skill:12",
-        {"skill_id": 12, "installed": True},
-    )
+    durable_session["installation_operations"][0]["status"] = "completed"
+    durable_session["installation_operations"][0]["result"] = {
+        "skill_id": 12,
+        "installed": True,
+    }
     catalog_module.complete_online_configuration("tenant_1", 202)
 
 
-def test_online_installation_reservation_rejects_another_operation(durable_session):
-    _prepare_online_review()
-    catalog_module.reserve_online_installation(
-        "tenant_1", 202, "skill:12", "install-skill:12"
-    )
+def test_workflow_state_has_no_online_installation_lock_collection(durable_session):
+    state = catalog_module.get_nl2agent_session_state("tenant_1", 202)
 
-    with pytest.raises(
-        catalog_module.Nl2AgentSessionCatalogError,
-        match="another operation",
-    ):
-        catalog_module.reserve_online_installation(
-            "tenant_1", 202, "skill:12", "different-operation"
-        )
+    assert "online_installations" not in state
 
 
 def test_online_completion_requires_both_catalogs(durable_session):

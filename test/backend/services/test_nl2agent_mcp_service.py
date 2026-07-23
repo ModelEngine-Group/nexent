@@ -52,18 +52,14 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
     )
     bind = MagicMock()
     monkeypatch.setattr(nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind)
-    reserve_binding = MagicMock(
-        return_value={
-            "recommendation_id": "registry:github",
-            "discovered_tool_ids": [11],
-        }
-    )
-    complete_binding = MagicMock()
-    monkeypatch.setattr(
-        nl2agent_runtime_service, "reserve_mcp_binding_operation", reserve_binding
-    )
-    monkeypatch.setattr(
-        nl2agent_runtime_service, "complete_mcp_binding_operation", complete_binding
+    nl2agent_session_catalog.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        mcp_id=5,
+        discovered_tool_ids=[11],
+        bound_tool_ids=[],
     )
 
     result = await nl2agent_runtime_service.bind_mcp_tools(
@@ -73,17 +69,14 @@ async def test_bind_mcp_tools_validates_provenance_and_binds(monkeypatch):
     assert result["bound_tool_ids"] == [11]
     assert bind.call_count == 1
     assert bind.call_args.kwargs["db_session"] is db_session
-    operation_id = reserve_binding.call_args.args[3]
-    complete_binding.assert_called_once_with(
-        "tenant_1",
-        202,
-        "registry:github",
-        operation_id,
-        "tools_bound",
-    )
+    workflow = nl2agent_session_catalog.find_mcp_workflow_by_id(
+        "tenant_1", 202, 5
+    )[1]
+    assert workflow["status"] == "tools_bound"
+    assert workflow["bound_tool_ids"] == [11]
 
 
-async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypatch):
+async def test_bind_mcp_tools_reconciles_after_workflow_completion_failure(monkeypatch):
     _mock_database_transaction(monkeypatch)
     monkeypatch.setattr(
         nl2agent_runtime_service,
@@ -126,7 +119,7 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         discovered_tool_ids=[11],
         bound_tool_ids=[],
     )
-    real_complete = nl2agent_runtime_service.complete_mcp_binding_operation
+    real_complete = nl2agent_runtime_service.complete_mcp_binding_result
     attempts = 0
 
     def flaky_complete(*args, **kwargs):
@@ -134,12 +127,12 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         attempts += 1
         if attempts == 1:
             raise nl2agent_session_catalog.Nl2AgentSessionCatalogError(
-                "redis unavailable"
+                "workflow CAS unavailable"
             )
         return real_complete(*args, **kwargs)
 
     monkeypatch.setattr(
-        nl2agent_runtime_service, "complete_mcp_binding_operation", flaky_complete
+        nl2agent_runtime_service, "complete_mcp_binding_result", flaky_complete
     )
 
     with pytest.raises(Nl2AgentOperationError, match="Retry binding"):
@@ -152,7 +145,7 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
         )
 
     state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
-    assert state["mcp_workflows"]["registry:github"]["status"] == "binding"
+    assert state["mcp_workflows"]["registry:github"]["status"] == "connected"
 
     result = await nl2agent_runtime_service.bind_mcp_tools(
         agent_id=202,
@@ -163,7 +156,7 @@ async def test_bind_mcp_tools_reconciles_after_redis_completion_failure(monkeypa
     )
 
     assert result["bound_tool_ids"] == [11]
-    assert bind.call_count == 2
+    assert bind.call_count == 1
     state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
     assert state["mcp_workflows"]["registry:github"]["status"] == "tools_bound"
 
@@ -200,18 +193,14 @@ async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
     )
     bind = MagicMock(side_effect=[None, RuntimeError("second tool failed")])
     monkeypatch.setattr(nl2agent_runtime_service, "create_or_update_tool_by_tool_info", bind)
-    reserve_binding = MagicMock(
-        return_value={
-            "recommendation_id": "registry:github",
-            "discovered_tool_ids": [11, 12],
-        }
-    )
-    release_binding = MagicMock()
-    monkeypatch.setattr(
-        nl2agent_runtime_service, "reserve_mcp_binding_operation", reserve_binding
-    )
-    monkeypatch.setattr(
-        nl2agent_runtime_service, "release_mcp_binding_operation", release_binding
+    nl2agent_session_catalog.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        mcp_id=5,
+        discovered_tool_ids=[11, 12],
+        bound_tool_ids=[],
     )
 
     with pytest.raises(
@@ -228,13 +217,9 @@ async def test_bind_mcp_tools_rolls_back_when_later_tool_fails(monkeypatch):
 
     assert bind.call_count == 2
     assert transaction.__exit__.call_args.args[0] is RuntimeError
-    operation_id = reserve_binding.call_args.args[3]
-    release_binding.assert_called_once_with(
-        "tenant_1",
-        202,
-        "registry:github",
-        operation_id,
-    )
+    assert nl2agent_session_catalog.find_mcp_workflow_by_id(
+        "tenant_1", 202, 5
+    )[1]["status"] == "connected"
 
 
 @pytest.mark.asyncio
@@ -252,18 +237,14 @@ async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
         "get_mcp_record_by_id_and_tenant",
         MagicMock(return_value={"mcp_id": 5, "mcp_name": "github"}),
     )
-    reserve_binding = MagicMock(
-        return_value={
-            "recommendation_id": "registry:github",
-            "discovered_tool_ids": [11, 12],
-        }
-    )
-    complete_binding = MagicMock()
-    monkeypatch.setattr(
-        nl2agent_runtime_service, "reserve_mcp_binding_operation", reserve_binding
-    )
-    monkeypatch.setattr(
-        nl2agent_runtime_service, "complete_mcp_binding_operation", complete_binding
+    nl2agent_session_catalog.update_mcp_workflow(
+        "tenant_1",
+        202,
+        "registry:github",
+        status="connected",
+        mcp_id=5,
+        discovered_tool_ids=[11, 12],
+        bound_tool_ids=[],
     )
     delete_instances = MagicMock()
     monkeypatch.setattr(
@@ -288,26 +269,17 @@ async def test_skip_mcp_tool_binding_resolves_connected_workflow(monkeypatch):
         version_no=0,
         db_session=db_session,
     )
-    operation_id = reserve_binding.call_args.args[3]
-    complete_binding.assert_called_once_with(
-        "tenant_1",
-        202,
-        "registry:github",
-        operation_id,
-        "binding_skipped",
-    )
+    workflow = nl2agent_session_catalog.find_mcp_workflow_by_id(
+        "tenant_1", 202, 5
+    )[1]
+    assert workflow["status"] == "binding_skipped"
+    assert workflow["bound_tool_ids"] == []
 
 
 @pytest.mark.asyncio
 async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secrets(
     monkeypatch,
 ):
-    release_lock = MagicMock(side_effect=RuntimeError("redis release failed"))
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "release_mcp_installation_lock",
-        release_lock,
-    )
     catalogs = {
         "tool_catalog": [],
         "skill_catalog": [],
@@ -417,7 +389,6 @@ async def test_install_recommended_mcp_resolves_cached_remote_and_redacts_secret
         ],
     }
     assert "secret-token" not in str(result)
-    release_lock.assert_called_once()
     nl2agent_runtime_service.validate_nl2agent_remote_mcp_url.assert_called_once_with(
         "https://acme.example/eu/sse"
     )
@@ -1043,12 +1014,12 @@ async def test_install_web_skill_installs_by_skill_name(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_install_web_skill_reconciles_after_workflow_completion_failure(
+async def test_install_web_skill_resumes_from_files_installed_checkpoint(
     monkeypatch,
 ):
     _prepare_required_online_review()
     install_from_zip = MagicMock(return_value=["search-web-tavily"])
-    bind_skill = MagicMock()
+    bind_skill = MagicMock(side_effect=[RuntimeError("database unavailable"), None])
     monkeypatch.setattr(
         nl2agent_runtime_service,
         "search_agent_info_by_agent_id",
@@ -1094,25 +1065,7 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
             ],
         },
     )
-    real_complete = nl2agent_runtime_service.complete_online_installation
-    attempts = 0
-
-    def flaky_complete(*args, **kwargs):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise nl2agent_session_catalog.Nl2AgentSessionCatalogError(
-                "redis unavailable"
-            )
-        return real_complete(*args, **kwargs)
-
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "complete_online_installation",
-        flaky_complete,
-    )
-
-    with pytest.raises(Nl2AgentOperationError, match="Retry installation"):
+    with pytest.raises(Nl2AgentOperationError, match="could not be bound"):
         await nl2agent_runtime_service.install_web_skill(
             agent_id=202,
             skill_id=12,
@@ -1120,14 +1073,6 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
             tenant_id="tenant_1",
             user_id="user_1",
         )
-
-    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
-    assert next(iter(state["online_installations"].values()))["status"] == "installing"
-    with pytest.raises(
-        nl2agent_session_catalog.Nl2AgentSessionCatalogError,
-        match="Skill installation",
-    ):
-        nl2agent_session_catalog.complete_online_configuration("tenant_1", 202)
 
     result = await nl2agent_runtime_service.install_web_skill(
         agent_id=202,
@@ -1138,20 +1083,18 @@ async def test_install_web_skill_reconciles_after_workflow_completion_failure(
     )
 
     assert result["skill_id"] == 112
-    assert install_from_zip.call_count == 2
+    assert install_from_zip.call_count == 1
     assert bind_skill.call_count == 2
-    state = nl2agent_session_catalog.get_nl2agent_session_state("tenant_1", 202)
-    assert next(iter(state["online_installations"].values()))["status"] == "completed"
+    assert (
+        nl2agent_session_catalog.get_nl2agent_search_catalogs("tenant_1", 202)[
+            "official_skills"
+        ][0]["status"]
+        == "installed"
+    )
 
 
 @pytest.mark.asyncio
 async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
-    release_lock = MagicMock(side_effect=RuntimeError("redis release failed"))
-    monkeypatch.setattr(
-        nl2agent_runtime_service,
-        "release_mcp_installation_lock",
-        release_lock,
-    )
     _prepare_required_online_review()
     install_by_id = MagicMock(return_value=[107])
     bind_skill = MagicMock()
@@ -1197,8 +1140,6 @@ async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
         tenant_id="tenant_1",
         user_id="user_1",
     )
-    release_lock.assert_called_once()
-
     install_by_id.assert_called_once_with(
         skill_ids=[77], tenant_id="tenant_1", user_id="user_1"
     )

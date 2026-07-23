@@ -108,6 +108,21 @@ def test_claim_takes_over_expired_lease(monkeypatch):
     session.flush.assert_called_once()
 
 
+def test_claim_rejects_request_fingerprint_mismatch(monkeypatch):
+    _claim_session(monkeypatch, _record(request_fingerprint="fingerprint-a"))
+
+    with pytest.raises(repository.InstallationRequestConflictError):
+        repository.claim_installation_operation(
+            identity=_identity(),
+            operation_id="operation-a",
+            installation_key="stable-key",
+            request_fingerprint="fingerprint-b",
+            resource_type="mcp",
+            lease_owner="owner-b",
+            lease_expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+
+
 def test_completed_transition_clears_lease_and_redacted_error(monkeypatch):
     query = MagicMock()
     query.filter.return_value = query
@@ -130,3 +145,24 @@ def test_completed_transition_clears_lease_and_redacted_error(monkeypatch):
     assert values["lease_owner"] is None
     assert values["lease_expires_at"] is None
     assert values["error"] is None
+
+
+def test_release_returns_running_operation_to_pending(monkeypatch):
+    query = MagicMock()
+    query.filter.return_value = query
+    query.update.return_value = 1
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(
+        repository, "get_db_session", lambda: _session_context(session)
+    )
+
+    assert repository.release_installation_lease(
+        operation_id="operation-a",
+        lease_owner="owner-a",
+    )
+
+    values = query.update.call_args.args[0]
+    assert values["status"] == "pending"
+    assert values["lease_owner"] is None
+    assert values["lease_expires_at"] is None
