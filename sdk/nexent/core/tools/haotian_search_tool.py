@@ -189,8 +189,6 @@ class HaotianSearchTool(Tool):
         )
 
         self.record_ops = 1
-        self.running_prompt_zh = "Haotian知识库检索中..."
-        self.running_prompt_en = "Searching Haotian knowledge base..."
 
     @staticmethod
     def _parse_dataset_ids(dataset_ids: Any) -> List[str]:
@@ -212,12 +210,6 @@ class HaotianSearchTool(Tool):
 
     def forward(self, query: str) -> str:
         if self.observer:
-            running_prompt = (
-                self.running_prompt_zh
-                if self.observer.lang == "zh"
-                else self.running_prompt_en
-            )
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message(
                 "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)

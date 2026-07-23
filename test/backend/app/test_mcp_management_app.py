@@ -108,7 +108,7 @@ class TestCommunityList:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
         mock_list.assert_called_once_with(
-            tenant_id="tid", search=None, tag=None,
+            tenant_id="tid", user_id="uid", search=None, tag=None,
             transport_type=None, cursor=None, limit=30,
         )
 

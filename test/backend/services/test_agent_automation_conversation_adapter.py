@@ -9,7 +9,11 @@ def test_append_proposal_exchange_persists_user_instruction_and_assistant_card(m
     monkeypatch.setattr(
         adapter_module,
         "get_conversation_history_service",
-        lambda conversation_id, user_id: [{"message": [{}, {}]}],
+        lambda conversation_id, user_id: [{"message": [
+            {"role": "user"},
+            {"role": "assistant"},
+            {"role": "assistant"},
+        ]}],
     )
 
     def fake_save_message(request, user_id, tenant_id):

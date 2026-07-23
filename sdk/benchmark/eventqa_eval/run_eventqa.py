@@ -46,7 +46,7 @@ from agent_runner import (
     ContextManagerConfig,
 )
 from nexent.core.agents.agent_model import AgentHistory
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 
 from dataset import load_books, EventQABook
 from eval_utils import score_mcq
@@ -154,11 +154,9 @@ def build_compressed_config(schema_name: str, args) -> ContextManagerConfig:
     is untouched — it is still the real production compression path.
     """
     config = ContextManagerConfig(
-        enabled=True,
         token_threshold=args.token_threshold,
-        keep_recent_pairs=args.keep_recent_pairs,
         keep_recent_steps=args.keep_recent_steps,
-        max_observation_length=args.max_observation_length,
+        policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
     )
     if schema_name == "narrative":
         config.summary_system_prompt = NARRATIVE_SUMMARY_SYSTEM_PROMPT
@@ -313,7 +311,7 @@ async def run_probes(items, history: list[AgentHistory], args) -> tuple[list[dic
     main-LLM input/output tokens across all probes (compression is disabled
     in this arm so no compression cost is incurred here).
     """
-    disabled_cm = ContextManagerConfig(enabled=False, token_threshold=10 ** 9)
+    disabled_cm = ContextManagerConfig(token_threshold=10 ** 9)
     concurrency = max(1, args.probe_concurrency)
     sem = asyncio.Semaphore(concurrency)
 

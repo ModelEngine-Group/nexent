@@ -3003,7 +3003,10 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_get_embedding_model_by_index_name.assert_called_once_with("tenant1", "test_index_1")
 
         # Verify knowledge name map was called with index_names
-        mock_get_knowledge_map.assert_called_once_with(["test_index_1", "test_index_2"])
+        mock_get_knowledge_map.assert_called_once_with(
+            ["test_index_1", "test_index_2"],
+            tenant_id="tenant1",
+        )
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')

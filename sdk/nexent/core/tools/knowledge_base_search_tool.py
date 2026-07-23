@@ -161,8 +161,6 @@ class KnowledgeBaseSearchTool(Tool):
         )
 
         self.record_ops = 1
-        self.running_prompt_zh = "知识库检索中..."
-        self.running_prompt_en = "Searching the knowledge base..."
 
     def set_document_paths(self, document_paths: Optional[List[str]]) -> None:
         """Set the internal document_paths filter for access control.
@@ -333,12 +331,6 @@ class KnowledgeBaseSearchTool(Tool):
     def _notify_search_start(self, query: str) -> None:
         if not self.observer:
             return
-        running_prompt = (
-            self.running_prompt_zh
-            if self.observer.lang == "zh"
-            else self.running_prompt_en
-        )
-        self.observer.add_message("", ProcessType.TOOL, running_prompt)
         card_content = [{"icon": "search", "text": query}]
         self.observer.add_message(
             "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)

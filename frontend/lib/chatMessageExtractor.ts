@@ -266,6 +266,19 @@ export function extractAssistantMsgFromResponse(
           break;
         }
 
+        case chatConfig.messageTypes.HISTORY_SUMMARY: {
+          const currentStep = getOrCreateCurrentStep(steps, "History Summary");
+          currentStep.contents.push({
+            id: `history-summary-${dialog_msg.message_id}-${currentStep.contents.length}`,
+            type: chatConfig.messageTypes.HISTORY_SUMMARY,
+            content: msg.content,
+            expanded: false,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
+          break;
+        }
+
         case chatConfig.messageTypes.CARD: {
           const currentStep = getOrCreateCurrentStep(steps, "Card");
           const contentId = `card-${Date.now()}-${Math.random()

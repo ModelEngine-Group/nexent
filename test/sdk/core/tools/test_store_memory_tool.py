@@ -1,13 +1,13 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
+from sdk.nexent.core.utils.observer import MessageObserver
 from sdk.nexent.core.tools.store_memory_tool import StoreMemoryTool, _run_coroutine
 
 
 @pytest.fixture
 def mock_observer():
-    observer = MagicMock(spec=MessageObserver)
+    observer = MagicMock()
     observer.lang = "en"
     return observer
 
@@ -31,30 +31,6 @@ def store_memory_tool(mock_observer, mock_user_config):
         memory_user_config=mock_user_config,
         observer=mock_observer,
     )
-
-
-def test_observer_english_message(store_memory_tool, mock_observer):
-    mock_observer.lang = "en"
-    with patch(
-        "sdk.nexent.memory.memory_service.add_memory_in_levels",
-        new_callable=AsyncMock,
-        return_value={"results": []},
-    ):
-        store_memory_tool.forward("some content")
-
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "Saving to memory...")
-
-
-def test_observer_chinese_message(store_memory_tool, mock_observer):
-    mock_observer.lang = "zh"
-    with patch(
-        "sdk.nexent.memory.memory_service.add_memory_in_levels",
-        new_callable=AsyncMock,
-        return_value={"results": []},
-    ):
-        store_memory_tool.forward("some content")
-
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "保存到记忆中...")
 
 
 def test_no_observer(store_memory_tool):

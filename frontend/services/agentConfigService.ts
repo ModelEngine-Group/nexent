@@ -201,6 +201,7 @@ export const fetchPublishedAgentList = async () => {
     // Convert backend data to frontend format
     const formattedAgents = data.map((agent: any) => ({
       id: String(agent.agent_id),
+      agent_id: Number(agent.agent_id),
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
@@ -209,6 +210,7 @@ export const fetchPublishedAgentList = async () => {
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
+      is_main_agent: agent.is_main_agent,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,

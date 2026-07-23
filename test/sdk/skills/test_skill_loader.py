@@ -65,6 +65,28 @@ tags:
         assert result["name"] == "tagged-skill"
         assert result["tags"] == ["python", "ml"]
 
+    def test_parse_with_file_output_metadata(self):
+        """Test parsing the artifact contract from skill frontmatter."""
+        content = """---
+name: file-skill
+description: A file-producing skill
+script_outputs:
+  scripts/render_pdf.py:
+    kind: file
+    mime_types:
+      - application/pdf
+---
+# Body
+"""
+        result = SkillLoader.parse(content)
+
+        assert result["script_outputs"] == {
+            "scripts/render_pdf.py": {
+                "kind": "file",
+                "mime_types": ["application/pdf"],
+            }
+        }
+
     def test_parse_ignores_unknown_fields(self):
         """Test that unknown fields are ignored during parsing."""
         content = """---
@@ -72,6 +94,9 @@ name: minimax-docx
 author: MiniMaxAI
 version: 1.0
 license: MIT
+output_type: file
+output_mime_types:
+  - application/pdf
 description: Process DOCX files
 ---
 # Content
@@ -301,6 +326,27 @@ class TestSkillLoaderToSkillMd:
         assert "allowed-tools:" in result
         assert "- tool1" in result
         assert "- tool2" in result
+
+    def test_to_skill_md_with_file_output_metadata(self):
+        """Test preserving the artifact contract when serializing a skill."""
+        skill_dict = {
+            "name": "file-skill",
+            "description": "A file-producing skill",
+            "script_outputs": {
+                "scripts/render_pdf.py": {
+                    "kind": "file",
+                    "mime_types": ["application/pdf"],
+                }
+            },
+            "content": "# Body",
+        }
+
+        result = SkillLoader.to_skill_md(skill_dict)
+
+        assert "output_type:" not in result
+        assert "output_mime_types:" not in result
+        assert "script_outputs:" in result
+        assert "scripts/render_pdf.py:" in result
 
     def test_to_skill_md_with_tags(self):
         """Test converting skill dict with tags."""

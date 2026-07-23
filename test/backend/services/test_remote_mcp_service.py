@@ -111,6 +111,7 @@ from backend.consts.exceptions import (
     McpNotFoundError, McpValidationError, McpNameConflictError,
     McpPortConflictError,
 )
+from backend.consts.const import PERMISSION_READ, PERMISSION_EDIT
 from backend.consts.model import MCPConfigRequest
 
 # Functions to test
@@ -519,6 +520,420 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
 
 # ============================================================================
+# add_mcp_service - name conflict with group visibility tests
+# ============================================================================
+
+class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestCase):
+    """Test add_mcp_service name conflict logic with group restrictions."""
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('database.group_db.query_group_ids_by_user')
+    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_name_conflict_allowed_when_existing_mcp_invisible(
+        self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
+    ):
+        """Name conflict should be allowed when existing MCP has group_ids not overlapping user's groups."""
+        mock_check_name.return_value = True  # name exists
+        mock_get_records.return_value = [
+            {"mcp_name": "test-svc", "group_ids": "2", "created_by": "other-user"}
+        ]
+        mock_query_groups.return_value = [4]  # user is in group 4, not group 2
+        mock_health.return_value = ["tool1"]
+
+        await add_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='local', server_url='https://srv/mcp',
+            tags=[], authorization_token=None,
+            custom_headers=None, container_config=None, registry_json=None,
+            enabled=False, config_json=None, market_id=None,
+        )
+        # Should not raise - installation allowed
+        mock_create.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('database.group_db.query_group_ids_by_user')
+    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_name_conflict_blocks_when_user_in_allowed_group(
+        self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
+    ):
+        """Name conflict should block when existing MCP's group_ids include user's group."""
+        mock_check_name.return_value = True
+        mock_get_records.return_value = [
+            {"mcp_name": "test-svc", "group_ids": "2,4", "created_by": "other-user"}
+        ]
+        mock_query_groups.return_value = [4]  # user is in group 4
+        mock_health.return_value = ["tool1"]
+
+        with self.assertRaises(MCPNameIllegal):
+            await add_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', server_url='https://srv/mcp',
+                tags=[], authorization_token=None,
+                custom_headers=None, container_config=None, registry_json=None,
+                enabled=False, config_json=None, market_id=None,
+            )
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('database.group_db.query_group_ids_by_user')
+    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_name_conflict_blocks_when_same_creator(
+        self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
+    ):
+        """Name conflict should block when existing MCP is created by the same user."""
+        mock_check_name.return_value = True
+        mock_get_records.return_value = [
+            {"mcp_name": "test-svc", "group_ids": "2", "created_by": "uid"}
+        ]
+        mock_query_groups.return_value = [4]
+
+        with self.assertRaises(MCPNameIllegal):
+            await add_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', server_url='https://srv/mcp',
+                tags=[], authorization_token=None,
+                custom_headers=None, container_config=None, registry_json=None,
+                enabled=False, config_json=None, market_id=None,
+            )
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_name_conflict_blocks_when_no_group_ids(
+        self, mock_check_name, mock_get_records, mock_health, mock_create
+    ):
+        """Name conflict should block when existing MCP has no group restriction."""
+        mock_check_name.return_value = True  # name exists
+        mock_get_records.return_value = [
+            {"mcp_name": "test-svc", "group_ids": "", "created_by": "other"}
+        ]
+
+        with self.assertRaises(MCPNameIllegal):
+            await add_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', server_url='https://srv/mcp',
+                tags=[], authorization_token=None,
+                custom_headers=None, container_config=None, registry_json=None,
+                enabled=False, config_json=None, market_id=None,
+            )
+
+
+# ============================================================================
+# add_mcp_service - API-type (OpenAPI) tests
+# ============================================================================
+
+class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
+    """Test add_mcp_service with API-type (OpenAPI JSON) config."""
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_api_type_skips_mcp_protocol_and_extracts_tools(
+        self, mock_check_name, mock_create
+    ):
+        """API-type MCP should skip MCP protocol check and extract tool names from OpenAPI."""
+        mock_check_name.return_value = False
+
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Test API", "version": "1.0.0"},
+            "paths": {
+                "/ping": {"get": {"operationId": "ping", "summary": "Health check"}},
+                "/echo": {"post": {"operationId": "echo", "summary": "Echo message"}},
+            },
+        }
+
+        await add_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-api',
+            description='desc', source='local', server_url='https://api.test',
+            tags=[], authorization_token=None,
+            custom_headers=None, container_config=None, registry_json=None,
+            enabled=False, config_json=openapi_spec, market_id=None,
+        )
+
+        # Verify tool names were extracted from OpenAPI paths
+        call_data = mock_create.call_args[1]['mcp_data']
+        self.assertEqual(
+            call_data['registry_json']['_toolNames'],
+            ["ping", "echo"],
+        )
+
+
+# ============================================================================
+# get_remote_mcp_server_list - group visibility filtering tests
+# ============================================================================
+
+class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
+    """Test get_remote_mcp_server_list group-based visibility filtering."""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_user_sees_only_own_and_group_mcps(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """Non-admin user should only see own MCPs and MCPs shared with their groups."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "my-mcp", "group_ids": "", "created_by": "uid",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None},
+            {"mcp_name": "shared-mcp", "group_ids": "2", "created_by": "other",
+             "mcp_id": 2, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None,
+             "ingroup_permission": "READ_ONLY"},
+            {"mcp_name": "private-mcp", "group_ids": "3", "created_by": "other",
+             "mcp_id": 3, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+
+        names = [r['remote_mcp_server_name'] for r in result]
+        self.assertIn("my-mcp", names)      # own MCP
+        self.assertIn("shared-mcp", names)   # shared with group 2
+        self.assertNotIn("private-mcp", names)  # group 3, not visible
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_null_group_ids_visible_to_all(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """MCPs with NULL group_ids should be visible to all users (backward compatible)."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "public-mcp", "group_ids": None, "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+        names = [r['remote_mcp_server_name'] for r in result]
+        self.assertIn("public-mcp", names)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_null_group_ids_editable_by_all(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """MCPs with NULL group_ids should be editable by all users."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "public-mcp", "group_ids": None, "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+        self.assertEqual(result[0]['permission'], PERMISSION_EDIT)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_empty_string_group_ids_hidden_from_non_creator(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """MCPs with empty string group_ids should be hidden from non-creator users."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "empty-group", "group_ids": "", "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+        names = [r['remote_mcp_server_name'] for r in result]
+        self.assertNotIn("empty-group", names)
+
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user', side_effect=Exception('query failed'))
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    async def test_group_query_failure_falls_back_gracefully(
+        self, mock_tenant, mock_records, mock_mgr, mock_groups
+    ):
+        """get_remote_mcp_server_list should handle query_group_ids_by_user failure gracefully."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = []
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+        self.assertEqual(len(result), 0)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_private_mcp_hidden_from_non_creator(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """PRIVATE MCPs should be hidden from non-creator group members."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "private-svc", "group_ids": "2", "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None,
+             "ingroup_permission": "PRIVATE"},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+
+        names = [r['remote_mcp_server_name'] for r in result]
+        self.assertNotIn("private-svc", names)
+
+
+# ============================================================================
+# _is_container_record - API type tests
+# ============================================================================
+
+class TestIsContainerRecordApiType(unittest.TestCase):
+    """Test _is_container_record with API-type config."""
+
+    def test_api_type_config_returns_false(self):
+        """_is_container_record should return False for API-type MCPs (config_json has openapi)."""
+        record = {"config_json": {"openapi": "3.0.0", "info": {"title": "Test"}}}
+        self.assertFalse(_is_container_record(record))
+
+    def test_none_record_returns_false(self):
+        """_is_container_record should return False for None record."""
+        self.assertFalse(_is_container_record(None))
+
+    def test_empty_record_returns_false(self):
+        """_is_container_record should return False for empty record."""
+        self.assertFalse(_is_container_record({}))
+
+    def test_container_config_returns_true(self):
+        """_is_container_record should return True for container MCPs."""
+        record = {"config_json": {"mcpServers": {"s": {"command": "echo"}}}}
+        self.assertTrue(_is_container_record(record))
+
+    def test_container_id_returns_true(self):
+        """_is_container_record should return True when container_id is set."""
+        record = {"container_id": "abc123", "config_json": None}
+        self.assertTrue(_is_container_record(record))
+
+
+# ============================================================================
+# update_mcp_service_enabled - API type tests
+# ============================================================================
+
+class TestUpdateMcpServiceEnabledApiType(unittest.IsolatedAsyncioTestCase):
+    """Test update_mcp_service_enabled with API-type MCP."""
+
+    def _make_api_record(self, **overrides):
+        base = {
+            "mcp_id": 1, "mcp_name": "test-api", "mcp_server": "http://localhost:8765",
+            "container_id": None, "container_port": None,
+            "config_json": {"openapi": "3.0.0", "info": {"title": "Test"}},
+            "authorization_token": None, "custom_headers": None,
+            "enabled": False, "source": "local",
+        }
+        base.update(overrides)
+        return base
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_api_enable_skips_health_check(
+        self, mock_records, mock_get, mock_status, mock_enabled
+    ):
+        """Enabling API-type MCP should skip MCP health check and set status=True."""
+        mock_get.return_value = self._make_api_record()
+        mock_records.return_value = []
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        # Should update status to True directly without health check
+        mock_status.assert_called_once_with(
+            mcp_id=1, tenant_id='tid', user_id='uid', status=True,
+        )
+        mock_enabled.assert_called_once()
+
+
+# ============================================================================
+# get_remote_mcp_server_list - ingroup_permission tests
+# ============================================================================
+
+class TestGetRemoteMcpServerListPermission(unittest.IsolatedAsyncioTestCase):
+    """Test get_remote_mcp_server_list permission computation with ingroup_permission."""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_ingroup_edit_grants_edit_permission(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """Group member should get EDIT permission when ingroup_permission is EDIT."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "editable", "group_ids": "2", "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None,
+             "ingroup_permission": "EDIT"},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+
+        self.assertEqual(result[0]['permission'], PERMISSION_EDIT)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    async def test_ingroup_readonly_grants_read_permission(
+        self, mock_mgr, mock_tenant, mock_groups, mock_records
+    ):
+        """Group member should get READ permission when ingroup_permission is READ_ONLY."""
+        mock_tenant.return_value = {"user_role": "DEV"}
+        mock_groups.return_value = [2]
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [
+            {"mcp_name": "readonly", "group_ids": "2", "created_by": "other",
+             "mcp_id": 1, "mcp_server": "", "status": None, "enabled": False,
+             "source": "local", "update_time": "", "tags": [], "container_port": None,
+             "registry_json": None, "config_json": None, "market_id": None,
+             "ingroup_permission": "READ_ONLY"},
+        ]
+
+        result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
+
+        self.assertEqual(result[0]['permission'], PERMISSION_READ)
+
+
+# ============================================================================
 # update_remote_mcp_server_list - custom_headers tests (lines 418, 423-424)
 # ============================================================================
 
@@ -621,6 +1036,64 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         call_kwargs = mock_update.call_args[1]
         self.assertIsNone(call_kwargs['custom_headers'])
 
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_update_with_group_ids(self, mock_get, mock_update):
+        """Test update_mcp_service passes group_ids to database update."""
+        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='n', description='d',
+            server_url='http://srv', authorization_token=None,
+            custom_headers=None, tags=None,
+            config_json=None, market_id=None,
+            group_ids="2,4",
+        )
+
+        call_kwargs = mock_update.call_args[1]
+        self.assertEqual(call_kwargs['group_ids'], "2,4")
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_update_with_ingroup_permission(self, mock_get, mock_update):
+        """Test update_mcp_service passes ingroup_permission to database update."""
+        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='n', description='d',
+            server_url='http://srv', authorization_token=None,
+            custom_headers=None, tags=None,
+            config_json=None, market_id=None,
+            ingroup_permission="READ_ONLY",
+        )
+
+        call_kwargs = mock_update.call_args[1]
+        self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_update_with_shared_fields(self, mock_get, mock_update):
+        """Test update_mcp_service passes shared_fields to database update."""
+        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+
+        shared = {"serverUrl": True, "authorizationToken": False}
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='n', description='d',
+            server_url='http://srv', authorization_token=None,
+            custom_headers=None, tags=None,
+            config_json=None, market_id=None,
+            group_ids="2", ingroup_permission="READ_ONLY",
+            shared_fields=shared,
+        )
+
+        call_kwargs = mock_update.call_args[1]
+        self.assertEqual(call_kwargs['group_ids'], "2")
+        self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
+        self.assertEqual(call_kwargs['shared_fields'], shared)
+
 
 # ============================================================================
 # update_mcp_service_enabled - custom_headers tests (lines 530, 599, 656)
@@ -685,6 +1158,25 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             remote_mcp_server='https://srv/mcp',
             authorization_token='tok',
             custom_headers=None,
+        )
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    @patch('backend.services.remote_mcp_service.mcp_server_health', return_value=False)
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_non_container_enable_health_fail_raises_error(
+        self, mock_records, mock_get, mock_health, mock_status, mock_enabled
+    ):
+        """Non-container enable with health check failure should raise MCPConnectionError."""
+        mock_get.return_value = self._make_record()
+        mock_records.return_value = []
+
+        with self.assertRaises(MCPConnectionError):
+            await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_status.assert_called_once_with(
+            mcp_id=1, tenant_id='tid', user_id='uid', status=False,
         )
 
     @patch('backend.services.remote_mcp_service.check_runtime_host_port_available', return_value=True)

@@ -2759,7 +2759,183 @@ class TestGetSkillByIdEndpoint:
                 response = client.get("/skills/1", headers={"Authorization": "Bearer token123"})
                 assert response.status_code == 500
 
-class TestUpdateSkillByIdEndpoint:
+
+# ===== Asset Owner Skill Visibility Tests =====
+class TestAssetOwnerSkillVisibility:
+    """Test asset owner skill view denial helper function."""
+
+    def test_asset_owner_skill_view_denied_response_returns_json_when_cannot_view(self, mocker):
+        """Test _asset_owner_skill_view_denied_response returns denial JSON when tenant cannot view."""
+        with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+            mock_can_view.return_value = False  # Cannot view
+
+            from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+            skill = {"tenant_id": "other_tenant"}
+            result = _asset_owner_skill_view_denied_response(skill, "my_tenant")
+
+            assert result is not None
+            # The response should contain "content" key with Chinese text for "No permission to view"
+            import json
+            response_data = json.loads(result.body)
+            assert "content" in response_data
+
+    def test_asset_owner_skill_view_denied_response_returns_none_when_can_view(self, mocker):
+        """Test _asset_owner_skill_view_denied_response returns None when tenant can view."""
+        with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+            mock_can_view.return_value = True  # Can view
+
+            from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+            skill = {"tenant_id": "other_tenant"}
+            result = _asset_owner_skill_view_denied_response(skill, "my_tenant")
+
+            assert result is None
+
+    def test_asset_owner_skill_view_denied_response_returns_none_when_skill_none(self, mocker):
+        """Test _asset_owner_skill_view_denied_response returns None when skill is None."""
+        from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+        result = _asset_owner_skill_view_denied_response(None, "my_tenant")
+        assert result is None
+
+    def test_asset_owner_skill_view_denied_returns_none_when_same_tenant(self, mocker):
+        """Test _asset_owner_skill_view_denied_response returns None when tenants match."""
+        from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+        skill = {"tenant_id": "same_tenant"}
+        result = _asset_owner_skill_view_denied_response(skill, "same_tenant")
+        assert result is None
+
+
+# ===== Build Skill Update Data Tests =====
+class TestBuildSkillUpdateData:
+    """Test _build_skill_update_data helper function."""
+
+    def test_build_skill_update_data_with_all_fields(self, mocker):
+        """Test _build_skill_update_data with all fields provided."""
+        from backend.apps.skill_app import _build_skill_update_data
+
+        mock_file_data = MagicMock()
+        mock_file_data.model_dump.return_value = {"path": "test.py", "content": "code"}
+
+        request = MagicMock()
+        request.name = "new_name"
+        request.description = "new description"
+        request.content = "# new content"
+        request.tags = ["tag1", "tag2"]
+        request.source = "partner"
+        request.config_schemas = {"key": "value"}
+        request.config_values = {"param": "val"}
+        request.files = [mock_file_data]
+
+        result = _build_skill_update_data(request)
+
+        assert result["name"] == "new_name"
+        assert result["description"] == "new description"
+        assert result["content"] == "# new content"
+        assert result["tags"] == ["tag1", "tag2"]
+        assert result["source"] == "partner"
+        assert result["config_schemas"] == {"key": "value"}
+        assert result["config_values"] == {"param": "val"}
+        assert result["files"] == [{"path": "test.py", "content": "code"}]
+
+    def test_build_skill_update_data_with_partial_fields(self, mocker):
+        """Test _build_skill_update_data with only some fields provided."""
+        from backend.apps.skill_app import _build_skill_update_data
+
+        request = MagicMock()
+        request.name = None
+        request.description = "only description"
+        request.content = None
+        request.tags = None
+        request.source = None
+        request.config_schemas = None
+        request.config_values = None
+        request.files = None
+
+        result = _build_skill_update_data(request)
+
+        assert "name" not in result
+        assert result["description"] == "only description"
+        assert "content" not in result
+
+    def test_build_skill_update_data_with_empty_files(self, mocker):
+        """Test _build_skill_update_data when files is an empty list (still gets included)."""
+        from backend.apps.skill_app import _build_skill_update_data
+
+        request = MagicMock()
+        request.name = "test"
+        request.description = "desc"
+        request.content = "content"
+        request.tags = []
+        request.source = "custom"
+        request.config_schemas = None
+        request.config_values = None
+        request.files = []  # Empty list is not None, so it gets included
+
+        result = _build_skill_update_data(request)
+
+        # Empty list is still included because None check passes
+        assert result["files"] == []
+
+
+# ===== Get Skill File Tree Asset Owner Tests =====
+class TestGetSkillFileTreeAssetOwner:
+    """Test asset owner denial in get_skill_file_tree endpoint."""
+
+    def test_get_file_tree_denied_for_non_asset_owner(self, mocker):
+        """Test file tree access denied when tenant cannot view skill."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.get_skill.return_value = {"tenant_id": "other_tenant"}
+
+                with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+                    mock_can_view.return_value = False
+
+                    app = FastAPI()
+                    app.include_router(skill_app.router)
+                    client = TestClient(app)
+
+                    response = client.get(
+                        "/skills/test_skill/files",
+                        headers={"Authorization": "Bearer token123"}
+                    )
+
+                    assert response.status_code == 200
+                    assert response.json() == {"content": "您无权限查看"}
+
+
+# ===== Get Skill File Content Asset Owner Tests =====
+class TestGetSkillFileContentAssetOwner:
+    """Test asset owner denial in get_skill_file_content endpoint."""
+
+    def test_get_file_content_denied_for_non_asset_owner(self, mocker):
+        """Test file content access denied when tenant cannot view skill."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.get_skill.return_value = {"tenant_id": "other_tenant"}
+
+                with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+                    mock_can_view.return_value = False
+
+                    app = FastAPI()
+                    app.include_router(skill_app.router)
+                    client = TestClient(app)
+
+                    response = client.get(
+                        "/skills/test_skill/files/readme.md",
+                        headers={"Authorization": "Bearer token123"}
+                    )
+
+                    assert response.status_code == 200
+                    assert response.json() == {"content": "您无权限查看"}
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
     def test_update_skill_by_id_success(self, mocker):
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
