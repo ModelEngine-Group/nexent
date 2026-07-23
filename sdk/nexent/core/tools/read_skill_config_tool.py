@@ -1,16 +1,24 @@
 """Skill config reading tool."""
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import yaml
-from smolagents import tool
+
+from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
 
-class ReadSkillConfigTool:
+class ReadSkillConfigTool(Tool):
     """Tool for reading the config.yaml file of a skill directory."""
+
+    name = "read_skill_config"
+    description = "Read config.yaml from a tenant-scoped skill directory."
+    inputs = {
+        "skill_name": {"type": "string", "description": "Name of the skill whose config should be read."},
+    }
+    output_type = "string"
 
     def __init__(
         self,
@@ -27,6 +35,7 @@ class ReadSkillConfigTool:
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
         """
+        super().__init__()
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
@@ -44,10 +53,10 @@ class ReadSkillConfigTool:
         if not skill_name:
             return "[Error] skill_name is required"
 
-        if self.local_skills_dir is None:
-            return "[Error] local_skills_dir is not configured"
+        from nexent.skills import SkillManager
 
-        skill_dir = os.path.join(self.local_skills_dir, skill_name)
+        manager = SkillManager(self.local_skills_dir)
+        skill_dir = manager.resolve_skill_dir(skill_name, tenant_id=self.tenant_id)
         if not os.path.isdir(skill_dir):
             return f"[Error] Skill directory not found: {skill_name}"
 
@@ -72,11 +81,12 @@ class ReadSkillConfigTool:
         except Exception as e:
             return f"[Error] Failed to read config.yaml: {e}"
 
+    def forward(self, skill_name: str) -> str:
+        """Read tenant-scoped skill configuration."""
+        return self.execute(skill_name)
 
-_global_tool_instance: Optional[ReadSkillConfigTool] = None
 
-
-def get_read_skill_config_tool(
+def _uncached_read_skill_config_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
@@ -89,20 +99,14 @@ def get_read_skill_config_tool(
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id for tenant isolation.
     """
-    global _global_tool_instance
-    if _global_tool_instance is None:
-        _global_tool_instance = ReadSkillConfigTool(
-            local_skills_dir,
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no,
-        )
-    return _global_tool_instance
+    return ReadSkillConfigTool(local_skills_dir, agent_id, tenant_id, version_no)
 
 
-@tool
-def read_skill_config(skill_name: str) -> str:
+def _read_skill_config_without_context(skill_name: str) -> str:
     """Read the config.yaml file from a skill directory.
 
     Use this tool to read configuration variables (such as temporary file paths)
@@ -119,5 +123,5 @@ def read_skill_config(skill_name: str) -> str:
         read_skill_config("skill-creator")
         # Returns: {"path": {"temp_skill": "/mnt/nexent/skills/tmp/"}}
     """
-    tool_instance = get_read_skill_config_tool()
+    tool_instance = _uncached_read_skill_config_tool()
     return tool_instance.execute(skill_name)

@@ -2,17 +2,28 @@
 import json
 import logging
 import os
-from contextvars import ContextVar
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from smolagents import tool
+from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
 
-class RunSkillScriptTool:
+class RunSkillScriptTool(Tool):
     """Tool for executing skill scripts."""
+    name = "run_skill_script"
+    description = "Execute a Python or shell script that belongs to an enabled skill."
+    inputs = {
+        "skill_name": {"type": "string", "description": "Name of the skill containing the script."},
+        "script_path": {"type": "string", "description": "Path to the script relative to the skill root."},
+        "params": {
+            "type": "string",
+            "description": "Optional raw command-line arguments for the script.",
+            "nullable": True,
+        },
+    }
+    output_type = "string"
 
     def __init__(
         self,
@@ -23,13 +34,14 @@ class RunSkillScriptTool:
         observer: Optional[Any] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
-
         Args:
             local_skills_dir: Path to local skills storage.
             agent_id: Agent ID for filtering available skills in error messages.
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
+            observer: Message observer used to publish structured skill artifacts.
         """
+        super().__init__()
         self.skill_manager = None
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
@@ -41,12 +53,7 @@ class RunSkillScriptTool:
         """Lazy load skill manager."""
         if self.skill_manager is None:
             from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(
-                self.local_skills_dir,
-                agent_id=self.agent_id,
-                tenant_id=self.tenant_id,
-                version_no=self.version_no,
-            )
+            self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     @staticmethod
@@ -56,7 +63,6 @@ class RunSkillScriptTool:
             return result
         if not isinstance(result, str):
             return None
-
         try:
             payload = json.loads(result)
         except json.JSONDecodeError:
@@ -71,31 +77,32 @@ class RunSkillScriptTool:
             normalized_path = normalized_path[2:]
         return normalized_path.lstrip("/\\").replace("\\", "/")
 
-    def _extract_file_artifacts(self, manager: Any, skill_name: str, script_path: str, result: Any) -> List[Dict[str, Any]]:
+    def _extract_file_artifacts(
+        self,
+        manager: Any,
+        skill_name: str,
+        script_path: str,
+        result: Any,
+    ) -> List[Dict[str, Any]]:
         """Extract artifacts only from a script declared as file-producing."""
-        skill = manager.load_skill(skill_name)
+        skill = manager.load_skill(skill_name, tenant_id=self.tenant_id)
         if not isinstance(skill, dict):
             return []
-
         script_outputs = skill.get("script_outputs") or {}
         script_output = script_outputs.get(self._normalize_script_path(script_path))
         if not isinstance(script_output, dict) or script_output.get("kind") != "file":
             return []
-
         payload = self._parse_result_payload(result)
         if not payload or payload.get("status") != "success":
             return []
-
         raw_artifacts = payload.get("artifacts")
         if not isinstance(raw_artifacts, list):
             return []
-
         declared_mime_types = set(script_output.get("mime_types") or [])
         artifacts: List[Dict[str, Any]] = []
         for raw_artifact in raw_artifacts:
             if not isinstance(raw_artifact, dict) or raw_artifact.get("kind") != "file":
                 continue
-
             absolute_path = raw_artifact.get("absolute_path")
             file_name = raw_artifact.get("file_name")
             mime_type = raw_artifact.get("mime_type")
@@ -120,7 +127,6 @@ class RunSkillScriptTool:
                     mime_type,
                 )
                 continue
-
             artifacts.append(raw_artifact)
         return artifacts
 
@@ -133,7 +139,6 @@ class RunSkillScriptTool:
         """Publish structured artifacts independently from model-visible output."""
         if not artifacts or self.observer is None:
             return
-
         content = {
             "skill_name": skill_name,
             "script_path": script_path,
@@ -147,9 +152,7 @@ class RunSkillScriptTool:
             except ImportError:
                 class ProcessType(Enum):
                     SKILL_ARTIFACT = "skill_artifact"
-
         self.observer.add_message("", ProcessType.SKILL_ARTIFACT, content)
-
     def execute(
         self,
         skill_name: str,
@@ -157,7 +160,6 @@ class RunSkillScriptTool:
         params: Optional[str] = None,
     ) -> str:
         """Execute a skill script with given parameters.
-
         ``script_path`` is always resolved relative to the skill's root
         directory (``<local_skills_dir>/<skill_name>``), regardless of the
         caller's working directory. The path may be supplied in any of the
@@ -167,38 +169,35 @@ class RunSkillScriptTool:
         without surrounding quotes). If the script cannot be located the
         returned error message lists the available scripts under the skill
         to help diagnose the mistake.
-
         Args:
             skill_name: Name of the skill containing the script
             script_path: Path to script relative to skill directory
                 (e.g. ``scripts/analyze.py``).
             params: Parameters to pass to the script as a raw string.
                 The string is appended directly to the command line.
-
         Returns:
             Script execution result as string
         """
         from nexent.skills.skill_manager import SkillNotFoundError, SkillScriptNotFoundError
-
         try:
             manager = self._get_skill_manager()
             result = manager.run_skill_script(
                 skill_name,
                 script_path,
                 params,
-                agent_id=self.agent_id,
                 tenant_id=self.tenant_id,
-                version_no=self.version_no,
             )
             artifacts = self._extract_file_artifacts(manager, skill_name, script_path, result)
             self._publish_artifacts(skill_name, script_path, artifacts)
             return str(result)
         except SkillNotFoundError as e:
-            logger.error(f"Skill not found: {skill_name} - {e}")
-            return f"[SkillNotFoundError] {e}"
+            message = getattr(e, "message", str(e))
+            logger.error(f"Skill not found: {skill_name} - {message}")
+            return f"[SkillNotFoundError] {message}"
         except SkillScriptNotFoundError as e:
-            logger.error(f"Script not found in skill '{skill_name}': {script_path} - {e}")
-            return f"[ScriptNotFoundError] {e}"
+            message = getattr(e, "message", str(e))
+            logger.error(f"Script not found in skill '{skill_name}': {script_path} - {message}")
+            return f"[SkillScriptNotFoundError] {message}"
         except FileNotFoundError as e:
             logger.error(f"Script file not found: {e}")
             return f"[FileNotFoundError] Script file not found: {e}"
@@ -208,74 +207,27 @@ class RunSkillScriptTool:
         except Exception as e:
             logger.error(f"Failed to execute skill script: {e}")
             return f"[UnexpectedError] Failed to execute skill script: {type(e).__name__}: {str(e)}"
+    def forward(
+        self,
+        skill_name: str,
+        script_path: str,
+        params: Optional[str] = None,
+    ) -> str:
+        """Execute a tenant-scoped skill script."""
+        return self.execute(skill_name, script_path, params)
 
-
-# Fallback instance supports direct calls outside an agent execution context.
-_skill_script_tool = None
-_skill_script_tool_context: ContextVar[Optional[RunSkillScriptTool]] = ContextVar(
-    "skill_script_tool_context",
-    default=None,
-)
-
-
-def get_run_skill_script_tool(
+def _uncached_run_skill_script_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
     observer: Optional[Any] = None,
 ) -> RunSkillScriptTool:
-    """Get or create the skill script tool instance.
-
-    Args:
-        local_skills_dir: Path to local skills storage.
-        agent_id: Agent ID for filtering available skills in error messages.
-        tenant_id: Tenant ID for filtering available skills in error messages.
-        version_no: Version number for filtering available skills.
-        observer: Message observer used to publish structured skill artifacts.
-    """
-    global _skill_script_tool
-    context_tool = _skill_script_tool_context.get()
-    has_context = any(value is not None for value in (local_skills_dir, agent_id, tenant_id, observer))
-
-    if has_context:
-        context_tool = RunSkillScriptTool(
-            local_skills_dir,
-            agent_id,
-            tenant_id,
-            version_no,
-            observer,
-        )
-        _skill_script_tool_context.set(context_tool)
-        return context_tool
-
-    if _skill_script_tool is None:
-        _skill_script_tool = RunSkillScriptTool()
-    return context_tool or _skill_script_tool
-
-
-@tool
-def run_skill_script(skill_name: str, script_path: str, params: Optional[str] = None) -> str:
-    """Execute a skill script with given parameters.
-
-    This tool runs Python or shell scripts that are part of a skill. Scripts
-    are declared in the skill via XML tags such as
-    ``<use_script path="..." />``. The ``script_path`` is always resolved
-    **relative to the skill's root directory**, not the agent's current
-    working directory. Common forms like ``scripts/foo`` (no extension) are
-    also accepted via .py/.sh fall-back resolution.
-
-    Args:
-        skill_name: Name of the skill containing the script (e.g., "code-reviewer")
-        script_path: Path to the script relative to the skill root directory
-            (e.g. ``"scripts/analyze.py"``, ``"./scripts/analyze.py"``,
-            ``"scripts/sub/run.sh"``). May be supplied bare or wrapped in
-            quotes if it was extracted from markdown formatting.
-        params: Raw command-line argument string to pass to the script.
-            Example: ``--target /path/to/file -c --code "SELECT 1"``
-
-    Returns:
-        Script execution result as string
-    """
-    tool_instance = get_run_skill_script_tool()
-    return tool_instance.execute(skill_name, script_path, params)
+    """Construct an uncached tool for internal use and isolated tests."""
+    return RunSkillScriptTool(
+        local_skills_dir,
+        agent_id,
+        tenant_id,
+        version_no,
+        observer,
+    )

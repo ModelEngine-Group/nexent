@@ -3,13 +3,26 @@ import logging
 import os
 import re
 from typing import Optional, Tuple
-from smolagents import tool
+
+from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
 
-class ReadSkillMdTool:
+class ReadSkillMdTool(Tool):
     """Tool for reading skill markdown files."""
+
+    name = "read_skill_md"
+    description = "Read a skill execution guide and optional files from the tenant-scoped skill directory."
+    inputs = {
+        "skill_name": {"type": "string", "description": "Name of the skill to read."},
+        "additional_files": {
+            "type": "array",
+            "description": "Optional additional files relative to the skill root.",
+            "nullable": True,
+        },
+    }
+    output_type = "string"
 
     def __init__(
         self,
@@ -26,6 +39,7 @@ class ReadSkillMdTool:
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
         """
+        super().__init__()
         self.skill_manager = None
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
@@ -36,12 +50,7 @@ class ReadSkillMdTool:
         """Lazy load skill manager."""
         if self.skill_manager is None:
             from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(
-                self.local_skills_dir,
-                agent_id=self.agent_id,
-                tenant_id=self.tenant_id,
-                version_no=self.version_no,
-            )
+            self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     def _strip_frontmatter(self, content: str) -> str:
@@ -111,13 +120,15 @@ class ReadSkillMdTool:
             if not skill_name:
                 return self._read_direct_file(additional_files)
 
-            skill = manager.load_skill(skill_name)
+            skill = manager.load_skill(skill_name, tenant_id=self.tenant_id)
 
             if not skill:
                 return f"Skill not found: {skill_name}"
 
             # Get skill directory (local path)
-            local_path = os.path.join(manager.local_skills_dir, skill_name)
+            local_path = manager.resolve_skill_dir(
+                skill_name, tenant_id=self.tenant_id
+            )
             if not os.path.exists(local_path):
                 return f"Skill directory not found: {skill_name}"
 
@@ -145,6 +156,14 @@ class ReadSkillMdTool:
             logger.error(f"Failed to read skill markdown: {e}")
             return f"Error reading skill: {str(e)}"
 
+    def forward(
+        self,
+        skill_name: str,
+        additional_files: Optional[list[str]] = None,
+    ) -> str:
+        """Read tenant-scoped skill guidance."""
+        return self.execute(skill_name, *(additional_files or []))
+
     def _read_direct_file(self, path_parts: tuple) -> str:
         """Read a file directly from local_skills_dir.
 
@@ -154,8 +173,7 @@ class ReadSkillMdTool:
         Returns:
             File content or error message
         """
-        if not self.local_skills_dir:
-            return "[Error] local_skills_dir is not configured"
+        manager = self._get_skill_manager()
 
         if not path_parts:
             # No path specified, try to read SKILL.md from root
@@ -163,7 +181,9 @@ class ReadSkillMdTool:
         else:
             file_path = "/".join(path_parts)
 
-        full_path = os.path.join(self.local_skills_dir, file_path)
+        full_path = os.path.join(
+            manager.resolve_tenant_dir(tenant_id=self.tenant_id), file_path
+        )
         if not os.path.exists(full_path):
             return f"File not found: {file_path}"
 
@@ -179,15 +199,7 @@ class ReadSkillMdTool:
             return f"[Error] Failed to read '{file_path}': {e}"
 
 
-# Global instance for tool execution (singleton - created once per process)
-# NOTE: This singleton approach has a known limitation: when multiple agents/tenants
-# share the same process with different local_skills_dir paths, only the first
-# initialized instance is reused. For tenant-isolated scenarios, ensure that
-# local_skills_dir includes the tenant_id as a subdirectory (handled by SkillManager).
-_skill_md_tool = None
-
-
-def get_read_skill_md_tool(
+def _uncached_read_skill_md_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
@@ -195,28 +207,19 @@ def get_read_skill_md_tool(
 ) -> ReadSkillMdTool:
     """Get or create the skill md tool instance.
 
-    This function uses a singleton pattern for efficiency. The singleton is
-    initialized on the first call and reused for subsequent calls.
-
-    NOTE: For tenant isolation, ensure that local_skills_dir paths are
-    constructed to include tenant_id as a subdirectory. For example:
-        local_skills_dir = "/skills" + "/" + tenant_id  # -> "/skills/tenant123"
-    This way, the SkillManager will correctly scope skills per tenant.
-
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id for tenant isolation.
     """
-    global _skill_md_tool
-    if _skill_md_tool is None:
-        _skill_md_tool = ReadSkillMdTool(local_skills_dir, agent_id, tenant_id, version_no)
-    return _skill_md_tool
+    return ReadSkillMdTool(local_skills_dir, agent_id, tenant_id, version_no)
 
 
-@tool
-def read_skill_md(skill_name: str, additional_files: Optional[list[str]] = None) -> str:
+def _read_skill_md_without_context(skill_name: str, additional_files: Optional[list[str]] = None) -> str:
     """Read skill files for execution guidance.
 
     Reads skill files from the skill root directory. Behavior depends on whether
@@ -255,6 +258,6 @@ def read_skill_md(skill_name: str, additional_files: Optional[list[str]] = None)
         read_skill_md("")  # reads SKILL.md from root
         read_skill_md("", ["my-file.txt"])  # reads my-file.txt from root
     """
-    tool_instance = get_read_skill_md_tool()
+    tool_instance = _uncached_read_skill_md_tool()
     files = additional_files or []
     return tool_instance.execute(skill_name, *files)

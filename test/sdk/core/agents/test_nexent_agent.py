@@ -2238,6 +2238,241 @@ class TestCreateBuiltinTool:
         with pytest.raises(ValueError, match="Unknown builtin tool: RunSkillScript"):
             nexent_agent_instance.create_builtin_tool(tool_config)
 
+    def test_create_builtin_tool_run_skill_script_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates RunSkillScriptTool with the correct arguments.
+
+        Covers the RunSkillScriptTool branch in create_builtin_tool, including
+        the dynamic import (line 327) and the metadata defaulting (line 328).
+        """
+        mock_tool_instance = MagicMock(name="RunSkillScriptToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="RunSkillScriptTool")
+        mock_run_skill_script_tool_module = MagicMock()
+        mock_run_skill_script_tool_module.RunSkillScriptTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="RunSkillScriptTool",
+            name="run_skill_script",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 42,
+                "tenant_id": "tenant_abc",
+                "version_no": 7,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.run_skill_script_tool": mock_run_skill_script_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=42,
+            tenant_id="tenant_abc",
+            version_no=7,
+            observer=nexent_agent_instance.observer,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_run_skill_script_tool_no_metadata(self, nexent_agent_instance):
+        """Test create_builtin_tool defaults version_no to 0 when metadata is absent.
+
+        Verifies that ``metadata = tool_config.metadata or {}`` substitutes an
+        empty dict when ``metadata`` is None and version_no defaults to 0.
+        """
+        mock_tool_instance = MagicMock(name="RunSkillScriptToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="RunSkillScriptTool")
+        mock_run_skill_script_tool_module = MagicMock()
+        mock_run_skill_script_tool_module.RunSkillScriptTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="RunSkillScriptTool",
+            name="run_skill_script",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata=None,
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.run_skill_script_tool": mock_run_skill_script_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=None,
+            tenant_id=None,
+            version_no=0,
+            observer=nexent_agent_instance.observer,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_read_skill_md_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates ReadSkillMdTool with the correct arguments.
+
+        Covers the ReadSkillMdTool branch (line 337) and verifies that the
+        observer is NOT passed to ReadSkillMdTool (per the source signature).
+        """
+        mock_tool_instance = MagicMock(name="ReadSkillMdToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="ReadSkillMdTool")
+        mock_read_skill_md_tool_module = MagicMock()
+        mock_read_skill_md_tool_module.ReadSkillMdTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="ReadSkillMdTool",
+            name="read_skill_md",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 11,
+                "tenant_id": "tenant_read",
+                "version_no": 3,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.read_skill_md_tool": mock_read_skill_md_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=11,
+            tenant_id="tenant_read",
+            version_no=3,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_write_skill_file_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates WriteSkillFileTool with the correct arguments.
+
+        Covers the WriteSkillFileTool branch (lines 345-353) and verifies that
+        all four constructor parameters are forwarded correctly.
+        """
+        mock_tool_instance = MagicMock(name="WriteSkillFileToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="WriteSkillFileTool")
+        mock_write_skill_file_tool_module = MagicMock()
+        mock_write_skill_file_tool_module.WriteSkillFileTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="WriteSkillFileTool",
+            name="write_skill_file",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 21,
+                "tenant_id": "tenant_write",
+                "version_no": 5,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.write_skill_file_tool": mock_write_skill_file_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=21,
+            tenant_id="tenant_write",
+            version_no=5,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_read_skill_config_tool(self, nexent_agent_instance):
+        """Test create_builtin_tool creates ReadSkillConfigTool with the correct arguments.
+
+        Covers the ReadSkillConfigTool branch (lines 354-357) and verifies
+        that all four constructor parameters are forwarded correctly, and the
+        observer is NOT passed (per the source signature).
+        """
+        mock_tool_instance = MagicMock(name="ReadSkillConfigToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="ReadSkillConfigTool")
+        mock_read_skill_config_tool_module = MagicMock()
+        mock_read_skill_config_tool_module.ReadSkillConfigTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="ReadSkillConfigTool",
+            name="read_skill_config",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata={
+                "agent_id": 31,
+                "tenant_id": "tenant_config",
+                "version_no": 9,
+            },
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.read_skill_config_tool": mock_read_skill_config_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=31,
+            tenant_id="tenant_config",
+            version_no=9,
+        )
+        assert result is mock_tool_instance
+
+    def test_create_builtin_tool_read_skill_config_tool_no_metadata(self, nexent_agent_instance):
+        """Test create_builtin_tool defaults metadata fields to None/0 when metadata is absent.
+
+        Verifies ``metadata = tool_config.metadata or {}`` substitutes an empty
+        dict when ``metadata`` is None so version_no falls back to 0.
+        """
+        mock_tool_instance = MagicMock(name="ReadSkillConfigToolInstance")
+        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="ReadSkillConfigTool")
+        mock_read_skill_config_tool_module = MagicMock()
+        mock_read_skill_config_tool_module.ReadSkillConfigTool = mock_tool_class
+
+        tool_config = ToolConfig(
+            class_name="ReadSkillConfigTool",
+            name="read_skill_config",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"local_skills_dir": "/tmp/skills"},
+            source="builtin",
+            metadata=None,
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"nexent.core.tools.read_skill_config_tool": mock_read_skill_config_tool_module},
+        ):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        mock_tool_class.assert_called_once_with(
+            local_skills_dir="/tmp/skills",
+            agent_id=None,
+            tenant_id=None,
+            version_no=0,
+        )
+        assert result is mock_tool_instance
+
 
 class TestCreateToolExceptionHandling:
     """Tests for exception handling in create_tool method."""
@@ -4300,3 +4535,219 @@ class TestCreateLocalToolVideoTool:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestCreateLocalToolMemory:
+    """Tests for create_local_tool with StoreMemoryTool and SearchMemoryTool."""
+
+    def test_create_local_tool_store_memory_success(self, nexent_agent_instance):
+        """Test successful StoreMemoryTool creation with metadata."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="StoreMemoryTool",
+            name="store_memory",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="local",
+            metadata={
+                "memory_config": {"type": "vector"},
+                "tenant_id": "tenant_123",
+                "user_id": "user_456",
+                "agent_id": "agent_789",
+                "memory_user_config": {"version": "v1"}
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("StoreMemoryTool")
+        nexent_agent.__dict__["StoreMemoryTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+            assert result == mock_tool_instance
+            # Verify memory_config was set
+            assert result.memory_config == {"type": "vector"}
+            # Verify tenant_id was set
+            assert result.tenant_id == "tenant_123"
+            # Verify user_id was set
+            assert result.user_id == "user_456"
+            # Verify agent_id was set
+            assert result.agent_id == "agent_789"
+            # Verify memory_user_config was set
+            assert result.memory_user_config == {"version": "v1"}
+            # Verify observer was set
+            assert result.observer == nexent_agent_instance.observer
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["StoreMemoryTool"] = original_value
+            elif "StoreMemoryTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["StoreMemoryTool"]
+
+    def test_create_local_tool_search_memory_success(self, nexent_agent_instance):
+        """Test successful SearchMemoryTool creation with metadata."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="SearchMemoryTool",
+            name="search_memory",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="local",
+            metadata={
+                "memory_config": {"type": "vector"},
+                "tenant_id": "tenant_abc",
+                "user_id": "user_def",
+                "agent_id": "agent_ghi"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("SearchMemoryTool")
+        nexent_agent.__dict__["SearchMemoryTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+            assert result == mock_tool_instance
+            # Verify memory_config was set
+            assert result.memory_config == {"type": "vector"}
+            # Verify tenant_id was set
+            assert result.tenant_id == "tenant_abc"
+            # Verify observer was set
+            assert result.observer == nexent_agent_instance.observer
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["SearchMemoryTool"] = original_value
+            elif "SearchMemoryTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["SearchMemoryTool"]
+
+    def test_create_local_tool_store_memory_without_metadata(self, nexent_agent_instance):
+        """Test StoreMemoryTool creation with minimal/no metadata."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="StoreMemoryTool",
+            name="store_memory",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="local",
+            metadata={}
+        )
+
+        original_value = nexent_agent.__dict__.get("StoreMemoryTool")
+        nexent_agent.__dict__["StoreMemoryTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+            assert result == mock_tool_instance
+            # Verify defaults are set
+            assert result.memory_config == {}
+            assert result.tenant_id == ""
+            assert result.user_id == ""
+            assert result.agent_id == ""
+            assert result.memory_user_config is None
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["StoreMemoryTool"] = original_value
+            elif "StoreMemoryTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["StoreMemoryTool"]
+
+
+class TestMonitoringHelpers:
+    """Tests for monitoring helper functions."""
+
+    def test_tool_name_with_name_attribute(self):
+        """Test _tool_name returns name attribute when available."""
+        mock_tool = MagicMock()
+        mock_tool.name = "custom_tool_name"
+
+        result = nexent_agent._tool_name(mock_tool)
+        assert result == "custom_tool_name"
+
+    def test_tool_name_with_only_name_attribute(self):
+        """Test _tool_name returns name attribute (no __name__)."""
+        mock_tool = MagicMock(spec=["name"])
+        mock_tool.name = "tool_with_name_only"
+
+        result = nexent_agent._tool_name(mock_tool)
+        assert result == "tool_with_name_only"
+
+    def test_tool_name_with_no_name_fallback_to_type_name(self):
+        """Test _tool_name falls back to type name."""
+        mock_tool = MagicMock()
+        del mock_tool.name
+        mock_tool.__name__ = None
+        type(mock_tool).__name__ = "MockToolClass"
+
+        result = nexent_agent._tool_name(mock_tool)
+        assert result == "MockToolClass"
+
+    def test_is_retriever_tool_with_knowledge_base(self):
+        """Test _is_retriever_tool returns True for KnowledgeBaseSearchTool."""
+        # The function checks type(tool_obj).__name__ which needs actual class name
+        mock_tool = MagicMock()
+        mock_tool.__class__.__name__ = "KnowledgeBaseSearchTool"
+
+        result = nexent_agent._is_retriever_tool(mock_tool)
+        assert result is True
+
+    def test_is_retriever_tool_with_search_memory(self):
+        """Test _is_retriever_tool returns True for SearchMemoryTool."""
+        # The function checks type(tool_obj).__name__ which needs actual class name
+        mock_tool = MagicMock()
+        mock_tool.__class__.__name__ = "SearchMemoryTool"
+
+        result = nexent_agent._is_retriever_tool(mock_tool)
+        assert result is True
+
+    def test_is_retriever_tool_returns_false_for_other_tools(self):
+        """Test _is_retriever_tool returns False for non-retriever tools."""
+        class MockTool:
+            pass
+
+        result = nexent_agent._is_retriever_tool(MockTool())
+        assert result is False
+
+    def test_build_tool_input_with_valid_signature(self):
+        """Test _build_tool_input with inspect.signature success."""
+        def sample_func(a, b, c=10):
+            pass
+
+        result = nexent_agent._build_tool_input(sample_func, (1, 2), {"c": 3})
+        assert result == {"a": 1, "b": 2, "c": 3}
+
+    def test_build_tool_input_with_signature_failure(self):
+        """Test _build_tool_input falls back when signature fails."""
+        def bad_func():
+            raise TypeError("cannot inspect")
+
+        result = nexent_agent._build_tool_input(bad_func, (1, 2), {"key": "value"})
+        # Should fall back to args/kwargs
+        assert result.get("args") == [1, 2]
+        assert result.get("key") == "value"
+
+    def test_build_tool_input_with_value_error(self):
+        """Test _build_tool_input falls back on ValueError."""
+        def bad_func():
+            raise ValueError("invalid value")
+
+        result = nexent_agent._build_tool_input(bad_func, (), {"x": 1})
+        assert result == {"x": 1}
+
+    def test_build_tool_input_with_empty_args_kwargs(self):
+        """Test _build_tool_input with no args or kwargs."""
+        def empty_func():
+            pass
+
+        result = nexent_agent._build_tool_input(empty_func, (), {})
+        assert result == {}

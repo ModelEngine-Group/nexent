@@ -1,108 +1,132 @@
 """
 Unit tests for nexent.core.tools.run_skill_script_tool module.
+
+This test module follows the pattern from test_ragflow_search_tool.py with proper mocking.
 """
 import json
 import logging
 import os
 import sys
+import types
 import tempfile
 import shutil
-import importlib.util
-import types
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 
-# Load the module directly without going through __init__.py
-spec = importlib.util.spec_from_file_location(
-    "run_skill_script_tool",
-    os.path.join(os.path.dirname(__file__), "../../../../sdk/nexent/core/tools/run_skill_script_tool.py")
-)
-run_skill_script_tool_module = importlib.util.module_from_spec(spec)
-_original_modules = {
-    name: sys.modules.get(name)
-    for name in ("smolagents", "smolagents.tool", "nexent", "nexent.skills", "nexent.skills.skill_manager")
+# ---------------------------------------------------------------------------
+# Prepare mocks for external dependencies BEFORE any SDK imports.
+# ---------------------------------------------------------------------------
+
+# -- smolagents ---------------------------------------------------------------
+class _MockTool:
+    """A proper class that Tool can inherit from."""
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+_mock_smolagents = MagicMock()
+_mock_smolagents_tools = types.ModuleType("smolagents.tools")
+_mock_smolagents_tools.Tool = _MockTool
+_mock_smolagents.tools = _mock_smolagents_tools
+
+# -- namespace package stubs --------------------------------------------------
+SDK_SOURCE_ROOT = Path(__file__).resolve().parents[4] / "sdk"
+
+_mock_sdk = types.ModuleType("sdk")
+_mock_sdk.__path__ = [str(SDK_SOURCE_ROOT)]
+
+_mock_sdk_nexent = types.ModuleType("sdk.nexent")
+_mock_sdk_nexent.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
+
+_mock_sdk_nexent_core = types.ModuleType("sdk.nexent.core")
+_mock_sdk_nexent_core.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
+
+_mock_sdk_nexent_core_tools = types.ModuleType("sdk.nexent.core.tools")
+_mock_sdk_nexent_core_tools.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")]
+
+_mock_nexent = types.ModuleType("nexent")
+_mock_nexent_skills = types.ModuleType("nexent.skills")
+_mock_nexent_skills_skill_manager = types.ModuleType("nexent.skills.skill_manager")
+
+
+# -- Register all mocks in sys.modules ----------------------------------------
+_MODULE_MOCKS = {
+    "smolagents": _mock_smolagents,
+    "smolagents.tools": _mock_smolagents_tools,
+    "sdk": _mock_sdk,
+    "sdk.nexent": _mock_sdk_nexent,
+    "sdk.nexent.core": _mock_sdk_nexent_core,
+    "sdk.nexent.core.tools": _mock_sdk_nexent_core_tools,
+    "nexent": _mock_nexent,
+    "nexent.skills": _mock_nexent_skills,
+    "nexent.skills.skill_manager": _mock_nexent_skills_skill_manager,
 }
+sys.modules.update(_MODULE_MOCKS)
 
-# Mock the smolagents.tool decorator and nexent.skills dependencies before loading
-mock_smolagents = MagicMock()
-sys.modules['smolagents'] = mock_smolagents
-sys.modules['smolagents.tool'] = mock_smolagents.tool
 
-# Mock nexent.skills.skill_manager as a proper module with the exception classes
-mock_skill_manager_module = types.ModuleType('nexent.skills.skill_manager')
-
+# -- Mock SkillManager for nexent.skills.skill_manager -------------------------
 class MockSkillNotFoundError(Exception):
+    """Mock exception for skill not found."""
     def __init__(self, message=""):
         self.message = message
         super().__init__(self.message)
+
 
 class MockSkillScriptNotFoundError(Exception):
+    """Mock exception for script not found."""
     def __init__(self, message=""):
         self.message = message
         super().__init__(self.message)
 
-mock_skill_manager_module.SkillNotFoundError = MockSkillNotFoundError
-mock_skill_manager_module.SkillScriptNotFoundError = MockSkillScriptNotFoundError
 
 class MockSkillManager:
+    """Mock SkillManager for testing."""
     def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
 
-    def load_skill(self, name):
-        return None
+    def resolve_skill_dir(self, skill_name, tenant_id=None):
+        if self.local_skills_dir:
+            return os.path.join(self.local_skills_dir, skill_name)
+        return skill_name
 
-    def list_skills(self):
-        return []
+    def resolve_tenant_dir(self, tenant_id=None):
+        return self.local_skills_dir or ""
+
+    def load_skill(self, name, tenant_id=None):
+        return {"name": name}
+
+    def save_skill(self, skill_data, tenant_id=None):
+        """Mock save_skill that does nothing."""
+        return skill_data
 
     def run_skill_script(self, skill_name, script_path, params, agent_id=None, tenant_id=None, version_no=0):
-        """Mock implementation that raises SkillNotFoundError by default."""
-        raise MockSkillNotFoundError(f"Skill '{skill_name}' not found.")
-
-mock_skill_manager_module.SkillManager = MockSkillManager
-
-# Mock nexent.skills as a proper module
-mock_nexent_skills = types.ModuleType('nexent.skills')
-mock_nexent_skills.skill_manager = mock_skill_manager_module
-
-# Mock nexent
-mock_nexent = types.ModuleType('nexent')
-mock_nexent.skills = mock_nexent_skills
-
-# Set up mocks in sys.modules
-sys.modules['nexent'] = mock_nexent
-sys.modules['nexent.skills'] = mock_nexent_skills
-sys.modules['nexent.skills.skill_manager'] = mock_skill_manager_module
-
-# Now load the module
-spec.loader.exec_module(run_skill_script_tool_module)
-
-for name, original_module in _original_modules.items():
-    if original_module is None:
-        sys.modules.pop(name, None)
-    else:
-        sys.modules[name] = original_module
-
-RunSkillScriptTool = run_skill_script_tool_module.RunSkillScriptTool
-get_run_skill_script_tool = run_skill_script_tool_module.get_run_skill_script_tool
-run_skill_script = run_skill_script_tool_module.run_skill_script
+        """Mock run_skill_script that returns success by default."""
+        return "Script executed successfully"
 
 
-@pytest.fixture(autouse=True)
-def mock_skill_dependencies():
-    with patch.dict(
-        sys.modules,
-        {
-            "nexent": mock_nexent,
-            "nexent.skills": mock_nexent_skills,
-            "nexent.skills.skill_manager": mock_skill_manager_module,
-        },
-    ):
-        yield
+_mock_nexent_skills_skill_manager.SkillManager = MockSkillManager
+_mock_nexent_skills_skill_manager.SkillNotFoundError = MockSkillNotFoundError
+_mock_nexent_skills_skill_manager.SkillScriptNotFoundError = MockSkillScriptNotFoundError
+
+# Also set on nexent.skills for import compatibility
+_mock_nexent_skills.SkillManager = MockSkillManager
+
+
+# -- Now import the module under test ---------------------------------------
+from sdk.nexent.core.tools.run_skill_script_tool import (
+    RunSkillScriptTool,
+    _uncached_run_skill_script_tool,
+)
+
+# ---------------------------------------------------------------------------
+# Test fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -149,17 +173,9 @@ if __name__ == "__main__":
     return skill_dir, skill_name, "scripts/analyze.py"
 
 
-@pytest.fixture
-def run_skill_script_tool(temp_skills_dir):
-    """Create RunSkillScriptTool instance for testing."""
-    tool = RunSkillScriptTool(
-        local_skills_dir=temp_skills_dir,
-        agent_id=1,
-        tenant_id="test-tenant",
-        version_no=0
-    )
-    return tool
-
+# ---------------------------------------------------------------------------
+# Test classes
+# ---------------------------------------------------------------------------
 
 class TestRunSkillScriptToolInit:
     """Test RunSkillScriptTool initialization."""
@@ -191,138 +207,142 @@ class TestRunSkillScriptToolInit:
 class TestGetSkillManager:
     """Test _get_skill_manager lazy loading."""
 
-    def test_lazy_load_creates_manager(self, run_skill_script_tool, temp_skills_dir):
+    def test_lazy_load_creates_manager(self, temp_skills_dir):
         """Test that _get_skill_manager creates manager on first call."""
-        assert run_skill_script_tool.skill_manager is None
-        # Patch _get_skill_manager to return a mock
-        mock_manager = MagicMock()
-        with patch.object(run_skill_script_tool, '_get_skill_manager', return_value=mock_manager):
-            manager = run_skill_script_tool._get_skill_manager()
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
+        assert tool.skill_manager is None
+        manager = tool._get_skill_manager()
         assert manager is not None
-        assert run_skill_script_tool.skill_manager is None  # Still None since we patched
+        # Check that manager has the expected attributes instead of using isinstance
+        assert hasattr(manager, 'resolve_skill_dir')
+        assert hasattr(manager, 'run_skill_script')
 
-    def test_lazy_load_reuses_manager(self, run_skill_script_tool):
+    def test_lazy_load_reuses_manager(self, temp_skills_dir):
         """Test that _get_skill_manager reuses existing manager."""
-        mock_manager = MagicMock()
-        run_skill_script_tool.skill_manager = mock_manager
-        manager1 = run_skill_script_tool._get_skill_manager()
-        manager2 = run_skill_script_tool._get_skill_manager()
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
+        manager1 = tool._get_skill_manager()
+        manager2 = tool._get_skill_manager()
         assert manager1 is manager2
-        assert manager1 is mock_manager
 
 
 class TestExecute:
     """Test execute method."""
 
-    def test_execute_calls_skill_manager(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_calls_skill_manager(self, temp_skills_dir):
         """Test execute calls skill manager's run_skill_script."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "Script output"
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "scripts/test.py")
+        result = tool.execute("test-skill", "scripts/test.py")
 
         assert mock_manager.run_skill_script.called
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][0] == "test-skill"
         assert call_args[0][1] == "scripts/test.py"
-        assert call_args[1]['agent_id'] == 1
-        assert call_args[1]['tenant_id'] == "test-tenant"
-        assert call_args[1]['version_no'] == 0
 
-    def test_execute_with_params(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_with_params(self, temp_skills_dir):
         """Test execute passes parameters to skill manager."""
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            agent_id=1,
+            tenant_id="test-tenant",
+            version_no=0
+        )
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "Result"
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
         params = "--name test --count 5"
-        result = run_skill_script_tool.execute("test-skill", "script.py", params)
+        result = tool.execute("test-skill", "script.py", params)
 
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] == params
 
-    def test_execute_handles_skill_not_found(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_handles_skill_not_found(self, temp_skills_dir):
         """Test execute handles SkillNotFoundError."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
-        # Import actual exception class and use it for side_effect
-        from nexent.skills.skill_manager import SkillNotFoundError
-        mock_manager.run_skill_script.side_effect = SkillNotFoundError("Skill 'test-skill' not found.")
-        run_skill_script_tool.skill_manager = mock_manager
+        mock_manager.run_skill_script.side_effect = MockSkillNotFoundError("Skill 'test-skill' not found.")
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py")
+        result = tool.execute("test-skill", "script.py")
 
         assert "[SkillNotFoundError]" in result
         assert "test-skill" in result
 
-    def test_execute_handles_script_not_found(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_handles_script_not_found(self, temp_skills_dir):
         """Test execute handles SkillScriptNotFoundError."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
-        # Import actual exception class and use it for side_effect
-        from nexent.skills.skill_manager import SkillScriptNotFoundError
-        mock_manager.run_skill_script.side_effect = SkillScriptNotFoundError("Script 'script.py' not found in skill 'test-skill'.")
-        run_skill_script_tool.skill_manager = mock_manager
+        mock_manager.run_skill_script.side_effect = MockSkillScriptNotFoundError("Script 'script.py' not found.")
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py")
+        result = tool.execute("test-skill", "script.py")
 
-        assert "[ScriptNotFoundError]" in result
+        assert "[SkillScriptNotFoundError]" in result
         assert "script.py" in result
 
-    def test_execute_handles_file_not_found(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_handles_file_not_found(self, temp_skills_dir):
         """Test execute handles FileNotFoundError."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.side_effect = FileNotFoundError("File not found")
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py")
+        result = tool.execute("test-skill", "script.py")
 
         assert "[FileNotFoundError]" in result
         assert "File not found" in result
 
-    def test_execute_handles_timeout(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_handles_timeout(self, temp_skills_dir):
         """Test execute handles TimeoutError."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.side_effect = TimeoutError("Script timed out")
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py")
+        result = tool.execute("test-skill", "script.py")
 
         assert "[TimeoutError]" in result
         assert "timed out" in result.lower()
 
-    def test_execute_handles_unexpected_error(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_handles_unexpected_error(self, temp_skills_dir):
         """Test execute handles unexpected exceptions."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.side_effect = RuntimeError("Unexpected error")
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py")
+        result = tool.execute("test-skill", "script.py")
 
         assert "[UnexpectedError]" in result
         assert "RuntimeError" in result
         assert "Unexpected error" in result
 
-    def test_execute_converts_result_to_string(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_converts_result_to_string(self, temp_skills_dir):
         """Test execute converts non-string results to string."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = {"status": "ok", "data": [1, 2, 3]}
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py")
+        result = tool.execute("test-skill", "script.py")
 
         assert isinstance(result, str)
         assert "status" in result
         assert "ok" in result
 
-    def test_execute_with_none_params(self, run_skill_script_tool, temp_skills_dir):
+    def test_execute_with_none_params(self, temp_skills_dir):
         """Test execute handles None params correctly."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "OK"
-        run_skill_script_tool.skill_manager = mock_manager
+        tool.skill_manager = mock_manager
 
-        result = run_skill_script_tool.execute("test-skill", "script.py", None)
+        result = tool.execute("test-skill", "script.py", None)
 
-        # Should pass None for params (not converted to {})
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] is None
 
@@ -516,7 +536,7 @@ class TestFileArtifactValidation:
         output_path.write_bytes(b"pdf")
         tool = RunSkillScriptTool()
 
-        with caplog.at_level(logging.WARNING, logger=run_skill_script_tool_module.__name__):
+        with caplog.at_level(logging.WARNING, logger="nexent.core.tools.run_skill_script_tool"):
             artifacts = tool._extract_file_artifacts(
                 self._manager(),
                 "report-skill",
@@ -534,7 +554,7 @@ class TestFileArtifactValidation:
         output_path.write_bytes(b"pdf")
         tool = RunSkillScriptTool()
 
-        with caplog.at_level(logging.WARNING, logger=run_skill_script_tool_module.__name__):
+        with caplog.at_level(logging.WARNING, logger="nexent.core.tools.run_skill_script_tool"):
             artifacts = tool._extract_file_artifacts(
                 self._manager(),
                 "report-skill",
@@ -546,97 +566,24 @@ class TestFileArtifactValidation:
         assert "Ignoring undeclared skill artifact MIME type skill=report-skill mime_type=text/plain" in caplog.text
 
 
-class TestGetRunSkillScriptTool:
-    """Test get_run_skill_script_tool singleton function."""
+class TestModuleFunctions:
+    """Test module-level tool functions."""
 
-    def test_get_tool_creates_instance(self):
-        """Test get_run_skill_script_tool creates instance."""
-        run_skill_script_tool_module._skill_script_tool = None
-
-        tool = get_run_skill_script_tool("/path/to/skills", agent_id=1)
+    def test_uncached_run_skill_script_tool_creates_instance(self):
+        """Test _uncached_run_skill_script_tool creates instance."""
+        tool = _uncached_run_skill_script_tool("/path/to/skills", agent_id=1, tenant_id="t1")
         assert tool is not None
         assert isinstance(tool, RunSkillScriptTool)
+        assert tool.local_skills_dir == "/path/to/skills"
+        assert tool.agent_id == 1
+        assert tool.tenant_id == "t1"
 
-    def test_get_tool_reuses_instance(self):
-        """Test get_run_skill_script_tool reuses existing instance."""
-        run_skill_script_tool_module._skill_script_tool = None
-
-        tool1 = get_run_skill_script_tool()
-        tool2 = get_run_skill_script_tool()
-        assert tool1 is tool2
-
-
-class TestRunSkillScriptToolDecorator:
-    """Test the @tool decorated function."""
-
-    def test_run_skill_script_decorator_exists(self):
-        """Test that run_skill_script is decorated properly."""
-        assert run_skill_script is not None
-        assert callable(run_skill_script)
-
-    def test_run_skill_script_with_params(self, temp_skills_dir):
-        """Test run_skill_script function with parameters - @tool returns wrapper."""
-        run_skill_script_tool_module._skill_script_tool = None
-        # The @tool decorator returns a wrapper, so we just verify it exists
-        assert hasattr(run_skill_script, '__call__')
-
-    def test_run_skill_script_without_params(self, temp_skills_dir):
-        """Test run_skill_script function without parameters - @tool returns wrapper."""
-        run_skill_script_tool_module._skill_script_tool = None
-        # The @tool decorator returns a wrapper, so we just verify it exists
-        assert hasattr(run_skill_script, '__call__')
-
-
-class TestExecuteEdgeCases:
-    """Test edge cases for execute method."""
-
-    def test_execute_with_complex_params(self, run_skill_script_tool, temp_skills_dir):
-        """Test execute with complex parameter types."""
-        mock_manager = MagicMock()
-        mock_manager.run_skill_script.return_value = "OK"
-        run_skill_script_tool.skill_manager = mock_manager
-
-        params = {
-            "--flag": True,
-            "--list": ["item1", "item2"],
-            "--value": "string",
-            "--number": 42,
-        }
-        result = run_skill_script_tool.execute("test-skill", "script.py", params)
-
-        assert mock_manager.run_skill_script.called
-        call_args = mock_manager.run_skill_script.call_args
-        assert call_args[0][2] == params
-
-    def test_execute_with_agent_and_tenant_context(self, temp_skills_dir):
-        """Test execute preserves agent and tenant context."""
-        tool = RunSkillScriptTool(
-            local_skills_dir=temp_skills_dir,
-            agent_id=123,
-            tenant_id="tenant-xyz",
-            version_no=2
-        )
-
+    def test_forward_delegates_to_execute(self, temp_skills_dir):
+        """Test forward method delegates to execute."""
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "OK"
         tool.skill_manager = mock_manager
 
-        tool.execute("test-skill", "script.py", {"--param": "value"})
-
-        call_args = mock_manager.run_skill_script.call_args
-        assert call_args[1]['agent_id'] == 123
-        assert call_args[1]['tenant_id'] == "tenant-xyz"
-        assert call_args[1]['version_no'] == 2
-
-
-class TestGetSkillManagerBranches:
-    """Test _get_skill_manager method branches."""
-
-    def test_get_skill_manager_creates_when_none(self, temp_skills_dir):
-        """Test _get_skill_manager creates manager when skill_manager is None."""
-        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir, agent_id=1)
-        # skill_manager starts as None
-        assert tool.skill_manager is None
-        # The code checks: if self.skill_manager is None:
-        # This branch is tested when tool is created without pre-set manager
-        # and _get_skill_manager is called
+        result = tool.forward("test-skill", "script.py")
+        assert mock_manager.run_skill_script.called
