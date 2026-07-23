@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 from sqlalchemy import text
@@ -84,7 +84,7 @@ def finish_audit(run_id: int, *, status: str, **values: Any) -> bool:
     payload = {
         **values,
         "status": status,
-        "finished_at": datetime.utcnow(),
+        "finished_at": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     if status != "failed":
         payload["current_phase"] = None

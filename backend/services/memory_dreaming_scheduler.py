@@ -2,7 +2,7 @@
 
 try:
     from services.memory_dreaming_service import get_memory_dreaming_service
-except (ImportError, ModuleNotFoundError):  # package-style unit-test imports
+except ImportError:  # package-style unit-test imports
     from .memory_dreaming_service import get_memory_dreaming_service
 
 

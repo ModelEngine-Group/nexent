@@ -1,7 +1,7 @@
 """Manual Dreaming run and audit endpoints."""
 
 from http import HTTPStatus
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -22,7 +22,7 @@ class DreamingRunRequest(BaseModel):
 @router.post("/run")
 def run_dreaming(
     payload: DreamingRunRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
 ):
     user_id, tenant_id = get_current_user_id(authorization)
     try:
@@ -39,10 +39,10 @@ def run_dreaming(
 
 @router.get("/audit")
 def list_dreaming_audits(
-    authorization: Optional[str] = Header(None),
-    agent_id: Optional[str] = Query(default=None),
-    run_id: Optional[int] = Query(default=None, ge=1),
-    limit: int = Query(default=100, ge=1, le=500),
+    authorization: Annotated[Optional[str], Header()] = None,
+    agent_id: Annotated[Optional[str], Query()] = None,
+    run_id: Annotated[Optional[int], Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ):
     user_id, tenant_id = get_current_user_id(authorization)
     return get_memory_dreaming_service().list_audits(

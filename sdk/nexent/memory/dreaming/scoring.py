@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterable, List, Optional
 
 from .models import (
@@ -47,7 +47,7 @@ def compute_metrics(
     now: Optional[datetime] = None,
     recency_half_life_days: float = 14,
 ) -> DreamingMetrics:
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     signal_count = max(0, candidate.recall_count) + max(0, candidate.daily_count) + max(0, candidate.grounded_count)
     unique_queries = len(set(candidate.query_hashes))
     unique_days = len(set(candidate.recall_days))
