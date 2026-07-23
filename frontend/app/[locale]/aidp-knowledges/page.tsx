@@ -1,48 +1,29 @@
 "use client";
 
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-
-import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useDeployment } from "@/components/providers/deploymentProvider";
-
-import AidpKnowledgeConfiguration from "@/ext_components/aidp/components/AidpKnowledgeConfiguration";
 
 /**
- * AIDP Knowledge Base configuration page entry.
- * Thin wrapper that provides page transition animation.
- * Redirects to home when the AIDP knowledge feature is disabled via env var.
+ * Legacy AIDP knowledge base entry page.
+ *
+ * After the frontend-toggle-plan redesign, the unified entry for all
+ * knowledge bases is `/knowledges`, which conditionally renders either
+ * `<AidpKnowledgeConfiguration />` or the built-in `<DataConfig />`
+ * based on the ENABLE_AIDP_KNOWLEDGE environment variable.
+ *
+ * This route is retained only for backward compatibility with existing
+ * bookmarks and links. It immediately redirects to `/knowledges` once
+ * the deployment config is ready.
  */
 export default function AidpKnowledgePage() {
-  const { pageVariants, pageTransition } = useSetupFlow();
-  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const router = useRouter();
 
-  // Redirect to home when AIDP knowledge feature is disabled
+  // Redirect to the unified `/knowledges` entry as soon as the page mounts.
+  // We don't gate this on deployment config because the unified entry
+  // handles both branches itself.
   useEffect(() => {
-    if (isDeploymentReady && !enableAidpKnowledge) {
-      router.replace("/");
-    }
-  }, [isDeploymentReady, enableAidpKnowledge, router]);
+    router.replace("/knowledges");
+  }, [router]);
 
-  // Render nothing while deployment info is loading or feature is disabled
-  if (!isDeploymentReady || !enableAidpKnowledge) {
-    return null;
-  }
-
-  return (
-    <div style={{ width: "100%", height: "100%", padding: "0 20px" }}>
-      <motion.div
-        initial="initial"
-        animate="in"
-        exit="out"
-        variants={pageVariants}
-        transition={pageTransition}
-        style={{ width: "100%", height: "100%" }}
-      >
-        <AidpKnowledgeConfiguration />
-      </motion.div>
-    </div>
-  );
+  return null;
 }

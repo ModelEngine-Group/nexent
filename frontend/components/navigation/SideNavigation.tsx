@@ -97,13 +97,6 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: "/agent-dev",
   },
   {
-    path: "/aidp-knowledges",
-    Icon: BookOpen,
-    labelKey: "sidebar.aidpKnowledge",
-    order: 5,
-    parentKey: "/agent-dev",
-  },
-  {
     path: "/agents",
     Icon: Bot,
     labelKey: "sidebar.agentConfig",
@@ -176,7 +169,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode, enableAidpKnowledge } = useDeployment();
+  const { isSpeedMode } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -246,10 +239,6 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     }
 
     const filtered = ROUTE_CONFIG.filter((route) => {
-      // Gate AIDP knowledge page behind feature flag
-      if (route.path === "/aidp-knowledges" && !enableAidpKnowledge) {
-        return false;
-      }
       return accessibleRoutes.includes(route.path);
     });
 
@@ -275,7 +264,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       ...root,
       children: childrenByParent.get(root.path) || [],
     }));
-  }, [accessibleRoutes, enableAidpKnowledge]);
+  }, [accessibleRoutes]);
 
   /**
    * Create a menu item from route configuration
