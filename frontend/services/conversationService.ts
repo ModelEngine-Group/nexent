@@ -887,7 +887,7 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
-      conversation_id: number;
+      conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
       minio_files?: Array<{
@@ -916,6 +916,11 @@ export const conversationService = {
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
       };
+
+      // Only include conversation_id if it has a value
+      if (params.conversation_id !== undefined && params.conversation_id !== null) {
+        requestParams.conversation_id = params.conversation_id;
+      }
 
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {

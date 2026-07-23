@@ -17,6 +17,7 @@ from consts.const import (
     ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
     OAUTH_CALLBACK_BASE_URL,
+    OAUTH_LOGIN_MODE,
     OAUTH_SSL_VERIFY,
     OAUTH_CA_BUNDLE,
     SUPABASE_JWT_SECRET,
@@ -89,6 +90,12 @@ def get_supported_providers() -> set:
     return set(get_all_provider_definitions().keys())
 
 
+def _get_oauth_login_mode() -> str:
+    if OAUTH_LOGIN_MODE in {"button", "force", "disabled"}:
+        return OAUTH_LOGIN_MODE
+    return "disabled"
+
+
 def get_enabled_providers() -> List[Dict[str, str]]:
     providers = []
     for name, definition in get_all_provider_definitions().items():
@@ -102,6 +109,31 @@ def get_enabled_providers() -> List[Dict[str, str]]:
                 }
             )
     return providers
+
+
+def get_oauth_config() -> Dict[str, Any]:
+    mode = _get_oauth_login_mode()
+    providers = get_enabled_providers()
+    auto_login_provider = None
+
+    if mode == "force":
+        if len(providers) == 1:
+            auto_login_provider = providers[0]["name"]
+        else:
+            logger.warning(
+                "OAuth auto login requires exactly one enabled provider; found %s",
+                len(providers),
+            )
+
+    if not providers:
+        mode = "disabled"
+
+    return {
+        "enabled": bool(providers),
+        "login_mode": mode,
+        "auto_login_provider": auto_login_provider,
+        "providers": providers,
+    }
 
 
 def get_authorize_url(provider: str, link_user_id: str = "") -> str:

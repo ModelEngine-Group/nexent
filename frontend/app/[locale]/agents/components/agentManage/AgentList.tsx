@@ -348,8 +348,9 @@ export default function AgentList({
           setCurrentAgent(null);
         }
 
-        // Refresh agent list
+        // Refresh agent lists
         queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
       },
       onError: () => {
         message.error(t("businessLogic.config.error.agentDeleteFailed"));

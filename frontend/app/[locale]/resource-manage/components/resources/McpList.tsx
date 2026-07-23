@@ -840,6 +840,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         maxLength={20}
                         disabled={actionsLocked || addingServer}
                         style={{ flex: 0.8 }}
+                        autoComplete="off"
                       />
                       <Input
                         placeholder={t("mcpConfig.addServer.urlPlaceholder")}
@@ -847,6 +848,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         onChange={(e) => setNewServerUrl(e.target.value)}
                         disabled={actionsLocked || addingServer}
                         style={{ flex: 3 }}
+                        autoComplete="off"
                       />
                     </div>
                     <Input.TextArea
@@ -864,6 +866,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         onChange={(e) => setNewServerAuthorizationToken(e.target.value)}
                         disabled={actionsLocked || addingServer}
                         className="flex-1"
+                        autoComplete="new-password"
                       />
                       <Button
                         type="primary"
@@ -991,6 +994,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         onChange={(e) => setUploadAuthorizationToken(e.target.value)}
                         className="flex-1"
                         disabled={actionsLocked}
+                        autoComplete="new-password"
                       />
                       <Button
                         type="primary"

@@ -11,10 +11,11 @@ import {
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
-import { McpSource, McpTransportType } from "@/const/mcpTools";
+import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
-import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
+import { uploadMcpImage } from "@/services/mcpService";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface UseMcpAddLocalParams {
   onSuccess: () => void;
@@ -28,6 +29,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const { user } = useAuthorizationContext();
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (draft: LocalAddMcpDraft): Promise<boolean> => {
@@ -37,8 +39,10 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return false;
     }
 
-    const isContainer = draft.transportType === McpTransportType.CONTAINER;
-    if (isContainer) {
+    const isContainer = draft.deploymentType === McpDeploymentType.CONTAINER;
+    const isApi = draft.deploymentType === McpDeploymentType.API;
+    const isLocalImage = draft.deploymentType === McpDeploymentType.LOCAL_IMAGE;
+    if (isContainer || isLocalImage) {
       const available = await checkContainerPortAvailable(draft.containerPort);
       if (!available) {
         message.error(
@@ -59,9 +63,51 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       }
     }
 
+    // Parse OpenAPI JSON for API type
+    let configJson: Record<string, unknown> | undefined;
+    if (isApi) {
+      const raw = (draft.openApiJson ?? "").trim();
+      if (!raw) {
+        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        return false;
+      }
+      try {
+        configJson = JSON.parse(raw);
+      } catch {
+        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        return false;
+      }
+    }
+
     setSubmitting(true);
     try {
-      if (isContainer) {
+      // Embed creator identity so the "我的" card can display the developer
+      const registryJson: Record<string, unknown> = {};
+      if (user?.email) {
+        registryJson["_authorDisplayName"] = user.email;
+      }
+
+      if (isLocalImage) {
+        const file = draft.uploadImageFile;
+        if (!file) {
+          message.error(t("mcpConfig.message.uploadImageFileRequired"));
+          return false;
+        }
+        if (!file.name.endsWith(".tar")) {
+          message.error(t("mcpConfig.message.uploadImageInvalidFileType"));
+          return false;
+        }
+        if (!draft.containerPort || draft.containerPort < 1 || draft.containerPort > 65535) {
+          message.error(t("mcpConfig.message.uploadImageValidPortRequired"));
+          return false;
+        }
+
+        const envVars = draft.authorizationToken?.trim()
+          ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
+          : undefined;
+
+        await uploadMcpImage(file, draft.containerPort, trimmedName, envVars);
+      } else if (isContainer) {
         const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
         if (!mcpConfig) {
           message.error(t("mcpTools.add.error.containerJsonInvalid"));
@@ -74,6 +120,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           tags: draft.tags,
           source: McpSource.LOCAL,
           authorization_token: draft.authorizationToken?.trim() || undefined,
+          registry_json: registryJson,
           port: draft.containerPort as number,
           mcp_config: mcpConfig,
         });
@@ -85,6 +132,8 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken?.trim() || undefined,
           custom_headers: customHeaders,
+          config_json: configJson,
+          registry_json: registryJson,
           tags: draft.tags,
         });
       }
@@ -102,7 +151,14 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return true;
     } catch (error) {
       log.error("[useMcpAddLocal] Failed to add service", { error });
-      message.error(t("mcpTools.add.failed"));
+      const msg = error instanceof Error ? error.message : "";
+      if (/already exists|name conflict|name already used/i.test(msg)) {
+        message.error(t("mcpTools.add.error.nameExists"));
+      } else if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
+        message.error(t("mcpTools.add.error.connectionFailed"));
+      } else {
+        message.error(msg || t("mcpTools.add.failed"));
+      }
       return false;
     } finally {
       setSubmitting(false);

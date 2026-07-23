@@ -50,9 +50,20 @@ class RunSkillScriptTool:
     ) -> str:
         """Execute a skill script with given parameters.
 
+        ``script_path`` is always resolved relative to the skill's root
+        directory (``<local_skills_dir>/<skill_name>``), regardless of the
+        caller's working directory. The path may be supplied in any of the
+        forms an LLM might emit after reading a SKILL.md body - bare
+        relative paths (``scripts/analyze.py``), ``./`` prefixed paths, or
+        values extracted from inline backticks/fenced code blocks (with or
+        without surrounding quotes). If the script cannot be located the
+        returned error message lists the available scripts under the skill
+        to help diagnose the mistake.
+
         Args:
             skill_name: Name of the skill containing the script
-            script_path: Path to script relative to skill directory (e.g., "scripts/analyze.py")
+            script_path: Path to script relative to skill directory
+                (e.g. ``scripts/analyze.py``).
             params: Parameters to pass to the script as a raw string.
                 The string is appended directly to the command line.
 
@@ -110,14 +121,21 @@ def get_run_skill_script_tool(
 def run_skill_script(skill_name: str, script_path: str, params: Optional[str] = None) -> str:
     """Execute a skill script with given parameters.
 
-    This tool runs Python or shell scripts that are part of a skill.
-    Scripts must be declared in the skill content using <use_script path="..." /> tags.
+    This tool runs Python or shell scripts that are part of a skill. Scripts
+    are declared in the skill via XML tags such as
+    ``<use_script path="..." />``. The ``script_path`` is always resolved
+    **relative to the skill's root directory**, not the agent's current
+    working directory. Common forms like ``scripts/foo`` (no extension) are
+    also accepted via .py/.sh fall-back resolution.
 
     Args:
         skill_name: Name of the skill containing the script (e.g., "code-reviewer")
-        script_path: Path to the script relative to skill directory (e.g., "scripts/analyze.py")
+        script_path: Path to the script relative to the skill root directory
+            (e.g. ``"scripts/analyze.py"``, ``"./scripts/analyze.py"``,
+            ``"scripts/sub/run.sh"``). May be supplied bare or wrapped in
+            quotes if it was extracted from markdown formatting.
         params: Raw command-line argument string to pass to the script.
-            Example: "--target /path/to/file -c --code \"SELECT 1\""
+            Example: ``--target /path/to/file -c --code "SELECT 1"``
 
     Returns:
         Script execution result as string

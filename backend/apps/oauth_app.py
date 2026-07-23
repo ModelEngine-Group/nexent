@@ -24,6 +24,7 @@ from services.oauth_service import (
     generate_pending_oauth_token,
     get_authorize_url,
     get_enabled_providers,
+    get_oauth_config,
     get_pending_oauth_info,
     get_provider_user_info,
     list_linked_accounts,
@@ -39,6 +40,14 @@ from utils.auth_utils import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])
+
+
+@router.get("/config")
+async def get_config():
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={"message": "success", "data": get_oauth_config()},
+    )
 
 
 @router.get("/providers")

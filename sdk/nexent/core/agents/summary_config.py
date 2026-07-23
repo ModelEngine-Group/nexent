@@ -73,7 +73,7 @@ class ContextManagerConfig:
     """Context component selection strategy.
     
     Options:
-    - 'full': Keep all components (for unlimited context models)
+    - 'full': Keep all components without component budget pruning
     - 'token_budget': Select components within token budget by priority
     - 'buffered': Keep last N components per type
     - 'priority': Weight by importance + relevance scores

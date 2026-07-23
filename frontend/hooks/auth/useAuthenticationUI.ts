@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
@@ -9,8 +9,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
-import { authFlowState } from "@/lib/authFlow";
-import { casService } from "@/services/casService";
+import { forcedLoginService } from "@/services/forcedLoginService";
 import { AuthenticationUIReturn, RegisterModalOptions } from "@/types/auth";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
@@ -38,7 +37,6 @@ export function useAuthenticationUI({
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
   const isSharePage = effectivePath.startsWith("/share/");
-  const isRedirectingToCasRef = useRef(false);
 
   // UI state for modals - managed locally within the hook
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -62,7 +60,7 @@ export function useAuthenticationUI({
     fetchSSOConfig();
   }, []);
 
-  const handleUnauthenticatedModalClose = () => {
+  const handleUnauthenticatedModalClose = useCallback(() => {
     // Only emit back to home event and redirect if user is not authenticated
     if (!isAuthenticated && !isSpeedMode && !isSharePage) {
       // Emit event to notify SideNavigation to reset selected key
@@ -72,10 +70,32 @@ export function useAuthenticationUI({
         router.push("/");
       }
     }
-  };
+  }, [
+    effectivePath,
+    isAuthenticated,
+    isOAuthCompletePage,
+    isSharePage,
+    isSpeedMode,
+    router,
+  ]);
+
+  const redirectToForcedLogin = useCallback(
+    (redirect?: string): Promise<boolean> =>
+      forcedLoginService.redirectIfNeeded(redirect),
+    []
+  );
 
   // Modal control functions
-  const openLoginModal = useCallback(() => setIsLoginModalOpen(true), []);
+  const openLoginModal = useCallback(() => {
+    if (isSharePage) {
+      setIsLoginModalOpen(true);
+      return;
+    }
+
+    redirectToForcedLogin(effectivePath).then((redirected) => {
+      if (!redirected) setIsLoginModalOpen(true);
+    });
+  }, [effectivePath, isSharePage, redirectToForcedLogin]);
 
   const closeLoginModal = useCallback(() => {
     setIsLoginModalOpen(false);
@@ -93,30 +113,14 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  const redirectToCasIfForced = useCallback(
-    async (redirect?: string): Promise<boolean> => {
-      if (isRedirectingToCasRef.current) return true;
-      if (authFlowState.isExplicitLogoutInProgress()) return true;
-
-      const config = await casService.getConfig();
-      if (authFlowState.isExplicitLogoutInProgress()) return true;
-      if (!config.enabled || config.login_mode !== "force") return false;
-
-      isRedirectingToCasRef.current = true;
-      casService.startLogin(redirect);
-      return true;
-    },
-    []
-  );
-
   const openAuthPromptModal = useCallback(
     (redirect?: string) => {
       if (isSharePage) return;
-      redirectToCasIfForced(redirect || effectivePath).then((redirected) => {
+      redirectToForcedLogin(redirect || effectivePath).then((redirected) => {
         if (!redirected) setIsAuthPromptModalOpen(true);
       });
     },
-    [effectivePath, isSharePage, redirectToCasIfForced]
+    [effectivePath, isSharePage, redirectToForcedLogin]
   );
 
   const closeAuthPromptModal = useCallback(() => {
@@ -124,16 +128,18 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  const openSessionExpiredModal = useCallback(
-    () => setIsSessionExpiredModalOpen(true),
-    []
-  );
+  const openSessionExpiredModal = useCallback(() => {
+    if (isSharePage) return;
+    redirectToForcedLogin(effectivePath).then((redirected) => {
+      if (!redirected) setIsSessionExpiredModalOpen(true);
+    });
+  }, [effectivePath, isSharePage, redirectToForcedLogin]);
 
   const closeSessionExpiredModal = useCallback(() => {
     clearLocalSession();
     setIsSessionExpiredModalOpen(false);
     handleUnauthenticatedModalClose();
-  }, [handleUnauthenticatedModalClose]);
+  }, [clearLocalSession, handleUnauthenticatedModalClose]);
 
   const getOAuthErrorMessage = useCallback(
     (error: string) => {
@@ -158,9 +164,7 @@ export function useAuthenticationUI({
         return;
       }
 
-      redirectToCasIfForced(effectivePath).then((redirected) => {
-        if (!redirected) setIsSessionExpiredModalOpen(true);
-      });
+      openSessionExpiredModal();
     };
 
     const handleRegisterSuccess = () => {
@@ -194,7 +198,7 @@ export function useAuthenticationUI({
     effectivePath,
     isSpeedMode,
     isSharePage,
-    redirectToCasIfForced,
+    openSessionExpiredModal,
     isLoginModalOpen,
     isRegisterModalOpen,
     openAuthPromptModal,
@@ -217,6 +221,7 @@ export function useAuthenticationUI({
 
     const oauthError = searchParams.get("oauth_error");
     if (oauthError && !isLoginModalOpen) {
+      forcedLoginService.suppressOAuthAutoLogin();
       setIsLoginModalOpen(true);
     }
   }, [
@@ -258,9 +263,7 @@ export function useAuthenticationUI({
       return;
     }
 
-    openAuthPromptModal();
-
-    redirectToCasIfForced(effectivePath).then((redirected) => {
+    redirectToForcedLogin(effectivePath).then((redirected) => {
       if (!cancelled && !redirected) {
         setIsAuthPromptModalOpen(true);
       }
@@ -279,9 +282,8 @@ export function useAuthenticationUI({
     isRegisterModalOpen,
     isOAuthCompletePage,
     isSharePage,
-    redirectToCasIfForced,
     ssoConfig,
-    openAuthPromptModal,
+    redirectToForcedLogin,
   ]);
 
   return {

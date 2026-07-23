@@ -21,6 +21,21 @@ sys.modules['boto3'] = boto3_module
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
+import services as _services_mod
+import types as _types
+_mcp_container_svc_stub = _types.ModuleType('services.mcp_container_service')
+_mcp_container_svc_stub.create_container_client_from_config = MagicMock()
+_mcp_container_svc_stub.DockerContainerConfig = MagicMock()
+_mcp_container_svc_stub.MCPContainerManager = MagicMock()
+_services_mod.mcp_container_service = _mcp_container_svc_stub
+sys.modules['services.mcp_container_service'] = _mcp_container_svc_stub
+
+# Pre-register stubs for service modules that remote_mcp_app.py imports at module
+# level but whose full import chain pulls in unavailable third-party packages
+# (docker SDK, jieba, mcpadapt, …).
+sys.modules['services.tool_configuration_service'] = MagicMock()
+sys.modules['services.file_management_service'] = MagicMock()
+sys.modules['services.vectordatabase_service'] = MagicMock()
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
@@ -39,6 +54,7 @@ patch('services.mcp_container_service.DockerContainerConfig').start()
 from backend.consts.exceptions import (
     MCPConnectionError, MCPNameIllegal, MCPContainerError,
     McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError,
+    UnauthorizedError,
 )
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -54,6 +70,7 @@ remote_app.McpNotFoundError = McpNotFoundError
 remote_app.McpValidationError = McpValidationError
 remote_app.McpNameConflictError = McpNameConflictError
 remote_app.McpPortConflictError = McpPortConflictError
+remote_app.UnauthorizedError = UnauthorizedError
 
 app = FastAPI()
 app.include_router(router)
@@ -352,6 +369,103 @@ class TestGetMcpList:
         mock_list.return_value = []
         resp = client.get("/mcp/list?tenant_id=explicit_tid", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    def test_list_unauthorized(self, mock_auth):
+        mock_auth.side_effect = UnauthorizedError("unauthorized")
+        resp = client.get("/mcp/list", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.UNAUTHORIZED
+
+
+# ============================================================================
+# POST /mcp/refresh-tools
+# ============================================================================
+
+class TestRefreshTools:
+    """Test POST /mcp/refresh-tools"""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_success(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_not_found(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = McpNotFoundError("not found")
+        resp = client.post("/mcp/refresh-tools?mcp_id=999", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_validation_error(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = McpValidationError("invalid")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_connection_error(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = MCPConnectionError("connection failed")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.refresh_mcp_service_tool_count')
+    def test_refresh_server_error(self, mock_refresh, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_refresh.side_effect = RuntimeError("unexpected")
+        resp = client.post("/mcp/refresh-tools?mcp_id=1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# ============================================================================
+# POST /mcp/test-connection
+# ============================================================================
+
+class TestMcpConnection:
+    """Test POST /mcp/test-connection"""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.test_mcp_connection')
+    def test_connection_success(self, mock_test, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.return_value = True
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["success"] is True
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.test_mcp_connection')
+    def test_connection_failure(self, mock_test, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.return_value = False
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["success"] is False
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.test_mcp_connection')
+    def test_connection_exception(self, mock_test, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.side_effect = RuntimeError("connection timeout")
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        # test-connection catches all exceptions and returns 200 with success=False
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["success"] is False
+        assert "connection timeout" in resp.json()["error"]
 
 
 # ============================================================================

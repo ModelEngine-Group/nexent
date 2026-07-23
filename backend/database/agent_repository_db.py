@@ -28,7 +28,6 @@ _UPSERT_SNAPSHOT_FIELDS = frozenset({
     "display_name",
     "description",
     "author",
-    "category_id",
     "tags",
     "tool_count",
     "version_name",
@@ -179,7 +178,6 @@ def list_agent_repository_summaries(
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
-    category_id: Optional[int] = None,
 ) -> List[dict]:
     """List active repository summaries for a publisher tenant without heavy JSON blobs."""
     with get_db_session() as session:
@@ -192,7 +190,6 @@ def list_agent_repository_summaries(
             AgentRepository.display_name,
             AgentRepository.description,
             AgentRepository.status,
-            AgentRepository.category_id,
             AgentRepository.tags,
             AgentRepository.tool_count,
             AgentRepository.version_name,
@@ -205,8 +202,6 @@ def list_agent_repository_summaries(
             query = query.filter(AgentRepository.status == status)
         if agent_id is not None:
             query = query.filter(AgentRepository.agent_id == agent_id)
-        if category_id is not None:
-            query = query.filter(AgentRepository.category_id == category_id)
         rows = query.order_by(AgentRepository.agent_repository_id.desc()).all()
         return [
             {
@@ -218,7 +213,6 @@ def list_agent_repository_summaries(
                 "display_name": row.display_name,
                 "description": row.description,
                 "status": row.status,
-                "category_id": row.category_id,
                 "tags": row.tags,
                 "tool_count": row.tool_count,
                 "version_name": row.version_name,
@@ -242,7 +236,6 @@ def update_agent_repository_by_id(
         "description",
         "author",
         "submitted_by",
-        "category_id",
         "tags",
         "tool_count",
         "version_name",

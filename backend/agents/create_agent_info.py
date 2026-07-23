@@ -974,7 +974,7 @@ async def create_agent_config(
             language=language,
             agent_id=agent_id
         ),
-        tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
+        tools=available_tools,
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
@@ -1107,7 +1107,7 @@ async def create_tool_config_list(
                     f"No embedding model found for index '{index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
-        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
+        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None

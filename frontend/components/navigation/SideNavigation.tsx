@@ -314,7 +314,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     });
   };
 
-  const menuItems: MenuProps["items"] = buildMenuItems();
+  const menuItems: MenuProps["items"] = buildMenuItems() ?? [];
 
   // Add workflow menu item if enabled (only for authenticated users)
   const workflowMenuItem = isAuthenticated && workflowConfig?.workflow_enabled && workflowConfig?.workflow_url

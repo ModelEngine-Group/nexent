@@ -56,7 +56,6 @@ class _AgentRepositoryModel:
     description = MagicMock(name="description")
     author = MagicMock(name="author")
     submitted_by = MagicMock(name="submitted_by")
-    category_id = MagicMock(name="category_id")
     tags = MagicMock(name="tags")
     tool_count = MagicMock(name="tool_count")
     icon = MagicMock(name="icon")
@@ -145,7 +144,6 @@ class MockAgentRepository:
             "description": "desc",
             "author": "author",
             "submitted_by": None,
-            "category_id": 1,
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
@@ -172,7 +170,6 @@ class MockSummaryRow:
             "display_name": "Test Agent",
             "description": "desc",
             "status": STATUS_NOT_SHARED,
-            "category_id": 1,
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
@@ -545,7 +542,6 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "display_name",
         "description",
         "status",
-        "category_id",
         "tags",
         "tool_count",
         "version_name",
@@ -566,11 +562,10 @@ def test_list_agent_repository_summaries_with_filters(monkeypatch, mock_session)
         "tenant-1",
         status="shared",
         agent_id=10,
-        category_id=3,
     )
 
     assert result == []
-    assert inner_query.filter.call_count == 3
+    assert inner_query.filter.call_count == 2
 
 
 def test_list_agent_repository_summaries_empty(monkeypatch, mock_session):

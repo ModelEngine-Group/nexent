@@ -236,6 +236,17 @@ class NexentAgent:
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+            elif class_name == "RAGFlowSearchTool":
+                # RAGFlowSearchTool does not accept rerank/rerank_model_name as
+                # init params — RAGFlow handles reranking internally via its API.
+                # The rerank_model attribute is set post-init for display and
+                # observability purposes only (e.g., showing model info in the UI).
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model", "rerank", "rerank_model_name"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
             elif class_name == "HaotianSearchTool":
                 # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
                 filtered_params = {k: v for k, v in params.items()

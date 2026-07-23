@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, message } from "antd";
 import { CheckCircle, AlertTriangle, RefreshCw } from "lucide-react";
-import { oauthService } from "@/services/oauthService";
+import { oauthService, type SSOCheckResult } from "@/services/oauthService";
 import log from "@/lib/logger";
 
 interface SSOStatusBannerProps {
@@ -13,7 +13,7 @@ interface SSOStatusBannerProps {
 
 export function SSOStatusBanner({ compact = false }: SSOStatusBannerProps) {
   const { t } = useTranslation("common");
-  const [status, setStatus] = useState<oauthService.SSOCheckResult | null>(null);
+  const [status, setStatus] = useState<SSOCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [reauthorizing, setReauthorizing] = useState(false);
 

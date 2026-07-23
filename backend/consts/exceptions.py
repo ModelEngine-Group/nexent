@@ -95,6 +95,12 @@ class UnauthorizedError(Exception):
     pass
 
 
+class ForbiddenError(Exception):
+    """Raised when an authenticated user lacks permission."""
+
+    pass
+
+
 class SignatureValidationError(Exception):
     """Raised when X-Signature header is missing or does not match the expected HMAC value."""
 
@@ -291,7 +297,6 @@ class AdminCreateUserException(Exception):
 
 # Common aliases
 ParameterInvalidError = ValidationError
-ForbiddenError = Exception  # Generic fallback
 ServiceUnavailableError = Exception  # Generic fallback
 DatabaseError = Exception  # Generic fallback
 TimeoutError = TimeoutException
