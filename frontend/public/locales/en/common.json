@@ -3804,7 +3804,7 @@
   "setup.navigation.button.saving": "Saving...",
   "space.new": "New Space",
   "toolConfig.validation.array.invalid": "Please enter valid array JSON",
-  "toolConfig.validation.object.invalid": "Please enter valid object JSON"
+  "toolConfig.validation.object.invalid": "Please enter valid object JSON",
   "skillSpace.comingSoon.badge": "Coming Soon",
 
   "aidpKnowledge.pageTitle": "AIDP Knowledge Bases",
