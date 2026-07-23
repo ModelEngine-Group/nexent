@@ -159,8 +159,12 @@ export default function SelectToolsDialog({
 
   // --- Merge instance params for a tool ---
   const mergeInstanceParams = useCallback(
-    async (tool: any): Promise<ToolParam[]> => {
+    async (tool: any, forceFetch?: boolean): Promise<ToolParam[]> => {
       const params = tool.initParams || [];
+      const hasStoredParams = params.some((p: ToolParam) => p.value !== undefined && p.value !== null && p.value !== "");
+      if (!forceFetch && hasStoredParams) {
+        return params;
+      }
       if (!currentAgentId) return params;
       try {
         const { searchToolConfig } = await import("@/services/agentConfigService");

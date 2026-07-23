@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
+import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
@@ -62,12 +63,20 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
   const [configParams, setConfigParams] = useState<ToolParam[]>([]);
   const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
 
+  const { availableTools } = useToolList({ enabled: true });
   // --- Group by source → category ---
   const grouped = groupToolsBySource(selectedTools);
 
   const mergeParams = useCallback(
-    async (tool: Tool): Promise<ToolParam[]> => {
+    async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
       const params = tool.initParams || [];
+      // If tool already has stored params in the agent config store, the user's
+      // unsaved modifications are already reflected in those params — skip the
+      // API call to avoid overwriting them with stale server data.
+      const hasStoredParams = params.some((p) => p.value !== undefined && p.value !== null && p.value !== "");
+      if (!forceFetch && hasStoredParams) {
+        return params;
+      }
       if (!currentAgentId) return params;
       try {
         const { searchToolConfig } = await import("@/services/agentConfigService");
@@ -90,13 +99,25 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
       if (kbType) prefetchKnowledgeBases(kbType);
       const current = useAgentConfigStore.getState().editedAgent.tools;
       const configured = current.find((t) => parseInt(t.id) === parseInt(tool.id));
-      const toolToUse = configured ? { ...tool, ...configured, initParams: configured.initParams } : tool;
+      const configuredTool = configured
+        ? { ...tool, ...configured, initParams: configured.initParams }
+        : tool;
+      // Backfill fields that may be missing from the stored tool (e.g.
+      // `inputs`, which is required for the tool test panel to enter
+      // parsed mode). The canonical source for these fields is the
+      // tool list returned by /tool/list.
+      const canonical = availableTools.find(
+        (t: any) => parseInt(String(t.id)) === parseInt(tool.id)
+      );
+      const toolToUse = canonical
+        ? { ...configuredTool, ...canonical, initParams: configuredTool.initParams }
+        : configuredTool;
       const merged = await mergeParams(toolToUse);
       setConfigTool(toolToUse);
       setConfigParams(merged);
       setModalOpen(true);
     },
-    [mergeParams, prefetchKnowledgeBases]
+    [mergeParams, prefetchKnowledgeBases, availableTools]
   );
 
   const removeTool = useCallback(
