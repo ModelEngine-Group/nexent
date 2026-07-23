@@ -229,4 +229,10 @@ class DashScopeModelProvider(AbstractModelProvider):
             else:
                 return []
         except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
-            return _classify_provider_error("DashScope", exception=e)
+            status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) and getattr(e, "response", None) else None
+            return _classify_provider_error(
+                "DashScope",
+                status_code=status_code,
+                error_message=str(e),
+                exception=e,
+            )
