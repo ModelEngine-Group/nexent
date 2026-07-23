@@ -707,6 +707,7 @@ async def create_agent_config(
     allow_memory_search: bool = True,
     version_no: int = 0,
     override_model_id: int | None = None,
+    conversation_id: int = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     request_context_policy: Optional[Dict[str, Any]] = None,
@@ -748,6 +749,7 @@ async def create_agent_config(
         tenant_id,
         user_id,
         version_no=version_no,
+        conversation_id=conversation_id,
         tool_params=normalized_tool_params,
     )
 
@@ -1083,6 +1085,7 @@ async def create_tool_config_list(
     tenant_id,
     user_id,
     version_no: int = 0,
+    conversation_id: int = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     tool_config_list = []
@@ -1223,6 +1226,17 @@ async def create_tool_config_list(
                 "vlm_model": get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name == "ScheduledTaskTool":
+            from database.scheduled_task_db import create_scheduled_task, query_tasks_by_agent, cancel_task
+            tool_config.metadata = {
+                "db_create": create_scheduled_task,
+                "db_list": query_tasks_by_agent,
+                "db_cancel": cancel_task,
+                "agent_id": agent_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "conversation_id": conversation_id,
             }
 
         tool_config_list.append(tool_config)
@@ -1489,6 +1503,7 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
+    conversation_id: int = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     context_policy: Optional[Dict[str, Any]] = None,
@@ -1521,6 +1536,7 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
+        "conversation_id": conversation_id,
         "enable_planning": enable_planning,
     }
     if override_model_id is not None:

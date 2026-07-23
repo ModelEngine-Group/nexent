@@ -307,6 +307,15 @@ class NexentAgent:
                     "agent_id", "") if tool_config.metadata else ""
                 tools_obj.memory_user_config = tool_config.metadata.get(
                     "memory_user_config", None) if tool_config.metadata else None
+            elif class_name == "ScheduledTaskTool":
+                tools_obj = tool_class()
+                # Inject DB functions and context from metadata
+                if tool_config.metadata:
+                    for attr in ("db_create", "db_list", "db_cancel",
+                                 "agent_id", "tenant_id", "user_id",
+                                 "conversation_id"):
+                        if attr in tool_config.metadata:
+                            setattr(tools_obj, attr, tool_config.metadata[attr])
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

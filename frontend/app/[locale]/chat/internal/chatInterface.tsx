@@ -370,6 +370,94 @@ export function ChatInterface() {
     };
   }, [attachments, fileUrls]);
 
+  // ---- Scheduled-task polling ----
+  // Track the max message index per conversation for polling
+  const pollingIndexRef = useRef<{[cid: number]: number}>({});
+
+  // Helper: refresh conversation messages from API and update sessionMessages.
+  // Reuses the same extractors as normal history loading so tool-call steps
+  // (thinking/code/execution) are preserved, not just the final answer.
+  const refreshConversation = useCallback(async (cid: number, scroll: boolean = false) => {
+    const detail = await conversationService.getDetail(cid);
+    if (detail?.code === 0 && detail.data?.[0]?.message) {
+      const conversationData = detail.data[0] as ApiConversationDetail;
+      const create_time = conversationData.create_time;
+      const formatted: ChatMessageType[] = [];
+      conversationData.message.forEach((dialog_msg, index) => {
+        if (dialog_msg.role === MESSAGE_ROLES.USER) {
+          formatted.push(extractUserMsgFromResponse(dialog_msg, index, create_time));
+        } else if (dialog_msg.role === MESSAGE_ROLES.ASSISTANT) {
+          formatted.push(extractAssistantMsgFromResponse(dialog_msg, index, create_time, t));
+        }
+      });
+      setSessionMessages(prev => ({ ...prev, [cid]: formatted }));
+      if (scroll) setShouldScrollToBottom(true);
+    }
+  }, [t]);
+
+  // Layer 1 (5s): poll the currently active conversation
+  useEffect(() => {
+    const cid = conversationManagement.selectedConversationId;
+    if (!cid) return;
+
+    const timer = setInterval(async () => {
+      try {
+        const sinceIdx = pollingIndexRef.current[cid] ?? -1;
+        const result = await conversationService.checkNewMessages(cid, sinceIdx);
+        if (result?.has_new) {
+          // While this conversation is actively streaming, do NOT overwrite the
+          // live messages with a full reload — that would wipe the in-progress
+          // tool-call rendering. Just advance the baseline; the stream itself
+          // updates the UI.
+          if (streamingConversations.has(cid)) {
+            pollingIndexRef.current[cid] = result.max_index;
+            return;
+          }
+          pollingIndexRef.current[cid] = result.max_index;
+          await refreshConversation(cid, true);
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [conversationManagement.selectedConversationId, refreshConversation, streamingConversations]);
+
+  // Layer 2 (10s): batch-poll all other cached conversations for silent cache update
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      const activeCid = conversationManagement.selectedConversationId;
+      const allCids = Object.keys(sessionMessages)
+        .map(Number)
+        .filter(id => id !== activeCid);
+      if (allCids.length === 0) return;
+
+      const checks = allCids.map(cid => ({
+        conversation_id: cid,
+        since_index: pollingIndexRef.current[cid] ?? -1,
+      }));
+
+      try {
+        const result = await conversationService.batchCheckNewMessages(checks);
+        const results = result?.results || {};
+        for (const cidStr of Object.keys(results)) {
+          const info = results[cidStr];
+          if (info?.has_new) {
+            const cid = Number(cidStr);
+            pollingIndexRef.current[cid] = info.max_index;
+            refreshConversation(cid).catch(() => {});
+          }
+        }
+      } catch {
+        // Silently ignore batch polling errors
+      }
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, [conversationManagement.selectedConversationId, sessionMessages, refreshConversation]);
+  // ---- End scheduled-task polling ----
+
   // Handle file upload
   const handleFileUpload = (file: File) => {
     return preProcessHandleFileUpload(file, setFileUrls, t);

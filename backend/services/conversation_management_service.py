@@ -472,6 +472,17 @@ def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[
     return None
 
 
+def get_new_messages_service(conversation_id: int, user_id: str, since_index: int) -> Dict[str, Any]:
+    """Lightweight polling: check for new messages after since_index."""
+    from database.conversation_db import get_conversation, get_max_message_index
+    conv = get_conversation(conversation_id, user_id)
+    if conv is None:
+        return {"has_new": False, "max_index": since_index, "since_index": since_index}
+    max_idx = get_max_message_index(conversation_id)
+    has_new = max_idx > since_index
+    return {"has_new": has_new, "max_index": max_idx, "since_index": since_index}
+
+
 def get_conversation_history_service(conversation_id: int, user_id: str) -> List[Dict[str, Any]]:
     """
     Get complete history of specified conversation

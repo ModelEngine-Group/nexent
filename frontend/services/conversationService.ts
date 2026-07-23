@@ -1045,4 +1045,30 @@ export const conversationService = {
 
     throw new ApiError(data.code, data.message);
   },
+
+  // Check for new messages in a single conversation (lightweight polling)
+  async checkNewMessages(conversationId: number, sinceIndex: number) {
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.newMessages(conversationId)}?since_index=${sinceIndex}`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    const data = await response.json();
+    return data;
+  },
+
+  // Batch check for new messages across multiple conversations
+  async batchCheckNewMessages(checks: Array<{ conversation_id: number; since_index: number }>) {
+    const response = await fetch(API_ENDPOINTS.conversation.batchNewMessages, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ checks }),
+    });
+
+    const data = await response.json();
+    return data;
+  },
 };

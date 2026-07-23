@@ -1225,6 +1225,17 @@ def get_source_searches_by_conversation(conversation_id: int, user_id: Optional[
         return [as_dict(record) for record in search_records]
 
 
+def get_max_message_index(conversation_id: int) -> int:
+    """Return the maximum message_index for a conversation, or -1 if empty."""
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+        stmt = select(func.coalesce(func.max(ConversationMessage.message_index), -1)).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == 'N',
+        )
+        return session.execute(stmt).scalar()
+
+
 def get_message(message_id: int, user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Get message details by message ID

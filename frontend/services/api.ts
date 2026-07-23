@@ -58,6 +58,8 @@ export const API_ENDPOINTS = {
     sources: `${API_BASE_URL}/conversation/sources`,
     opinion: `${API_BASE_URL}/conversation/message/update_opinion`,
     messageId: `${API_BASE_URL}/conversation/message/id`,
+    newMessages: (id: number) => `${API_BASE_URL}/conversation/${id}/new_messages`,
+    batchNewMessages: `${API_BASE_URL}/conversation/batch_new_messages`,
   },
   share: {
     createConversation: (conversationId: number) =>
