@@ -3770,26 +3770,27 @@ class TestElasticSearchService(unittest.TestCase):
         # Should succeed, embedding model IS called but returns empty
         self.assertEqual(result["status"], "success")
 
-    def test_update_chunk_builds_payload_and_calls_core(self):
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_builds_payload_and_calls_core(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
         """
-        Test update_chunk builds update payload and delegates to vdb_core.update_chunk.
+        Test update_chunk builds update payload, re-embeds the updated content,
+        and delegates to vdb_core.update_chunk.
         """
-
-        class DummyUpdate:
-            def __init__(self, **fields):
-                self._fields = fields
-                # Expose metadata attribute like real Pydantic model
-                self.metadata = fields.get("metadata")
-
-            def dict(self, exclude_unset=True, exclude=None):
-                data = dict(self._fields)
-                if exclude:
-                    for key in exclude:
-                        data.pop(key, None)
-                return data
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
 
         self.mock_vdb_core.update_chunk.return_value = {"id": "chunk-1"}
-        chunk_request = DummyUpdate(
+        mock_get_knowledge_record.return_value = {
+            "index_name": "kb-index",
+            "embedding_model_id": 42,
+        }
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
+        mock_get_embedding_model_by_id.return_value = (mock_embedding, 42)
+
+        chunk_request = ChunkUpdateRequest(
             content="updated",
             filename="updated.txt",
             metadata={"lang": "en"},
@@ -3801,13 +3802,19 @@ class TestElasticSearchService(unittest.TestCase):
             chunk_request=chunk_request,
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
+            tenant_id="tenant-1",
         )
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["chunk_id"], "chunk-1")
-        self.mock_vdb_core.update_chunk.assert_called_once_with(
-            "kb-index", "chunk-1", ANY
-        )
+        mock_embedding.get_embeddings.assert_called_once_with("updated")
+        self.mock_vdb_core.update_chunk.assert_called_once()
+        _, _, payload = self.mock_vdb_core.update_chunk.call_args[0]
+        self.assertEqual(payload["content"], "updated")
+        self.assertEqual(payload["filename"], "updated.txt")
+        self.assertEqual(payload["lang"], "en")
+        self.assertEqual(payload["embedding"], [0.1, 0.2, 0.3])
+        self.assertEqual(payload["embedding_model_id"], 42)
 
     def test_delete_chunk_success(self):
         """
@@ -5566,7 +5573,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         """update_chunk should wrap core exceptions with consistent message."""
         self.mock_vdb_core.update_chunk.side_effect = RuntimeError("core failed")
         from backend.services.vectordatabase_service import ChunkUpdateRequest
-        req = ChunkUpdateRequest(content="new-content")
+        # Metadata-only update so vdb_core.update_chunk is actually reached
+        req = ChunkUpdateRequest(title="new-title")
 
         with self.assertRaises(Exception) as ctx:
             ElasticSearchService.update_chunk(
@@ -5578,6 +5586,241 @@ class TestRethrowOrPlain(unittest.TestCase):
                 tenant_id=None,
             )
         self.assertIn("Error updating chunk", str(ctx.exception))
+        self.assertIn("core failed", str(ctx.exception))
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_metadata_only_skips_embedding(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
+        """Metadata-only update does not call the embedding model or write embedding fields."""
+        self.mock_vdb_core.update_chunk.return_value = {"id": "c1"}
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(title="new title")
+
+        result = ElasticSearchService.update_chunk(
+            index_name="idx",
+            chunk_id="c1",
+            chunk_request=req,
+            vdb_core=self.mock_vdb_core,
+            user_id="u1",
+            tenant_id="t1",
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_get_knowledge_record.assert_not_called()
+        mock_get_embedding_model_by_id.assert_not_called()
+        _, _, payload = self.mock_vdb_core.update_chunk.call_args[0]
+        self.assertNotIn("embedding", payload)
+        self.assertNotIn("embedding_model_id", payload)
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_content_triggers_reembedding(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
+        """Content update re-embeds and writes content/embedding/embedding_model_id together."""
+        self.mock_vdb_core.update_chunk.return_value = {"id": "c1"}
+        mock_get_knowledge_record.return_value = {
+            "index_name": "idx",
+            "embedding_model_id": 7,
+        }
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.return_value = [[0.4, 0.5, 0.6]]
+        mock_get_embedding_model_by_id.return_value = (mock_embedding, 7)
+
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="brand new text")
+
+        result = ElasticSearchService.update_chunk(
+            index_name="idx",
+            chunk_id="c1",
+            chunk_request=req,
+            vdb_core=self.mock_vdb_core,
+            user_id="u1",
+            tenant_id="t1",
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_get_knowledge_record.assert_called_once_with(
+            {"index_name": "idx", "tenant_id": "t1"})
+        mock_get_embedding_model_by_id.assert_called_once_with("t1", 7)
+        mock_embedding.get_embeddings.assert_called_once_with("brand new text")
+        _, _, payload = self.mock_vdb_core.update_chunk.call_args[0]
+        self.assertEqual(payload["content"], "brand new text")
+        self.assertEqual(payload["embedding"], [0.4, 0.5, 0.6])
+        self.assertEqual(payload["embedding_model_id"], 7)
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_content_none_skips_embedding(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
+        """Explicit content=None in payload skips embedding and writes no content/embedding."""
+        self.mock_vdb_core.update_chunk.return_value = {"id": "c1"}
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content=None, title="t")
+
+        result = ElasticSearchService.update_chunk(
+            index_name="idx",
+            chunk_id="c1",
+            chunk_request=req,
+            vdb_core=self.mock_vdb_core,
+            user_id="u1",
+            tenant_id="t1",
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_get_knowledge_record.assert_not_called()
+        mock_get_embedding_model_by_id.assert_not_called()
+        _, _, payload = self.mock_vdb_core.update_chunk.call_args[0]
+        self.assertNotIn("content", payload)
+        self.assertNotIn("embedding", payload)
+        self.assertNotIn("embedding_model_id", payload)
+
+    def test_update_chunk_missing_tenant_raises_and_does_not_write(self):
+        """Content update without tenant_id raises and does not call vdb_core.update_chunk."""
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="x")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c1",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id=None,
+            )
+
+        self.assertIn("tenant_id is required", str(ctx.exception))
+        self.mock_vdb_core.update_chunk.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_chunk_missing_knowledge_record_raises(self, mock_get_knowledge_record):
+        """Missing knowledge record aborts the update."""
+        mock_get_knowledge_record.return_value = None
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="x")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c1",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id="t1",
+            )
+
+        self.assertIn("Knowledge base record for index", str(ctx.exception))
+        self.mock_vdb_core.update_chunk.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_chunk_missing_embedding_model_id_raises(self, mock_get_knowledge_record):
+        """Knowledge record without embedding_model_id aborts the update."""
+        mock_get_knowledge_record.return_value = {"index_name": "idx"}
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="x")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c1",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id="t1",
+            )
+
+        self.assertIn("No embedding model configured", str(ctx.exception))
+        self.mock_vdb_core.update_chunk.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_unresolvable_embedding_model_raises(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
+        """Unresolvable embedding model aborts the update."""
+        mock_get_knowledge_record.return_value = {
+            "index_name": "idx",
+            "embedding_model_id": 7,
+        }
+        mock_get_embedding_model_by_id.return_value = (None, None)
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="x")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c1",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id="t1",
+            )
+
+        self.assertIn("Failed to resolve embedding model", str(ctx.exception))
+        self.mock_vdb_core.update_chunk.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_embedding_raises_propagates(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
+        """Exception from get_embeddings aborts the update."""
+        mock_get_knowledge_record.return_value = {
+            "index_name": "idx",
+            "embedding_model_id": 7,
+        }
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.side_effect = RuntimeError("embed boom")
+        mock_get_embedding_model_by_id.return_value = (mock_embedding, 7)
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="x")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c1",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id="t1",
+            )
+
+        self.assertIn("embed boom", str(ctx.exception))
+        mock_embedding.get_embeddings.assert_called_once_with("x")
+        self.mock_vdb_core.update_chunk.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_update_chunk_empty_embedding_result_raises(
+        self, mock_get_embedding_model_by_id, mock_get_knowledge_record
+    ):
+        """Empty embedding result aborts the update."""
+        mock_get_knowledge_record.return_value = {
+            "index_name": "idx",
+            "embedding_model_id": 7,
+        }
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.return_value = []
+        mock_get_embedding_model_by_id.return_value = (mock_embedding, 7)
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="x")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c1",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id="t1",
+            )
+
+        self.assertIn("Embedding generation returned no vector", str(ctx.exception))
+        self.mock_vdb_core.update_chunk.assert_not_called()
 
 
 class TestNewEmbeddingModelMethods(unittest.TestCase):

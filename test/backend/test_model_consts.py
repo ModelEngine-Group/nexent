@@ -27,6 +27,15 @@ def test_model_request_and_validation():
     assert req.title == "t"
     assert req.filename == "f"
 
+    # Chunk update request rejects empty content at the schema boundary
+    with pytest.raises(ValidationError):
+        model_consts.ChunkUpdateRequest(content="")
+
+    # Update with omitted content is allowed (metadata-only fast path)
+    upd = model_consts.ChunkUpdateRequest(title="new-title")
+    assert upd.content is None
+    assert upd.title == "new-title"
+
 
 def test_model_request_threads_w11_capacity_and_accept_fields():
     """W11 spec L721-727 + L500-502: ModelRequest must carry every capacity
