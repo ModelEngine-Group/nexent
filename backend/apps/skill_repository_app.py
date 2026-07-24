@@ -152,6 +152,11 @@ async def update_skill_repository_status_api(
             "New status: not_shared / pending_review / rejected / shared"
         ),
     ),
+    content: Optional[str] = Body(
+        None,
+        embed=True,
+        description="Review opinion or resubmit note",
+    ),
     authorization: str = Header(None),
 ):
     """Update skill marketplace repository listing status."""
@@ -162,6 +167,7 @@ async def update_skill_repository_status_api(
             status=status,
             user_id=user_id,
             tenant_id=tenant_id,
+            content=content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
