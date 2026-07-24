@@ -699,10 +699,8 @@ class TestStartStreamingChat:
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == 99
 
-    async def test_start_streaming_chat_appends_conversation_id_sse(self):
-        """Test that streaming response appends a conversation_id SSE trailer."""
-        import json
-
+    async def test_start_streaming_chat_sets_conversation_id_header(self):
+        """Test that streaming response sets conversation_id via headers only (no SSE trailer)."""
         ctx = MockNorthboundContext(token_id=0)
 
         async def _body_iterator():
@@ -719,7 +717,7 @@ class TestStartStreamingChat:
                 patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as mock_history:
             mock_history.return_value = {"data": {"history": []}}
 
-            wrapped = await ns.start_streaming_chat(
+            response = await ns.start_streaming_chat(
                 ctx=ctx,
                 conversation_id=123,
                 agent_name="test_agent",
@@ -727,15 +725,14 @@ class TestStartStreamingChat:
             )
 
         chunks = []
-        async for chunk in wrapped.body_iterator:
+        async for chunk in response.body_iterator:
             chunks.append(chunk)
 
-        assert chunks[0] == b"data: hello\n\n"
-        assert chunks[-1] == (
-            f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': 123}, ensure_ascii=False)}\n\n"
-        )
-        assert wrapped.headers["conversation_id"] == "123"
-        assert wrapped.headers["X-Request-Id"] == ctx.request_id
+        # Stream body is passed through unchanged; conversation_id is only in headers
+        assert chunks == [b"data: hello\n\n"]
+        assert response.headers["conversation_id"] == "123"
+        assert response.headers["X-Request-Id"] == ctx.request_id
+        assert response.headers["x-existing"] == "1"
 
 
 @pytest.mark.asyncio
