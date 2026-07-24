@@ -32,6 +32,16 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
         node_modules/follow-redirects \
         node_modules/http-proxy \
         node_modules/requires-port \
+        node_modules/multiparty \
+        node_modules/safe-buffer \
+        node_modules/http-errors \
+        node_modules/depd \
+        node_modules/uid-safe \
+        node_modules/random-bytes \
+        node_modules/inherits \
+        node_modules/statuses \
+        node_modules/toidentifier \
+        node_modules/setprototypeof \
         ../frontend-dist/node_modules/ && \
     rm -rf ../frontend-dist/.next/cache
 
