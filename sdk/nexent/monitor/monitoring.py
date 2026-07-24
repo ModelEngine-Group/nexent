@@ -2501,6 +2501,7 @@ class MonitoringRecordBuffer:
         self._degraded_until: float = 0.0
         self._last_flush_time: float = time.time()
         self._running: bool = False
+        self._stop_event = threading.Event()
         self._flush_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
@@ -2511,6 +2512,7 @@ class MonitoringRecordBuffer:
         with self._lock:
             if self._running:
                 return
+            self._stop_event.clear()
             self._running = True
             self._flush_thread = threading.Thread(
                 target=self._flush_loop,
@@ -2540,10 +2542,8 @@ class MonitoringRecordBuffer:
             except Exception as e:
                 logger.error(f"Error in monitoring flush loop: {e}")
 
-            for _ in range(10):
-                if not self._running:
-                    return
-                time.sleep(self._flush_interval / 10)
+            if self._stop_event.wait(timeout=self._flush_interval):
+                return
 
     def _flush_to_db(self) -> None:
         now = time.time()
@@ -2623,6 +2623,7 @@ class MonitoringRecordBuffer:
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
         if self._flush_thread and self._flush_thread.is_alive():
             self._flush_thread.join(timeout=5)
         logger.info("Monitoring buffer flush thread stopped")
