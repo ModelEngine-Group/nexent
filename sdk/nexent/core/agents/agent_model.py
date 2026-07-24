@@ -141,7 +141,7 @@ class AgentConfig(BaseModel):
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
-    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
+    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1)
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
@@ -254,28 +254,28 @@ class ExternalA2AAgentConfig(BaseModel):
         """Build detailed skills description from raw_card."""
         if not self.raw_card:
             return ""
-        
+
         skills = self.raw_card.get("skills", [])
         if not skills:
             return ""
-        
+
         # Build examples section
         examples_lines = []
         for skill in skills:
             examples = skill.get("examples", [])
             if examples:
                 examples_lines.extend(examples[:3])
-        
+
         examples_section = ""
         if examples_lines:
             # Shuffle and pick some examples
             examples_str = ', '.join(f'"{ex}"' for ex in examples_lines[:8])
             examples_section = f"\n  调用示例: {examples_str}"
-        
+
         # Build capability description (without explicit skill IDs)
         capability_names = [skill.get("name", "") for skill in skills if skill.get("name")]
         capability_str = "、".join(capability_names) if capability_names else ""
-        
+
         return f"[此助手可处理: {capability_str}]{examples_section}"
 
     def to_a2a_agent_info(self) -> "A2AAgentInfo":
@@ -303,7 +303,7 @@ ComponentType = Literal["system_prompt", "tools", "skills", "memory", "knowledge
 
 class ContextComponent(BaseModel, ABC):
     """Abstract base for all context components.
-    
+
     Each component knows how to convert itself to LLM message format via to_messages().
     Follows smolagents MemoryStep.to_messages() pattern.
     """
@@ -315,7 +315,7 @@ class ContextComponent(BaseModel, ABC):
     @abstractmethod
     def to_messages(self) -> List[Dict[str, str]]:
         """Convert component content to message format for LLM.
-        
+
         Returns:
             List of message dicts with 'role' and 'content' keys.
         """
@@ -323,10 +323,10 @@ class ContextComponent(BaseModel, ABC):
 
     def estimate_tokens(self, chars_per_token: float = 1.5) -> int:
         """Estimate token count from content length.
-        
+
         Args:
             chars_per_token: Average characters per token ratio.
-            
+
         Returns:
             Estimated token count.
         """
@@ -464,7 +464,7 @@ class ExternalAgentsComponent(ContextComponent):
 
 class ContextStrategy(ABC):
     """Abstract base for context component selection strategies."""
-    
+
     @abstractmethod
     def select_components(
         self,
@@ -473,12 +473,12 @@ class ContextStrategy(ABC):
         component_budgets: Dict[str, int]
     ) -> List[ContextComponent]:
         """Select components to include within constraints.
-        
+
         Args:
             components: All available context components.
             token_budget: Maximum total tokens allowed.
             component_budgets: Per-type token limits.
-            
+
         Returns:
             Selected components in priority order.
         """
@@ -492,7 +492,7 @@ class ContextStrategy(ABC):
 
 class FullStrategy(ContextStrategy):
     """Keep all components - for unlimited context models."""
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
@@ -507,7 +507,7 @@ class FullStrategy(ContextStrategy):
 
 class TokenBudgetStrategy(ContextStrategy):
     """Select components within total token budget by priority."""
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
@@ -518,7 +518,7 @@ class TokenBudgetStrategy(ContextStrategy):
         selected: List[ContextComponent] = []
         total_tokens = 0
         type_totals: Dict[str, int] = {}
-        
+
         for comp in sorted_components:
             comp_tokens = comp.token_estimate or comp.estimate_tokens()
             comp_budget = component_budgets.get(comp.component_type, token_budget)
@@ -556,10 +556,10 @@ class TokenBudgetStrategy(ContextStrategy):
 
 class BufferedStrategy(ContextStrategy):
     """Keep last N components per type."""
-    
+
     def __init__(self, buffer_size: int = 10):
         self.buffer_size = buffer_size
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
@@ -567,10 +567,10 @@ class BufferedStrategy(ContextStrategy):
         component_budgets: Dict[str, int]
     ) -> List[ContextComponent]:
         type_buckets: Dict[str, List[ContextComponent]] = {}
-        
+
         for comp in components:
             type_buckets.setdefault(comp.component_type, []).append(comp)
-        
+
         selected: List[ContextComponent] = []
         for comp_type, bucket in type_buckets.items():
             recent = bucket[-self.buffer_size:]
@@ -591,10 +591,10 @@ class BufferedStrategy(ContextStrategy):
 
 class PriorityWeightedStrategy(ContextStrategy):
     """Select by weighted importance + relevance scores."""
-    
+
     def __init__(self, relevance_threshold: float = 0.5):
         self.relevance_threshold = relevance_threshold
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
