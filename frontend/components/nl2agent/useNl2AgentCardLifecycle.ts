@@ -24,7 +24,10 @@ interface PendingActionIdentity {
   actionId: string;
 }
 
-export const useNl2AgentCardLifecycle = (scopeKey: string) => {
+export const useNl2AgentCardLifecycle = (
+  scopeKey: string,
+  cardWorkflowRevision?: number
+) => {
   const workflow = useNl2AgentWorkflow();
   const {
     active,
@@ -35,6 +38,8 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
     setInputBlocked,
     notifyStateChanged,
     continueWithAction,
+    getLatestWorkflowRevision,
+    updateWorkflowRevision,
   } = workflow;
   const mountedRef = useRef(true);
   const pendingRef = useRef(false);
@@ -73,7 +78,11 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
       const request = {
         ...action,
         action_id: actionIdentity.actionId,
-        expected_revision: sessionState.revision,
+        expected_revision: Math.max(
+          sessionState.revision,
+          cardWorkflowRevision ?? 0,
+          getLatestWorkflowRevision() ?? 0
+        ),
       } as Nl2AgentActionRequest;
 
       pendingRef.current = true;
@@ -88,6 +97,7 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
         if (result.status === "pending") {
           throw new Error("The NL2AGENT action is still being applied.");
         }
+        updateWorkflowRevision(result.workflow_revision);
         actionIdentityRef.current = undefined;
         if (!mountedRef.current) return result;
         await options.onSuccess?.(result);
@@ -126,12 +136,15 @@ export const useNl2AgentCardLifecycle = (scopeKey: string) => {
       active,
       agentId,
       beginAction,
+      cardWorkflowRevision,
       continueWithAction,
       endAction,
+      getLatestWorkflowRevision,
       notifyStateChanged,
       scopeKey,
       sessionState,
       setInputBlocked,
+      updateWorkflowRevision,
     ]
   );
 

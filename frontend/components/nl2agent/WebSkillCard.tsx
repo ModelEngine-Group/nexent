@@ -20,6 +20,7 @@ export interface WebSkillCardProps {
   recommendationBatchId: string;
   itemKey: string;
   item: WebSkillCardItem;
+  workflowRevision?: number;
 }
 
 /**
@@ -33,10 +34,12 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({
   recommendationBatchId,
   itemKey,
   item,
+  workflowRevision,
 }) => {
   const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(
-    `web-skill:${agentId}:${item.skill_id ?? item.skill_name ?? item.name}`
+    `web-skill:${agentId}:${item.skill_id ?? item.skill_name ?? item.name}`,
+    workflowRevision
   );
   const { t } = useTranslation("common");
   const [installed, setInstalled] = useState(item.status === "installed");

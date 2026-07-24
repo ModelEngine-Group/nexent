@@ -32,6 +32,7 @@ export interface LocalResourcesCardProps {
   /** The draft agent_id being built by the NL2AGENT session. */
   agentId: number;
   recommendationBatchId: string;
+  workflowRevision?: number;
   tools: LocalResourceItem[];
   skills: LocalResourceItem[];
 }
@@ -49,12 +50,14 @@ const MASKED_SECRET_VALUE = "••••••••";
 export const LocalResourcesCard: React.FC<LocalResourcesCardProps> = ({
   agentId,
   recommendationBatchId,
+  workflowRevision,
   tools,
   skills,
 }) => {
   const workflow = useNl2AgentWorkflow();
   const lifecycle = useNl2AgentCardLifecycle(
-    `local:${agentId}:${recommendationBatchId}`
+    `local:${agentId}:${recommendationBatchId}`,
+    workflowRevision
   );
   const { execute, pending } = lifecycle;
   const { t } = useTranslation("common");

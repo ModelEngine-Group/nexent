@@ -47,6 +47,12 @@ const useLifecycleWithWorkflow = () => ({
   workflow: useNl2AgentWorkflow(),
 });
 
+const useRevisionAwareLifecycles = () => ({
+  first: useNl2AgentCardLifecycle("identity:54", 19),
+  second: useNl2AgentCardLifecycle("models:54", 19),
+  workflow: useNl2AgentWorkflow(),
+});
+
 describe("useNl2AgentCardLifecycle", () => {
   beforeEach(() => {
     vi.mocked(getNl2AgentSessionState).mockReset();
@@ -98,6 +104,86 @@ describe("useNl2AgentCardLifecycle", () => {
         workflowRevision: 19,
       },
     });
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the card envelope revision when it is newer than session state", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "card-revision-action" });
+    vi.mocked(dispatchNl2AgentAction).mockResolvedValue({
+      action_id: "card-revision-action",
+      action: "save_identity",
+      status: "applied",
+      workflow_revision: 20,
+      result: {},
+    });
+    const { result } = renderHook(
+      () => ({
+        lifecycle: useNl2AgentCardLifecycle("identity:54", 19),
+        workflow: useNl2AgentWorkflow(),
+      }),
+      { wrapper: wrapperFor(vi.fn(async () => undefined)) }
+    );
+    await waitFor(() =>
+      expect(result.current.workflow.sessionState?.revision).toBe(18)
+    );
+
+    await act(async () => {
+      await result.current.lifecycle.execute(action, {
+        continueAfterSuccess: false,
+      });
+    });
+
+    expect(dispatchNl2AgentAction).toHaveBeenCalledWith(
+      54,
+      expect.objectContaining({ expected_revision: 19 })
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("uses a successful action revision immediately for another card", async () => {
+    vi.stubGlobal("crypto", {
+      randomUUID: vi
+        .fn()
+        .mockReturnValueOnce("first-action")
+        .mockReturnValueOnce("second-action"),
+    });
+    vi.mocked(dispatchNl2AgentAction)
+      .mockResolvedValueOnce({
+        action_id: "first-action",
+        action: "save_identity",
+        status: "applied",
+        workflow_revision: 20,
+        result: {},
+      })
+      .mockResolvedValueOnce({
+        action_id: "second-action",
+        action: "save_identity",
+        status: "applied",
+        workflow_revision: 21,
+        result: {},
+      });
+    const { result } = renderHook(useRevisionAwareLifecycles, {
+      wrapper: wrapperFor(vi.fn(async () => undefined)),
+    });
+    await waitFor(() =>
+      expect(result.current.workflow.sessionState?.revision).toBe(18)
+    );
+
+    await act(async () => {
+      await result.current.first.execute(action, {
+        continueAfterSuccess: false,
+      });
+      await result.current.second.execute(action, {
+        continueAfterSuccess: false,
+      });
+    });
+
+    expect(vi.mocked(dispatchNl2AgentAction).mock.calls[0][1]).toEqual(
+      expect.objectContaining({ expected_revision: 19 })
+    );
+    expect(vi.mocked(dispatchNl2AgentAction).mock.calls[1][1]).toEqual(
+      expect.objectContaining({ expected_revision: 20 })
+    );
     vi.unstubAllGlobals();
   });
 

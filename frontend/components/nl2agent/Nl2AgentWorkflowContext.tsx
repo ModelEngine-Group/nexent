@@ -37,6 +37,9 @@ interface Nl2AgentWorkflowContextValue {
   sessionState?: Nl2AgentSessionState;
   sessionStateLoading: boolean;
   sessionStateError?: string;
+  latestWorkflowRevision?: number;
+  getLatestWorkflowRevision: () => number | undefined;
+  updateWorkflowRevision: (revision: number) => void;
   refreshSessionState: () => Promise<void>;
   resumeSession: () => Promise<void>;
   resuming: boolean;
@@ -53,6 +56,8 @@ const Nl2AgentWorkflowContext = createContext<Nl2AgentWorkflowContextValue>({
   busy: false,
   stateVersion: 0,
   sessionStateLoading: false,
+  getLatestWorkflowRevision: () => undefined,
+  updateWorkflowRevision: () => {},
   refreshSessionState: async () => {},
   resumeSession: async () => {},
   resuming: false,
@@ -90,14 +95,44 @@ export const Nl2AgentWorkflowProvider: React.FC<{
   const [sessionState, setSessionState] = useState<Nl2AgentSessionState>();
   const [sessionStateLoading, setSessionStateLoading] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string>();
+  const [latestWorkflowRevision, setLatestWorkflowRevision] =
+    useState<number>();
   const [resuming, setResuming] = useState(false);
   const continuingRef = useRef(false);
   const sessionRequestRef = useRef(0);
+  const workflowRevisionRef = useRef<{
+    agentId?: number;
+    revision?: number;
+  }>({});
   const onContinueRef = useRef(onContinue);
   const onStateChangedRef = useRef(onStateChanged);
 
   onContinueRef.current = onContinue;
   onStateChangedRef.current = onStateChanged;
+
+  const updateWorkflowRevision = useCallback(
+    (revision: number) => {
+      if (!Number.isInteger(revision) || revision < 0 || !scopedAgentId) return;
+      const current =
+        workflowRevisionRef.current.agentId === scopedAgentId
+          ? workflowRevisionRef.current.revision
+          : undefined;
+      const nextRevision = Math.max(current ?? 0, revision);
+      workflowRevisionRef.current = {
+        agentId: scopedAgentId,
+        revision: nextRevision,
+      };
+      setLatestWorkflowRevision(nextRevision);
+    },
+    [scopedAgentId]
+  );
+  const getLatestWorkflowRevision = useCallback(
+    () =>
+      workflowRevisionRef.current.agentId === scopedAgentId
+        ? workflowRevisionRef.current.revision
+        : undefined,
+    [scopedAgentId]
+  );
 
   useEffect(() => {
     setInputBlockers(new Set());
@@ -110,7 +145,10 @@ export const Nl2AgentWorkflowProvider: React.FC<{
     setSessionStateError(undefined);
     try {
       const nextState = await getNl2AgentSessionState(scopedAgentId);
-      if (sessionRequestRef.current === requestId) setSessionState(nextState);
+      if (sessionRequestRef.current === requestId) {
+        updateWorkflowRevision(nextState.revision);
+        setSessionState(nextState);
+      }
     } catch (error) {
       if (sessionRequestRef.current !== requestId) return;
       setSessionStateError(
@@ -123,17 +161,21 @@ export const Nl2AgentWorkflowProvider: React.FC<{
         setSessionStateLoading(false);
       }
     }
-  }, [enabled, scopedAgentId]);
+  }, [enabled, scopedAgentId, updateWorkflowRevision]);
 
   useEffect(() => {
     if (!enabled || !scopedAgentId) {
       sessionRequestRef.current += 1;
       setSessionState(undefined);
+      workflowRevisionRef.current = {};
+      setLatestWorkflowRevision(undefined);
       setSessionStateError(undefined);
       setSessionStateLoading(false);
       return;
     }
     setSessionState(undefined);
+    workflowRevisionRef.current = {};
+    setLatestWorkflowRevision(undefined);
   }, [enabled, scopeKey, scopedAgentId]);
 
   useEffect(() => {
@@ -218,6 +260,9 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       sessionState,
       sessionStateLoading,
       sessionStateError,
+      latestWorkflowRevision,
+      getLatestWorkflowRevision,
+      updateWorkflowRevision,
       refreshSessionState,
       resumeSession,
       resuming,
@@ -231,6 +276,8 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       enabled,
       endAction,
       inputBlockers,
+      getLatestWorkflowRevision,
+      latestWorkflowRevision,
       notifyStateChanged,
       refreshSessionState,
       resumeSession,
@@ -241,6 +288,7 @@ export const Nl2AgentWorkflowProvider: React.FC<{
       sessionStateLoading,
       setInputBlocked,
       stateVersion,
+      updateWorkflowRevision,
     ]
   );
 

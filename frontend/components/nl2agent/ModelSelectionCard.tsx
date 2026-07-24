@@ -7,12 +7,16 @@ import { getAvailablePlatformLlms } from "@/services/nl2agentService";
 import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 import { useNl2AgentCardLifecycle } from "./useNl2AgentCardLifecycle";
 
-export const ModelSelectionCard: React.FC<{ agentId: number }> = ({
-  agentId,
-}) => {
+export const ModelSelectionCard: React.FC<{
+  agentId: number;
+  workflowRevision?: number;
+}> = ({ agentId, workflowRevision }) => {
   const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
-  const lifecycle = useNl2AgentCardLifecycle(`models:${agentId}`);
+  const lifecycle = useNl2AgentCardLifecycle(
+    `models:${agentId}`,
+    workflowRevision
+  );
   const [models, setModels] = useState<
     Array<{ id: number; displayName: string }>
   >([]);

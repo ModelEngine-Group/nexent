@@ -17,6 +17,7 @@ import { useNl2AgentWorkflow } from "./Nl2AgentWorkflowContext";
 export interface RequirementsSummaryCardProps {
   agentId: number;
   summary: RequirementsSummaryCardPayload;
+  workflowRevision?: number;
 }
 
 const labels: Array<[keyof Nl2AgentRequirementsSummary, string]> = [
@@ -29,10 +30,13 @@ const labels: Array<[keyof Nl2AgentRequirementsSummary, string]> = [
 
 export const RequirementsSummaryCard: React.FC<
   RequirementsSummaryCardProps
-> = ({ agentId, summary }) => {
+> = ({ agentId, summary, workflowRevision }) => {
   const { t } = useTranslation();
   const workflow = useNl2AgentWorkflow();
-  const lifecycle = useNl2AgentCardLifecycle(`requirements:${agentId}`);
+  const lifecycle = useNl2AgentCardLifecycle(
+    `requirements:${agentId}`,
+    workflowRevision
+  );
   const [confirmedLocally, setConfirmedLocally] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string>();
   const summaryPayload = useMemo(

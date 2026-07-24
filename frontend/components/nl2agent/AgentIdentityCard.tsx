@@ -12,14 +12,19 @@ import { ActionCard } from "./ActionCard";
 export interface AgentIdentityCardProps {
   agentId: number;
   suggestedDisplayName?: string;
+  workflowRevision?: number;
 }
 
 export const AgentIdentityCard: React.FC<AgentIdentityCardProps> = ({
   agentId,
   suggestedDisplayName,
+  workflowRevision,
 }) => {
   const { t } = useTranslation();
-  const lifecycle = useNl2AgentCardLifecycle(`identity:${agentId}`);
+  const lifecycle = useNl2AgentCardLifecycle(
+    `identity:${agentId}`,
+    workflowRevision
+  );
   const normalizedSuggestion = (suggestedDisplayName || "").trim().slice(0, 50);
   const [displayName, setDisplayName] = useState(normalizedSuggestion);
   const [internalName, setInternalName] = useState("");

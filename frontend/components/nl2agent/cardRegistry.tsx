@@ -35,7 +35,8 @@ export type {
 
 type StructuredCardRenderer = (
   card: StructuredNl2AgentCard,
-  draftAgentId: number
+  draftAgentId: number,
+  workflowRevision: number
 ) => React.ReactNode;
 
 export const OnlineRecommendationGroup: React.FC<{
@@ -62,23 +63,36 @@ export const OnlineRecommendationGroup: React.FC<{
 
 const renderRequirementsSummary: StructuredCardRenderer = (
   card,
-  draftAgentId
+  draftAgentId,
+  workflowRevision
 ) => {
   if (card.card_type !== "requirements_summary") return null;
   return (
     <RequirementsSummaryCard
       agentId={draftAgentId}
       summary={card.payload as RequirementsSummaryCardPayload}
+      workflowRevision={workflowRevision}
     />
   );
 };
 
-const renderModelSelection: StructuredCardRenderer = (card, draftAgentId) =>
+const renderModelSelection: StructuredCardRenderer = (
+  card,
+  draftAgentId,
+  workflowRevision
+) =>
   card.card_type === "model_selection" ? (
-    <ModelSelectionCard agentId={draftAgentId} />
+    <ModelSelectionCard
+      agentId={draftAgentId}
+      workflowRevision={workflowRevision}
+    />
   ) : null;
 
-const renderLocalResources: StructuredCardRenderer = (card, draftAgentId) => {
+const renderLocalResources: StructuredCardRenderer = (
+  card,
+  draftAgentId,
+  workflowRevision
+) => {
   if (card.card_type !== "local_resources") return null;
   return (
     <div>
@@ -87,6 +101,7 @@ const renderLocalResources: StructuredCardRenderer = (card, draftAgentId) => {
       />
       <LocalResourcesCard
         agentId={draftAgentId}
+        workflowRevision={workflowRevision}
         recommendationBatchId={card.payload.recommendation_batch_id}
         tools={card.payload.tools.map((item) => ({
           ...item,
@@ -101,7 +116,11 @@ const renderLocalResources: StructuredCardRenderer = (card, draftAgentId) => {
   );
 };
 
-const renderWebMcp: StructuredCardRenderer = (card, draftAgentId) => {
+const renderWebMcp: StructuredCardRenderer = (
+  card,
+  draftAgentId,
+  workflowRevision
+) => {
   if (card.card_type !== "web_mcp") return null;
   const payload = card.payload;
   const recommendationBatchId = payload.recommendation_batch_id;
@@ -115,6 +134,7 @@ const renderWebMcp: StructuredCardRenderer = (card, draftAgentId) => {
         <WebMcpCard
           key={item.recommendation_id}
           agentId={draftAgentId}
+          workflowRevision={workflowRevision}
           recommendationBatchId={recommendationBatchId}
           item={item as WebMcpCardItem}
         />
@@ -123,7 +143,11 @@ const renderWebMcp: StructuredCardRenderer = (card, draftAgentId) => {
   );
 };
 
-const renderWebSkill: StructuredCardRenderer = (card, draftAgentId) => {
+const renderWebSkill: StructuredCardRenderer = (
+  card,
+  draftAgentId,
+  workflowRevision
+) => {
   if (card.card_type !== "web_skill") return null;
   const payload = card.payload;
   const recommendationBatchId = payload.recommendation_batch_id;
@@ -142,6 +166,7 @@ const renderWebSkill: StructuredCardRenderer = (card, draftAgentId) => {
           <WebSkillCard
             key={itemKey}
             agentId={draftAgentId}
+            workflowRevision={workflowRevision}
             recommendationBatchId={recommendationBatchId}
             itemKey={itemKey}
             item={item}
@@ -152,20 +177,30 @@ const renderWebSkill: StructuredCardRenderer = (card, draftAgentId) => {
   );
 };
 
-const renderAgentIdentity: StructuredCardRenderer = (card, draftAgentId) => {
+const renderAgentIdentity: StructuredCardRenderer = (
+  card,
+  draftAgentId,
+  workflowRevision
+) => {
   if (card.card_type !== "agent_identity") return null;
   return (
     <AgentIdentityCard
       agentId={draftAgentId}
       suggestedDisplayName={card.payload.display_name}
+      workflowRevision={workflowRevision}
     />
   );
 };
 
-const renderFinalReview: StructuredCardRenderer = (card, draftAgentId) => {
+const renderFinalReview: StructuredCardRenderer = (
+  card,
+  draftAgentId,
+  workflowRevision
+) => {
   if (card.card_type !== "final_review") return null;
   return (
     <FinalizeCard
+      workflowRevision={workflowRevision}
       data={{
         ...(card.payload as FinalReviewCardPayload),
         agent_id: draftAgentId,
@@ -189,14 +224,20 @@ export const nl2AgentCardRegistry: Record<
 
 export const renderStructuredNl2AgentCard = (
   card: StructuredNl2AgentCard,
-  draftAgentId: number
-): React.ReactNode => nl2AgentCardRegistry[card.card_type](card, draftAgentId);
+  draftAgentId: number,
+  workflowRevision: number
+): React.ReactNode =>
+  nl2AgentCardRegistry[card.card_type](card, draftAgentId, workflowRevision);
 
 export const renderStructuredNl2AgentEnvelope = (
   envelope: StructuredNl2AgentCardEnvelope
 ): React.ReactNode[] =>
   (envelope.cards ?? []).map((card) => (
     <React.Fragment key={`${card.card_type}:${card.card_key}`}>
-      {renderStructuredNl2AgentCard(card, envelope.draft_agent_id)}
+      {renderStructuredNl2AgentCard(
+        card,
+        envelope.draft_agent_id,
+        envelope.workflow_revision
+      )}
     </React.Fragment>
   ));

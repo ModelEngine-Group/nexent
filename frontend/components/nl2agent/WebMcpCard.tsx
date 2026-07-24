@@ -16,6 +16,7 @@ export interface WebMcpCardProps {
   agentId: number;
   recommendationBatchId: string;
   item: WebMcpCardItem;
+  workflowRevision?: number;
 }
 
 const initialFieldValues = (
@@ -67,10 +68,12 @@ export const WebMcpCard: React.FC<WebMcpCardProps> = ({
   agentId,
   recommendationBatchId,
   item,
+  workflowRevision,
 }) => {
   const workflowState = useNl2AgentWorkflow().sessionState;
   const lifecycle = useNl2AgentCardLifecycle(
-    `web-mcp:${agentId}:${item.recommendation_id ?? item.name}`
+    `web-mcp:${agentId}:${item.recommendation_id ?? item.name}`,
+    workflowRevision
   );
   const { t } = useTranslation("common");
   const options = item.install_options ?? [];

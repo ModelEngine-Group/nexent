@@ -23,6 +23,7 @@ export type { FinalizeCardData } from "./cardPayloadTypes";
 
 export interface FinalizeCardProps {
   data: FinalizeCardData;
+  workflowRevision?: number;
 }
 
 export interface FinalReviewResource {
@@ -157,13 +158,19 @@ const NameList: React.FC<{
  * Rendered from a validated final-review card in the persisted structured
  * NL2AGENT message envelope.
  */
-export const FinalizeCard: React.FC<FinalizeCardProps> = ({ data }) => {
+export const FinalizeCard: React.FC<FinalizeCardProps> = ({
+  data,
+  workflowRevision,
+}) => {
   const { t } = useTranslation("common");
   const router = useRouter();
   const params = useParams<{ locale: string }>();
   const locale = params?.locale || "en";
   const workflow = useNl2AgentWorkflow();
-  const lifecycle = useNl2AgentCardLifecycle(`finalize:${data.agent_id}`);
+  const lifecycle = useNl2AgentCardLifecycle(
+    `finalize:${data.agent_id}`,
+    workflowRevision
+  );
   const [loading, setLoading] = useState(false);
   const [sessionState, setSessionState] = useState<Nl2AgentSessionState | null>(
     null

@@ -137,11 +137,15 @@ describe("structured NL2AGENT card registry", () => {
     });
 
     assert.equal(rendered.length, 7);
-    const direct = cards.map((card) => renderStructuredNl2AgentCard(card, 202));
+    const direct = cards.map((card) =>
+      renderStructuredNl2AgentCard(card, 202, 8)
+    );
     assertElement(direct[0]);
     assert.equal(direct[0].type, RequirementsSummaryCard);
+    assert.equal(direct[0].props.workflowRevision, 8);
     assertElement(direct[1]);
     assert.equal(direct[1].type, ModelSelectionCard);
+    assert.equal(direct[1].props.workflowRevision, 8);
     assertElement(direct[2]);
     assert.equal(direct[2].type, "div");
     const localChildren = React.Children.toArray(
@@ -151,22 +155,27 @@ describe("structured NL2AGENT card registry", () => {
     assert.equal(localChildren[0].type, CatalogSnapshotIdentifier);
     assertElement(localChildren[1]);
     assert.equal(localChildren[1].type, LocalResourcesCard);
+    assert.equal(localChildren[1].props.workflowRevision, 8);
     assertElement(direct[3]);
     const mcpChildren = React.Children.toArray(
       direct[3].props.children as React.ReactNode
     );
     assertElement(mcpChildren[0]);
     assert.equal(mcpChildren[0].type, WebMcpCard);
+    assert.equal(mcpChildren[0].props.workflowRevision, 8);
     assertElement(direct[4]);
     const skillChildren = React.Children.toArray(
       direct[4].props.children as React.ReactNode
     );
     assertElement(skillChildren[0]);
     assert.equal(skillChildren[0].type, WebSkillCard);
+    assert.equal(skillChildren[0].props.workflowRevision, 8);
     assertElement(direct[5]);
     assert.equal(direct[5].type, AgentIdentityCard);
+    assert.equal(direct[5].props.workflowRevision, 8);
     assertElement(direct[6]);
     assert.equal(direct[6].type, FinalizeCard);
+    assert.equal(direct[6].props.workflowRevision, 8);
   });
 
   it("exposes the effective verification configuration in final review", () => {
