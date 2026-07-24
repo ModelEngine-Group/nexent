@@ -19,6 +19,7 @@ _UPDATE_ALLOWED_FIELDS = frozenset({
     "skill_info_json",
     "skill_zip_base64",
     "status",
+    "content",
 })
 
 
@@ -240,6 +241,7 @@ def update_skill_repository_status_by_id(
     publisher_tenant_id: Optional[str] = None,
     publisher_user_id: Optional[str] = None,
     submitted_by: Optional[str] = None,
+    content: Optional[str] = None,
 ) -> int:
     """Update repository listing status by primary key. Returns affected row count."""
     update_values: Dict[str, Any] = {
@@ -252,6 +254,8 @@ def update_skill_repository_status_by_id(
         update_values["publisher_user_id"] = publisher_user_id
     if submitted_by is not None:
         update_values["submitted_by"] = submitted_by
+    if content is not None:
+        update_values["content"] = content
 
     with get_db_session() as session:
         where_clauses = [

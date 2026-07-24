@@ -17,6 +17,10 @@ from consts.agent_repository import (
 )
 from consts.const import PERMISSION_PRIVATE, PERMISSION_READ
 from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
+from consts.notification import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_SKILL_REPOSITORY,
+)
 from database.skill_repository_db import (
     get_skill_repository_by_id_and_publisher,
     get_skill_repository_by_skill_id,
@@ -30,6 +34,11 @@ from database.skill_repository_db import (
 )
 from database.skill_db import get_skill_by_name
 from database.user_tenant_db import get_user_tenant_by_user_id
+from services.notification_service import (
+    create_repository_pending_review_notification,
+    create_repository_review_notification,
+    deactivate_notifications,
+)
 from services.skill_service import SkillService
 
 logger = logging.getLogger("skill_repository_service")
@@ -81,6 +90,7 @@ _UPDATE_SNAPSHOT_FIELDS = (
     "skill_info_json",
     "skill_zip_base64",
     "status",
+    "content",
 )
 
 
@@ -114,6 +124,7 @@ def _to_summary_item(
         "downloads": record.get("downloads") or 0,
         "created_at": record.get("created_at") or _serialize_created_at(record.get("create_time")),
         "updated_at": record.get("updated_at") or _serialize_created_at(record.get("update_time")),
+        "content": record.get("content"),
     }
     if can_take_down is not None:
         item["can_take_down"] = can_take_down
@@ -145,7 +156,7 @@ def _to_detail_item(
         "downloads": record.get("downloads") or 0,
         "created_at": _serialize_created_at(record.get("create_time")),
         "updated_at": _serialize_created_at(record.get("update_time")),
-        "content": snapshot.get("content"),
+        "content": record.get("content"),
         "config_schemas": _as_dict(snapshot.get("config_schemas")),
         "config_values": _as_dict(snapshot.get("config_values")),
         "tool_ids": _as_list(snapshot.get("tool_ids")),
@@ -403,12 +414,13 @@ def _build_repository_data_from_skill(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "category_id"):
+        for key in ("icon", "downloads", "category_id", "content"):
             if key in card_fields and card_fields[key] is not None:
                 repository_data[key] = card_fields[key]
         if "tags" in card_fields and card_fields["tags"] is not None:
             repository_data["tags"] = card_fields["tags"]
 
+    repository_data["content"] = (card_fields or {}).get("content") or ""
     return repository_data
 
 
@@ -535,6 +547,18 @@ def create_skill_repository_listing_impl(
     )
     if not record:
         raise ValueError("Failed to load repository listing after write")
+    create_repository_pending_review_notification(
+        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+        tenant_id=tenant_id,
+        unique_id=repository_id,
+        details={
+            "name": record.get("name"),
+            "skill_repository_id": repository_id,
+            "skill_id": record.get("skill_id"),
+            "content": record.get("content") or "",
+        },
+        created_by=user_id,
+    )
     return _to_detail_item(record, is_updated=is_updated)
 
 
@@ -615,6 +639,7 @@ def update_skill_repository_status_impl(
     status: str,
     user_id: str,
     tenant_id: str,
+    content: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update a skill repository listing status by primary key."""
     if status not in VALID_REPOSITORY_STATUSES:
@@ -662,6 +687,7 @@ def update_skill_repository_status_impl(
             else None
         ),
         submitted_by=submitted_by,
+        content=content,
     )
     if rows_affected == 0:
         raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
@@ -679,7 +705,54 @@ def update_skill_repository_status_impl(
     )
     if not updated:
         raise ValueError("Failed to load repository listing after update")
+
+    _handle_review_status_notifications(
+        current_status=current_status,
+        new_status=status,
+        updated=updated,
+        skill_repository_id=skill_repository_id,
+        user_id=user_id,
+        content=content,
+    )
+
     return _to_summary_item(updated)
+
+
+def _handle_review_status_notifications(
+    *,
+    current_status: str,
+    new_status: str,
+    updated: Dict[str, Any],
+    skill_repository_id: int,
+    user_id: str,
+    content: Optional[str] = None,
+) -> None:
+    """Send review-result notification and deactivate pending-review notification."""
+    if current_status != new_status and new_status in (STATUS_SHARED, STATUS_REJECTED):
+        details: Dict[str, Any] = {
+            "name": updated.get("name"),
+            "skill_repository_id": skill_repository_id,
+            "skill_id": updated.get("skill_id"),
+        }
+        if content:
+            details["content"] = content
+        create_repository_review_notification(
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            review_status=new_status,
+            receiver_user_id=updated["publisher_user_id"],
+            details=details,
+            tenant_id=updated.get("publisher_tenant_id"),
+            unique_id=skill_repository_id,
+            created_by=user_id,
+        )
+
+    if current_status == STATUS_PENDING_REVIEW:
+        deactivate_notifications(
+            event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            unique_id=skill_repository_id,
+            updated_by=user_id,
+        )
 
 
 def _extract_duplicate_skill_name(error_message: str) -> Optional[str]:

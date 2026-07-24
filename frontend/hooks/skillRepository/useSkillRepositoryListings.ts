@@ -81,13 +81,16 @@ export function useUpdateSkillRepositoryStatus() {
     mutationFn: ({
       skillRepositoryId,
       status,
+      content,
     }: {
       skillRepositoryId: number;
       status: SkillRepositoryListingStatus;
+      content?: string;
     }) =>
       skillRepositoryService.updateSkillRepositoryStatus(
         skillRepositoryId,
-        status
+        status,
+        content
       ),
     onSuccess: async () => {
       await invalidateSkillRepositoryCaches(queryClient);

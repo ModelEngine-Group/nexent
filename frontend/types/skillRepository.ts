@@ -118,4 +118,5 @@ export interface SkillRepositoryListingCreatePayload {
   icon?: string;
   category_id?: number | null;
   tags?: string[];
+  content?: string;
 }

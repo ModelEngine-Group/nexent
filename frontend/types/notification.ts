@@ -19,6 +19,8 @@ export interface NotificationDetails {
   content?: string;
   agent_repository_id?: number;
   agent_id?: number;
+  skill_repository_id?: number;
+  skill_id?: number;
   [key: string]: unknown;
 }
 

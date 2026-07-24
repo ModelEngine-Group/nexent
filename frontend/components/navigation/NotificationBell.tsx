@@ -8,8 +8,8 @@ import { useTranslation } from "react-i18next";
 
 import { formatNotificationMessage } from "@/lib/notificationMessage";
 import {
-  buildAgentRepositoryReviewDeepLink,
-  isAgentRepositoryReviewResultNotification,
+  buildRepositoryReviewDeepLink,
+  isRepositoryReviewNotification,
 } from "@/lib/notificationNavigation";
 import { formatDateTime } from "@/lib/utils";
 import type { NotificationItem } from "@/types/notification";
@@ -43,15 +43,11 @@ export function NotificationBell({
       : t("notifications.bell.label");
 
   const handleItemClick = async (item: NotificationItem) => {
-    if (!isAgentRepositoryReviewResultNotification(item)) {
+    if (!isRepositoryReviewNotification(item)) {
       return;
     }
 
-    const deepLink = buildAgentRepositoryReviewDeepLink(
-      locale,
-      item.details,
-      item.event_type
-    );
+    const deepLink = buildRepositoryReviewDeepLink(locale, item);
     if (!deepLink) {
       return;
     }
@@ -96,7 +92,7 @@ export function NotificationBell({
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {items.map((item) => {
-              const isClickable = isAgentRepositoryReviewResultNotification(item);
+              const isClickable = isRepositoryReviewNotification(item);
 
               return (
                 <li

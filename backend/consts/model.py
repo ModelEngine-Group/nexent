@@ -787,6 +787,9 @@ class SkillRepositoryListingCreateRequest(BaseModel):
     downloads: int = Field(0, ge=0, description="Initial download count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
     category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+    content: Optional[str] = Field(
+        None, description="Listing note when submitting for review"
+    )
 
 
 class SkillRepositoryInstallRequest(BaseModel):

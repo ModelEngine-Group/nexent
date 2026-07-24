@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App, Button, Dropdown, Input, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
+import { MineApplyListingModal } from "./MineApplyListingModal";
 import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
 import {
   AsyncContent,
@@ -53,6 +54,22 @@ function isNewSkillPaddingItem(
   return "new_skill_padding" in item && item.new_skill_padding === true;
 }
 
+export type SkillReviewDeepLinkTarget = {
+  skillRepositoryId: number;
+  skillId: number;
+};
+
+function findRepositoryInfoById(
+  repositoryInfo: MySkillRepositoryInfoItem[],
+  skillRepositoryId: number
+): MySkillRepositoryInfoItem | null {
+  return (
+    repositoryInfo.find(
+      (item) => item.skill_repository_id === skillRepositoryId
+    ) ?? null
+  );
+}
+
 export function MineSkillsView({
   skills,
   counts,
@@ -75,6 +92,10 @@ export function MineSkillsView({
   onApplyListing,
   isUpdatingStatus,
   onSetNotShared,
+  reviewDeepLink = null,
+  deepLinkFallbackSkill = null,
+  deepLinkFallbackLoading = false,
+  onReviewDeepLinkConsumed,
 }: {
   skills: MyEditableSkillListItem[];
   counts: { all: number; created: number; others: number };
@@ -100,6 +121,10 @@ export function MineSkillsView({
   ) => Promise<void>;
   isUpdatingStatus: boolean;
   onSetNotShared: (repositoryInfo: MySkillRepositoryInfoItem) => Promise<void>;
+  reviewDeepLink?: SkillReviewDeepLinkTarget | null;
+  deepLinkFallbackSkill?: MyEditableSkillItem | null;
+  deepLinkFallbackLoading?: boolean;
+  onReviewDeepLinkConsumed?: () => void;
 }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
@@ -108,19 +133,29 @@ export function MineSkillsView({
     useState<MyEditableSkillItem | null>(null);
   const [reviewModalInfo, setReviewModalInfo] =
     useState<MySkillRepositoryInfoItem | null>(null);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [applyModalSkill, setApplyModalSkill] =
+    useState<MyEditableSkillItem | null>(null);
+  const [applySubmitting, setApplySubmitting] = useState(false);
+  const consumedDeepLinkRef = useRef<number | null>(null);
   const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
-    all: "agentRepository.mine.filter.all",
-    created: "agentRepository.mine.filter.created",
-    others: "agentRepository.mine.filter.others",
+    all: "skillRepository.mine.filter.all",
+    created: "skillRepository.mine.filter.created",
+    others: "skillRepository.mine.filter.others",
   };
 
-  const openReviewModal = (skill: MyEditableSkillItem) => {
-    const repositoryInfo = pickReviewDisplayRepositoryInfo(
-      skill.repository_info ?? []
-    );
-    if (!repositoryInfo) return;
+  const openReviewModal = (
+    skill: MyEditableSkillItem,
+    repositoryInfo?: MySkillRepositoryInfoItem | null
+  ) => {
+    const info =
+      repositoryInfo ??
+      pickReviewDisplayRepositoryInfo(skill.repository_info ?? []);
+    if (!info) {
+      return;
+    }
     setReviewModalSkill(skill);
-    setReviewModalInfo(repositoryInfo);
+    setReviewModalInfo(info);
     setReviewModalOpen(true);
   };
 
@@ -146,21 +181,79 @@ export function MineSkillsView({
     }
   };
 
+  useEffect(() => {
+    if (!reviewDeepLink) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+
+    if (consumedDeepLinkRef.current === reviewDeepLink.skillRepositoryId) {
+      return;
+    }
+
+    if (isLoading && deepLinkFallbackLoading) {
+      return;
+    }
+
+    const skillFromList = skills.find(
+      (item): item is MyEditableSkillItem =>
+        !isNewSkillPaddingItem(item) && item.skill_id === reviewDeepLink.skillId
+    );
+    const skill = skillFromList ?? deepLinkFallbackSkill;
+
+    if (!skill) {
+      if (isLoading || deepLinkFallbackLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.skillNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    const repositoryInfo = findRepositoryInfoById(
+      skill.repository_info ?? [],
+      reviewDeepLink.skillRepositoryId
+    );
+
+    if (!repositoryInfo) {
+      message.error(t("notifications.deepLink.skillNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    openReviewModal(skill, repositoryInfo);
+    consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
+    onReviewDeepLinkConsumed?.();
+  }, [
+    deepLinkFallbackLoading,
+    deepLinkFallbackSkill,
+    isLoading,
+    message,
+    onReviewDeepLinkConsumed,
+    reviewDeepLink,
+    skills,
+    t,
+  ]);
+
   const handleEnableSkill = (skill: MyEditableSkillItem) => {
-    const title = skill.name?.trim() || t("skillRepository.common.untitled");
-    modal.confirm({
-      title: t("skillRepository.mine.confirmApplyTitle", { name: title }),
-      content: t("skillRepository.mine.confirmApplyContent"),
-      centered: true,
-      okText: t("skillRepository.mine.submitReview"),
-      cancelText: t("common.cancel"),
-      onOk: async () => {
-        await onApplyListing(skill, {
-          icon: "skill",
-          tags: skill.tags ?? [],
-        });
-      },
-    });
+    setApplyModalSkill(skill);
+    setApplyModalOpen(true);
+  };
+
+  const handleConfirmApply = async (
+    payload: SkillRepositoryListingCreatePayload
+  ) => {
+    if (!applyModalSkill) {
+      return;
+    }
+    setApplySubmitting(true);
+    try {
+      await onApplyListing(applyModalSkill, payload);
+    } finally {
+      setApplySubmitting(false);
+    }
   };
 
   const handleDeleteSkill = (skill: MyEditableSkillItem) => {
@@ -261,6 +354,16 @@ export function MineSkillsView({
         isUpdatingStatus={isUpdatingStatus}
         onClose={closeReviewModal}
         onSetNotShared={handleSetNotShared}
+      />
+      <MineApplyListingModal
+        open={applyModalOpen}
+        skill={applyModalSkill}
+        loading={applySubmitting}
+        onClose={() => {
+          setApplyModalOpen(false);
+          setApplyModalSkill(null);
+        }}
+        onConfirm={handleConfirmApply}
       />
     </div>
   );
