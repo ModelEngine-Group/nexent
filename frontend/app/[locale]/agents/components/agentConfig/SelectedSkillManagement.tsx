@@ -49,9 +49,9 @@ function toSourceKey(source?: string): SkillSourceKey {
 }
 
 interface SelectedSkillManagementProps {
-  isCreatingMode?: boolean;
-  currentAgentId?: number;
-  isReadOnly?: boolean;
+  readonly isCreatingMode?: boolean;
+  readonly currentAgentId?: number;
+  readonly isReadOnly?: boolean;
 }
 
 export default function SelectedSkillManagement({

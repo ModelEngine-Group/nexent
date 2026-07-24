@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Checkbox, Input, Modal, Select, Tabs } from "antd";
+import { Button, Input, Modal, Select, Tabs } from "antd";
 import { BlocksIcon, Info, Search, Settings, Tag } from "lucide-react";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -13,18 +13,36 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../SkillDetailModal";
 import SkillConfigModal from "./SkillConfigModal";
+import SkillRowContent from "./SkillRowContent";
 
 interface SelectSkillsDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onOpenManageTags: () => void;
-  isCreatingMode?: boolean;
-  currentAgentId?: number;
-  isReadOnly?: boolean;
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly onOpenManageTags: () => void;
+  readonly isCreatingMode?: boolean;
+  readonly currentAgentId?: number;
+  readonly isReadOnly?: boolean;
 }
 
 const includesText = (value: string | null | undefined, query: string) =>
-  Boolean(value && value.toLowerCase().includes(query));
+  value?.toLowerCase().includes(query) ?? false;
+
+const matchesSkillFilters = (
+  skill: Skill,
+  query: string,
+  activeTags: readonly string[]
+) => {
+  const matchesText =
+    !query ||
+    includesText(skill.name, query) ||
+    includesText(skill.description, query) ||
+    (skill.tags || []).some((tag) => includesText(tag, query));
+  const matchesTags =
+    activeTags.length === 0 ||
+    (skill.tags || []).some((tag) => activeTags.includes(tag));
+
+  return matchesText && matchesTags;
+};
 
 const skillTagManagementEnabled = false;
 
@@ -70,17 +88,9 @@ export default function SelectSkillsDialog({
     return groupedSkills
       .map((group) => ({
         ...group,
-        skills: group.skills.filter((skill: Skill) => {
-          const matchesText =
-            !query ||
-            includesText(skill.name, query) ||
-            includesText(skill.description, query) ||
-            (skill.tags || []).some((tag) => includesText(tag, query));
-          const matchesTags =
-            activeTags.length === 0 ||
-            (skill.tags || []).some((tag) => activeTags.includes(tag));
-          return matchesText && matchesTags;
-        }),
+        skills: group.skills.filter((skill: Skill) =>
+          matchesSkillFilters(skill, query, activeTags)
+        ),
       }))
       .filter((group) => group.skills.length > 0);
   }, [activeTags, groupedSkills, search]);
@@ -332,27 +342,11 @@ export default function SelectSkillsDialog({
                       }
                     }}
                   >
-                    <Checkbox checked={isSelected} disabled={isReadOnly} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-mono text-xs font-medium text-gray-800">
-                          {skill.name}
-                        </span>
-                        {(skill.tags || []).slice(0, 2).map((tag) => (
-                          <span
-                            key={tag}
-                            className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                      {skill.description ? (
-                        <p className="truncate text-xs text-gray-400">
-                          {skill.description}
-                        </p>
-                      ) : null}
-                    </div>
+                    <SkillRowContent
+                      skill={skill}
+                      selected={isSelected}
+                      isReadOnly={Boolean(isReadOnly)}
+                    />
                     <div
                       className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                       data-testid={`skill-picker-actions-${skill.skill_id}`}

@@ -12,8 +12,8 @@ import { updateSkillById } from "@/services/agentConfigService";
 import type { Skill } from "@/types/agentConfig";
 
 interface SkillTagManagementModalProps {
-  open: boolean;
-  onClose: () => void;
+  readonly open: boolean;
+  readonly onClose: () => void;
 }
 
 interface SkillTagRow {

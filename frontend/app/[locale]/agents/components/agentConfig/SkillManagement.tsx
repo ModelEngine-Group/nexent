@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
-import { Badge, Button, Checkbox, message, Tabs, Tooltip } from "antd";
+import { Badge, message, Tabs, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Info, Trash2, Settings } from "lucide-react";
@@ -15,6 +15,7 @@ import {
 import log from "@/lib/logger";
 import SkillDetailModal from "./SkillDetailModal";
 import SkillConfigModal from "./skill/SkillConfigModal";
+import SkillRowContent from "./skill/SkillRowContent";
 
 interface SkillManagementProps {
   skillGroups: SkillGroup[];
@@ -269,27 +270,11 @@ export default function SkillManagement({
                 }
               }}
             >
-              <Checkbox checked={isSelected} disabled={isReadOnly} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate font-mono text-xs font-medium text-gray-800">
-                    {skill.name}
-                  </span>
-                  {(skill.tags || []).slice(0, 2).map((tag) => (
-                    <span
-                      key={tag}
-                      className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                {skill.description ? (
-                  <p className="truncate text-xs text-gray-400">
-                    {skill.description}
-                  </p>
-                ) : null}
-              </div>
+              <SkillRowContent
+                skill={skill}
+                selected={isSelected}
+                isReadOnly={isReadOnly}
+              />
               <div
                 className="ml-2 flex shrink-0 items-center justify-end gap-1"
                 data-testid={`skill-row-actions-${skill.skill_id}`}
