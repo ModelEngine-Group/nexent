@@ -152,6 +152,9 @@ When the prefix is omitted, the wrapper prompts for it. `push-images.sh` then pr
 ### Access Your Installation
 
 When deployment completes successfully:
+
+> **Get the administrator password**: The super administrator account is `suadmin@nexent.com`. On its first non-interactive creation, the terminal displays the effective password; when no value was configured, the default password is `Nexent@123`. For an offline deployment using `--config`, the manually entered password is neither saved nor displayed. If it is forgotten, recreate the account by following the earlier "Recreate the `suadmin` account" steps.
+
 1. Open **http://localhost:3000** in your browser
 2. Log in with the super administrator account
 3. Access tenant resources → Create tenant and tenant administrator

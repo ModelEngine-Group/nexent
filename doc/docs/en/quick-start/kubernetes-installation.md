@@ -139,6 +139,8 @@ The offline package installs all Nexent components by default. Add `--config` to
 
 When deployment completes successfully:
 
+> **Get the administrator password**: The super administrator account is `suadmin@nexent.com`. On its first non-interactive creation, the terminal displays the effective password; when no value was configured, the default password is `Nexent@123`. For an offline deployment using `--config`, the manually entered password is neither saved nor displayed. If it is forgotten, recreate the account by following the earlier "Recreate the `suadmin` account" steps.
+
 | Service | Default Address |
 |---------|-----------------|
 | Web Application | http://localhost:30000 |
