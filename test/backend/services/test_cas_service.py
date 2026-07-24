@@ -25,12 +25,12 @@ consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 consts_mock.const.CAS_CA_BUNDLE = ""
 consts_mock.const.CAS_CALLBACK_BASE_URL = "http://localhost:3000"
+consts_mock.const.CAS_DEFAULT_TENANT_ID = "cas-default-tenant"
 consts_mock.const.CAS_EMAIL_ATTRIBUTE = "mail"
 consts_mock.const.CAS_ENABLED = True
 consts_mock.const.CAS_LOGIN_MODE = "button"
 consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300
-consts_mock.const.CAS_RENEW_INTERVAL_SECONDS = 300
 consts_mock.const.CAS_RENEW_TIMEOUT_SECONDS = 10
 consts_mock.const.CAS_ROLE_ATTRIBUTE = "memberOf"
 consts_mock.const.CAS_ROLE_MAP_JSON = '{"cn=admins":"ADMIN"}'
@@ -58,7 +58,6 @@ from services.cas_service import (  # noqa: E402
     CasAuthenticationError,
     build_login_url,
     build_logout_url,
-    get_cas_config,
     parse_logout_request,
     parse_service_validate_response,
     revoke_from_logout_request,
@@ -73,20 +72,6 @@ sys.modules.pop("services.cas_service", None)
 
 
 class TestCasServiceParsing(unittest.TestCase):
-    def test_get_cas_config_returns_active_renewal_interval(self):
-        config = get_cas_config()
-
-        self.assertEqual(config["renew_before_seconds"], 300)
-        self.assertEqual(config["renew_interval_seconds"], 300)
-        self.assertEqual(config["renew_timeout_seconds"], 10)
-
-        original_interval = get_cas_config.__globals__["CAS_RENEW_INTERVAL_SECONDS"]
-        get_cas_config.__globals__["CAS_RENEW_INTERVAL_SECONDS"] = 120
-        try:
-            self.assertEqual(get_cas_config()["renew_interval_seconds"], 120)
-        finally:
-            get_cas_config.__globals__["CAS_RENEW_INTERVAL_SECONDS"] = original_interval
-
     def test_parse_success_response_with_attributes(self):
         xml = """
         <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
@@ -112,6 +97,37 @@ class TestCasServiceParsing(unittest.TestCase):
         self.assertEqual(principal.tenant_id, "tenant-a")
         self.assertEqual(principal.session_index, "ST-123")
         self.assertIsInstance(principal.expires_at, datetime)
+
+    def test_parse_response_uses_configured_default_tenant_when_attribute_is_missing(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+
+        principal = parse_service_validate_response(xml)
+
+        self.assertEqual(principal.tenant_id, "cas-default-tenant")
+
+    def test_parse_response_uses_global_default_tenant_when_cas_default_is_empty(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+            <cas:attributes><cas:tenant></cas:tenant></cas:attributes>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        original_default = parse_service_validate_response.__globals__["CAS_DEFAULT_TENANT_ID"]
+        parse_service_validate_response.__globals__["CAS_DEFAULT_TENANT_ID"] = ""
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            parse_service_validate_response.__globals__["CAS_DEFAULT_TENANT_ID"] = original_default
+
+        self.assertEqual(principal.tenant_id, "tenant_id")
 
     def test_parse_failure_response_raises(self):
         xml = """

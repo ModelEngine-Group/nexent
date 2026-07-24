@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { sessionService } from "@/services/sessionService";
-import { casService } from "@/services/casService";
 import {
   getTokenExpiresAt,
   hasAuthCookies,
@@ -15,9 +14,6 @@ import {
   TOKEN_REFRESH_BEFORE_EXPIRY_MS,
   MIN_ACTIVITY_CHECK_INTERVAL_MS,
 } from "@/const/constants";
-import { authEventUtils } from "@/lib/authEvents";
-import { getSessionRenewalAction } from "@/lib/sessionRenewal";
-import type { User } from "@/types/auth";
 import log from "@/lib/logger";
 
 /**
@@ -58,18 +54,9 @@ export const refreshSession = async (): Promise<boolean> => {
 // Hook implementation
 // ============================================================================
 
-export function useSessionManager(authProvider?: User["authProvider"]) {
+export function useSessionManager() {
   const { isSpeedMode, isDeploymentReady } = useDeployment();
   const reconcileExpiryRef = useRef<() => void>(() => {});
-  const lastCasRenewAttemptAtRef = useRef(0);
-  const isCasRenewingRef = useRef(false);
-  const hasCasRenewAttemptedRef = useRef(false);
-
-  useEffect(() => {
-    lastCasRenewAttemptAtRef.current = authProvider === "cas" ? Date.now() : 0;
-    isCasRenewingRef.current = false;
-    hasCasRenewAttemptedRef.current = false;
-  }, [authProvider]);
 
   useEffect(() => {
     if (isSpeedMode || !isDeploymentReady) return;
@@ -177,79 +164,17 @@ export function useSessionManager(authProvider?: User["authProvider"]) {
       try {
         reconcileExpiryRef.current();
 
-        if (!checkSessionValid()) return;
-
         const now = Date.now();
         if (now - lastActivityCheckAt < MIN_ACTIVITY_CHECK_INTERVAL_MS) return;
         lastActivityCheckAt = now;
 
         if (typeof document !== "undefined" && document.hidden) return;
 
-        if (authProvider === "cas") {
-          const config = await casService.getConfig();
-          if (!config.enabled || config.login_mode === "disabled") return;
-
-          const expiresAt = getTokenExpiresAt();
-          if (expiresAt === null) return;
-
-          const currentTime = Date.now();
-          const remainingLifetimeMs = expiresAt * 1000 - currentTime;
-          const action = getSessionRenewalAction({
-            authProvider,
-            isVisible: !document.hidden,
-            remainingLifetimeMs,
-            localRefreshThresholdMs: TOKEN_REFRESH_BEFORE_EXPIRY_MS,
-            currentTimeMs: currentTime,
-            lastCasRenewAttemptAtMs: lastCasRenewAttemptAtRef.current,
-            casRenewIntervalMs: config.renew_interval_seconds * 1000,
-            casRenewSafetyWindowMs: config.renew_before_seconds * 1000,
-            isCasRenewing: isCasRenewingRef.current,
-            hasCasRenewAttempted: hasCasRenewAttemptedRef.current,
-          });
-          if (action !== "renew-cas") return;
-
-          lastCasRenewAttemptAtRef.current = currentTime;
-          isCasRenewingRef.current = true;
-          hasCasRenewAttemptedRef.current = true;
-          try {
-            const success = await casService.renewInIframe(
-              config.renew_timeout_seconds
-            );
-            if (success) {
-              reconcileExpiryRef.current();
-              authEventUtils.emitTokenRefreshed();
-              log.info("CAS session renewed successfully");
-            } else {
-              log.warn("CAS session renewal failed");
-            }
-          } finally {
-            isCasRenewingRef.current = false;
-          }
-          return;
-        }
-
-        const expiresAt = getTokenExpiresAt();
-        if (expiresAt === null) return;
-        const action = getSessionRenewalAction({
-          authProvider,
-          isVisible: !document.hidden,
-          remainingLifetimeMs: expiresAt * 1000 - Date.now(),
-          localRefreshThresholdMs: TOKEN_REFRESH_BEFORE_EXPIRY_MS,
-          currentTimeMs: Date.now(),
-          lastCasRenewAttemptAtMs: 0,
-          casRenewIntervalMs: 0,
-          casRenewSafetyWindowMs: 0,
-          isCasRenewing: false,
-          hasCasRenewAttempted: false,
-        });
-        if (action === "refresh-local") {
+        if (isSessionExpiringSoon()) {
           const success = await refreshSession();
 
           if (!success) {
             log.debug("Token refresh failed, waiting for 401 from backend");
-          } else {
-            reconcileExpiryRef.current();
-            authEventUtils.emitTokenRefreshed();
           }
         }
       } catch (error) {
@@ -257,11 +182,12 @@ export function useSessionManager(authProvider?: User["authProvider"]) {
       }
     };
 
-    const documentEvents: (keyof DocumentEventMap)[] = [
+    const events: (keyof DocumentEventMap | keyof WindowEventMap)[] = [
       "click",
       "keydown",
       "mousemove",
       "touchstart",
+      "focus",
       "visibilitychange",
     ];
 
@@ -269,18 +195,24 @@ export function useSessionManager(authProvider?: User["authProvider"]) {
       void maybeRefreshOnActivity();
     };
 
-    window.addEventListener("focus", handler, { passive: true });
-    documentEvents.forEach((eventName) => {
-      document.addEventListener(eventName, handler, { passive: true });
+    events.forEach((evt) => {
+      if (evt === "focus" || evt === "visibilitychange") {
+        window.addEventListener(evt as any, handler, { passive: true });
+      } else {
+        document.addEventListener(evt as any, handler, { passive: true });
+      }
     });
 
     return () => {
-      window.removeEventListener("focus", handler);
-      documentEvents.forEach((eventName) => {
-        document.removeEventListener(eventName, handler);
+      events.forEach((evt) => {
+        if (evt === "focus" || evt === "visibilitychange") {
+          window.removeEventListener(evt as any, handler);
+        } else {
+          document.removeEventListener(evt as any, handler);
+        }
       });
     };
-  }, [authProvider, isSpeedMode]);
+  }, [isSpeedMode]);
 
   useEffect(() => {
     const cleanupAutoRefresh = setupTokenAutoRefresh();

@@ -177,11 +177,11 @@ data:
   CAS_EMAIL_ATTRIBUTE: {{ .Values.config.cas.emailAttribute | quote }}
   CAS_ROLE_ATTRIBUTE: {{ .Values.config.cas.roleAttribute | quote }}
   CAS_TENANT_ATTRIBUTE: {{ .Values.config.cas.tenantAttribute | quote }}
+  CAS_DEFAULT_TENANT_ID: {{ .Values.config.cas.defaultTenantId | quote }}
   CAS_ROLE_MAP_JSON: {{ .Values.config.cas.roleMapJson | quote }}
   CAS_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.sessionMaxAgeSeconds | quote }}
   LOCAL_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.localSessionMaxAgeSeconds | quote }}
   CAS_RENEW_BEFORE_SECONDS: {{ .Values.config.cas.renewBeforeSeconds | quote }}
-  CAS_RENEW_INTERVAL_SECONDS: {{ .Values.config.cas.renewIntervalSeconds | quote }}
   CAS_RENEW_TIMEOUT_SECONDS: {{ .Values.config.cas.renewTimeoutSeconds | quote }}
   CAS_SYNTHETIC_EMAIL_DOMAIN: {{ .Values.config.cas.syntheticEmailDomain | quote }}
   CAS_LOGOUT_URL: {{ .Values.config.cas.logoutUrl | quote }}

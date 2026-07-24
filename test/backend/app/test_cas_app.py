@@ -27,7 +27,6 @@ cas_service_mock.get_cas_config = MagicMock(
         "enabled": True,
         "login_mode": "button",
         "renew_before_seconds": 300,
-        "renew_interval_seconds": 300,
         "renew_timeout_seconds": 10,
         "display_name": "CAS",
     }
@@ -84,7 +83,6 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(data["message"], "success")
         self.assertTrue(data["data"]["enabled"])
         self.assertEqual(data["data"]["login_mode"], "button")
-        self.assertEqual(data["data"]["renew_interval_seconds"], 300)
 
     def test_login_redirects_to_cas_server(self):
         response = client.get("/user/cas/login?redirect=/chat", follow_redirects=False)

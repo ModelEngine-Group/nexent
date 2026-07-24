@@ -392,18 +392,16 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | 邮箱属性 |
 | `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | 角色属性 |
 | `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | 租户属性 |
+| `nexent-common.config.cas.defaultTenantId` | `CAS_DEFAULT_TENANT_ID` | CAS 未返回租户属性或属性为空时使用的默认租户 |
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | CAS 角色到 Nexent 角色的 JSON 映射 |
 | `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | CAS 本地会话最长有效期 |
 | `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent 本地会话有效期 |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | 距离过期多少秒内触发无感续期 |
-| `nexent-common.config.cas.renewIntervalSeconds` | `CAS_RENEW_INTERVAL_SECONDS` | 用户活跃时向 CAS Server 发起无感续期的最小间隔 |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | 无感续期等待超时时间 |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | CAS 未返回邮箱时生成邮箱使用的域名 |
 | `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS 登出地址。为空时 Nexent 主动退出不调用 CAS Server 登出接口 |
 | `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | 访问 CAS Server 时是否校验证书 |
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | 自定义 CA bundle 路径 |
-
-CAS 续期仅在用户近期有点击、键盘、鼠标、触摸、窗口聚焦或页面可见性变化时触发。页面隐藏或无操作时不会向 CAS Server 保活；`renewBeforeSeconds` 用于页面恢复时临近过期的补偿续期。建议将本地会话时长和续期间隔都设置得短于认证源的空闲过期时间。
 
 常用 CAS 地址：
 
@@ -450,11 +448,11 @@ nexent-common:
       emailAttribute: "email"
       roleAttribute: "userType"
       tenantAttribute: "tenant_id"
+      defaultTenantId: "tenant_id"
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'
       sessionMaxAgeSeconds: 3600
       localSessionMaxAgeSeconds: 3600
       renewBeforeSeconds: 300
-      renewIntervalSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"
       logoutUrl: "/logout?service=http://<Nexent IP>:30000"

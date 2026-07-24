@@ -348,11 +348,11 @@ CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_RENEW_BEFORE_SECONDS=300
-CAS_RENEW_INTERVAL_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
 
@@ -363,7 +363,7 @@ CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
 
-CAS renewal is triggered only by recent clicks, keyboard input, mouse movement, touch input, window focus, or page visibility changes. `CAS_RENEW_INTERVAL_SECONDS` controls the minimum interval between active-user requests to CAS Server; inactive or hidden pages do not keep the session alive. `CAS_RENEW_BEFORE_SECONDS` remains as an expiry safety window. Keep both the local session lifetime and renewal interval shorter than the authentication source idle timeout.
+When CAS omits the tenant attribute selected by `CAS_TENANT_ATTRIBUTE` or returns it empty, Nexent uses `CAS_DEFAULT_TENANT_ID`.
 
 Common CAS URLs:
 
@@ -405,11 +405,11 @@ CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_RENEW_BEFORE_SECONDS=300
-CAS_RENEW_INTERVAL_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
 CAS_LOGOUT_URL=/logout?service=http://<Nexent IP>:3000

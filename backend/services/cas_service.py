@@ -16,12 +16,12 @@ from defusedxml.common import DefusedXmlException
 from consts.const import (
     CAS_CA_BUNDLE,
     CAS_CALLBACK_BASE_URL,
+    CAS_DEFAULT_TENANT_ID,
     CAS_EMAIL_ATTRIBUTE,
     CAS_ENABLED,
     CAS_LOGIN_MODE,
     CAS_LOGOUT_URL,
     CAS_RENEW_BEFORE_SECONDS,
-    CAS_RENEW_INTERVAL_SECONDS,
     CAS_RENEW_TIMEOUT_SECONDS,
     CAS_ROLE_ATTRIBUTE,
     CAS_ROLE_MAP_JSON,
@@ -80,7 +80,6 @@ def get_cas_config() -> Dict[str, Any]:
         "enabled": enabled,
         "login_mode": mode,
         "renew_before_seconds": CAS_RENEW_BEFORE_SECONDS,
-        "renew_interval_seconds": CAS_RENEW_INTERVAL_SECONDS,
         "renew_timeout_seconds": CAS_RENEW_TIMEOUT_SECONDS,
         "display_name": "CAS",
     }
@@ -168,7 +167,8 @@ def parse_service_validate_response(xml_text: str, fallback_session_index: str =
     email = _attribute_or_default(attrs, CAS_EMAIL_ATTRIBUTE, "")
     username = attrs.get("displayName") or attrs.get("name") or cas_user_id
     role = _map_role(_attribute_or_default(attrs, CAS_ROLE_ATTRIBUTE, "USER"))
-    tenant_id = _attribute_or_default(attrs, CAS_TENANT_ATTRIBUTE, DEFAULT_TENANT_ID) or DEFAULT_TENANT_ID
+    default_tenant_id = CAS_DEFAULT_TENANT_ID or DEFAULT_TENANT_ID
+    tenant_id = _attribute_or_default(attrs, CAS_TENANT_ATTRIBUTE, default_tenant_id) or default_tenant_id
     session_index = attrs.get("SessionIndex") or attrs.get("sessionIndex") or fallback_session_index
     expires_at = _resolve_expires_at(attrs)
 

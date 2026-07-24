@@ -389,18 +389,16 @@ Configurable CAS values:
 | `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | Email attribute |
 | `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | Role attribute |
 | `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | Tenant attribute |
+| `nexent-common.config.cas.defaultTenantId` | `CAS_DEFAULT_TENANT_ID` | Default tenant when CAS omits the tenant attribute or returns it empty |
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | JSON mapping from CAS roles to Nexent roles |
 | `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | Maximum local CAS session lifetime |
 | `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent local session lifetime |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | Trigger silent renewal within this many seconds before expiry |
-| `nexent-common.config.cas.renewIntervalSeconds` | `CAS_RENEW_INTERVAL_SECONDS` | Minimum interval for active-user silent renewal against CAS Server |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | Silent renewal timeout |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | Domain used when CAS does not return an email |
 | `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS logout URL. Empty means Nexent logout will not call the CAS Server logout endpoint |
 | `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | Whether to verify CAS Server TLS certificates |
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | Custom CA bundle path |
-
-CAS renewal is triggered only by recent clicks, keyboard input, mouse movement, touch input, window focus, or page visibility changes. Hidden or inactive pages do not keep CAS Server alive; `renewBeforeSeconds` provides an expiry safety renewal when activity resumes. Keep both the local session lifetime and renewal interval shorter than the authentication source idle timeout.
 
 Common CAS URLs:
 
@@ -447,11 +445,11 @@ nexent-common:
       emailAttribute: "email"
       roleAttribute: "userType"
       tenantAttribute: "tenant_id"
+      defaultTenantId: "tenant_id"
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'
       sessionMaxAgeSeconds: 3600
       localSessionMaxAgeSeconds: 3600
       renewBeforeSeconds: 300
-      renewIntervalSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"
       logoutUrl: "/logout?service=http://<Nexent IP>:30000"
