@@ -62,7 +62,7 @@ bash deploy.sh k8s
 - **mainland**: 使用中国大陆镜像源
 - **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
 
-Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。每次部署前，脚本会保留已有值、注释和旧版变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板；部署时必须存在可读的 `.env.example`。
 
 使用 `bash deploy.sh k8s --defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。
 
@@ -112,6 +112,17 @@ cd nexent
 ```bash
 bash deploy.sh --load-images k8s
 ```
+
+如果管理节点上保留了此前已部署的离线包，可通过 `--reuse-from` 复用其中的环境配置和 Kubernetes 部署选项：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  k8s
+```
+
+指定目录必须是已解压的旧部署包根目录，并包含 `deploy/env/.env`。该参数会导入旧 `.env`、保留其已有值，并立即追加当前包 `.env.example` 新增的变量。存在 `monitoring.env` 和 Kubernetes `deploy.options` 时也会复用；Helm generated values 由新版本脚本重新生成。`--reuse-from` 可与 `--config`、`--defaults` 或 `--push-images` 组合使用。
 
 其他单节点集群和多节点集群应将镜像推送到集群可访问的内部仓库，或使用对应容器运行时的工具，将镜像导入所有可能运行 Nexent Pod 的节点：
 

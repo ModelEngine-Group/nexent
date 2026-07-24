@@ -41,7 +41,7 @@ bash deploy.sh k8s
 脚本会自动检测您之前保存的部署设置（组件组合、端口策略、镜像来源等）。如果 `deploy.options` 文件不存在，系统会提示您输入配置信息。
 
 > 💡 提示
-> - 若需配置语音模型（STT/TTS），请在对应的 `values.yaml` 中修改相关配置，或通过命令行参数传入。
+> - 升级时会保留 `deploy/env/.env` 中的已有值、注释、顺序和旧版独有变量，并自动追加当前 `deploy/env/.env.example` 新增的变量。部署前必须存在可读的模板。Helm generated values 会根据合并后的 `.env` 重新生成，请勿直接修改。语音模型（STT/TTS）也请在 `deploy/env/.env` 中配置。
 
 ---
 

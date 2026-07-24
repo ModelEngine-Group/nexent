@@ -26,7 +26,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
+> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Before every deployment, the scripts keep all existing values, comments, and old variables, then append variables newly introduced by the current `deploy/env/.env.example`. If `.env` does not exist, they first reuse legacy `docker/.env`, then fall back to the current template. A readable `.env.example` is required. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
 
 #### 2. Deployment Options
 
@@ -124,6 +124,17 @@ The offline package installs all Nexent components by default. Add `--config` to
 ```bash
 bash deploy.sh --load-images --config docker
 ```
+
+If the host still has a previously deployed offline package, use `--reuse-from` to reuse its environment configuration and deployment options:
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  docker
+```
+
+The specified directory must be the root of an extracted previous package and contain `deploy/env/.env`. This option imports the old `.env`, preserves its values, and immediately appends variables newly introduced by the current package's `.env.example`. It also reuses `monitoring.env` and Docker `deploy.options` when present; the new scripts regenerate Docker-derived configuration. `--reuse-from` can be combined with `--config`, `--defaults`, or `--push-images`.
 
 When `suadmin@nexent.com` is created for the first time, non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation. Offline deployment with `--config` prompts for and confirms the password; that input is neither persisted nor displayed.
 

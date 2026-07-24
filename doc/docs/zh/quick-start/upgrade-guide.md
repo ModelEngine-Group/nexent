@@ -40,7 +40,7 @@ bash deploy.sh docker
 缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
 
 > 💡 提示
-> - 已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+> - 升级时会保留 `deploy/env/.env` 中的已有值、注释、顺序和旧版独有变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板。加载镜像或启动服务前必须存在可读的 `.env.example`。
 > - 若需配置语音模型（STT/TTS），请在 `deploy/env/.env` 中补充相关变量，我们将尽快提供前端配置入口。
 
 ## 🌐 步骤三：验证部署

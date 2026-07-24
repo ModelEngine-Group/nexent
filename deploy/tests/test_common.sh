@@ -787,6 +787,7 @@ printf 'FROM_DOCKER=yes\n' > "$ENV_TEST_ROOT/docker/.env"
 printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env.example"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_DOCKER=yes" "deploy/env/.env should migrate from docker/.env first"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_EXAMPLE=yes" "docker/.env migration should merge current template variables"
 if grep -q "FROM_ROOT_SHOULD_NOT_COPY" "$ENV_TEST_ROOT/deploy/env/.env"; then
   echo "FAIL: deploy/env/.env should not migrate from root .env"
   exit 1
@@ -807,6 +808,84 @@ fi
 printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "ROOT_ONLY=yes" "existing deploy/env/.env should not be overwritten"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_EXAMPLE=yes" "existing deploy/env/.env should receive variables missing from the current template"
+
+MERGE_ENV_ROOT="$TMP_DIR/merge-env-root"
+mkdir -p "$MERGE_ENV_ROOT/docker" "$MERGE_ENV_ROOT/deploy/env"
+cat > "$MERGE_ENV_ROOT/deploy/env/.env" <<'EOF'
+# Existing comment remains in place
+PASSWORD=custom
+OLD_OPTION=true
+# COMMENTED_ONLY=old-commented-value
+EMPTY_VALUE=
+DUPLICATE=first
+DUPLICATE=second
+export EXPORTED_VALUE=custom
+  LEADING_SPACE_VALUE=custom
+SPECIAL_EXISTING='literal $EXISTING # value \\ path'
+EOF
+MERGE_SIDE_EFFECT="$TMP_DIR/merge-side-effect"
+{
+  printf '%s\n' 'PASSWORD=default'
+  printf '%s\n' 'EMPTY_VALUE=template-default'
+  printf '%s\n' 'DUPLICATE=template-default'
+  printf '%s\n' 'EXPORTED_VALUE=template-default'
+  printf '%s\n' 'LEADING_SPACE_VALUE=template-default'
+  printf '%s\n' 'COMMENTED_ONLY=active-default'
+  printf '%s\n' 'NEW_FIRST="  literal $NEW_VALUE # hash \\ path  "'
+  printf '%s\n' "NEW_COMMAND=\"\$(touch $MERGE_SIDE_EFFECT)\""
+  printf '%s\n' 'NEW_DUPLICATE=first-default'
+  printf '%s\n' 'NEW_DUPLICATE=second-default'
+  printf '%s\n' 'NEW_EMPTY='
+} > "$MERGE_ENV_ROOT/deploy/env/.env.example"
+cp "$MERGE_ENV_ROOT/deploy/env/.env" "$MERGE_ENV_ROOT/original.env"
+MERGE_OUTPUT="$(deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker")"
+original_size="$(wc -c < "$MERGE_ENV_ROOT/original.env" | tr -d '[:space:]')"
+head -c "$original_size" "$MERGE_ENV_ROOT/deploy/env/.env" > "$MERGE_ENV_ROOT/preserved-prefix.env"
+cmp -s "$MERGE_ENV_ROOT/original.env" "$MERGE_ENV_ROOT/preserved-prefix.env" || {
+  echo "FAIL: .env merge should preserve all existing bytes before appended variables"
+  exit 1
+}
+MERGED_ENV_CONTENT="$(cat "$MERGE_ENV_ROOT/deploy/env/.env")"
+assert_not_contains "$MERGED_ENV_CONTENT" "PASSWORD=default" "existing values should override template defaults"
+assert_not_contains "$MERGED_ENV_CONTENT" "EMPTY_VALUE=template-default" "an existing empty value should count as configured"
+assert_not_contains "$MERGED_ENV_CONTENT" "DUPLICATE=template-default" "existing duplicate assignments should prevent template defaults from being appended"
+assert_not_contains "$MERGED_ENV_CONTENT" "EXPORTED_VALUE=template-default" "export assignments should count as existing variables"
+assert_not_contains "$MERGED_ENV_CONTENT" "LEADING_SPACE_VALUE=template-default" "indented active assignments should count as existing variables"
+assert_contains "$MERGED_ENV_CONTENT" "# COMMENTED_ONLY=old-commented-value" "commented assignments should remain unchanged"
+assert_contains "$MERGED_ENV_CONTENT" "COMMENTED_ONLY=active-default" "commented assignments should not count as existing variables"
+assert_contains "$MERGED_ENV_CONTENT" '# Added automatically from the current deploy/env/.env.example' "new variables should follow the English merge separator"
+assert_contains "$MERGED_ENV_CONTENT" 'NEW_FIRST="  literal $NEW_VALUE # hash \\ path  "' "special characters should remain unexpanded and byte-preserved"
+assert_contains "$MERGED_ENV_CONTENT" "NEW_COMMAND=\"\$(touch $MERGE_SIDE_EFFECT)\"" "command substitutions should be appended without execution"
+assert_contains "$MERGED_ENV_CONTENT" $'NEW_DUPLICATE=first-default\nNEW_DUPLICATE=second-default\nNEW_EMPTY=' "new template assignments should retain template order and duplicates"
+assert_not_contains "$MERGE_OUTPUT" "custom" "merge logs should not expose environment values"
+[ ! -e "$MERGE_SIDE_EFFECT" ] || {
+  echo "FAIL: .env merge should never execute template values"
+  exit 1
+}
+
+cp "$MERGE_ENV_ROOT/deploy/env/.env" "$MERGE_ENV_ROOT/merged-snapshot.env"
+deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker" >/dev/null
+cmp -s "$MERGE_ENV_ROOT/merged-snapshot.env" "$MERGE_ENV_ROOT/deploy/env/.env" || {
+  echo "FAIL: .env merge should not rewrite files when no variables are missing"
+  exit 1
+}
+
+EMPTY_ENV_ROOT="$TMP_DIR/empty-env-root"
+mkdir -p "$EMPTY_ENV_ROOT/deploy/env"
+: > "$EMPTY_ENV_ROOT/deploy/env/.env"
+printf 'ADDED_TO_EMPTY=yes\n' > "$EMPTY_ENV_ROOT/deploy/env/.env.example"
+deployment_ensure_root_env "$EMPTY_ENV_ROOT" "$EMPTY_ENV_ROOT/docker" >/dev/null
+assert_eq $'# Added automatically from the current deploy/env/.env.example\nADDED_TO_EMPTY=yes' "$(cat "$EMPTY_ENV_ROOT/deploy/env/.env")" "an empty .env should receive current template variables"
+
+MISSING_TEMPLATE_ROOT="$TMP_DIR/missing-template-root"
+mkdir -p "$MISSING_TEMPLATE_ROOT/deploy/env"
+printf 'EXISTING_VALUE=preserved\n' > "$MISSING_TEMPLATE_ROOT/deploy/env/.env"
+if deployment_ensure_root_env "$MISSING_TEMPLATE_ROOT" "$MISSING_TEMPLATE_ROOT/docker" >"$TMP_DIR/missing-template.log" 2>&1; then
+  echo "FAIL: environment initialization should require deploy/env/.env.example"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/missing-template.log")" "deploy/env/.env.example" "missing template errors should identify the required file"
 
 deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "ROOT_ONLY" "updated"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" 'ROOT_ONLY="updated"' "env updater should update deploy env values"

@@ -62,7 +62,7 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
 
-Kubernetes uses the same `deploy/env/.env` file as Docker. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`.
+Kubernetes uses the same `deploy/env/.env` file as Docker. Before every deployment, existing values, comments, and old variables are preserved while variables newly introduced by the current `deploy/env/.env.example` are appended. If `.env` does not exist, the scripts first reuse legacy `docker/.env`, then fall back to the current template. A readable `.env.example` is required.
 
 Use `bash deploy.sh k8s --defaults` to skip the TUI and deploy with saved `deploy.options` or built-in defaults.
 
@@ -112,6 +112,17 @@ A single-node cluster backed by the Docker container runtime can load and deploy
 ```bash
 bash deploy.sh --load-images k8s
 ```
+
+If the management host still has a previously deployed offline package, use `--reuse-from` to reuse its environment configuration and Kubernetes deployment options:
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  k8s
+```
+
+The specified directory must be the root of an extracted previous package and contain `deploy/env/.env`. This option imports the old `.env`, preserves its values, and immediately appends variables newly introduced by the current package's `.env.example`. It also reuses `monitoring.env` and Kubernetes `deploy.options` when present; the new scripts regenerate Helm generated values. `--reuse-from` can be combined with `--config`, `--defaults`, or `--push-images`.
 
 For other single-node and multi-node clusters, push images to an internal registry accessible to the cluster, or import them with the container runtime's tooling on every node that may run Nexent Pods:
 

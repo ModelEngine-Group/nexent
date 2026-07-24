@@ -41,7 +41,7 @@ bash deploy.sh k8s
 The script will detect your saved deployment settings (components, port policy, image source, etc.) from `deploy.options`. If the file is missing, you will be prompted to enter configuration details.
 
 > 💡 Tip
-> If you need to configure voice models (STT/TTS), please edit the corresponding values in `values.yaml` or pass them via command line.
+> Existing values, comments, ordering, and old-only variables in `deploy/env/.env` are preserved, while variables newly introduced by the current `deploy/env/.env.example` are appended automatically. A readable template is required before deployment starts. Generated Helm values are then recreated from the merged `.env`; do not edit them directly. Configure voice models (STT/TTS) in `deploy/env/.env`.
 
 ---
 

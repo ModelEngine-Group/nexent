@@ -26,7 +26,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **💡 提示**: `deploy.sh` 使用 `deploy/env/.env` 作为运行配置。已有 `deploy/env/.env` 会原样保留；如果不存在，会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
+> **💡 提示**: Docker 和 Kubernetes 共用 `deploy/env/.env`。每次部署前，脚本会保留已有值、注释和旧版变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板；部署时必须存在可读的 `.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
 
 #### 2. 部署选项
 
@@ -122,6 +122,17 @@ bash deploy.sh --load-images docker
 ```bash
 bash deploy.sh --load-images --config docker
 ```
+
+如果服务器上保留了此前已部署的离线包，可通过 `--reuse-from` 复用其中的环境配置和部署选项：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  docker
+```
+
+指定目录必须是已解压的旧部署包根目录，并包含 `deploy/env/.env`。该参数会导入旧 `.env`、保留其已有值，并立即追加当前包 `.env.example` 新增的变量。存在 `monitoring.env` 和 Docker `deploy.options` 时也会复用；Docker 派生配置由新版本脚本重新生成。`--reuse-from` 可与 `--config`、`--defaults` 或 `--push-images` 组合使用。
 
 首次创建 `suadmin@nexent.com` 时，非交互部署使用 `NEXENT_SUPER_ADMIN_PASSWORD`，默认值为 `Nexent@123`，创建成功后会在终端显示实际密码。离线部署使用 `--config` 时会要求手动输入并确认密码，输入值不会写入配置文件，也不会在终端显示。
 

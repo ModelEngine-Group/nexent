@@ -110,6 +110,9 @@ deployment_i18n_format() {
       password.validation) printf '密码至少 8 位，并且包含大写字母、小写字母和数字。' ;;
       env.created_from_docker) printf '✅ 已从 docker/.env 创建 deploy/env/.env' ;;
       env.created_from_example) printf '✅ 已从 deploy/env/.env.example 创建 deploy/env/.env' ;;
+      env.example_missing) printf '缺少可读的 deploy/env/.env.example，无法初始化或升级环境配置' ;;
+      env.merge_failed) printf '无法将 deploy/env/.env.example 中的新变量合并到 deploy/env/.env' ;;
+      env.merged) printf '✅ 已将 deploy/env/.env.example 中的新变量追加到 deploy/env/.env' ;;
       env.root_missing) printf '未找到 deploy/env/.env，且没有可用的 docker/.env 或 deploy/env/.env.example 模板' ;;
       validation.local_config_schema) printf '%s' '本地配置 schemaVersion %s 与 %s 不兼容。请使用 --reconfigure 重新配置。' ;;
       validation.unknown_component) printf '%s' '未知部署组件：%s' ;;
@@ -172,6 +175,9 @@ deployment_i18n_format() {
       password.validation) printf 'Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers.' ;;
       env.created_from_docker) printf '✅ Created deploy/env/.env from docker/.env' ;;
       env.created_from_example) printf '✅ Created deploy/env/.env from deploy/env/.env.example' ;;
+      env.example_missing) printf 'A readable deploy/env/.env.example is required to initialize or upgrade environment configuration' ;;
+      env.merge_failed) printf 'Failed to merge new variables from deploy/env/.env.example into deploy/env/.env' ;;
+      env.merged) printf '✅ Added new variables from deploy/env/.env.example to deploy/env/.env' ;;
       env.root_missing) printf 'deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available' ;;
       validation.local_config_schema) printf '%s' 'Local config schemaVersion %s is incompatible with %s. Re-run with --reconfigure.' ;;
       validation.unknown_component) printf '%s' 'Unknown deployment component: %s' ;;
@@ -319,6 +325,78 @@ deployment_should_prompt_super_admin_password() {
     [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
 }
 
+deployment_require_env_example() {
+  local example_file="$1"
+  if [ ! -f "$example_file" ] || [ ! -r "$example_file" ]; then
+    deployment_error "$(deployment_i18n env.example_missing)"
+    return 1
+  fi
+}
+
+deployment_merge_env_from_example() {
+  local env_file="$1"
+  local example_file="$2"
+  local missing_assignments
+  local last_byte
+
+  deployment_require_env_example "$example_file" || return 1
+
+  if [ ! -f "$env_file" ] || [ ! -r "$env_file" ]; then
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  fi
+
+  missing_assignments="$(awk '
+    function assignment_key(line, normalized) {
+      normalized = line
+      sub(/^[[:space:]]*/, "", normalized)
+      sub(/^export[[:space:]]+/, "", normalized)
+      if (normalized !~ /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/) {
+        return ""
+      }
+      sub(/[[:space:]]*=.*/, "", normalized)
+      return normalized
+    }
+    FILENAME == ARGV[1] {
+      key = assignment_key($0)
+      if (key != "") {
+        existing[key] = 1
+      }
+      next
+    }
+    {
+      key = assignment_key($0)
+      if (key != "" && !(key in existing)) {
+        print $0
+      }
+    }
+  ' "$env_file" "$example_file")" || {
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  }
+
+  if [ -z "$missing_assignments" ]; then
+    return 0
+  fi
+
+  if [ -s "$env_file" ]; then
+    last_byte="$(tail -c 1 "$env_file" 2>/dev/null || true)"
+  fi
+  {
+    if [ -s "$env_file" ]; then
+      if [ -n "$last_byte" ]; then
+        printf '\n'
+      fi
+      printf '\n'
+    fi
+    printf '# Added automatically from the current deploy/env/.env.example\n%s\n' "$missing_assignments"
+  } >> "$env_file" || {
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  }
+  deployment_log "$(deployment_i18n env.merged)"
+}
+
 deployment_ensure_root_env() {
   local project_root="$1"
   local docker_dir="${2:-$project_root/docker}"
@@ -327,28 +405,27 @@ deployment_ensure_root_env() {
   local root_example="$env_dir/.env.example"
   local docker_env="$docker_dir/.env"
 
-  mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
   export DEPLOYMENT_ROOT_ENV
 
+  deployment_require_env_example "$root_example" || return 1
+
+  mkdir -p "$env_dir"
+
   if [ -f "$root_env" ]; then
-    return 0
+    deployment_merge_env_from_example "$root_env" "$root_example"
+    return $?
   fi
 
   if [ -f "$docker_env" ]; then
     cp "$docker_env" "$root_env"
     deployment_log "$(deployment_i18n env.created_from_docker)"
-    return 0
-  fi
-
-  if [ -f "$root_example" ]; then
+  else
     cp "$root_example" "$root_env"
     deployment_log "$(deployment_i18n env.created_from_example)"
-    return 0
   fi
 
-  deployment_error "$(deployment_i18n env.root_missing)"
-  return 1
+  deployment_merge_env_from_example "$root_env" "$root_example"
 }
 
 deployment_source_root_env() {
