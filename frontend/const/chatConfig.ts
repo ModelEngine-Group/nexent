@@ -31,7 +31,7 @@ export const chatConfig = {
 
   // File limit configuration
   maxFileCount: 50,
-  maxFileSize: 10 * 1024 * 1024, // Maximum 10MB per file
+  maxFileSize: 100 * 1024 * 1024, // Maximum 100MB per file
 
   // Supported image file extensions
   imageExtensions: ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"],

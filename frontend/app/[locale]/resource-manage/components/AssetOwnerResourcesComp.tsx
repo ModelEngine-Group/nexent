@@ -14,6 +14,7 @@ import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
+import ProjectConfigTab from "./resources/projectConfig";
 
 export default function AssetOwnerResourcesComp() {
   const { t } = useTranslation("common");
@@ -99,6 +100,13 @@ export default function AssetOwnerResourcesComp() {
                     tenantId={ASSET_OWNER_TENANT_ID}
                     refreshKey={invitationListRefreshKey}
                   />
+                ),
+              },
+              {
+                key: "projectConfig",
+                label: t("project.config"),
+                children: (
+                  <ProjectConfigTab/>
                 ),
               },
             ]}
