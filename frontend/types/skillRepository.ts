@@ -114,6 +114,10 @@ export interface MyEditableSkillListResponse {
   pagination: MyEditableSkillPagination;
 }
 
+export interface MyEditableSkillCountsResponse {
+  counts: MyEditableSkillOwnershipCounts;
+}
+
 export interface SkillRepositoryListingCreatePayload {
   icon?: string;
   category_id?: number | null;

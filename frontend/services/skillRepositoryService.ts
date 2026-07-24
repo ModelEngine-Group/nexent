@@ -8,6 +8,7 @@ import log from "@/lib/logger";
 import type {
   MyEditableSkillListParams,
   MyEditableSkillListResponse,
+  MyEditableSkillCountsResponse,
   SkillRepositoryListingCreatePayload,
   SkillRepositoryListingDetail,
   SkillRepositoryListingItem,
@@ -87,6 +88,29 @@ export async function fetchMyEditableSkills(
     return response.json();
   } catch (error) {
     log.error("Error fetching my editable skills:", error);
+    throw error;
+  }
+}
+
+export async function fetchMyEditableSkillCounts(): Promise<MyEditableSkillCountsResponse> {
+  try {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.skillRepository.mineSkillCounts,
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch my editable skill counts: ${response.statusText}`
+      );
+    }
+
+    return response.json();
+  } catch (error) {
+    log.error("Error fetching my editable skill counts:", error);
     throw error;
   }
 }
@@ -196,6 +220,7 @@ const skillRepositoryService = {
   fetchSkillRepositoryListings,
   fetchSkillRepositoryListingDetail,
   fetchMyEditableSkills,
+  fetchMyEditableSkillCounts,
   createSkillRepositoryListing,
   updateSkillRepositoryStatus,
   installSkillFromRepository,

@@ -308,6 +308,29 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
         return results
 
 
+def list_skill_permission_summaries(tenant_id: str) -> List[Dict[str, Any]]:
+    """List only the fields required to resolve skill visibility and ownership."""
+    with get_db_session() as session:
+        rows = session.query(
+            SkillInfo.skill_id,
+            SkillInfo.created_by,
+            SkillInfo.group_ids,
+            SkillInfo.ingroup_permission,
+        ).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+        ).all()
+        return [
+            {
+                "skill_id": row.skill_id,
+                "created_by": row.created_by,
+                "group_ids": convert_string_to_list(row.group_ids),
+                "ingroup_permission": row.ingroup_permission,
+            }
+            for row in rows
+        ]
+
+
 def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     """Get skill by name within a tenant.
 

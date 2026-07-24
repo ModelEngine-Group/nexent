@@ -565,6 +565,7 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
+    mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
     install: (skillRepositoryId: number) =>

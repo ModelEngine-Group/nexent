@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -15,6 +16,7 @@ import type {
 export const SKILL_REPOSITORY_LISTINGS_QUERY_KEY = "skillRepositoryListings";
 export const SKILL_REPOSITORY_DETAIL_QUERY_KEY = "skillRepositoryListingDetail";
 export const MY_EDITABLE_SKILLS_QUERY_KEY = "myEditableSkills";
+export const MY_EDITABLE_SKILL_COUNTS_QUERY_KEY = "myEditableSkillCounts";
 export const SKILLS_LIST_QUERY_KEY = "skills";
 
 export async function invalidateSkillRepositoryCaches(
@@ -24,6 +26,7 @@ export async function invalidateSkillRepositoryCaches(
     [SKILL_REPOSITORY_LISTINGS_QUERY_KEY],
     [MY_EDITABLE_SKILLS_QUERY_KEY],
     [SKILL_REPOSITORY_DETAIL_QUERY_KEY],
+    [MY_EDITABLE_SKILL_COUNTS_QUERY_KEY],
   ] as const;
 
   await Promise.all(
@@ -40,6 +43,7 @@ export function useSkillRepositoryListings(
   return useQuery({
     queryKey: [SKILL_REPOSITORY_LISTINGS_QUERY_KEY, params],
     queryFn: () => skillRepositoryService.fetchSkillRepositoryListings(params),
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnMount: "always",
     enabled,
@@ -53,9 +57,19 @@ export function useMyEditableSkills(
   return useQuery({
     queryKey: [MY_EDITABLE_SKILLS_QUERY_KEY, params],
     queryFn: () => skillRepositoryService.fetchMyEditableSkills(params),
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnMount: "always",
     enabled,
+  });
+}
+
+export function useMyEditableSkillCounts() {
+  return useQuery({
+    queryKey: [MY_EDITABLE_SKILL_COUNTS_QUERY_KEY],
+    queryFn: () => skillRepositoryService.fetchMyEditableSkillCounts(),
+    staleTime: 60_000,
+    refetchOnMount: "always",
   });
 }
 

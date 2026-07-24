@@ -821,6 +821,50 @@ class TestSkillServiceListSkills:
         assert len(result) == 1
         assert result[0]["permission"] == "EDIT"
 
+    def test_list_visible_skill_permission_summaries_uses_lightweight_query(
+        self,
+        mocker,
+    ):
+        list_summaries = mocker.patch(
+            'backend.services.skill_service.skill_db.list_skill_permission_summaries',
+            create=True,
+            return_value=[
+                {
+                    "skill_id": 1,
+                    "created_by": "user-1",
+                    "group_ids": [],
+                    "ingroup_permission": "PRIVATE",
+                },
+                {
+                    "skill_id": 2,
+                    "created_by": "user-2",
+                    "group_ids": [10],
+                    "ingroup_permission": "READ_ONLY",
+                },
+                {
+                    "skill_id": 3,
+                    "created_by": "user-2",
+                    "group_ids": [20],
+                    "ingroup_permission": "EDIT",
+                },
+            ],
+        )
+        mocker.patch(
+            'backend.services.skill_service.query_group_ids_by_user',
+            return_value=[10],
+        )
+        mocker.patch(
+            'backend.services.skill_service.get_user_tenant_by_user_id',
+            return_value={"user_role": "DEV"},
+        )
+
+        result = create_test_service().list_visible_skill_permission_summaries(
+            user_id="user-1",
+        )
+
+        assert [skill["skill_id"] for skill in result] == [1, 2]
+        list_summaries.assert_called_once_with("test-tenant")
+
 
 class TestSkillServiceGetSkill:
     """Test SkillService.get_skill method."""

@@ -924,6 +924,21 @@ def list_my_editable_skills_impl(
     }
 
 
+def count_my_editable_skills_impl(
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Count visible skills without loading content, tool relations, or YAML files."""
+    skills = SkillService(
+        tenant_id=tenant_id
+    ).list_visible_skill_permission_summaries(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return {"counts": _count_skills_by_ownership(skills, user_id)}
+
+
 def list_skill_repository_listings_impl(
     tenant_id: str,
     *,

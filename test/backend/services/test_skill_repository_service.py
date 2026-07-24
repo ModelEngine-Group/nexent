@@ -155,6 +155,17 @@ class _SkillServiceMock:
             )
         return skills
 
+    def list_visible_skill_permission_summaries(
+        self,
+        *,
+        tenant_id=None,
+        user_id,
+    ):
+        return self.list_visible_skills(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
 
 _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
@@ -507,6 +518,31 @@ def test_mine_ownership_uses_creator_not_edit_permission():
     assert others_result["items"][0]["permission"] == "EDIT"
     assert created_result["items"][0]["can_publish"] is True
     assert others_result["items"][0]["can_publish"] is False
+
+
+def test_count_my_editable_skills_uses_lightweight_visible_summaries():
+    list_visible = MagicMock(return_value=[
+        {"skill_id": 1, "created_by": "user-1"},
+        {"skill_id": 2, "created_by": "user-2"},
+    ])
+
+    class CountSkillService:
+        def __init__(self, tenant_id=None):
+            self.tenant_id = tenant_id
+
+        list_visible_skill_permission_summaries = list_visible
+
+    with patch.object(srs, "SkillService", CountSkillService):
+        result = srs.count_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+    assert result == {"counts": {"all": 2, "created": 1, "others": 1}}
+    list_visible.assert_called_once_with(
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
 
 
 def test_list_repository_listings_validates_status():

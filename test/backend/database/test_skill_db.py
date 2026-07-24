@@ -71,6 +71,7 @@ from backend.database.skill_db import (
     delete_skills_by_agent_id,
     delete_skill_instances_by_skill_id,
     delete_skill_instances_by_tenant,
+    list_skill_permission_summaries,
     list_skills,
     get_skill_by_name,
     get_skill_by_id,
@@ -1106,6 +1107,37 @@ class TestListSkills:
         result = list_skills('tenant1')
 
         assert result == []
+
+
+class TestListSkillPermissionSummaries:
+    """Tests for the lightweight skill permission query."""
+
+    def test_returns_only_permission_fields(self, monkeypatch, mock_session):
+        session, query = mock_session
+        row = MagicMock(
+            skill_id=1,
+            created_by="user-1",
+            group_ids="10,20",
+            ingroup_permission="READ_ONLY",
+        )
+        query.filter.return_value.all.return_value = [row]
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session",
+            lambda: mock_ctx,
+        )
+
+        result = list_skill_permission_summaries("tenant1")
+
+        assert result == [{
+            "skill_id": 1,
+            "created_by": "user-1",
+            "group_ids": [10, 20],
+            "ingroup_permission": "READ_ONLY",
+        }]
 
 
 # ===== get_skill_by_name Tests =====

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { App, ConfigProvider, Input, Modal } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,8 +13,11 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import {
+  invalidateSkillRepositoryCaches,
+  SKILLS_LIST_QUERY_KEY,
   useCreateSkillRepositoryListing,
   useInstallSkillFromRepository,
+  useMyEditableSkillCounts,
   useMyEditableSkills,
   useSkillRepositoryListingDetail,
   useSkillRepositoryListings,
@@ -38,8 +43,15 @@ import {
   getSkillRepositoryStatusLabel,
   STATUS_LABEL_KEYS,
 } from "./components/skillRepositoryShared";
-import SkillBuildModal from "../agents/components/agentConfig/SkillBuildModal";
-import SkillDetailModal from "../agents/components/agentConfig/SkillDetailModal";
+
+const SkillBuildModal = dynamic(
+  () => import("../agents/components/agentConfig/SkillBuildModal"),
+  { ssr: false }
+);
+const SkillDetailModal = dynamic(
+  () => import("../agents/components/agentConfig/SkillDetailModal"),
+  { ssr: false }
+);
 
 enum SkillRepositoryTab {
   REPOSITORY = "repository",
@@ -50,6 +62,7 @@ enum SkillRepositoryTab {
 const REPOSITORY_PAGE_SIZE = 6;
 const MINE_PAGE_SIZE = 6;
 const REVIEW_PAGE_SIZE = 10;
+const SEARCH_DEBOUNCE_MS = 300;
 const skillRepositoryTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
 };
@@ -68,24 +81,30 @@ export default function SkillRepositoryPage() {
   const { user } = useAuthorizationContext();
   const { message, modal } = App.useApp();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const queryClient = useQueryClient();
 
   const [tab, setTab] = useState<SkillRepositoryTab>(
     SkillRepositoryTab.REPOSITORY
   );
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
+  const [debouncedRepositorySearch, setDebouncedRepositorySearch] =
+    useState("");
   const [minePage, setMinePage] = useState(1);
   const [mineOwnership, setMineOwnership] =
     useState<MineOwnershipFilter>("all");
   const [mineSearch, setMineSearch] = useState("");
+  const [debouncedMineSearch, setDebouncedMineSearch] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [detailRepositoryId, setDetailRepositoryId] = useState<number | null>(
     null
   );
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
+  const [skillBuildLoaded, setSkillBuildLoaded] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
+  const [skillDetailLoaded, setSkillDetailLoaded] = useState(false);
   const [viewingSkill, setViewingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
@@ -98,14 +117,32 @@ export default function SkillRepositoryPage() {
   const isMineTab = tab === SkillRepositoryTab.MINE;
   const isReviewTab = tab === SkillRepositoryTab.REVIEW;
 
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedRepositorySearch(repositorySearch),
+      SEARCH_DEBOUNCE_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [repositorySearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedMineSearch(mineSearch),
+      SEARCH_DEBOUNCE_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [mineSearch]);
+
   const repositoryParams = useMemo(
     () => ({
       status: "shared" as const,
       page: repositoryPage,
       page_size: REPOSITORY_PAGE_SIZE,
-      ...(repositorySearch.trim() ? { search: repositorySearch.trim() } : {}),
+      ...(debouncedRepositorySearch.trim()
+        ? { search: debouncedRepositorySearch.trim() }
+        : {}),
     }),
-    [repositoryPage, repositorySearch]
+    [debouncedRepositorySearch, repositoryPage]
   );
 
   const mineParams = useMemo(
@@ -113,12 +150,14 @@ export default function SkillRepositoryPage() {
       ownership: mineOwnership,
       page: minePage,
       page_size: MINE_PAGE_SIZE,
-      ...(mineSearch.trim() ? { search: mineSearch.trim() } : {}),
-      ...(mineOwnership === "all" && !mineSearch.trim()
+      ...(debouncedMineSearch.trim()
+        ? { search: debouncedMineSearch.trim() }
+        : {}),
+      ...(mineOwnership === "all" && !debouncedMineSearch.trim()
         ? { new_skill_padding: true }
         : {}),
     }),
-    [mineOwnership, minePage, mineSearch]
+    [debouncedMineSearch, mineOwnership, minePage]
   );
 
   const reviewParams = useMemo(
@@ -152,10 +191,7 @@ export default function SkillRepositoryPage() {
     refetch: refetchMine,
   } = useMyEditableSkills(mineParams, isMineTab);
 
-  const { data: mineCountData } = useMyEditableSkills(
-    { page: 1, page_size: 1, ownership: "all" },
-    true
-  );
+  const { data: mineCountData } = useMyEditableSkillCounts();
 
   const {
     data: reviewData,
@@ -183,20 +219,6 @@ export default function SkillRepositoryPage() {
     detailRepositoryId,
     detailRepositoryId != null
   );
-
-  useEffect(() => {
-    const refreshActiveTab = async () => {
-      if (tab === SkillRepositoryTab.REPOSITORY) {
-        await refetchRepository();
-      } else if (tab === SkillRepositoryTab.MINE) {
-        await refetchMine();
-      } else if (tab === SkillRepositoryTab.REVIEW) {
-        await refetchReview();
-      }
-    };
-
-    refreshActiveTab().catch(() => {});
-  }, [tab, refetchRepository, refetchMine, refetchReview]);
 
   const repositoryItems = repositoryData?.items ?? [];
   const repositoryTotal = repositoryData?.pagination?.total ?? 0;
@@ -330,8 +352,15 @@ export default function SkillRepositoryPage() {
     );
   };
 
+  const refreshSkillCaches = async () => {
+    await Promise.all([
+      invalidateSkillRepositoryCaches(queryClient),
+      queryClient.invalidateQueries({ queryKey: [SKILLS_LIST_QUERY_KEY] }),
+    ]);
+  };
+
   const handleSkillBuildSuccess = async () => {
-    await refetchMine().catch(() => {});
+    await refreshSkillCaches().catch(() => {});
     setEditingSkill(null);
   };
 
@@ -479,13 +508,18 @@ export default function SkillRepositoryPage() {
                   onRetry={() => refetchMine()}
                   onCreateSkill={() => {
                     setEditingSkill(null);
+                    setSkillBuildLoaded(true);
                     setSkillBuildOpen(true);
                   }}
                   onEditSkill={(skill) => {
                     setEditingSkill(skill);
+                    setSkillBuildLoaded(true);
                     setSkillBuildOpen(true);
                   }}
-                  onViewSkill={(skill) => setViewingSkill(skill)}
+                  onViewSkill={(skill) => {
+                    setSkillDetailLoaded(true);
+                    setViewingSkill(skill);
+                  }}
                   onDeleteSkill={async (skill) => {
                     const name = skill.name?.trim();
                     if (!name) {
@@ -500,7 +534,7 @@ export default function SkillRepositoryPage() {
                       throw new Error(result.message || "Delete skill failed");
                     }
                     message.success(t("skillRepository.delete.success"));
-                    await refetchMine();
+                    await refreshSkillCaches();
                   }}
                   onApplyListing={async (skill, payload) => {
                     try {
@@ -603,30 +637,34 @@ export default function SkillRepositoryPage() {
           )}
         </div>
       </Modal>
-      <SkillBuildModal
-        isOpen={skillBuildOpen}
-        editingSkill={editingSkill}
-        onCancel={() => {
-          setSkillBuildOpen(false);
-          setEditingSkill(null);
-        }}
-        onSuccess={handleSkillBuildSuccess}
-      />
-      <SkillDetailModal
-        open={viewingSkill != null}
-        skill={
-          viewingSkill
-            ? ({
-                skill_id: viewingSkill.skill_id,
-                name: viewingSkill.name || "",
-                description: viewingSkill.description || "",
-                source: viewingSkill.source || "custom",
-                tags: viewingSkill.tags || [],
-              } satisfies Skill)
-            : null
-        }
-        onClose={() => setViewingSkill(null)}
-      />
+      {skillBuildLoaded ? (
+        <SkillBuildModal
+          isOpen={skillBuildOpen}
+          editingSkill={editingSkill}
+          onCancel={() => {
+            setSkillBuildOpen(false);
+            setEditingSkill(null);
+          }}
+          onSuccess={handleSkillBuildSuccess}
+        />
+      ) : null}
+      {skillDetailLoaded ? (
+        <SkillDetailModal
+          open={viewingSkill != null}
+          skill={
+            viewingSkill
+              ? ({
+                  skill_id: viewingSkill.skill_id,
+                  name: viewingSkill.name || "",
+                  description: viewingSkill.description || "",
+                  source: viewingSkill.source || "custom",
+                  tags: viewingSkill.tags || [],
+                } satisfies Skill)
+              : null
+          }
+          onClose={() => setViewingSkill(null)}
+        />
+      ) : null}
     </ConfigProvider>
   );
 }
