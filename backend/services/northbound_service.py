@@ -442,29 +442,10 @@ async def start_streaming_chat(
         except Exception as e:
             logger.warning(f"Failed to log token usage: {str(e)}")
 
-    async def _stream_with_conversation_id():
-        async for chunk in response.body_iterator:
-            yield chunk
-
-        # 流结束后追加一段 SSE JSON
-        payload = {
-            "type": "conversation_id",
-            "conversation_id": conversation_id,
-        }
-
-        yield (
-            f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-        )
-
-    wrapped = StreamingResponse(
-        _stream_with_conversation_id(),
-        media_type=response.media_type or "text/event-stream",
-        headers=dict(response.headers),
-    )
-
-    wrapped.headers["X-Request-Id"] = ctx.request_id
-    wrapped.headers["conversation_id"] = str(conversation_id)
-    return wrapped
+    # Attach request id header and conversation_id (internal id)
+    response.headers["X-Request-Id"] = ctx.request_id
+    response.headers["conversation_id"] = str(conversation_id)
+    return response
 
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
