@@ -105,7 +105,7 @@
   "chatInput.cannotPreviewFileType": "Cannot preview this file type",
   "chatInput.thisFileTypeCannotBePreviewed": "This file type cannot be previewed",
   "chatInput.fileCountExceedsLimit": "File count exceeds limit. Maximum {{count}} files allowed",
-  "chatInput.fileSizeExceedsLimit": "File \"{{name}}\" exceeds size limit. Maximum 100MB per file",
+  "chatInput.fileSizeExceedsLimit": "File \"{{name}}\" exceeds size limit. Maximum 10MB per file",
   "chatInput.unsupportedFileType": "File \"{{name}}\" is not a supported file type. Supported formats: images, documents (PDF, Word, Excel, PPT), text files, CSV/TSV, Markdown、JSON、HTML、XML",
   "chatInput.unsupportedFileTypeSimple": "Unsupported file type",
   "chatInput.dragAndDropFilesHere": "Drag and drop files here to upload",
