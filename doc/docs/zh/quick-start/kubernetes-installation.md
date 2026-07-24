@@ -65,9 +65,9 @@ Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。已有 `deploy/env/.en
 
 ### ⚠️ 重要提示
 
-1️⃣ **首次部署 v1.8.0 及以上版本时**，部署过程中系统会提示您设置 `suadmin` 超级管理员账号的密码。该账号为系统最高权限账户，请输入您想要的密码并**妥善保存**——密码创建后无法再次找回。
+1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时，部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 
-2️⃣ 忘记记录 `suadmin` 账号密码？请按照以下步骤操作：
+2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 
 ```bash
 # Step 1: 在 Supabase 数据库中删除 su 账号记录
@@ -83,7 +83,7 @@ kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
 kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
-# Step 3: 重新部署并记录 su 账号密码
+# Step 3: 重新部署；非交互模式将使用配置值或默认密码
 bash deploy.sh k8s
 ```
 

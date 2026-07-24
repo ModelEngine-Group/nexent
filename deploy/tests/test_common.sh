@@ -741,6 +741,44 @@ if deployment_validate_password "Nex123"; then
   exit 1
 fi
 
+unset NEXENT_SUPER_ADMIN_PASSWORD NEXENT_DEPLOYMENT_OFFLINE NEXENT_DEPLOY_CONFIG_MODE
+assert_eq "Nexent@123" "$(deployment_super_admin_password)" "super admin password should use the built-in default"
+NEXENT_SUPER_ADMIN_PASSWORD="CustomAdmin123"
+assert_eq "CustomAdmin123" "$(deployment_super_admin_password)" "configured super admin password should override the default"
+unset NEXENT_SUPER_ADMIN_PASSWORD
+
+if deployment_should_prompt_super_admin_password; then
+  echo "FAIL: online deployments should not prompt for the super admin password"
+  exit 1
+fi
+NEXENT_DEPLOY_CONFIG_MODE="tui"
+if deployment_should_prompt_super_admin_password; then
+  echo "FAIL: online --config deployments should not prompt for the super admin password"
+  exit 1
+fi
+NEXENT_DEPLOYMENT_OFFLINE="true"
+assert_success "offline --config deployments should prompt for the super admin password" deployment_should_prompt_super_admin_password
+NEXENT_DEPLOY_CONFIG_MODE="defaults"
+if deployment_should_prompt_super_admin_password; then
+  echo "FAIL: offline defaults deployments should not prompt for the super admin password"
+  exit 1
+fi
+unset NEXENT_DEPLOYMENT_OFFLINE NEXENT_DEPLOY_CONFIG_MODE
+
+DOCKER_SUPER_ADMIN_BLOCK="$(awk '/^create_default_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../docker/deploy.sh")"
+K8S_SUPER_ADMIN_BLOCK="$(awk '/^create_supabase_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "Docker super admin creation should use the shared prompt policy"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "Docker super admin creation should use the shared default password"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'bash "$script_path" "$password" "$display_password"' "Docker super admin creation should pass the password display policy"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "K8s super admin creation should use the shared prompt policy"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "K8s super admin creation should use the shared default password"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: ${password}"' "K8s should display non-interactive super admin passwords"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: [hidden]"' "K8s should hide interactively entered super admin passwords"
+DOCKER_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../docker/create-su.sh")"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: ${password}"' "Docker should display non-interactive super admin passwords"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: [hidden]"' "Docker should hide interactively entered super admin passwords"
+assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "NEXENT_SUPER_ADMIN_PASSWORD=Nexent@123" "deployment env example should define the default super admin password"
+
 ENV_TEST_ROOT="$TMP_DIR/env-root"
 mkdir -p "$ENV_TEST_ROOT/docker" "$ENV_TEST_ROOT/deploy/env"
 printf 'FROM_ROOT_SHOULD_NOT_COPY=yes\n' > "$ENV_TEST_ROOT/.env"

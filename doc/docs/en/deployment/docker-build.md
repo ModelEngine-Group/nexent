@@ -264,4 +264,6 @@ bash deploy.sh --load-images docker \
   --image-source local-latest
 ```
 
+By default, an offline package uses saved configuration or built-in defaults and creates the initial super administrator with `NEXENT_SUPER_ADMIN_PASSWORD` (default `Nexent@123`), displaying the effective password in the terminal after successful creation. When `bash deploy.sh --config ...` opens the interactive configuration and the account does not yet exist, deployment also prompts for and confirms the super administrator password. This input is neither written to the configuration file nor displayed in the terminal.
+
 To push the packaged images to an internal registry during offline deployment, replace `--load-images` with `--push-images --image-registry-prefix registry.example.com/nexent`. If the prefix is omitted, the wrapper prompts for it before `push-images.sh` asks for the registry username and password. The deployment config will use the same registry prefix for Docker Compose image references.

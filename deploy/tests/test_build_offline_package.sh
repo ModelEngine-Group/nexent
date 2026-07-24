@@ -162,7 +162,7 @@ SH
 chmod +x "$deploy_wrapper_dir/push-images.sh"
 cat > "$deploy_wrapper_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
+printf 'deploy:%s:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "${NEXENT_DEPLOYMENT_OFFLINE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/deploy/deploy.sh"
 
@@ -171,35 +171,39 @@ DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" do
 if grep -q '^load-images$' "$deploy_wrapper_log"; then
   fail "deploy.sh should not load images by default"
 fi
-grep -q '^deploy::docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args without --load-images"
+grep -q '^deploy::false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args and mark an online deployment"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [ "$first_line" = "load-images" ] || fail "deploy.sh --load-images should load images before deploy"
-[ "$second_line" = "deploy::docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+[ "$second_line" = "deploy::false:docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --defaults docker --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults before target should enable defaults mode"
+grep -q '^deploy:defaults:false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults before target should enable defaults mode"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --defaults --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
+grep -q '^deploy:defaults:false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
+
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --config --foo bar
+grep -q '^deploy:tui:false:docker --foo bar$' "$deploy_wrapper_log" || fail "online deploy.sh --config should enable TUI mode without the offline marker"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "deploy.sh --push-images should delegate push args to push-images.sh"
-[ "$second_line" = "deploy::docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --push-images should forward image registry prefix to deploy config"
+[ "$second_line" = "deploy::false:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --push-images should forward image registry prefix to deploy config"
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --load-images --push-images --image-registry-prefix registry.local/nexent docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "deploy.sh --load-images --push-images should not load before push login"
-[ "$second_line" = "deploy::docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --load-images --push-images should forward deploy args"
+[ "$second_line" = "deploy::false:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --load-images --push-images should forward deploy args"
 
 if DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --push-images docker --foo bar >/tmp/nexent-deploy-wrapper-missing-prefix.log 2>&1; then
   fail "deploy.sh --push-images should require image registry prefix in non-interactive mode"
@@ -277,36 +281,36 @@ SH
 chmod +x "$latest_package_dir/push-images.sh"
 cat > "$latest_package_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
+printf 'deploy:%s:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "${NEXENT_DEPLOYMENT_OFFLINE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$latest_package_dir/deploy/deploy.sh"
 
 offline_deploy_log="$TMP_DIR/offline-deploy-wrapper.log"
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh should default to non-interactive defaults mode"
+grep -q '^deploy:defaults:true:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh should default to non-interactive defaults mode"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --config --foo bar
-grep -q '^deploy:tui:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and consume the flag"
+grep -q '^deploy:tui:true:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and propagate the offline marker"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --defaults --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --defaults should preserve defaults mode and consume the flag"
+grep -q '^deploy:defaults:true:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --defaults should preserve defaults mode and consume the flag"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$offline_deploy_log")"
 second_line="$(sed -n '2p' "$offline_deploy_log")"
 [ "$first_line" = "load-images" ] || fail "offline deploy.sh --load-images should load images before deploy"
-[ "$second_line" = "deploy:defaults:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
+[ "$second_line" = "deploy:defaults:true:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$latest_package_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent docker --foo bar
 first_line="$(sed -n '1p' "$offline_deploy_log")"
 second_line="$(sed -n '2p' "$offline_deploy_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "offline deploy.sh --push-images should push before deploy"
-[ "$second_line" = "deploy:defaults:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "offline deploy.sh --push-images should preserve defaults mode and forward registry prefix"
+[ "$second_line" = "deploy:defaults:true:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "offline deploy.sh --push-images should preserve defaults mode and forward registry prefix"
 
 [ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"

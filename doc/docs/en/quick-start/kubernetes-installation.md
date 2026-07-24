@@ -65,9 +65,9 @@ After a successful deployment, non-sensitive choices are saved to `deploy/k8s/de
 
 ### ⚠️ Important Notes
 
-1️⃣ **When deploying v1.8.0 or later for the first time**, you will be prompted to set a password for the `suadmin` super administrator account during the deployment process. This account has the highest system privileges. Please enter your desired password and **save it securely** after creation - it cannot be retrieved later.
+1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. An offline package launched with `--config` instead prompts for and confirms the password, and that input takes precedence without being displayed.
 
-2️⃣ Forgot to note the `suadmin` account password? Follow these steps:
+2️⃣ To recreate the `suadmin` account, follow these steps:
 
 ```bash
 # Step 1: Delete su account record in Supabase database
@@ -83,7 +83,7 @@ kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
 kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
-# Step 3: Re-deploy and record the su account password
+# Step 3: Redeploy; non-interactive mode uses the configured or default password
 bash deploy.sh k8s
 ```
 

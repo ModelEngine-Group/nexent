@@ -243,4 +243,6 @@ bash deploy.sh --load-images docker \
   --image-source local-latest
 ```
 
+离线包默认使用已保存配置或内置默认值，并以 `NEXENT_SUPER_ADMIN_PASSWORD`（默认 `Nexent@123`）创建首次出现的超级管理员账号，创建成功后在终端显示实际密码。若使用 `bash deploy.sh --config ...` 进入交互配置，且账号尚不存在，部署脚本会额外要求输入并确认超级管理员密码；本次输入不会写入配置文件，也不会在终端显示。
+
 如果离线部署时需要推送到内部镜像仓库，可将 `--load-images` 替换为 `--push-images --image-registry-prefix registry.example.com/nexent`。如果省略前缀，入口脚本会先询问镜像仓库前缀，随后 `push-images.sh` 询问仓库账号和密码。部署配置会使用同一个镜像仓库前缀生成 Docker Compose 镜像引用。

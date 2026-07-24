@@ -74,10 +74,10 @@ bash deploy.sh docker --image-source local-latest
 
 #### ⚠️ 重要提示
 
-1️⃣ **首次部署 v1.8.0 及以上版本时**，需特别留意 Docker 日志中输出的 `suadmin` 超级管理员账号信息。该账号为系统最高权限账户，密码仅在首次生成时显示，后续无法再次查看，请务必妥善保存。
+1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时例外：部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 > 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
 
-2️⃣ 忘记留意 `suadmin` 账号密码？请按照以下步骤操作：
+2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 ```bash
 # Step1: 在supabase容器中删除su账号记录
 docker exec -it supabase-db-mini bash
@@ -92,7 +92,7 @@ docker exec -it nexent-postgresql bash
 psql -U root -d nexent
 delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
-# Step 3: 重新部署并记录 su 账号密码
+# Step 3: 重新部署；非交互模式将使用配置值或默认密码
 ```
 ### 3. 访问您的安装
 

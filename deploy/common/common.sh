@@ -11,6 +11,7 @@ DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT=""
 DEPLOYMENT_MONITORING_PROVIDER_DEFAULT="otlp"
+DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT="Nexent@123"
 
 DEPLOYMENT_COMPONENTS=""
 DEPLOYMENT_PORT_POLICY=""
@@ -307,6 +308,15 @@ deployment_validate_password() {
 
 deployment_password_validation_message() {
   deployment_i18n password.validation
+}
+
+deployment_super_admin_password() {
+  printf '%s' "${NEXENT_SUPER_ADMIN_PASSWORD:-$DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT}"
+}
+
+deployment_should_prompt_super_admin_password() {
+  [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" = "true" ] &&
+    [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
 }
 
 deployment_ensure_root_env() {

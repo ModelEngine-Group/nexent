@@ -197,6 +197,7 @@ insert_super_admin_tenant_record() {
 create_supabase_super_admin_user() {
   local email="$SUPER_ADMIN_EMAIL"
   local password
+  local display_password="true"
 
   if ! wait_for_supabase_auth_table_ready; then
     echo "   💡 The super admin user will not be created, but deployment will continue."
@@ -227,8 +228,14 @@ create_supabase_super_admin_user() {
     return 1
   fi
 
-  # Prompt user to enter password only when the user does not exist.
-  password="$(prompt_super_admin_password)" || return 1
+  # Offline --config deployments remain interactive. Other deployments use the
+  # configured password or the shared non-interactive default.
+  if deployment_should_prompt_super_admin_password; then
+    password="$(prompt_super_admin_password)" || return 1
+    display_password="false"
+  else
+    password="$(deployment_super_admin_password)"
+  fi
 
   local payload
   payload="{\"email\":\"$(json_escape "$email")\",\"password\":\"$(json_escape "$password")\",\"email_confirm\":true}"
@@ -278,7 +285,11 @@ create_supabase_super_admin_user() {
     echo ""
     echo "      Please save the following credentials carefully."
     echo "   📧 Email:    ${email}"
-    echo "   🔏 Password: [hidden]"
+    if [ "$display_password" = "true" ]; then
+      echo "   🔏 Password: ${password}"
+    else
+      echo "   🔏 Password: [hidden]"
+    fi
 
     local user_id
     user_id="$response_user_id"
