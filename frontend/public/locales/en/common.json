@@ -3860,6 +3860,9 @@
   "aidpKnowledge.uploading": "Uploading...",
   "aidpKnowledge.uploadHint": "Click or drag files here to upload",
   "aidpKnowledge.uploadHintDetail": "Multiple files supported",
+  "aidpKnowledge.uploadNoKb": "Please select a knowledge base first",
+  "aidpKnowledge.uploadKbUnavailable": "The knowledge base is currently unavailable; uploads are disabled",
+  "aidpKnowledge.uploadReadOnly": "You have read-only access and cannot upload files",
   "aidpKnowledge.notConnectedTitle": "Not Connected",
   "aidpKnowledge.notConnectedHint": "Configure AIDP connection above to get started",
   "aidpKnowledge.selectKbTitle": "Select a Knowledge Base",
@@ -3889,5 +3892,13 @@
   "aidpKnowledge.createVlmModelLoading": "Loading models…",
   "aidpKnowledge.createVlmModelNone": "No models available",
   "aidpKnowledge.createVlmModelSearch": "Search or select a VLM model",
+  "aidpKnowledge.createIngroupPermission": "In-Group Permission",
+  "aidpKnowledge.createIngroupPermissionRequired": "Please select in-group permission",
+  "aidpKnowledge.createIngroupPermissionEdit": "Edit — authorized groups can read, write and modify settings",
+  "aidpKnowledge.createIngroupPermissionRead": "Read Only — authorized groups can only view",
+  "aidpKnowledge.createIngroupPermissionPrivate": "Private — only the creator can access",
+  "aidpKnowledge.createAccessGroups": "Accessible User Groups",
+  "aidpKnowledge.createAccessGroupsPlaceholder": "Select user groups that can access this knowledge base",
+  "aidpKnowledge.createAccessGroupsRequired": "Please select at least one user group, or switch to private",
   "aidpKnowledge.showTotal": "Total {{count}} items"
 }

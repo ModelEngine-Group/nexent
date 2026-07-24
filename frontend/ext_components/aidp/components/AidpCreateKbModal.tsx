@@ -25,6 +25,8 @@ import { InboxOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpModelItem } from "@/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const { Dragger } = Upload;
 
@@ -73,6 +75,25 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   const [current, setCurrent] = useState(0);
   const [loading, setLoading] = useState(false);
   const [fileList, setFileList] = useState<File[]>([]);
+
+  // Load the tenant's groups so the user can pick which groups may access
+  // the new KB. When no tenant context is available we fall back to an
+  // empty list and disable the group picker.
+  // NOTE: ``useAuthorizationContext`` is required — it is the only context
+  // that exposes ``user: User | null`` (with ``tenantId``). The similarly-
+  // named ``useAuthenticationContext`` only carries ``session`` and the
+  // plain ``useAuthentication`` hook doesn't carry ``user`` at all.
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId ?? null;
+  const { data: groupListData } = useGroupList(tenantId);
+  const groupOptions = useMemo(
+    () =>
+      (groupListData?.groups ?? []).map((g) => ({
+        value: g.group_id,
+        label: g.group_name,
+      })),
+    [groupListData]
+  );
   const [formValues, setFormValues] = useState<{
     name: string;
     description?: string;
@@ -80,11 +101,15 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     chunk_token_num: number;
     chunk_overlap_num: number;
     caption_enable: number;
+    ingroup_permission: "EDIT" | "READ_ONLY" | "PRIVATE";
+    group_ids: number[];
   }>({
     name: "",
     chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
     chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
     caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
+    ingroup_permission: "READ_ONLY",
+    group_ids: [],
   });
 
   // Drive the vlm_model dropdown's visibility off the live Switch value.
@@ -154,19 +179,23 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       setFormValues({
         name,
         description: values.description?.trim() || undefined,
-        // VLM model is only meaningful for multimodal KBs. When the Switch
-        // is OFF we intentionally blank it here so the submit step also sends
-        // an empty ``vlm_model`` (AIDP ignores the field in that case).
         vlm_model: values.caption_enable
           ? values.vlm_model || defaultVlmModel || undefined
           : "",
-        // AIDP requires these chunk fields; fall back to defaults if missing.
         chunk_token_num:
           values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num,
         chunk_overlap_num:
           values.chunk_overlap_num ?? AIDP_CREATE_DEFAULTS.chunk_overlap_num,
-        // caption_enable: int 0/1.
         caption_enable: values.caption_enable ? 1 : 0,
+        // The permission select is disabled at PRIVATE so users cannot pick
+        // group_ids while PRIVATE; we always coerce to [] for safety.
+        ingroup_permission: values.ingroup_permission ?? "READ_ONLY",
+        group_ids:
+          (values.ingroup_permission ?? "READ_ONLY") === "PRIVATE"
+            ? []
+            : Array.isArray(values.group_ids)
+              ? values.group_ids
+              : [],
       });
       setCurrent(1);
     } catch {
@@ -197,16 +226,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       const created = await aidpKnowledgeService.createKb({
         name: formValues.name.trim(),
         description: formValues.description || "",
-        // AIDP expects int for chunk size fields.
         chunk_token_num: formValues.chunk_token_num,
         chunk_overlap_num: formValues.chunk_overlap_num,
-        // embedding_model is no longer exposed in the UI — always send the
-        // server-side default via AIDP_CREATE_DEFAULTS.
         embedding_model: AIDP_CREATE_DEFAULTS.embedding_model,
-        // When multimodal captioning is disabled, AIDP should receive an
-        // empty vlm_model — ``formValues.vlm_model`` is already blanked in
-        // handleNext, and the guard below preserves that even if a stale
-        // ``defaultVlmModel`` is resolved via the useEffect hook.
         vlm_model:
           formValues.caption_enable === 1
             ? formValues.vlm_model || defaultVlmModel || ""
@@ -216,6 +238,10 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         similarity: AIDP_CREATE_DEFAULTS.similarity,
         smartsplit: AIDP_CREATE_DEFAULTS.smartsplit,
         caption_enable: formValues.caption_enable,
+        // v7.1: forward in-group permission + groups to the backend so the
+        // knowledge-base permission row is created in lockstep with the KB.
+        ingroup_permission: formValues.ingroup_permission,
+        group_ids: formValues.group_ids,
       });
 
       // Step 2: Upload files (if any and not skipped)
@@ -270,6 +296,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
       chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
       caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
+      ingroup_permission: "READ_ONLY",
+      group_ids: [],
     });
   };
 
@@ -301,6 +329,66 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
             placeholder={t("aidpKnowledge.kbDescriptionPlaceholder")}
           />
         </Form.Item>
+
+        {/* v7.1: in-group permission controls.
+            PRIVATE disallows picking groups (groups are forced to []).
+            Non-PRIVATE selections REQUIRE a non-empty group_ids list. */}
+        <Form.Item
+          name="ingroup_permission"
+          label={t("aidpKnowledge.createIngroupPermission")}
+          initialValue="READ_ONLY"
+          rules={[
+            {
+              required: true,
+              message: t("aidpKnowledge.createIngroupPermissionRequired"),
+            },
+          ]}
+        >
+          <Select
+            options={[
+              {
+                value: "EDIT",
+                label: t("aidpKnowledge.createIngroupPermissionEdit"),
+              },
+              {
+                value: "READ_ONLY",
+                label: t("aidpKnowledge.createIngroupPermissionRead"),
+              },
+              {
+                value: "PRIVATE",
+                label: t("aidpKnowledge.createIngroupPermissionPrivate"),
+              },
+            ]}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="group_ids"
+          label={t("aidpKnowledge.createAccessGroups")}
+          dependencies={["ingroup_permission"]}
+          rules={[
+            ({ getFieldValue }) => ({
+              validator(_rule, value) {
+                const level = getFieldValue("ingroup_permission") || "READ_ONLY";
+                if (level === "PRIVATE") return Promise.resolve();
+                if (Array.isArray(value) && value.length > 0) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(
+                  new Error(t("aidpKnowledge.createAccessGroupsRequired"))
+                );
+              },
+            }),
+          ]}
+        >
+          <Select
+            mode="multiple"
+            placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
+            disabled={Form.useWatch("ingroup_permission", form) === "PRIVATE"}
+            options={groupOptions}
+          />
+        </Form.Item>
+
         <Form.Item
           name="caption_enable"
           required

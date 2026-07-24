@@ -73,7 +73,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       cancelText={t("common.cancel")}
       confirmLoading={loading}
       centered
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" className="mt-4">
         <Form.Item

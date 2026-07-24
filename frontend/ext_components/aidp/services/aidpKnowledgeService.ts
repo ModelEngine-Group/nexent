@@ -90,6 +90,21 @@ export interface AidpCreateKbPayload {
   similarity?: number;
   smartsplit?: number;
   caption_enable?: number;
+  /**
+   * Nexent-side in-group permission. ``PRIVATE`` forces an empty
+   * ``group_ids``; ``READ_ONLY`` / ``EDIT`` require a non-empty group list.
+   * Never forwarded to AIDP — the backend writes it to
+   * ``aidp_kb_permission_t``.
+   */
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Group IDs granted the in-group permission. */
+  group_ids?: number[];
+}
+
+/** Body for PATCH /aidp-mgmt/aidp-permissions/{kds_id}. */
+export interface AidpSetPermissionPayload {
+  ingroup_permission: "EDIT" | "READ_ONLY" | "PRIVATE";
+  group_ids?: number[];
 }
 
 export interface AidpUpdateKbPayload {
@@ -319,6 +334,29 @@ class AidpKnowledgeService {
             ? result.models.length
             : 0,
     };
+  }
+
+  /**
+   * Update the in-group permission for a KB (does not call AIDP).
+   * Required when a Nexent user with EDIT permission changes who can see the KB.
+   */
+  async setPermission(
+    id: string,
+    payload: AidpSetPermissionPayload
+  ): Promise<void> {
+    const url = buildUrl(
+      API_ENDPOINTS.aidpMgmt.kbPermission(id),
+      {}
+    );
+
+    await fetchWithErrorHandling(url, {
+      method: "PATCH",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
   }
 
   /**

@@ -250,6 +250,54 @@ def query_group_users(group_id: int) -> List[Dict[str, Any]]:
         return [as_dict(record) for record in result]
 
 
+def query_group_ids_by_user_in_tenant(user_id: str, tenant_id: str) -> List[int]:
+    """Return ``user_id``'s group IDs restricted to ``tenant_id``.
+
+    Joins ``tenant_group_user_t`` with ``tenant_group_info_t`` so a user that
+    happens to share a group ID across tenants cannot leak access. Filters on
+    ``delete_flag='N'`` for both tables.
+    """
+    if not user_id or not tenant_id:
+        return []
+    with get_db_session() as session:
+        result = (
+            session.query(TenantGroupUser.group_id)
+            .join(
+                TenantGroupInfo,
+                TenantGroupInfo.group_id == TenantGroupUser.group_id,
+            )
+            .filter(
+                TenantGroupUser.user_id == user_id,
+                TenantGroupUser.delete_flag == "N",
+                TenantGroupInfo.tenant_id == tenant_id,
+                TenantGroupInfo.delete_flag == "N",
+            )
+            .all()
+        )
+    return [row[0] for row in result]
+
+
+def filter_tenant_group_ids(group_ids: List[int], tenant_id: str) -> List[int]:
+    """Return the subset of ``group_ids`` that exist in ``tenant_id``.
+
+    Used by the AIDP permission service to validate submitted ``group_ids``
+    against the current tenant. Returns an empty list when no IDs match.
+    """
+    if not group_ids or not tenant_id:
+        return []
+    with get_db_session() as session:
+        rows = (
+            session.query(TenantGroupInfo.group_id)
+            .filter(
+                TenantGroupInfo.group_id.in_(group_ids),
+                TenantGroupInfo.tenant_id == tenant_id,
+                TenantGroupInfo.delete_flag == "N",
+            )
+            .all()
+        )
+    return [row[0] for row in rows]
+
+
 def query_group_ids_by_user(user_id: str) -> List[int]:
     """
     Query all group IDs for a user

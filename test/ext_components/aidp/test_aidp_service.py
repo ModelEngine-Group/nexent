@@ -81,6 +81,7 @@ class TestFetchAidpKnowledgeBasesImpl:
             "value": [{"kds_id": "kb-1"}, {"kds_id": "kb-2"}],
             "total_count": 2,
         }
+        mock_response.status_code = 200
         mock_response.raise_for_status.return_value = None
         mock_client.get.return_value = mock_response
 
@@ -231,6 +232,7 @@ class TestFetchAllAidpKnowledgeBasesImpl:
             "value": [{"kds_id": "kb-1"}, {"kds_id": "kb-2"}],
             "next_link": "/KnowledgeBase/Tenants/real-tenant/KnowledgeBases?page=2&page_size=100",
         }
+        page1_response.status_code = 200
         page1_response.raise_for_status.return_value = None
 
         page2_response = MagicMock()
@@ -238,6 +240,7 @@ class TestFetchAllAidpKnowledgeBasesImpl:
             "value": [{"kds_id": "kb-3"}, {"kds_id": "kb-4"}],
             "next_link": None,
         }
+        page2_response.status_code = 200
         page2_response.raise_for_status.return_value = None
 
         mock_client.get.side_effect = [page1_response, page2_response]
@@ -268,6 +271,7 @@ class TestFetchAllAidpKnowledgeBasesImpl:
             "value": [{"kds_id": "kb-1"}],
             "next_link": None,
         }
+        single_response.status_code = 200
         single_response.raise_for_status.return_value = None
         mock_client.get.return_value = single_response
 
@@ -442,7 +446,12 @@ class TestApplyCreateDefaults:
 
     def test_false_value_preserved_not_replaced_by_default(self, aidp_mod):
         result = aidp_mod._apply_create_defaults(
-            {"name": "kb", "chunk_token_num": 0, "vlm_model": "my-vlm"}
+            {
+                "name": "kb",
+                "chunk_token_num": 0,
+                "caption_enable": 1,
+                "vlm_model": "my-vlm",
+            }
         )
         assert result["chunk_token_num"] == 0
         assert result["vlm_model"] == "my-vlm"

@@ -716,31 +716,31 @@ class TestIsAidpUrl:
     the proxy only adds the Bearer header to the intended target."""
 
     def test_matches_when_host_and_path_match(self, monkeypatch):
-        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_rejects_wrong_host(self, monkeypatch):
-        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert not image_service_module._is_aidp_url(
             "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_rejects_right_host_wrong_path(self, monkeypatch):
-        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert not image_service_module._is_aidp_url(
             "https://aidp.example.com/some/other/path.png"
         )
 
     def test_rejects_when_env_empty(self, monkeypatch):
-        monkeypatch.delenv("AIDP_SERVER_URL", raising=False)
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "")
         assert not image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_ignores_trailing_slash_in_env(self, monkeypatch):
-        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com/")
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com/")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
@@ -752,7 +752,7 @@ class TestFetchAidpImage:
 
     @pytest.mark.asyncio
     async def test_attaches_bearer_header_and_returns_base64(self, monkeypatch):
-        monkeypatch.setenv("AIDP_API_KEY", "secret-key")
+        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "secret-key")
 
         mock_response = AsyncMock()
         mock_response.status = 200
@@ -782,7 +782,7 @@ class TestFetchAidpImage:
 
     @pytest.mark.asyncio
     async def test_returns_error_when_api_key_missing(self, monkeypatch):
-        monkeypatch.delenv("AIDP_API_KEY", raising=False)
+        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "")
         result = await image_service_module._fetch_aidp_image(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
@@ -797,8 +797,8 @@ class TestProxyImageImplAidpPath:
 
     @pytest.mark.asyncio
     async def test_aidp_url_short_circuits_to_fetch_aidp_image(self, monkeypatch):
-        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setenv("AIDP_API_KEY", "secret")
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "secret")
 
         sentinel = {"success": True, "base64": "abc", "content_type": "image/jpeg"}
         called = {"aidp": False, "direct": False, "dp": False}
@@ -829,8 +829,8 @@ class TestProxyImageImplAidpPath:
         # Env says AIDP is at a different host -> this URL must NOT be
         # classified as AIDP and must fall through to the loopback check /
         # data-process fallback.
-        monkeypatch.setenv("AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.delenv("AIDP_API_KEY", raising=False)
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "")
 
         aidp_spy = AsyncMock()
         # Force the data-process fallback to exit early by making the

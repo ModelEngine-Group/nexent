@@ -10,13 +10,23 @@ from urllib.parse import urljoin
 
 import httpx
 
+from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 from nexent.utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_service")
 
-_LIST_PATH = "/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+def _resolve_tenant_id(tenant_id: Any = None) -> str:
+    """Resolve a valid AIDP tenant identifier from explicit or configured input."""
+    configured_tenant = AIDP_TENANT_ID if isinstance(AIDP_TENANT_ID, str) else "aidp"
+    resolved_tenant = tenant_id if isinstance(tenant_id, str) else configured_tenant
+    return resolved_tenant.strip() or "aidp"
+
+
+def _get_list_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped knowledge-base API path."""
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/KnowledgeBases"
 
 
 def _timestamp_to_iso(value: Any) -> str | None:
@@ -164,7 +174,7 @@ def fetch_aidp_knowledge_bases_impl(
         "Content-Type": "application/json",
     }
 
-    list_path = f"{_LIST_PATH}?page={page}&page_size={page_size}"
+    list_path = f"{_get_list_path()}?page={page}&page_size={page_size}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Fetching AIDP knowledge bases from %s", list_url)
 
@@ -277,7 +287,7 @@ def fetch_all_aidp_knowledge_bases_impl(
         detected_tenant: str | None = None
 
         # Build the first request URL using the known path pattern
-        first_path = f"{_LIST_PATH}?page=1&page_size={page_size}"
+        first_path = f"{_get_list_path()}?page=1&page_size={page_size}"
         current_url: str | None = urljoin(f"{normalized_url}/", first_path)
 
         while current_page <= max_pages and current_url:
@@ -384,7 +394,7 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         "Content-Type": "application/json",
     }
 
-    count_path = f"{_LIST_PATH}/0/Count"
+    count_path = f"{_get_list_path()}/0/Count"
     count_url = urljoin(f"{normalized_url}/", count_path)
     logger.info("Counting AIDP knowledge bases from %s", count_url)
 
@@ -503,7 +513,7 @@ def create_aidp_kb_impl(
     # Fill missing fields with SDK-aligned defaults before forwarding.
     full_payload = _apply_create_defaults(payload)
 
-    create_url = urljoin(f"{normalized_url}/", _LIST_PATH)
+    create_url = urljoin(f"{normalized_url}/", _get_list_path())
     logger.info("Creating AIDP knowledge base at %s", create_url)
 
     try:
@@ -568,7 +578,7 @@ def get_aidp_kb_impl(
         "Content-Type": "application/json",
     }
 
-    get_path = f"{_LIST_PATH}/{kds_id}"
+    get_path = f"{_get_list_path()}/{kds_id}"
     get_url = urljoin(f"{normalized_url}/", get_path)
     logger.info("Getting AIDP knowledge base from %s", get_url)
 
@@ -638,7 +648,7 @@ def update_aidp_kb_impl(
         "Content-Type": "application/json",
     }
 
-    update_path = f"{_LIST_PATH}/{kds_id}"
+    update_path = f"{_get_list_path()}/{kds_id}"
     update_url = urljoin(f"{normalized_url}/", update_path)
     logger.info("Updating AIDP knowledge base at %s", update_url)
 
@@ -704,7 +714,7 @@ def delete_aidp_kb_impl(
         "Content-Type": "application/json",
     }
 
-    delete_path = f"{_LIST_PATH}/{kds_id}"
+    delete_path = f"{_get_list_path()}/{kds_id}"
     delete_url = urljoin(f"{normalized_url}/", delete_path)
     logger.info("Deleting AIDP knowledge base at %s", delete_url)
 
@@ -758,7 +768,7 @@ def upload_aidp_docs_impl(
         "Authorization": f"Bearer {api_key}",
     }
 
-    upload_path = f"{_LIST_PATH}/{kds_id}/KnowledgeFiles/Upload"
+    upload_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Upload"
     upload_url = urljoin(f"{normalized_url}/", upload_path)
     logger.info("Uploading documents to AIDP knowledge base at %s", upload_url)
 
@@ -837,7 +847,7 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
         "Content-Type": "application/json",
     }
 
-    count_path = f"{_LIST_PATH}/{kds_id}/KnowledgeFiles/Count"
+    count_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Count"
     count_url = urljoin(f"{normalized_url}/", count_path)
     logger.info("Counting AIDP documents in KB %s from %s", kds_id, count_url)
 
@@ -914,7 +924,7 @@ def list_aidp_docs_impl(
         "Content-Type": "application/json",
     }
 
-    list_path = f"{_LIST_PATH}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
+    list_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Listing AIDP documents from %s", list_url)
 
@@ -979,7 +989,9 @@ def list_aidp_docs_impl(
 
 
 # AIDP ModelService endpoint for listing applicable models.
-_MODELS_PATH = "/ModelService/Tenants/aidp/Service"
+def _get_models_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped model service API path."""
+    return f"/ModelService/Tenants/{_resolve_tenant_id(tenant_id)}/Service"
 
 
 def _is_kb_applicable(model: Dict[str, Any]) -> bool:
@@ -1010,7 +1022,7 @@ def list_aidp_models_impl(
 ) -> Dict[str, Any]:
     """Fetch available models from AIDP ModelService.
 
-    Queries ``GET /ModelService/Tenants/aidp/Service?service=<service>&app=<app>``
+    Queries ``GET /ModelService/Tenants/{tenant_id}/Service?service=<service>&app=<app>``
     and post-filters the response to only include models whose ``application``
     field matches ``All`` or the requested ``app`` (AIDP's query parameter is
     advisory; it does not enforce filtering on its own).
@@ -1030,7 +1042,7 @@ def list_aidp_models_impl(
         "Content-Type": "application/json",
     }
 
-    models_path = f"{_MODELS_PATH}?service={service}&app={app}"
+    models_path = f"{_get_models_path()}?service={service}&app={app}"
     models_url = urljoin(f"{normalized_url}/", models_path.lstrip("/"))
     logger.info("Fetching AIDP models from %s", models_url)
 

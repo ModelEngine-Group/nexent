@@ -6,7 +6,6 @@ Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_
 """
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -20,9 +19,6 @@ from ...utils.tools_common_message import SearchResultTextMessage, ToolCategory,
 from ....utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_search_tool")
-
-_LIST_PATH = "/KnowledgeBase/Tenants/aidp/KnowledgeBases"
-_RETRIEVE_PATH = "/KnowledgeBase/Tenants/aidp/Retrieval/FusionSearch"
 
 _VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
 _VALID_RERANK_MODES = {"performance", "high_accuracy"}
@@ -96,6 +92,10 @@ class AidpSearchTool(Tool):
             "description": "AIDP API key (ak_...)",
             "description_zh": "AIDP API 密钥",
         },
+        "tenant_id": {
+            "description": "AIDP tenant identifier used in API paths",
+            "description_zh": "AIDP API 路径中的租户标识",
+        },
         "kds_list": {
             "description": "JSON string array of knowledge base IDs (kds_id) to search",
             "description_zh": "要检索的知识库 ID 列表",
@@ -144,8 +144,9 @@ class AidpSearchTool(Tool):
 
     def __init__(
         self,
-        server_url: str = Field(default_factory=lambda: os.environ.get("AIDP_SERVER_URL", ""), exclude=True, description="AIDP API base URL"),
-        api_key: str = Field(default_factory=lambda: os.environ.get("AIDP_API_KEY", ""), exclude=True, description="AIDP API key"),
+        server_url: str = Field(exclude=True, description="AIDP API base URL"),
+        api_key: str = Field(exclude=True, description="AIDP API key"),
+        tenant_id: str = Field(exclude=True, description="AIDP tenant identifier"),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
         search_method: str = Field(default="hybrid_search", description="Search method"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
@@ -160,26 +161,16 @@ class AidpSearchTool(Tool):
         super().__init__()
         self.kds_list: List[str] = _parse_kds_list(kds_list)
 
-        # --- credential resolution (defense in depth) ---
-        # Three failure modes must all degrade gracefully to env vars:
-        #  1. Argument omitted  → Field(default_factory=...) fills from env
-        #  2. Explicit empty string ("") from a persisted DB config
-        #  3. Non-string value (e.g. a Pydantic FieldInfo dict/object that
-        #     leaked through when _merge_tool_params read a serialized
-        #     FieldInfo from ag_tool_info_t.init_params). Calling .rstrip()
-        #     on a FieldInfo would raise AttributeError, so we coerce first.
-        def _resolve_credential(raw_value: Any, env_name: str) -> str:
-            if isinstance(raw_value, str) and raw_value:
-                return raw_value
-            return os.environ.get(env_name, "")
-
-        self.base_url = _resolve_credential(server_url, "AIDP_SERVER_URL").rstrip("/")
-        self.api_key = _resolve_credential(api_key, "AIDP_API_KEY")
+        self.base_url = server_url.rstrip("/") if isinstance(server_url, str) else ""
+        self.api_key = api_key if isinstance(api_key, str) else ""
+        self.tenant_id = tenant_id.strip() if isinstance(tenant_id, str) else ""
 
         if not self.base_url:
             raise ValueError("server_url is required and must be a non-empty string")
         if not self.api_key:
             raise ValueError("api_key is required and must be a non-empty string")
+        if not self.tenant_id:
+            raise ValueError("tenant_id is required and must be a non-empty string")
         self.search_method = _coerce_choice(
             search_method, _VALID_SEARCH_METHODS, "hybrid_search", "search_method"
         )
@@ -196,6 +187,11 @@ class AidpSearchTool(Tool):
         self.top_k = max(1, min(int(resolved_top_k), 100))
         self.multi_modal = bool(resolved_multi_modal)
         self.observer = observer
+        # Runtime whitelist populated by the backend (create_agent_info).
+        # When non-empty, both the configured ``kds_list`` and any LLM-supplied
+        # ``kds_list`` are intersected with this set so permission changes take
+        # effect immediately, without ever touching the database.
+        self._allowed_kds_set: set[str] = set()
 
         self._http_client = http_client_manager.get_sync_client(
             base_url=self.base_url,
@@ -206,7 +202,8 @@ class AidpSearchTool(Tool):
         self.record_ops = 1
 
     def _build_retrieve_url(self) -> str:
-        return urljoin(self.base_url, _RETRIEVE_PATH)
+        path = f"/KnowledgeBase/Tenants/{self.tenant_id}/Retrieval/FusionSearch"
+        return urljoin(self.base_url, path)
 
     def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
         payload = {
@@ -342,7 +339,27 @@ class AidpSearchTool(Tool):
         if file_url.startswith("http://") or file_url.startswith("https://"):
             return file_url
         cleaned = file_url.lstrip("/")
-        return f"{self.base_url}{_LIST_PATH}/{cleaned}"
+        list_path = f"/KnowledgeBase/Tenants/{self.tenant_id}/KnowledgeBases"
+        return f"{self.base_url}{list_path}/{cleaned}"
+
+    def set_allowed_kds(self, allowed: Optional[List[str]]) -> None:
+        """Install the runtime whitelist computed by the backend.
+
+        Called once during agent setup so the tool never reaches a forbidden
+        KB even if the LLM later crafts a ``kds_list`` that includes one.
+        Passing ``None`` or an empty list clears the whitelist (i.e. trust
+        the configured ``kds_list``).
+        """
+        if allowed is None:
+            self._allowed_kds_set = set()
+        else:
+            self._allowed_kds_set = {str(k) for k in allowed if k}
+
+    def _filter_by_whitelist(self, kds: List[str]) -> List[str]:
+        """Intersect ``kds`` with the runtime whitelist, preserving order."""
+        if not self._allowed_kds_set:
+            return list(kds)
+        return [k for k in kds if k in self._allowed_kds_set]
 
     def forward(
         self,
@@ -352,10 +369,17 @@ class AidpSearchTool(Tool):
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
 
-        # Use kds_list from runtime parameters if provided, otherwise fall back to instance kds_list
-        search_kds_list = self.kds_list
-        if kds_list is not None and len(kds_list) > 0:
-            search_kds_list = kds_list
+        # Always intersect with the runtime whitelist, regardless of whether
+        # the LLM passed a fresh ``kds_list`` or we fall back to the
+        # configured value. ``_filter_by_whitelist`` is a no-op when no
+        # whitelist has been installed (e.g. SDK unit tests), so it stays
+        # safe to call from anywhere.
+        base_kds = (
+            kds_list
+            if kds_list is not None and len(kds_list) > 0
+            else self.kds_list
+        )
+        search_kds_list = self._filter_by_whitelist(list(base_kds))
 
         self._emit_running_prompt(query)
 
@@ -368,8 +392,13 @@ class AidpSearchTool(Tool):
         )
 
         if not search_kds_list:
+            # Provide a clear, actionable message so the LLM (and the user)
+            # know that the configured KBs were filtered out by the
+            # permission system rather than failing silently.
             raise AidpSearchError(
-                "No knowledge base selected. Please select at least one knowledge base."
+                "No accessible knowledge base. The configured KBs are either "
+                "missing from your accessible set or have been revoked. "
+                "Ask the operator to grant access to at least one KB."
             )
 
         try:

@@ -216,43 +216,75 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         );
       })()}
 
-      {/* Upload area */}
+      {/* Upload area — gated by ``activeKb.permission`` and ``resource_status``.
+
+          Per v7.1 §7.1, READ_ONLY callers may view existing documents but
+          must not be able to upload. UNAVAILABLE / ORPHANED KBs are
+          read-only regardless of permission because the AIDP backend cannot
+          service the request. The container is replaced with a hint instead
+          of disabling the Dragger so the visual structure stays consistent
+          and screen-reader users get an explicit reason. */}
       <div className="p-3">
-        <Dragger
-          multiple
-          showUploadList={false}
-          beforeUpload={(_file, fileList) => {
-            // Dedupe: antd calls beforeUpload N times for N selected files,
-            // passing the same `fileList` reference each time. Only process
-            // the FIRST invocation per batch to prevent duplicate uploads.
-            if (batchRef.current === fileList) return false;
-            batchRef.current = fileList;
+        {(() => {
+          const isUnavailable =
+            activeKb?.resource_status === "UNAVAILABLE" ||
+            activeKb?.resource_status === "ORPHANED";
+          const canUpload =
+            !!activeKb &&
+            !isUnavailable &&
+            activeKb.permission === "EDIT";
+          if (!canUpload) {
+            const reasonKey = !activeKb
+              ? "aidpKnowledge.uploadNoKb"
+              : isUnavailable
+              ? "aidpKnowledge.uploadKbUnavailable"
+              : "aidpKnowledge.uploadReadOnly";
+            return (
+              <div className="ant-upload ant-upload-drag p-6 text-center border border-dashed border-gray-200 rounded">
+                <p className="ant-upload-text text-gray-500">
+                  {t(reasonKey)}
+                </p>
+              </div>
+            );
+          }
+          return (
+            <Dragger
+              multiple
+              showUploadList={false}
+              beforeUpload={(_file, fileList) => {
+                // Dedupe: antd calls beforeUpload N times for N selected files,
+                // passing the same `fileList` reference each time. Only process
+                // the FIRST invocation per batch to prevent duplicate uploads.
+                if (batchRef.current === fileList) return false;
+                batchRef.current = fileList;
 
-            const allFiles = fileList
-              .map((f) => f as unknown as File)
-              .filter(Boolean);
+                const allFiles = fileList
+                  .map((f) => f as unknown as File)
+                  .filter(Boolean);
 
-            // Defer to avoid blocking antd
-            setTimeout(() => {
-              handleUpload(allFiles);
-              batchRef.current = null;
-            }, 0);
-            return false;
-          }}
-          disabled={uploading || !activeKb}
-        >
-          <p className="ant-upload-drag-icon">
-            <InboxOutlined />
-          </p>
-          <p className="ant-upload-text">
-            {uploading
-              ? t("aidpKnowledge.uploading")
-              : t("aidpKnowledge.uploadHint")}
-          </p>
-          <p className="ant-upload-hint">
-            {t("aidpKnowledge.uploadHintDetail")}
-          </p>
-        </Dragger>
+                // Defer to avoid blocking antd
+                setTimeout(() => {
+                  handleUpload(allFiles);
+                  batchRef.current = null;
+                }, 0);
+                return false;
+              }}
+              disabled={uploading}
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">
+                {uploading
+                  ? t("aidpKnowledge.uploading")
+                  : t("aidpKnowledge.uploadHint")}
+              </p>
+              <p className="ant-upload-hint">
+                {t("aidpKnowledge.uploadHintDetail")}
+              </p>
+            </Dragger>
+          );
+        })()}
       </div>
     </div>
   );

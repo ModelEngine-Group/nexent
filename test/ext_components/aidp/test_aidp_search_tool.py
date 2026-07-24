@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock
 
@@ -9,7 +10,7 @@ import httpx
 import pytest
 
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 MODULE_PATH = os.path.join(PROJECT_ROOT, "sdk", "nexent", "core", "ext_components", "aidp", "aidp_search_tool.py")
 
 
@@ -84,7 +85,7 @@ def aidp_module():
     module_name = "sdk.nexent.core.ext_components.aidp.aidp_search_tool"
     spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
-    module.__package__ = "sdk.nexent.core.tools"
+    module.__package__ = "sdk.nexent.core.ext_components.aidp"
     register_module(module_name, module)
     spec.loader.exec_module(module)
 
@@ -125,6 +126,7 @@ def aidp_tool(aidp_module, mock_observer):
     tool = aidp_module.AidpSearchTool(
         server_url="https://aidp.example.com/",
         api_key="jwt-token",
+        tenant_id="aidp",
         kds_list='["kb1", "kb2"]',
         search_method="hybrid_search",
         reranking_enable=True,
@@ -175,6 +177,7 @@ class TestAidpSearchToolInit:
         tool = aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com/",
                 api_key="jwt-token",
+                tenant_id="aidp",
                 kds_list='["kb1", "kb2"]',
                 search_method="vector_search",
                 reranking_enable=True,
@@ -221,6 +224,7 @@ class TestAidpSearchToolInit:
             aidp_module.AidpSearchTool(
                 server_url=server_url,
                 api_key=api_key,
+                tenant_id="aidp",
                 kds_list=kds_list,
                 observer=mock_observer,
             )
@@ -232,6 +236,7 @@ class TestAidpSearchToolInit:
             aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com",
                 api_key="jwt-token",
+                tenant_id="aidp",
                 kds_list="not-json",
                 observer=mock_observer,
             )
@@ -245,6 +250,7 @@ class TestAidpSearchToolInit:
         tool = aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com",
                 api_key="jwt-token",
+                tenant_id="aidp",
                 kds_list='["kb1"]',
                 search_method="bad-method",
                 reranking_enable=True,
@@ -409,6 +415,7 @@ class TestAidpBuildImageUrl:
         tool = aidp_module.AidpSearchTool(
             server_url="https://aidp-no-slash.example.com",  # no trailing slash
             api_key="jwt-token",
+            tenant_id="aidp",
             kds_list='["kb1"]',
             observer=mock_observer,
         )
@@ -444,7 +451,7 @@ class TestAidpBuildImageUrl:
 
         aidp_tool.forward("image query")
 
-        picture_call = mock_observer.add_message.call_args_list[3]
+        picture_call = mock_observer.add_message.call_args_list[-1]
         assert picture_call.args[1] == aidp_module.ProcessType.PICTURE_WEB
         assert (
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/data/picture.png"

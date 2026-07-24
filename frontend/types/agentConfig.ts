@@ -219,6 +219,16 @@ export interface AidpKnowledgeBaseItem {
   description?: string;
   document_count?: number;
   chunk_count?: number;
+  /** Effective permission for the current user: "EDIT" / "READ_ONLY" / null. */
+  permission?: "EDIT" | "READ_ONLY" | null;
+  /** Group-level permission configured for the KB: "EDIT" / "READ_ONLY" / "PRIVATE". */
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Group IDs granted the in-group permission. Ignored when PRIVATE. */
+  group_ids?: number[];
+  /** Nexent user_id of the KB creator (owner). */
+  created_by?: string;
+  /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
+  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
 }
 
 export interface AidpKnowledgeBaseListResponse {

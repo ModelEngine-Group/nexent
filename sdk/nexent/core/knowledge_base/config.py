@@ -1,8 +1,8 @@
-"""Hardcoded configuration for the first AIDP adapter implementation."""
+"""Default-free configuration constants for the standalone AIDP adapter."""
 
-AIDP_BASE_URL = "http://127.0.0.1:8000"
-AIDP_API_KEY = "ak_a6222712e0942a494e6cd45493d30faeb8290e4250628c6e26f17c226f64e98d"
-AIDP_TENANT_ID = "aidp"
+AIDP_BASE_URL = ""
+AIDP_API_KEY = ""
+AIDP_TENANT_ID = ""
 
 DEFAULT_CHUNK_TOKEN_NUM = 1024
 DEFAULT_CHUNK_OVERLAP_NUM = 128

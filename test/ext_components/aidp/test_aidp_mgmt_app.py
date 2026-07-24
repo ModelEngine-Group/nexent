@@ -1,702 +1,557 @@
-"""
-Unit tests for AIDP Management App Layer.
+"""Unit tests for the v7.1 AIDP management endpoints.
 
-Tests the 8 FastAPI endpoints in backend/apps/aidp_mgmt_app.py
-that proxy AIDP knowledge base CRUD and document management.
+These tests exercise the FastAPI router in ``backend/ext_components/aidp/apps/aidp_mgmt_app.py``
+after the permission rewrite. Every handler now:
+* parses the Authorization header via ``_auth``,
+* enforces the permission matrix via ``require_permission``,
+* delegates KB CRUD to the AIDP client while writing permission state to
+  ``aidp_kb_permission_t``.
+
+The tests stub the auth helper, the AIDP service layer, and the local DB
+CRUD so we can validate request/response semantics without a real Postgres.
 """
+from __future__ import annotations
+
 import io
-import sys
 import os
+import sys
 import types
 from http import HTTPStatus
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-# -------------------- Bootstrap module stubs --------------------
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
-backend_dir = os.path.join(project_root, "backend")
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+BACKEND_DIR = os.path.join(PROJECT_ROOT, "backend")
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
-# Stub nexent SDK modules so imports don't pull optional runtime deps.
-_def = lambda name, **attrs: types.ModuleType(name)
-nexent_pkg = _def("nexent"); nexent_pkg.__path__ = []
-nexent_utils_pkg = _def("nexent.utils"); nexent_utils_pkg.__path__ = []
-nexent_http_mgr = _def("nexent.utils.http_client_manager")
+# --- Module stubs --------------------------------------------------------
+
+def _mod(name):
+    m = types.ModuleType(name)
+    m.__path__ = []
+    return m
+
+
+nexent_pkg = _mod("nexent")
+nexent_utils = _mod("nexent.utils")
+nexent_http_mgr = _mod("nexent.utils.http_client_manager")
 nexent_http_mgr.http_client_manager = MagicMock()
+nexent_storage = _mod("nexent.storage")
+nexent_storage_factory = _mod("nexent.storage.storage_client_factory")
+nexent_storage_factory.create_storage_client_from_config = MagicMock()
 
-for _mod in [nexent_pkg, nexent_utils_pkg, nexent_http_mgr]:
-    sys.modules.setdefault(_mod.__name__, _mod)
 
-# Stub backend package hierarchy
-backend_pkg = sys.modules.get("backend") or _def("backend")
-backend_pkg.__path__ = [backend_dir]
-backend_db_pkg = _def("backend.database"); backend_db_pkg.__path__ = [os.path.join(backend_dir, "database")]
-backend_db_client_pkg = _def("backend.database.client"); backend_db_client_pkg.MinioClient = MagicMock()
+class _MinIOStorageConfig:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
 
-for _mod in [backend_pkg, backend_db_pkg, backend_db_client_pkg]:
-    sys.modules.setdefault(_mod.__name__, _mod)
 
-# Now safe to import backend modules under test
-from backend.ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
-from backend.apps.app_factory import register_exception_handlers
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from backend.ext_components.aidp.services.aidp_service import (
-    count_aidp_kbs_impl,
-    create_aidp_kb_impl,
-    delete_aidp_kb_impl,
-    fetch_aidp_knowledge_bases_impl,
-    get_aidp_kb_impl,
-    list_aidp_docs_impl,
-    update_aidp_kb_impl,
-    upload_aidp_docs_impl,
+nexent_storage_factory.MinIOStorageConfig = _MinIOStorageConfig
+
+for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
+            nexent_storage_factory):
+    sys.modules.setdefault(mod.__name__, mod)
+
+backend_pkg = sys.modules.get("backend") or _mod("backend")
+backend_pkg.__path__ = [BACKEND_DIR]
+backend_db_pkg = _mod("backend.database")
+backend_db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
+backend_db_client = _mod("backend.database.client")
+backend_db_client.MinioClient = MagicMock()
+backend_db_client.PostgresClient = MagicMock()
+backend_db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
+backend_db_client.get_db_session = MagicMock()
+for mod in (backend_pkg, backend_db_pkg, backend_db_client):
+    sys.modules.setdefault(mod.__name__, mod)
+
+# Production modules under test
+from backend.ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
+    aidp_mgmt_router,
 )
-
-# -------------------- Helpers --------------------
+from backend.apps.app_factory import register_exception_handlers  # noqa: E402
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
-KDS_ID = "kb-test-001"
+USER_ID = "user-test"
+TENANT_ID = "tenant-test"
+
+
+# --- Fixtures -------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def configure_aidp_constants(monkeypatch):
+    """Pin AIDP credentials and auth helper behaviour for every test."""
+    from backend.ext_components.aidp.apps import aidp_mgmt_app
+
+    monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", SERVER_URL)
+    monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", API_KEY)
+
+    # Default: auth succeeds with the standard test user/tenant.
+    monkeypatch.setattr(
+        aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+        lambda *_a, **_kw: (USER_ID, TENANT_ID),
+    )
+    yield
 
 
 def _build_app() -> FastAPI:
-    """Build a FastAPI app with aidp_mgmt_router and exception handlers."""
     app = FastAPI()
     app.include_router(aidp_mgmt_router)
     register_exception_handlers(app)
     return app
 
 
-# ==================== GET /knowledge-bases ====================
+def _client():
+    return TestClient(_build_app())
 
 
-class TestListKnowledgeBases:
-    """Tests for GET /aidp-mgmt/knowledge-bases."""
+def _bearer() -> dict:
+    return {"Authorization": "Bearer fake-token"}
 
-    def test_list_kbs_success(self):
+
+# --- Auth (401) -----------------------------------------------------------
+
+
+class TestAuthRequired:
+    def test_missing_auth_returns_401(self):
         app = _build_app()
         client = TestClient(app)
-        expected = {
-            "value": [
-                {"kds_id": "kb-1", "kds_name": "KB One"},
-                {"kds_id": "kb-2", "kds_name": "KB Two"},
-            ],
-            "total_count": 2,
-            "next_link": None,
-        }
+        # Disable the autouse auth patch by replacing get_current_user_id.
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
-            mock.return_value = expected
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY, "page": 1, "page_size": 10},
+        def _raise(*_a, **_kw):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="bad")
+
+        original = aidp_mgmt_app.auth_utils_module.get_current_user_id
+        aidp_mgmt_app.auth_utils_module.get_current_user_id = _raise
+        try:
+            response = client.get("/aidp-mgmt/knowledge-bases")
+        finally:
+            aidp_mgmt_app.auth_utils_module.get_current_user_id = original
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    def test_missing_auth_for_set_permission_returns_401(self):
+        app = _build_app()
+        client = TestClient(app)
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from fastapi import HTTPException
+
+        def _raise(*_a, **_kw):
+            raise HTTPException(status_code=401, detail="bad")
+
+        original = aidp_mgmt_app.auth_utils_module.get_current_user_id
+        aidp_mgmt_app.auth_utils_module.get_current_user_id = _raise
+        try:
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                json={"ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
+        finally:
+            aidp_mgmt_app.auth_utils_module.get_current_user_id = original
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
 
-        assert response.status_code == HTTPStatus.OK
-        assert response.json() == expected
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            page=1,
-            page_size=10,
+
+# --- Permission matrix enforcement ---------------------------------------
+
+
+class TestPermissionEnforcement:
+    def test_get_kb_without_access_returns_404(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
+
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(
+            side_effect=aidp_mgmt_app.HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="not found",
+            )
         )
+        try:
+            response = client.get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer())
+        finally:
+            aidp_permission_service.require_permission = original_require
+        assert response.status_code == HTTPStatus.NOT_FOUND
 
-    def test_list_kbs_custom_pagination(self):
-        app = _build_app()
-        client = TestClient(app)
-        expected = {"value": [], "total_count": 0, "next_link": None}
+    def test_get_kb_with_readonly_returns_metadata(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
-            mock.return_value = expected
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY, "page": 3, "page_size": 50},
-            )
+        decision = MagicMock()
+        decision.permission = "READ_ONLY"
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(return_value=decision)
 
+        with patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_get:
+            mock_get.return_value = {"kds_name": "name", "description": "desc"}
+            try:
+                response = client.get(
+                    "/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()
+                )
+            finally:
+                aidp_permission_service.require_permission = original_require
         assert response.status_code == HTTPStatus.OK
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            page=3,
-            page_size=50,
+        assert response.json()["permission"] == "READ_ONLY"
+
+    def test_update_kb_without_edit_returns_403(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
+
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(
+            side_effect=aidp_mgmt_app.HTTPException(
+                status_code=HTTPStatus.FORBIDDEN, detail="denied",
+            )
         )
-
-    def test_list_kbs_app_exception_passthrough(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_AUTH_ERROR, "auth failed")
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
+        try:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"name": "new"},
             )
+        finally:
+            aidp_permission_service.require_permission = original_require
+        assert response.status_code == HTTPStatus.FORBIDDEN
 
-        assert response.status_code == HTTPStatus.BAD_GATEWAY  # 502 for AIDP_AUTH_ERROR
+    def test_delete_kb_runs_and_soft_deletes(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-    def test_list_kbs_unexpected_error_wraps_aidp_service_error(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.fetch_aidp_knowledge_bases_impl") as mock:
-            mock.side_effect = RuntimeError("unexpected")
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-
-
-# ==================== GET /knowledge-bases/count ====================
-
-
-class TestCountKnowledgeBases:
-    """Tests for GET /aidp-mgmt/knowledge-bases/count."""
-
-    def test_count_kbs_success(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
-            mock.return_value = 42
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/count",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(
+            return_value=MagicMock(permission="EDIT")
+        )
+        try:
+            soft_delete = MagicMock(return_value=True)
+            with patch.object(aidp_mgmt_app, "delete_aidp_kb_impl", return_value=True), \
+                 patch.object(aidp_mgmt_app.perms, "soft_delete_permission", soft_delete):
+                response = client.delete(
+                    "/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()
+                )
+        finally:
+            aidp_permission_service.require_permission = original_require
         assert response.status_code == HTTPStatus.OK
-        assert response.json() == {"total_count": 42}
-        mock.assert_called_once_with(server_url=SERVER_URL, api_key=API_KEY)
+        assert response.json() == {"success": True}
+        soft_delete.assert_called_once()
 
-    def test_count_kbs_zero(self):
-        app = _build_app()
-        client = TestClient(app)
+    def test_set_permission_private_clears_groups(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
-            mock.return_value = 0
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/count",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(
+            return_value=MagicMock(permission="EDIT")
+        )
+        try:
+            update_perm = MagicMock(return_value=True)
+            with patch.object(aidp_mgmt_app.perms, "update_permission", update_perm), \
+                 patch.object(aidp_mgmt_app, "_validate_group_ids_strict") as mock_validate:
+                response = client.patch(
+                    "/aidp-mgmt/aidp-permissions/kb-1",
+                    headers=_bearer(),
+                    json={"ingroup_permission": "PRIVATE", "group_ids": [1, 2]},
+                )
+        finally:
+            aidp_permission_service.require_permission = original_require
         assert response.status_code == HTTPStatus.OK
-        assert response.json() == {"total_count": 0}
+        # validation must NOT be called for PRIVATE; group_ids is forced to []
+        mock_validate.assert_not_called()
+        kwargs = update_perm.call_args.kwargs
+        assert kwargs["group_ids"] == []
 
-    def test_count_kbs_app_exception_passthrough(self):
-        app = _build_app()
-        client = TestClient(app)
+    def test_set_permission_requires_groups_when_not_private(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_CONNECTION_ERROR, "timeout")
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/count",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(
+            return_value=MagicMock(permission="EDIT")
+        )
+        try:
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "READ_ONLY", "group_ids": []},
             )
+        finally:
+            aidp_permission_service.require_permission = original_require
+        assert response.status_code == HTTPStatus.BAD_REQUEST
 
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
+    def test_set_permission_rejects_cross_tenant_group(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-    def test_count_kbs_unexpected_error(self):
-        app = _build_app()
-        client = TestClient(app)
+        original_require = aidp_permission_service.require_permission
+        aidp_permission_service.require_permission = MagicMock(
+            return_value=MagicMock(permission="EDIT")
+        )
+        try:
+            with patch.object(
+                aidp_permission_service, "_validate_group_ids_strict",
+                side_effect=aidp_mgmt_app.HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST, detail="invalid group",
+                ),
+            ):
+                response = client.patch(
+                    "/aidp-mgmt/aidp-permissions/kb-1",
+                    headers=_bearer(),
+                    json={"ingroup_permission": "EDIT", "group_ids": [1, 999]},
+                )
+        finally:
+            aidp_permission_service.require_permission = original_require
+        assert response.status_code == HTTPStatus.BAD_REQUEST
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.count_aidp_kbs_impl") as mock:
-            mock.side_effect = ValueError("bad value")
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/count",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
 
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-
-
-# ==================== POST /knowledge-bases ====================
+# --- Create KB ------------------------------------------------------------
 
 
 class TestCreateKnowledgeBase:
-    """Tests for POST /aidp-mgmt/knowledge-bases."""
-
-    def test_create_kb_minimal_payload(self):
-        app = _build_app()
-        client = TestClient(app)
-        created = {"kds_id": "kb-new", "kds_name": "New KB"}
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
-            mock.return_value = created
-            response = client.post(
-                "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                json={"name": "New KB"},
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        assert response.json() == created
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            payload={"name": "New KB"},
+    def _patch_create(self, aidp_result=None):
+        if aidp_result is None:
+            aidp_result = {"kds_id": "kb-new", "name": "kb"}
+        return patch(
+            "backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+            return_value=aidp_result,
         )
 
-    def test_create_kb_full_payload(self):
-        app = _build_app()
-        client = TestClient(app)
-        created = {"kds_id": "kb-new", "kds_name": "Full KB"}
+    def test_create_persists_permission_and_returns_edit(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
-            mock.return_value = created
+        with self._patch_create(), \
+             patch.object(aidp_permission_service.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1) as mock_create, \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True) as mock_status, \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict", side_effect=lambda g, t: list(g)):
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
+                headers=_bearer(),
                 json={
-                    "name": "Full KB",
-                    "description": "A full knowledge base",
-                    "embedding_model": "bge-large-zh",
-                    "is_multimodal": True,
-                    "vision_model": "qwen-vl-max",
+                    "name": "New KB",
+                    "ingroup_permission": "EDIT",
+                    "group_ids": [1, 2],
                 },
             )
-
         assert response.status_code == HTTPStatus.OK
-        call_payload = mock.call_args.kwargs["payload"]
-        assert call_payload["name"] == "Full KB"
-        assert call_payload["description"] == "A full knowledge base"
-        assert call_payload["embedding_model"] == "bge-large-zh"
-        assert call_payload["is_multimodal"] is True
-        assert call_payload["vision_model"] == "qwen-vl-max"
+        body = response.json()
+        assert body["permission"] == "EDIT"
+        assert body["kds_id"] == "kb-new"
+        mock_create.assert_called_once()
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["kb_id"] == "kb-new"
+        assert kwargs["ingroup_permission"] == "EDIT"
+        assert sorted(kwargs["group_ids"]) == [1, 2]
+        # status was flipped to ACTIVE on success
+        assert mock_status.call_args.kwargs["status"] == "ACTIVE"
 
-    def test_create_kb_excludes_none_fields(self):
-        """None fields in request should be excluded via model_dump(exclude_none=True)."""
-        app = _build_app()
-        client = TestClient(app)
+    def test_create_returns_409_when_active_record_exists(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
-            mock.return_value = {"kds_id": "kb-1"}
-            client.post(
-                "/aidp-mgmt/knowledge-bases",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                json={"name": "KB"},
-            )
-
-        call_payload = mock.call_args.kwargs["payload"]
-        assert "description" not in call_payload
-        assert "embedding_model" not in call_payload
-
-    def test_create_kb_config_invalid_error(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_CONFIG_INVALID, "bad config")
+        with self._patch_create(), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict", side_effect=lambda g, t: list(g)), \
+             patch.object(aidp_permission_service.aidp_permission_db, "get_permission_by_kb_id", return_value={"id": 1}):
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
-                params={"server_url": "", "api_key": API_KEY},
-                json={"name": "KB"},
+                headers=_bearer(),
+                json={
+                    "name": "New KB",
+                    "ingroup_permission": "READ_ONLY",
+                    "group_ids": [1],
+                },
             )
+        assert response.status_code == HTTPStatus.CONFLICT
 
+    def test_create_rolls_back_aidp_when_db_fails(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
+
+        delete_mock = MagicMock(return_value=True)
+        with self._patch_create(), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict", side_effect=lambda g, t: list(g)), \
+             patch.object(aidp_permission_service.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", side_effect=RuntimeError("db down")), \
+             patch.object(aidp_mgmt_app, "delete_aidp_kb_impl", delete_mock):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={
+                    "name": "New KB",
+                    "ingroup_permission": "READ_ONLY",
+                    "group_ids": [1],
+                },
+            )
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        delete_mock.assert_called_once()
+
+    def test_create_requires_groups_for_non_private(self):
+        client = _client()
+        response = client.post(
+            "/aidp-mgmt/knowledge-bases",
+            headers=_bearer(),
+            json={"name": "New KB", "ingroup_permission": "EDIT"},
+        )
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
 
-# ==================== GET /knowledge-bases/{kds_id} ====================
+# --- List KBs -------------------------------------------------------------
 
 
-class TestGetKnowledgeBase:
-    """Tests for GET /aidp-mgmt/knowledge-bases/{kds_id}."""
+class TestListKnowledgeBases:
+    def test_list_returns_empty_when_no_rows(self):
+        client = _client()
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-    def test_get_kb_success(self):
-        app = _build_app()
-        client = TestClient(app)
-        detail = {
-            "kds_id": KDS_ID,
-            "kds_name": "Test KB",
-            "description": "A test KB",
-            "document_count": 10,
-            "state": 4,
-        }
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.get_aidp_kb_impl") as mock:
-            mock.return_value = detail
-            response = client.get(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
+        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=0):
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
-        assert response.json() == detail
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            kds_id=KDS_ID,
-        )
+        body = response.json()
+        assert body["total_count"] == 0
+        assert body["has_more"] is False
 
-    def test_get_kb_service_error(self):
-        app = _build_app()
-        client = TestClient(app)
+    def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.get_aidp_kb_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_SERVICE_ERROR, "error")
-            response = client.get(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
+        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=1), \
+             patch.object(aidp_permission_service, "get_accessible_kbs", return_value=[
+                 {
+                     "kb_id": "kb-1", "owner_user_id": USER_ID, "tenant_id": TENANT_ID,
+                     "ingroup_permission": "EDIT", "group_ids": [],
+                     "resource_status": "ACTIVE", "permission": "EDIT",
+                 }
+             ]), \
+             patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
+                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
+             patch.object(aidp_permission_service, "update_resource_status") as mock_status:
+            from backend.consts.error_code import ErrorCode as _E  # noqa
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["value"][0]["resource_status"] == "UNAVAILABLE"
+        mock_status.assert_called_once()
 
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
+
+# Use a lazy import for AppException at module load to avoid breaking the
+# fastapi exception handler fixture.
+from backend.consts.exceptions import AppException  # noqa: E402
+from backend.consts.error_code import ErrorCode  # noqa: E402
 
 
-# ==================== PUT /knowledge-bases/{kds_id} ====================
+# --- Update KB ------------------------------------------------------------
 
 
 class TestUpdateKnowledgeBase:
-    """Tests for PUT /aidp-mgmt/knowledge-bases/{kds_id}."""
+    def test_update_rejects_empty_payload(self):
+        client = _client()
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-    def test_update_kb_name_only(self):
-        app = _build_app()
-        client = TestClient(app)
-        updated = {"kds_id": KDS_ID, "kds_name": "Renamed KB"}
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
-            mock.return_value = updated
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")):
             response = client.put(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                json={"name": "Renamed KB"},
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        assert response.json() == updated
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            kds_id=KDS_ID,
-            payload={"name": "Renamed KB"},
-        )
-
-    def test_update_kb_description_only(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
-            mock.return_value = {"kds_id": KDS_ID}
-            response = client.put(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                json={"description": "Updated desc"},
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        call_payload = mock.call_args.kwargs["payload"]
-        assert call_payload == {"description": "Updated desc"}
-
-    def test_update_kb_both_fields(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
-            mock.return_value = {"kds_id": KDS_ID}
-            response = client.put(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                json={"name": "New Name", "description": "New Desc"},
-            )
-
-        assert response.status_code == HTTPStatus.OK
-
-    def test_update_kb_empty_body_returns_validation_error(self):
-        """Empty body (no name, no description) should raise AppException(COMMON_VALIDATION_ERROR)."""
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl"):
-            response = client.put(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
                 json={},
             )
-
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
-    def test_update_kb_service_error(self):
-        app = _build_app()
-        client = TestClient(app)
+    def test_update_calls_aidp_with_payload(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.update_aidp_kb_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_SERVICE_ERROR, "fail")
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl", return_value={"ok": True}) as mock_update:
             response = client.put(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                json={"name": "X"},
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"name": "new"},
             )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-
-
-# ==================== DELETE /knowledge-bases/{kds_id} ====================
-
-
-class TestDeleteKnowledgeBase:
-    """Tests for DELETE /aidp-mgmt/knowledge-bases/{kds_id}."""
-
-    def test_delete_kb_success(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
-            mock.return_value = True
-            response = client.delete(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
         assert response.status_code == HTTPStatus.OK
-        assert response.json() == {"success": True}
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            kds_id=KDS_ID,
-        )
-
-    def test_delete_kb_auth_error(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_AUTH_ERROR, "unauthorized")
-            response = client.delete(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-
-    def test_delete_kb_unexpected_error(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.delete_aidp_kb_impl") as mock:
-            mock.side_effect = Exception("boom")
-            response = client.delete(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
+        mock_update.assert_called_once()
+        call_args = mock_update.call_args
+        # Production signature: update_aidp_kb_impl(server_url, api_key, kds_id, payload)
+        positional = call_args.args
+        assert positional[2] == "kb-1"
+        assert positional[3] == {"name": "new"}
 
 
-# ==================== POST /knowledge-bases/{kds_id}/documents ====================
+# --- Upload documents ----------------------------------------------------
 
 
 class TestUploadDocuments:
-    """Tests for POST /aidp-mgmt/knowledge-bases/{kds_id}/documents."""
+    def test_upload_calls_aidp_with_files(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-    def test_upload_docs_success(self):
-        app = _build_app()
-        client = TestClient(app)
-        upload_result = {"success_count": 2, "failed_count": 0, "errors": []}
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
-            mock.return_value = upload_result
+        files = [
+            ("files", ("doc.txt", io.BytesIO(b"hello"), "text/plain")),
+        ]
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl", return_value={"uploaded": 1}) as mock_upload:
             response = client.post(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                files=[
-                    ("files", ("doc1.pdf", b"pdf-content", "application/pdf")),
-                    ("files", ("doc2.txt", b"text-content", "text/plain")),
-                ],
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
             )
-
         assert response.status_code == HTTPStatus.OK
-        assert response.json() == upload_result
-        mock.assert_called_once()
-        call_kwargs = mock.call_args.kwargs
-        assert call_kwargs["server_url"] == SERVER_URL
-        assert call_kwargs["api_key"] == API_KEY
-        assert call_kwargs["kds_id"] == KDS_ID
-        assert len(call_kwargs["files"]) == 2
-
-    def test_upload_docs_single_file(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
-            mock.return_value = {"success_count": 1}
-            response = client.post(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                files=[("files", ("readme.md", b"# Hello", "text/markdown"))],
-            )
-
-        assert response.status_code == HTTPStatus.OK
-
-    def test_upload_docs_rate_limit(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.upload_aidp_docs_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_RATE_LIMIT, "slow down")
-            response = client.post(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-                files=[("files", ("a.pdf", b"data", "application/pdf"))],
-            )
-
-        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS  # 429
-
-    def test_upload_docs_no_files_returns_422(self):
-        """FastAPI should reject missing files with 422."""
-        app = _build_app()
-        client = TestClient(app)
-
-        response = client.post(
-            f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-            params={"server_url": SERVER_URL, "api_key": API_KEY},
-        )
-
-        assert response.status_code == 422
+        mock_upload.assert_called_once()
 
 
-# ==================== GET /knowledge-bases/{kds_id}/documents ====================
+# --- List documents ------------------------------------------------------
 
 
 class TestListDocuments:
-    """Tests for GET /aidp-mgmt/knowledge-bases/{kds_id}/documents."""
+    def test_list_documents_uses_count_api(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from backend.ext_components.aidp.services import aidp_permission_service
 
-    def test_list_docs_success(self):
-        app = _build_app()
-        client = TestClient(app)
-        expected = {
-            "value": [
-                {"file_ino_no": "f-1", "file_name": "doc1.pdf", "file_size": 1024},
-                {"file_ino_no": "f-2", "file_name": "doc2.txt", "file_size": 512},
-            ],
-            "total_count": 2,
-        }
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
-            mock.return_value = expected
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": [{"name": "a"}]}), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=42):
             response = client.get(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY, "page": 1, "page_size": 10},
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
             )
-
         assert response.status_code == HTTPStatus.OK
-        assert response.json() == expected
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            kds_id=KDS_ID,
-            page=1,
-            page_size=10,
-        )
+        body = response.json()
+        assert body["total_count"] == 42
+        assert body["has_more"] is True
 
-    def test_list_docs_custom_pagination(self):
-        app = _build_app()
-        client = TestClient(app)
 
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
-            mock.return_value = {"value": [], "total_count": 0}
-            response = client.get(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY, "page": 5, "page_size": 20},
-            )
+# --- Models list (auth only, no per-KB permission) ------------------------
 
+
+class TestListModels:
+    def test_list_models_returns_aidp_response(self):
+        client = _client()
+        from backend.ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_mgmt_app, "list_aidp_models_impl",
+                          return_value={"models": []}) as mock_models:
+            response = client.get("/aidp-mgmt/models", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
-        mock.assert_called_once_with(
-            server_url=SERVER_URL,
-            api_key=API_KEY,
-            kds_id=KDS_ID,
-            page=5,
-            page_size=20,
-        )
-
-    def test_list_docs_service_error(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
-            mock.side_effect = AppException(ErrorCode.AIDP_SERVICE_ERROR, "error")
-            response = client.get(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-
-    def test_list_docs_unexpected_error(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        with patch("backend.ext_components.aidp.apps.aidp_mgmt_app.list_aidp_docs_impl") as mock:
-            mock.side_effect = TypeError("type err")
-            response = client.get(
-                f"/aidp-mgmt/knowledge-bases/{KDS_ID}/documents",
-                params={"server_url": SERVER_URL, "api_key": API_KEY},
-            )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-
-
-# ==================== Validation & Param Tests ====================
-
-
-class TestParamValidation:
-    """Tests for FastAPI query parameter validation across endpoints."""
-
-    def test_list_kbs_missing_server_url_returns_422(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        response = client.get(
-            "/aidp-mgmt/knowledge-bases",
-            params={"api_key": API_KEY},
-        )
-
-        assert response.status_code == 422
-
-    def test_list_kbs_missing_api_key_returns_422(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        response = client.get(
-            "/aidp-mgmt/knowledge-bases",
-            params={"server_url": SERVER_URL},
-        )
-
-        assert response.status_code == 422
-
-    def test_list_kbs_page_below_min_returns_422(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        response = client.get(
-            "/aidp-mgmt/knowledge-bases",
-            params={"server_url": SERVER_URL, "api_key": API_KEY, "page": 0},
-        )
-
-        assert response.status_code == 422
-
-    def test_list_kbs_page_size_above_max_returns_422(self):
-        app = _build_app()
-        client = TestClient(app)
-
-        response = client.get(
-            "/aidp-mgmt/knowledge-bases",
-            params={"server_url": SERVER_URL, "api_key": API_KEY, "page_size": 101},
-        )
-
-        assert response.status_code == 422
-
-    def test_create_kb_missing_name_returns_422(self):
-        """CreateKbRequest requires 'name' field."""
-        app = _build_app()
-        client = TestClient(app)
-
-        response = client.post(
-            "/aidp-mgmt/knowledge-bases",
-            params={"server_url": SERVER_URL, "api_key": API_KEY},
-            json={"description": "no name"},
-        )
-
-        assert response.status_code == 422
+        mock_models.assert_called_once()

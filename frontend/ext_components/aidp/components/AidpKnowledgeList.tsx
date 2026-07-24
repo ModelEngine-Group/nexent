@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Pagination, Tooltip } from "antd";
+import { Button, Pagination, Tag, Tooltip } from "antd";
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -88,6 +88,11 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
           <div>
             {displayedKbs.map((kb) => {
               const isActive = activeKbId === kb.kds_id;
+              const isUnavailable =
+                kb.resource_status === "UNAVAILABLE" ||
+                kb.resource_status === "ORPHANED";
+              // Only EDIT-level callers may modify the KB or its files.
+              const canModify = kb.permission === "EDIT" && !isUnavailable;
 
               return (
                 <div
@@ -105,12 +110,24 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0 mr-2">
-                      <p
-                        className="text-sm font-medium text-gray-800 truncate"
-                        title={kb.kds_name}
-                      >
-                        {kb.kds_name}
-                      </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p
+                          className="text-sm font-medium text-gray-800 truncate"
+                          title={kb.kds_name}
+                        >
+                          {kb.kds_name}
+                        </p>
+                        {isUnavailable && (
+                          <Tag color="default">
+                            {t("aidpKnowledge.kbUnavailable")}
+                          </Tag>
+                        )}
+                        {kb.permission === "READ_ONLY" && !isUnavailable && (
+                          <Tag color="default">
+                            {t("aidpKnowledge.kbReadOnly")}
+                          </Tag>
+                        )}
+                      </div>
                       {kb.description && (
                         <p className="text-xs text-gray-500 truncate mt-1">
                           {kb.description}
@@ -127,29 +144,33 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Tooltip title={t("common.edit")}>
-                        <Button
-                          type="text"
-                          icon={<SquarePen className="h-4 w-4" />}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEdit(kb);
-                          }}
-                          size="small"
-                        />
-                      </Tooltip>
-                      <Tooltip title={t("common.delete")}>
-                        <Button
-                          type="text"
-                          danger
-                          icon={<Trash2 className="h-4 w-4" />}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(kb);
-                          }}
-                          size="small"
-                        />
-                      </Tooltip>
+                      {canModify && (
+                        <Tooltip title={t("common.edit")}>
+                          <Button
+                            type="text"
+                            icon={<SquarePen className="h-4 w-4" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(kb);
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                      )}
+                      {canModify && (
+                        <Tooltip title={t("common.delete")}>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<Trash2 className="h-4 w-4" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(kb);
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                 </div>

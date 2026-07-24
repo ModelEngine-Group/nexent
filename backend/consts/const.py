@@ -207,8 +207,11 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv(
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")
 IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
-# AIDP Knowledge Base feature flag (controls frontend page visibility)
-ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "true").lower() in ("true", "1", "yes", "on")
+# AIDP Knowledge Base configuration
+ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
+AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
+AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
 DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
 DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
 DEFAULT_APP_NAME_ZH = "Nexent 智能体"

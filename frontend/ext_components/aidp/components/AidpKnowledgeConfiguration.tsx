@@ -89,6 +89,21 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     fetchKbs();
   }, [fetchKbs]);
 
+  // ---- Cleanup legacy localStorage credentials on mount ----
+  // v7.1: AIDP credentials moved backend-side; frontends that pre-date the
+  // migration may still carry serverUrl / apiKey in localStorage. Remove
+  // them on mount so a stale value cannot accidentally leak.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.removeItem("aidp_kb_server_url");
+      window.localStorage.removeItem("aidp_kb_api_key");
+    } catch {
+      // localStorage may be unavailable in some test/SSR environments;
+      // ignore — the cleanup is best-effort.
+    }
+  }, []);
+
   // ---- Fetch documents for active KB (server-side pagination) ----
   const fetchDocs = useCallback(
     async (kbId: string, page: number = 1) => {

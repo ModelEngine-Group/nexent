@@ -1,7 +1,6 @@
 import base64
 import ipaddress
 import logging
-import os
 import socket
 from http import HTTPStatus
 from typing import Optional
@@ -9,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
-from consts.const import DATA_PROCESS_SERVICE
+from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
 from consts.const import MODEL_CONFIG_MAPPING
 from database.model_management_db import get_model_by_model_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -25,14 +24,13 @@ logger = logging.getLogger("image_service")
 # ---------------------------------------------------------------------------
 # AIDP serves images behind GET endpoints that require ``Authorization:
 # Bearer <AIDP_API_KEY>``. The chunk-level URLs built by AidpSearchTool
-# look like ``{AIDP_SERVER_URL}/KnowledgeBase/Tenants/aidp/KnowledgeBases/...``.
+# look like ``{AIDP_SERVER_URL}/KnowledgeBase/Tenants/{tenant}/KnowledgeBases/...``.
 # When the image proxy sees such a URL, we short-circuit the generic
 # data-processing proxy (which would not know how to authenticate) and
-# fetch the image ourselves with the env-supplied api key.
+# fetch the image ourselves with the configured API key.
 #
-# Environment variables reused here match those in
-# ``sdk/nexent/core/tools/aidp_search_tool.py`` so a single deployment
-# config drives both the search tool and the image proxy.
+# The host and path checks prevent the proxy from forwarding the credential to
+# an unrelated URL.
 _AIDP_KB_PATH_PREFIX = "/KnowledgeBase/Tenants/"
 
 
@@ -44,7 +42,7 @@ def _is_aidp_url(decoded_url: str) -> bool:
     match; otherwise we fall through to the generic proxy so an accidental
     base_url typo never leaks the AIDP api key to an unrelated host.
     """
-    aidp_base = os.environ.get("AIDP_SERVER_URL", "").rstrip("/")
+    aidp_base = AIDP_SERVER_URL.rstrip("/")
     if not aidp_base:
         return False
     try:
@@ -58,7 +56,7 @@ def _is_aidp_url(decoded_url: str) -> bool:
 
 
 def _get_aidp_api_key() -> str:
-    return os.environ.get("AIDP_API_KEY", "")
+    return AIDP_API_KEY
 
 
 async def _fetch_aidp_image(url: str):
