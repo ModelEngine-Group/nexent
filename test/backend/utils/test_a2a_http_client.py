@@ -46,6 +46,13 @@ class TestBuildA2AHeaders:
         headers = build_a2a_headers(api_key="")
         assert "Authorization" not in headers
 
+    def test_headers_with_custom_headers(self):
+        """Test headers with custom values."""
+        from backend.utils.a2a_http_client import build_a2a_headers
+
+        headers = build_a2a_headers(custom_headers={"X-Tenant": "tenant-1"})
+        assert headers["X-Tenant"] == "tenant-1"
+
 
 class TestA2AHttpClientInit:
     """Test class for A2AHttpClient initialization."""

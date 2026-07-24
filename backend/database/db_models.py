@@ -1357,6 +1357,8 @@ class A2AExternalAgent(TableBase):
     protocol_type = Column(String(20), default=PROTOCOL_JSONRPC,
                            doc="Protocol type for calling this agent")
 
+    custom_headers = Column(JSON, doc="Custom HTTP headers for calling this agent")
+
     # Capabilities
     streaming = Column(Boolean, default=False,
                        doc="Whether this agent supports SSE streaming")
