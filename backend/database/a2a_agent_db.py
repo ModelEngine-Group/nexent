@@ -644,13 +644,13 @@ def refresh_external_agent_cache(
             agent.supported_interfaces = new_supported_interfaces
         if new_protocol_type is not None:
             agent.protocol_type = new_protocol_type
-            # Update agent_url based on the selected protocol type
-            interface = _find_interface_by_protocol_type(
-                agent.supported_interfaces,
-                new_protocol_type
-            )
-            if interface:
-                agent.agent_url = interface.get("url", agent.agent_url)
+
+        interface = _find_interface_by_protocol_type(
+            agent.supported_interfaces,
+            agent.protocol_type
+        )
+        if interface:
+            agent.agent_url = interface.get("url", agent.agent_url)
 
         agent.cached_at = now
         agent.cache_expires_at = expires_at
