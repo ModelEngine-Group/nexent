@@ -14,7 +14,12 @@
 
 ## 🚀 Quick Start
 
-### 1. Prepare Kubernetes Cluster
+- [Online Deployment](#online-deployment)
+- [Offline Deployment](#offline-deployment)
+
+### Online Deployment
+
+#### 1. Prepare Kubernetes Cluster
 
 Ensure your Kubernetes cluster is running and kubectl is configured with cluster access:
 
@@ -23,14 +28,14 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
-### 2. Clone and Navigate
+#### 2. Clone and Navigate
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-### 3. Deployment
+#### 3. Deployment
 
 Run the deployment script:
 
@@ -63,7 +68,7 @@ Use `bash deploy.sh k8s --defaults` to skip the TUI and deploy with saved `deplo
 
 After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
-### ⚠️ Important Notes
+#### ⚠️ Important Notes
 
 1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. An offline package launched with `--config` instead prompts for and confirms the password, and that input takes precedence without being displayed.
 
@@ -87,7 +92,39 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
 bash deploy.sh k8s
 ```
 
-### 4. Access Your Installation
+### Offline Deployment
+
+When the target cluster cannot access public image registries, download a prebuilt offline deployment package from GitHub Actions:
+
+1. Sign in to GitHub and open [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml).
+2. Select a successful run for the required version and download `nexent-<version>-<platform>.zip` matching the cluster node architecture from **Artifacts**.
+3. Copy the archive to a management host that can access the target cluster and extract it. Workflow artifacts are retained for 30 days; if one has expired, ask a maintainer to rerun the workflow.
+
+Extract the offline deployment package:
+
+```bash
+unzip nexent-v2.2.1-amd64.zip -d nexent
+cd nexent
+```
+
+A single-node cluster backed by the Docker container runtime can load and deploy the images directly:
+
+```bash
+bash deploy.sh --load-images k8s
+```
+
+For other single-node and multi-node clusters, push images to an internal registry accessible to the cluster, or import them with the container runtime's tooling on every node that may run Nexent Pods:
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  k8s
+```
+
+The offline package installs all Nexent components by default. Add `--config` to reselect deployment settings. When the super administrator is created for the first time, this mode prompts for and confirms the password without displaying or persisting it. Non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation.
+
+### Access Your Installation
 
 When deployment completes successfully:
 
@@ -186,38 +223,6 @@ bash uninstall.sh k8s delete-all
 ```
 
 `--delete-data` and `--delete-volumes` are compatibility options for Helm-managed resources. For local disks, use `--delete-local-data` or `--keep-local-data`; `delete-all --keep-local-data` removes the namespace while preserving local volume contents.
-
-### Offline Image Package
-
-Build a Kubernetes offline package from the repository root:
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target k8s \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-The package includes image tar files, `load-images.sh`, `push-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, `manifest.yaml`, and `checksums.txt`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or generated Helm values. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
-
-On the target host, the package root `deploy.sh` uses saved `deploy.options` when present, otherwise built-in defaults, and does not open the TUI by default. Add `--config` to open the interactive configuration UI. If the package was built with a custom version, component set, port policy, or image source, pass the same options during deployment or use `--config` to select them interactively. On a single-node Docker-backed cluster, you can load and deploy directly:
-
-```bash
-cd offline-package
-bash deploy.sh --load-images k8s
-```
-
-For multi-node clusters, load the images on every node that may run Nexent Pods, or push the packaged images to an internal registry and deploy with matching image settings:
-
-```bash
-bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent k8s
-```
-
-When `--push-images` is used without a prefix, `deploy.sh` prompts for the image registry prefix first. `push-images.sh` then prompts for the registry username and password before pushing.
 
 ## 🔧 Deployment Commands
 

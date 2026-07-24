@@ -14,7 +14,12 @@
 
 ## 🚀 Quick Start
 
-### 1. Download and Setup
+- [Online Deployment](#online-deployment)
+- [Offline Deployment](#offline-deployment)
+
+### Online Deployment
+
+#### 1. Download and Setup
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
@@ -23,7 +28,7 @@ cd nexent
 
 > **Tip**: Docker and Kubernetes use `deploy/env/.env`. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
 
-### 2. Deployment Options
+#### 2. Deployment Options
 
 Run the following command to start deployment:
 
@@ -96,7 +101,44 @@ delete from nexent.user_tenant_t where user_id = 'your_user_id';
 # Step 3: Redeploy; non-interactive mode uses the configured or default password
 ```
 
-### 3. Access Your Installation
+### Offline Deployment
+
+When the target host cannot access public image registries, download a prebuilt offline deployment package from GitHub Actions:
+
+1. Sign in to GitHub and open [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml).
+2. Select a successful run for the required version and download the artifact matching the server architecture from **Artifacts** at the bottom of the run page.
+3. Download `nexent-<version>-amd64.zip` for AMD64 or `nexent-<version>-arm64.zip` for ARM64.
+
+GitHub Actions artifacts are retained for 30 days. If the required artifact has expired, ask a maintainer to rerun the workflow.
+
+Copy the downloaded archive to the offline host and extract it. The downloaded artifact contains the package files directly, with no nested archive:
+
+```bash
+unzip nexent-v2.2.1-amd64.zip -d nexent
+cd nexent
+bash deploy.sh --load-images docker
+```
+
+The offline package installs all Nexent components by default. Add `--config` to reselect components, port policy, image source, or monitoring provider:
+
+```bash
+bash deploy.sh --load-images --config docker
+```
+
+When `suadmin@nexent.com` is created for the first time, non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation. Offline deployment with `--config` prompts for and confirms the password; that input is neither persisted nor displayed.
+
+To push the packaged images to an internal registry accessible to the target environment:
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  docker
+```
+
+When the prefix is omitted, the wrapper prompts for it. `push-images.sh` then prompts for the registry username and password before pushing.
+
+### Access Your Installation
 
 When deployment completes successfully:
 1. Open **http://localhost:3000** in your browser
@@ -174,38 +216,6 @@ bash uninstall.sh docker delete-all
 ```
 
 The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and removes Compose resources. Data deletion removes service directories such as `postgresql`, `elasticsearch`, `redis`, `minio`, `volumes`, `openssh-server`, `scripts`, and `skills`; keep volumes when you plan to redeploy with existing data.
-
-### Offline Image Package
-
-Use `deploy/offline/build_offline_package.sh` when you need to move images and deployment scripts to an offline host:
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target docker \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-The package directory contains `images/*.tar`, `load-images.sh`, `push-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
-
-On the target host, the package root `deploy.sh` uses saved `deploy.options` when present, otherwise built-in defaults, and does not open the TUI by default. Add `--config` to open the interactive configuration UI. If the package was built with a custom version, component set, port policy, or image source, pass the same options during deployment or use `--config` to select them interactively:
-
-```bash
-cd offline-package
-bash deploy.sh --load-images docker
-```
-
-To push packaged images to an internal registry and deploy with that prefix:
-
-```bash
-bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
-```
-
-When `--push-images` is used without a prefix, `deploy.sh` prompts for the image registry prefix first. `push-images.sh` then prompts for the registry username and password before pushing.
 
 ## 🔌 Port Mapping
 
