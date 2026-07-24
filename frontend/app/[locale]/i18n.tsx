@@ -39,17 +39,11 @@ export const loadLocaleMessages = async (locale: string) => {
         return item;
       }) as any;
     }
-    return {
-      resourcesCustom,
-      resources,
-    }
+    return { resourcesCustom, resources };
   } catch (error) {
     console.log(`Failed to load locale ${locale}:`, error)
   } finally {
-    return {
-      resourcesCustom,
-      resources,
-    }
+    return { resourcesCustom, resources };
   }
 }
 
@@ -59,7 +53,7 @@ const parseI18NStrFunc = (str: string, lang: string): any => {
   }
 
   const replacementKeyArr: any[] = lang === 'en' ? resourcesCustom.en.replacemenKeyArr : resourcesCustom.zh.replacemenKeyArr;
-  let newStr = new String(str);
+  let newStr = String(str);
    replacementKeyArr.forEach(replacePair => {
     const patternKey= `{${replacePair.pattern}}`;
     const replaceStr = replacePair.str;
@@ -95,7 +89,7 @@ const  processI18n: ThirdPartyModule = {
   type: '3rdParty',
   init(i18next) {
     const originalT = i18next.t.bind(i18next);
-    i18next.t = (key, opts) => {
+    (i18next as any).t = (key: string, opts: any) => {
       const originData = originalT(key, opts);
       return parseI18nFunc(originData, i18next.language);
     }

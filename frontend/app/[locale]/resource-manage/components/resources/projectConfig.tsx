@@ -84,19 +84,20 @@ export default function ProjectConfigTab() {
     return false;
   }
 
-  const handleSave = async (values) => {
+  const handleSave = async (values: any) => {
     setLoading(true);
     try {
       await saveConfig(values, file as File, file2 as File);
       message.success(t('project.config.update.success'));
     } catch (error) {
-      message.success(t('errorCode.990202'))
+      console.log(`Failed to update:`, error);
+      message.success(t('errorCode.990202'));
     } finally {
       setLoading(false);
     }
   }
 
-  const saveConfig = async (configData, iconFile?: File, iconFile2?: File): Promise<void> => {
+  const saveConfig = async (configData: any, iconFile?: File, iconFile2?: File): Promise<void> => {
     try {
       const formData = new FormData();
       formData.append("configZh", JSON.stringify({
@@ -188,8 +189,8 @@ export default function ProjectConfigTab() {
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
               <span>{ t('project.config.logo.change') }</span>
-              <img className="h-7" src="/modelengine-logo2.png"></img>
-              { previewUrl && <img className="h-7" src={previewUrl}></img>}
+              <img className="h-7" src="/modelengine-logo2.png" alt={"old logo1"}></img>
+              { previewUrl && <img className="h-7" src={previewUrl} alt={"new logo1"}></img>}
             </div>
             <Upload
                 beforeUpload={(fileRaw) => beforeUpload(fileRaw, false)}
@@ -204,8 +205,8 @@ export default function ProjectConfigTab() {
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
               <span>{ t('project.config.logo.change') }</span>
-              <img className="h-7" src="/modelengine-logo.png"></img>
-              { previewUrl2 && <img className="h-7" src={previewUrl2}></img>}
+              <img className="h-7" src="/modelengine-logo.png" alt={"old logo2"}></img>
+              { previewUrl2 && <img className="h-7" src={previewUrl2} alt={"new logo2"}></img>}
             </div>
             <Upload
                 beforeUpload={(fileRaw) => beforeUpload(fileRaw, true)}
