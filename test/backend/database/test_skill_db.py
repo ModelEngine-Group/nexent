@@ -1,6 +1,7 @@
 """Unit tests for backend.database.skill_db module."""
 import sys
 import os
+import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../sdk"))
@@ -45,14 +46,23 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
+utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
+utils_str_utils_mock.convert_string_to_list = (
+    lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
+)
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['utils.str_utils'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
 sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
 
 from backend.database.skill_db import (
     _params_value_for_db,
+    _build_skill_update_values,
+    _replace_skill_tool_relations,
     create_or_update_skill_by_skill_info,
     query_skill_instances_by_agent_id,
     query_enabled_skill_instances,
@@ -67,6 +77,7 @@ from backend.database.skill_db import (
     get_skill_by_id_global,
     create_skill,
     update_skill,
+    update_skill_by_id,
     delete_skill,
     get_tool_names_by_ids,
     get_tool_ids_by_names,
@@ -112,6 +123,8 @@ class MockSkillInfo:
         self.config_schemas = kwargs.get('config_schemas', {})
         self.config_values = kwargs.get('config_values', {})
         self.source = kwargs.get('source', 'custom')
+        self.group_ids = kwargs.get('group_ids', '')
+        self.ingroup_permission = kwargs.get('ingroup_permission')
         self.created_by = kwargs.get('created_by', 'creator1')
         self.create_time = kwargs.get('create_time', datetime.now())
         self.updated_by = kwargs.get('updated_by', 'updater1')
@@ -1050,7 +1063,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = [skill1, skill2]
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -1069,6 +1082,10 @@ class TestListSkills:
         assert result[0]['name'] == 'skill1'
         assert result[0]['tool_ids'] == [1, 2]
         assert result[1]['tool_ids'] == []
+        mock_filter.order_by.assert_called_once_with(
+            db_models_mock.SkillInfo.create_time.desc(),
+            db_models_mock.SkillInfo.skill_id.desc(),
+        )
 
     def test_list_skills_empty(self, monkeypatch, mock_session):
         """Test listing when no skills exist."""
@@ -1077,7 +1094,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = []
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -2243,6 +2260,237 @@ class TestUpsertScannedSkills:
         upsert_scanned_skills(skills, 'user1', 'tenant1')
 
         session.add.assert_not_called()
+
+
+# ===== _build_skill_update_values Tests =====
+
+class TestBuildSkillUpdateValues:
+    def test_basic_fields(self):
+        result = _build_skill_update_values({"description": "new desc"}, "user1")
+        assert result["skill_description"] == "new desc"
+        assert result["updated_by"] == "user1"
+        assert "update_time" in result
+
+    def test_all_mapped_fields(self):
+        data = {
+            "description": "d", "content": "c", "tags": ["t"], "source": "s"
+        }
+        result = _build_skill_update_values(data, None)
+        assert result["skill_description"] == "d"
+        assert result["skill_content"] == "c"
+        assert result["skill_tags"] == ["t"]
+        assert result["source"] == "s"
+        assert "updated_by" not in result
+
+    def test_config_fields(self):
+        data = {"config_schemas": {"k": "v"}, "config_values": {"k2": "v2"}}
+        result = _build_skill_update_values(data, "admin")
+        assert "config_schemas" in result
+        assert "config_values" in result
+
+    def test_group_permission_fields(self):
+        result = _build_skill_update_values(
+            {"group_ids": [10, 20], "ingroup_permission": "READ_ONLY"},
+            "admin",
+        )
+
+        assert result["group_ids"] == "10,20"
+        assert result["ingroup_permission"] == "READ_ONLY"
+
+    def test_group_ids_string_is_preserved(self):
+        result = _build_skill_update_values({"group_ids": "10,20"}, "admin")
+
+        assert result["group_ids"] == "10,20"
+
+    def test_empty_skill_data(self):
+        result = _build_skill_update_values({}, "user1")
+        assert "update_time" in result
+        assert result["updated_by"] == "user1"
+
+
+class TestReplaceSkillToolRelations:
+    def test_replace_deletes_and_adds(self, mock_session):
+        session, query = mock_session
+        mock_delete = MagicMock()
+        mock_filter = MagicMock()
+        mock_filter.delete = mock_delete
+        query.filter.return_value = mock_filter
+        _replace_skill_tool_relations(session, 5, [1, 2, 3])
+        mock_delete.assert_called_once()
+        assert session.add.call_count == 3
+
+    def test_replace_empty_tool_ids(self, mock_session):
+        session, query = mock_session
+        mock_delete = MagicMock()
+        mock_filter = MagicMock()
+        mock_filter.delete = mock_delete
+        query.filter.return_value = mock_filter
+        _replace_skill_tool_relations(session, 5, [])
+        mock_delete.assert_called_once()
+        session.add.assert_not_called()
+
+
+# ===== update_skill_by_id Tests =====
+
+class TestUpdateSkillById:
+    def test_update_skill_by_id_not_found(self, monkeypatch, mock_session):
+        session, query = mock_session
+        mock_first = MagicMock()
+        mock_first.return_value = None
+        mock_filter = MagicMock()
+        mock_filter.first = mock_first
+        query.filter.return_value = mock_filter
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        with pytest.raises(ValueError, match="Skill not found"):
+            update_skill_by_id(999, {"description": "new"}, "tenant1")
+
+    def test_update_skill_by_id_basic(self, monkeypatch, mock_session):
+        session, query = mock_session
+        existing = MockSkillInfo(skill_id=1, skill_name="skill1", tenant_id="tenant1")
+        refreshed = MockSkillInfo(skill_id=1, skill_name="skill1", tenant_id="tenant1", skill_description="new desc")
+        call_count = [0]
+        def mock_query_side_effect(model):
+            mock_q = MagicMock()
+            mock_first = MagicMock()
+            if call_count[0] == 0:
+                mock_first.return_value = existing
+            else:
+                mock_first.return_value = refreshed
+            mock_q.filter.return_value.first = mock_first
+            call_count[0] += 1
+            return mock_q
+        session.query.side_effect = mock_query_side_effect
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("backend.database.skill_db._get_tool_ids", lambda s, sid: [])
+        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        session.execute = MagicMock()
+        session.commit = MagicMock()
+        result = update_skill_by_id(1, {"description": "new desc"}, "tenant1")
+        session.execute.assert_called()
+
+    def test_update_skill_by_id_duplicate_name(self, monkeypatch, mock_session):
+        session, query = mock_session
+        existing = MockSkillInfo(skill_id=1, skill_name="old_name", tenant_id="tenant1")
+        duplicate = MockSkillInfo(skill_id=2, skill_name="new_name", tenant_id="tenant1")
+        call_count = [0]
+        def mock_query_side_effect(model):
+            mock_q = MagicMock()
+            mock_first = MagicMock()
+            if call_count[0] == 0:
+                mock_first.return_value = existing
+            elif call_count[0] == 1:
+                mock_first.return_value = duplicate
+            call_count[0] += 1
+            return mock_q
+        session.query.side_effect = mock_query_side_effect
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        with pytest.raises(ValueError, match="already exists"):
+            update_skill_by_id(1, {"name": "new_name"}, "tenant1")
+
+    def test_update_skill_by_id_empty_name(self, monkeypatch, mock_session):
+        session, query = mock_session
+        existing = MockSkillInfo(skill_id=1, skill_name="skill1", tenant_id="tenant1")
+        mock_first = MagicMock()
+        mock_first.return_value = existing
+        mock_filter = MagicMock()
+        mock_filter.first = mock_first
+        query.filter.return_value = mock_filter
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        with pytest.raises(ValueError, match="Skill name is required"):
+            update_skill_by_id(1, {"name": ""}, "tenant1")
+
+    def test_update_skill_by_id_with_tool_ids(self, monkeypatch, mock_session):
+        session, query = mock_session
+        existing = MockSkillInfo(skill_id=1, skill_name="skill1", tenant_id="tenant1")
+        refreshed = MockSkillInfo(skill_id=1, skill_name="skill1", tenant_id="tenant1")
+        call_count = [0]
+        def mock_query_side_effect(model):
+            mock_q = MagicMock()
+            mock_first = MagicMock()
+            if call_count[0] == 0:
+                mock_first.return_value = existing
+            else:
+                mock_first.return_value = refreshed
+            mock_q.filter.return_value.first = mock_first
+            call_count[0] += 1
+            return mock_q
+        session.query.side_effect = mock_query_side_effect
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("backend.database.skill_db._get_tool_ids", lambda s, sid: [1, 2])
+        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        monkeypatch.setattr("backend.database.skill_db._replace_skill_tool_relations", MagicMock())
+        session.execute = MagicMock()
+        session.commit = MagicMock()
+        result = update_skill_by_id(1, {"tool_ids": [1, 2]}, "tenant1")
+        assert result["tool_ids"] == [1, 2]
+
+    def test_update_skill_by_id_refresh_not_found(self, monkeypatch, mock_session):
+        session, query = mock_session
+        existing = MockSkillInfo(skill_id=1, skill_name="skill1", tenant_id="tenant1")
+        call_count = [0]
+        def mock_query_side_effect(model):
+            mock_q = MagicMock()
+            mock_first = MagicMock()
+            if call_count[0] == 0:
+                mock_first.return_value = existing
+            else:
+                mock_first.return_value = None
+            mock_q.filter.return_value.first = mock_first
+            call_count[0] += 1
+            return mock_q
+        session.query.side_effect = mock_query_side_effect
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        session.execute = MagicMock()
+        session.commit = MagicMock()
+        with pytest.raises(ValueError, match="Skill not found after update"):
+            update_skill_by_id(1, {"description": "new"}, "tenant1")
+
+    def test_update_skill_by_id_same_name_no_duplicate_check(self, monkeypatch, mock_session):
+        session, query = mock_session
+        existing = MockSkillInfo(skill_id=1, skill_name="same_name", tenant_id="tenant1")
+        refreshed = MockSkillInfo(skill_id=1, skill_name="same_name", tenant_id="tenant1")
+        call_count = [0]
+        def mock_query_side_effect(model):
+            mock_q = MagicMock()
+            mock_first = MagicMock()
+            if call_count[0] == 0:
+                mock_first.return_value = existing
+            else:
+                mock_first.return_value = refreshed
+            mock_q.filter.return_value.first = mock_first
+            call_count[0] += 1
+            return mock_q
+        session.query.side_effect = mock_query_side_effect
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("backend.database.skill_db._get_tool_ids", lambda s, sid: [])
+        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        session.execute = MagicMock()
+        session.commit = MagicMock()
+        result = update_skill_by_id(1, {"name": "same_name"}, "tenant1")
+        session.execute.assert_called()
 
 
 if __name__ == "__main__":

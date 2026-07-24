@@ -1,7 +1,7 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   App,
   Button,
@@ -31,12 +31,18 @@ import {
   type AgentDetailModalData,
 } from "@/lib/agentRepositoryDetail";
 import type { AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
+import { isNewAgentPaddingItem } from "@/types/agentRepository";
+import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import { MineAgentsView } from "./components/MineAgentsView";
 import { ReviewAgentList } from "./components/ReviewAgentList";
+import {
+  AgentRepositoryReviewConfirmModal,
+  type AgentRepositoryReviewAction,
+} from "./components/AgentRepositoryReviewConfirmModal";
 
 enum AgentRepositoryTab {
   REPOSITORY = "repository",
@@ -60,6 +66,9 @@ export default function AgentRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
   const { user } = useAuthorizationContext();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
 
@@ -101,6 +110,15 @@ export default function AgentRepositoryPage() {
   const isReviewTab = tab === AgentRepositoryTab.REVIEW;
   const isMineTab = tab === AgentRepositoryTab.MINE;
 
+  const reviewDeepLink = useMemo(
+    () => parseReviewDeepLinkParams(searchParams),
+    [searchParams]
+  );
+
+  const handleReviewDeepLinkConsumed = useCallback(() => {
+    router.replace(`/${locale}/agent-space?tab=mine`);
+  }, [locale, router]);
+
   const listingParams = useMemo(
     () => ({
       status: "shared" as const,
@@ -140,6 +158,20 @@ export default function AgentRepositoryPage() {
     refetch: refetchMine,
   } = useMyEditableAgents(mineListParams, isMineTab);
 
+  const {
+    data: deepLinkMineData,
+    isLoading: isDeepLinkMineLoading,
+  } = useMyEditableAgents(
+    {
+      ownership: "all",
+      agent_id: reviewDeepLink?.agentId,
+      page: 1,
+      page_size: 1,
+      new_agent_padding: false,
+    },
+    isMineTab && reviewDeepLink != null
+  );
+
   const { data: mineCountData } = useMyEditableAgents(
     { page: 1, page_size: 1, ownership: "all" },
     true
@@ -168,20 +200,6 @@ export default function AgentRepositoryPage() {
   );
 
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
-
-  useEffect(() => {
-    const refreshActiveTab = async () => {
-      if (tab === AgentRepositoryTab.REPOSITORY) {
-        await refetch();
-      } else if (tab === AgentRepositoryTab.MINE) {
-        await refetchMine();
-      } else if (tab === AgentRepositoryTab.REVIEW) {
-        await refetchReview();
-      }
-    };
-
-    refreshActiveTab().catch(() => {});
-  }, [tab, refetch, refetchMine, refetchReview]);
 
   const detailOpen = detailSource !== null;
   const selectedRepositoryId =
@@ -301,6 +319,13 @@ export default function AgentRepositoryPage() {
   const mineCounts = mineData?.counts ?? { all: 0, created: 0, others: 0 };
   const minePagination = mineData?.pagination;
   const mineTotal = minePagination?.total ?? 0;
+  const deepLinkFallbackAgent = useMemo(() => {
+    const item = deepLinkMineData?.items?.[0];
+    if (!item || isNewAgentPaddingItem(item)) {
+      return null;
+    }
+    return item;
+  }, [deepLinkMineData]);
   const repositoryTabCount = repositoryCountData?.pagination?.total ?? 0;
   const mineTabCount = mineCountData?.counts?.all ?? 0;
   const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
@@ -420,16 +445,18 @@ export default function AgentRepositoryPage() {
                   onPageChange={setReviewPage}
                   updatingRepositoryId={updatingRepositoryId}
                   onDetailClick={handleDetailClick}
-                  onApprove={(listing) =>
+                  onApprove={(listing, content) =>
                     updateStatusMutation.mutateAsync({
                       agentRepositoryId: listing.agent_repository_id,
                       status: "shared",
+                      content,
                     })
                   }
-                  onReject={(listing) =>
+                  onReject={(listing, content) =>
                     updateStatusMutation.mutateAsync({
                       agentRepositoryId: listing.agent_repository_id,
                       status: "rejected",
+                      content,
                     })
                   }
                 />
@@ -456,6 +483,10 @@ export default function AgentRepositoryPage() {
                   isFetching={isMineFetching}
                   onRetry={() => refetchMine()}
                   onViewDetail={handleMineViewDetail}
+                  reviewDeepLink={reviewDeepLink}
+                  deepLinkFallbackAgent={deepLinkFallbackAgent}
+                  deepLinkFallbackLoading={isDeepLinkMineLoading}
+                  onReviewDeepLinkConsumed={handleReviewDeepLinkConsumed}
                 />
               ) : null}
             </div>
@@ -679,11 +710,21 @@ function ReviewCenterView({
   onPageChange: (page: number) => void;
   updatingRepositoryId: number | null;
   onDetailClick: (listing: AgentRepositoryListingItem) => void;
-  onApprove: (listing: AgentRepositoryListingItem) => Promise<unknown>;
-  onReject: (listing: AgentRepositoryListingItem) => Promise<unknown>;
+  onApprove: (
+    listing: AgentRepositoryListingItem,
+    content?: string
+  ) => Promise<unknown>;
+  onReject: (
+    listing: AgentRepositoryListingItem,
+    content?: string
+  ) => Promise<unknown>;
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const [reviewAction, setReviewAction] =
+    useState<AgentRepositoryReviewAction | null>(null);
+  const [reviewListing, setReviewListing] =
+    useState<AgentRepositoryListingItem | null>(null);
 
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const showPagination = !isLoading && !isError && totalPages > 1;
@@ -693,46 +734,50 @@ function ReviewCenterView({
     listing.name?.trim() ||
     t("agentRepository.card.untitled");
 
-  const confirmReviewAction = (
-    listing: AgentRepositoryListingItem,
-    action: "approve" | "reject"
-  ) => {
-    const title = getListingTitle(listing);
-    const isApprove = action === "approve";
-
-    Modal.confirm({
-      title: isApprove
-        ? t("agentRepository.review.confirmApproveTitle")
-        : t("agentRepository.review.confirmRejectTitle"),
-      content: isApprove
-        ? t("agentRepository.review.confirmApproveContent", { name: title })
-        : t("agentRepository.review.confirmRejectContent", { name: title }),
-      okText: isApprove
-        ? t("agentRepository.review.approve")
-        : t("agentRepository.review.reject"),
-      cancelText: t("common.cancel"),
-      okButtonProps: isApprove
-        ? undefined
-        : { danger: true },
-      onOk: async () => {
-        try {
-          await (isApprove ? onApprove(listing) : onReject(listing));
-          message.success(
-            isApprove
-              ? t("agentRepository.review.approveSuccess", { name: title })
-              : t("agentRepository.review.rejectSuccess", { name: title })
-          );
-        } catch {
-          message.error(
-            isApprove
-              ? t("agentRepository.review.approveError")
-              : t("agentRepository.review.rejectError")
-          );
-          throw new Error("Review action failed");
-        }
-      },
-    });
+  const closeReviewModal = () => {
+    setReviewAction(null);
+    setReviewListing(null);
   };
+
+  const openReviewModal = (
+    listing: AgentRepositoryListingItem,
+    action: AgentRepositoryReviewAction
+  ) => {
+    setReviewListing(listing);
+    setReviewAction(action);
+  };
+
+  const handleReviewConfirm = async (content?: string) => {
+    if (!reviewListing || !reviewAction) {
+      return;
+    }
+
+    const title = getListingTitle(reviewListing);
+    const isApprove = reviewAction === "approve";
+
+    try {
+      await (isApprove
+        ? onApprove(reviewListing, content)
+        : onReject(reviewListing, content));
+      message.success(
+        isApprove
+          ? t("agentRepository.review.approveSuccess", { name: title })
+          : t("agentRepository.review.rejectSuccess", { name: title })
+      );
+      closeReviewModal();
+    } catch {
+      message.error(
+        isApprove
+          ? t("agentRepository.review.approveError")
+          : t("agentRepository.review.rejectError")
+      );
+      throw new Error("Review action failed");
+    }
+  };
+
+  const isReviewModalLoading =
+    reviewListing != null &&
+    updatingRepositoryId === reviewListing.agent_repository_id;
 
   return (
     <div className="space-y-5">
@@ -758,8 +803,17 @@ function ReviewCenterView({
             currentUserEmail={currentUserEmail}
             updatingRepositoryId={updatingRepositoryId}
             onDetailClick={onDetailClick}
-            onApprove={(listing) => confirmReviewAction(listing, "approve")}
-            onReject={(listing) => confirmReviewAction(listing, "reject")}
+            onApprove={(listing) => openReviewModal(listing, "approve")}
+            onReject={(listing) => openReviewModal(listing, "reject")}
+          />
+
+          <AgentRepositoryReviewConfirmModal
+            open={reviewAction != null && reviewListing != null}
+            action={reviewAction}
+            listing={reviewListing}
+            loading={isReviewModalLoading}
+            onClose={closeReviewModal}
+            onConfirm={handleReviewConfirm}
           />
 
           {showPagination ? (

@@ -19,7 +19,8 @@ def get_mcp_community_records(
 ) -> Dict[str, Any]:
     with get_db_session() as session:
         query = session.query(McpCommunityRecord).filter(
-            McpCommunityRecord.delete_flag != "Y"
+            McpCommunityRecord.delete_flag != "Y",
+            McpCommunityRecord.review_status == "approved",
         )
 
         if transport_type:
@@ -77,6 +78,7 @@ def get_mcp_community_tag_stats() -> List[Dict[str, Any]]:
             )
             .filter(
                 McpCommunityRecord.delete_flag != "Y",
+                McpCommunityRecord.review_status == "approved",
             )
             .group_by("tag")
             .order_by(func.count(McpCommunityRecord.community_id).desc(), "tag")
@@ -101,13 +103,15 @@ def create_mcp_community_record(mcp_data: Dict[str, Any], tenant_id: str, user_i
         return int(new_record.community_id)
 
 
-def get_mcp_community_record_by_id_and_tenant(community_id: int, tenant_id: str) -> Dict[str, Any] | None:
+def get_mcp_community_record_by_id_and_tenant(community_id: int, tenant_id: str | None) -> Dict[str, Any] | None:
     with get_db_session() as session:
-        record = session.query(McpCommunityRecord).filter(
+        query = session.query(McpCommunityRecord).filter(
             McpCommunityRecord.community_id == community_id,
-            McpCommunityRecord.tenant_id == tenant_id,
             McpCommunityRecord.delete_flag != "Y",
-        ).first()
+        )
+        if tenant_id is not None:
+            query = query.filter(McpCommunityRecord.tenant_id == tenant_id)
+        record = query.first()
         return as_dict(record) if record else None
 
 
@@ -122,6 +126,10 @@ def update_mcp_community_record_by_id(
     version: str | None = None,
     registry_json: Dict[str, Any] | None = None,
     config_json: Dict[str, Any] | None = None,
+    mcp_server: str | None = None,
+    transport_type: str | None = None,
+    review_status: str | None = None,
+    review_type: str | None = None,
 ) -> None:
     update_fields: Dict[str, Any] = {"updated_by": user_id}
 
@@ -137,6 +145,14 @@ def update_mcp_community_record_by_id(
         update_fields["registry_json"] = registry_json
     if config_json is not None:
         update_fields["config_json"] = config_json
+    if mcp_server is not None:
+        update_fields["mcp_server"] = mcp_server
+    if transport_type is not None:
+        update_fields["transport_type"] = transport_type
+    if review_status is not None:
+        update_fields["review_status"] = review_status
+    if review_type is not None:
+        update_fields["review_type"] = review_type
 
     with get_db_session() as session:
         session.query(McpCommunityRecord).filter(
@@ -155,13 +171,90 @@ def delete_mcp_community_record_by_id(*, community_id: int, tenant_id: str, user
         ).update({"delete_flag": "Y", "updated_by": user_id})
 
 
-def list_mcp_community_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+def list_mcp_community_records_by_tenant_and_user(tenant_id: str, user_id: str) -> List[Dict[str, Any]]:
     with get_db_session() as session:
         rows = session.query(McpCommunityRecord).filter(
             McpCommunityRecord.tenant_id == tenant_id,
+            McpCommunityRecord.user_id == user_id,
             McpCommunityRecord.delete_flag != "Y",
         ).order_by(McpCommunityRecord.community_id.desc()).all()
         return [as_dict(row) for row in rows]
+
+
+def list_mcp_community_review_records(
+    *,
+    tenant_id: str | None,
+    status: str | None = None,
+    search: str | None = None,
+    tag: str | None = None,
+    transport_type: str | None = None,
+    cursor: str | None = None,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    with get_db_session() as session:
+        query = session.query(McpCommunityRecord).filter(
+            McpCommunityRecord.delete_flag != "Y",
+        )
+
+        if tenant_id is not None:
+            query = query.filter(McpCommunityRecord.tenant_id == tenant_id)
+        if status:
+            query = query.filter(McpCommunityRecord.review_status == status)
+        if transport_type:
+            query = query.filter(McpCommunityRecord.transport_type == transport_type)
+        if tag:
+            query = query.filter(McpCommunityRecord.tags.any(tag))
+        if search:
+            keyword = f"%{search}%"
+            query = query.filter(
+                or_(
+                    McpCommunityRecord.mcp_name.ilike(keyword),
+                    McpCommunityRecord.description.ilike(keyword),
+                    func.array_to_string(McpCommunityRecord.tags, ",").ilike(keyword),
+                )
+            )
+
+        cursor_id: int | None = None
+        if cursor:
+            try:
+                cursor_id = int(cursor)
+            except ValueError:
+                cursor_id = None
+        if cursor_id is not None:
+            query = query.filter(McpCommunityRecord.community_id < cursor_id)
+
+        rows: List[McpCommunityRecord] = (
+            query.order_by(McpCommunityRecord.community_id.desc())
+            .limit(limit + 1)
+            .all()
+        )
+        has_next = len(rows) > limit
+        page_rows = rows[:limit]
+        next_cursor = str(page_rows[-1].community_id) if has_next and page_rows else None
+
+        return {
+            "count": len(page_rows),
+            "nextCursor": next_cursor,
+            "items": [as_dict(row) for row in page_rows],
+        }
+
+
+def update_mcp_community_review_status(
+    *,
+    community_id: int,
+    tenant_id: str | None,
+    user_id: str,
+    review_status: str,
+) -> None:
+    with get_db_session() as session:
+        query = session.query(McpCommunityRecord).filter(
+            McpCommunityRecord.community_id == community_id,
+            McpCommunityRecord.delete_flag != "Y",
+        )
+        if tenant_id is not None:
+            query = query.filter(McpCommunityRecord.tenant_id == tenant_id)
+        query.update({"review_status": review_status, "updated_by": user_id})
+
 
 def get_mcp_community_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
     with get_db_session() as session:

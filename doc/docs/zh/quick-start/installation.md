@@ -309,6 +309,11 @@ WECHAT_OAUTH_APP_SECRET=
 # 访问 OAuth provider 时的 TLS 校验
 OAUTH_SSL_VERIFY=true
 OAUTH_CA_BUNDLE=
+
+# disabled: 隐藏 OAuth 登录入口并禁用自动跳转
+# button: 显示已配置的 OAuth 登录按钮
+# force: 恰好配置一个 Provider 时，未登录用户自动跳转
+OAUTH_LOGIN_MODE=button
 ```
 
 Provider 启用规则：
@@ -321,6 +326,8 @@ Provider 启用规则：
 | WeChat | `ENABLE_WECHAT_OAUTH=true`、`WECHAT_OAUTH_APP_ID`、`WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 本地默认回调示例为 `http://localhost:3000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，例如 `https://nexent.example.com/api/user/oauth/callback?provider=github`，并在 OAuth provider 控制台中登记相同地址。
+
+`OAUTH_LOGIN_MODE` 支持 `disabled`、`button`、`force`，默认为 `button`。`force` 模式下，恰好有一个 Provider 满足启用条件时，未登录访问 Nexent 会直接跳转到该 Provider；没有可用 Provider 时禁用 OAuth，多个 Provider 时回退到登录按钮。若同时配置了 CAS `force` 模式，CAS 优先。
 
 ### CAS 登录配置
 

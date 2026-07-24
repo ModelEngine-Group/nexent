@@ -14,6 +14,32 @@ from fastapi import Request
 # STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
 # =============================================================================
 
+email_validator_mock = types.ModuleType("email_validator")
+
+
+class MockEmailNotValidError(ValueError):
+    pass
+
+
+def mock_validate_email(email, check_deliverability=False):
+    local_part = email.split("@", 1)[0]
+    return types.SimpleNamespace(normalized=email, local_part=local_part)
+
+email_validator_mock.EmailNotValidError = MockEmailNotValidError
+email_validator_mock.validate_email = mock_validate_email
+sys.modules['email_validator'] = email_validator_mock
+
+try:
+    import pydantic.networks as pydantic_networks
+    original_package_version = pydantic_networks.version
+    pydantic_networks.version = (
+        lambda package_name: "2.0.0"
+        if package_name == "email-validator"
+        else original_package_version(package_name)
+    )
+except Exception:
+    pass
+
 # Create mock ToolConfig class with all necessary methods
 class MockToolConfig:
     """Mock ToolConfig for testing - accepts any arguments."""
@@ -33,6 +59,19 @@ sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+context_input_mock = types.ModuleType("nexent.core.agents.context_input")
+
+
+class MockContextInput:
+    def __init__(self, items=()):
+        self.items = items
+
+
+context_input_mock.ContextInput = MockContextInput
+sys.modules['nexent.core.agents.context_input'] = context_input_mock
+context_items_mock = types.ModuleType("nexent.core.agents.context")
+context_items_mock.ContextItemInput = MagicMock()
+sys.modules['nexent.core.agents.context'] = context_items_mock
 
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
@@ -75,6 +114,18 @@ sys.modules['backend.database.client'] = _mock_db_client
 services_module = types.ModuleType("services")
 services_module.__path__ = []
 sys.modules['services'] = services_module
+
+runtime_state_service_module = types.ModuleType("services.runtime_state_service")
+runtime_state_service_mock = MagicMock()
+runtime_state_service_mock.enabled = False
+runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
+runtime_state_service_mock.get_run_state_async = AsyncMock(return_value={})
+runtime_state_service_mock.read_stream_events_async = AsyncMock(return_value=[])
+runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value=[])
+runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
+runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
+runtime_state_service_module.runtime_state_service = runtime_state_service_mock
+sys.modules['services.runtime_state_service'] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
@@ -209,6 +260,9 @@ class MockProcessType:
         value = "model_output_thinking"
     class MODEL_OUTPUT_DEEP_THINKING:
         value = "model_output_deep_thinking"
+
+    class SKILL_ARTIFACT:
+        value = "skill_artifact"
 
 sys.modules['nexent.core.utils.observer'] = MagicMock()
 sys.modules['nexent.core.utils.observer'].ProcessType = MockProcessType
@@ -497,22 +551,22 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     mock_sub_agent_ids = [456, 789]
     mock_query_sub_agents_id.return_value = mock_sub_agent_ids
 
-    # Mock SkillService to return empty list for skills
+    # Disabled skill instances must not be returned as selected skills.
     mock_skill_service_instance = MagicMock()
-    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service_instance.list_skill_instances.return_value = [
+        {"skill_id": 1, "enabled": True},
+        {"skill_id": 2, "enabled": False},
+    ]
     mock_skill_service.return_value = mock_skill_service_instance
 
-    # Mock query_external_sub_agents
-    mock_query_external_sub_agents.return_value = []
-
-    # Mock get_model_by_model_id - return None for model_id=None
-    mock_get_model_by_model_id.return_value = None
-
-    # Mock check_agent_availability - agent is available
-    mock_check_availability.return_value = (True, [])
-
-    # Execute
-    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+    # skill_db.get_valid_skill_ids is hit as a fallback check; mock it to keep the
+    # flow self-contained without requiring a live DB.
+    with patch("backend.services.agent_service.skill_db.get_valid_skill_ids",
+               return_value={1}):
+        # Mock check_agent_availability - agent is available
+        mock_check_availability.return_value = (True, [])
+        # Execute
+        result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 
     # Assert
     expected_tools = [{"tool_id": 1, "name": "Tool 1", "unavailable_reasons": []}]
@@ -522,7 +576,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
-        "skills": [],
+        "skills": [{"skill_id": 1, "enabled": True}],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
         "model_names": [],
@@ -4200,6 +4254,11 @@ async def test_prepare_agent_run(
     """Test prepare_agent_run function."""
     # Setup
     mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_items = []
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
+    mock_run_info.history = []
     mock_create_run_info.return_value = mock_run_info
     mock_memory_context = MagicMock()
     mock_build_memory_context.return_value = mock_memory_context
@@ -4230,17 +4289,21 @@ async def test_prepare_agent_run(
         override_model_id=None,
         requested_output_tokens=4096,
         tool_params=None,
+        context_policy=None,
+        enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
+    mock_agent_run_manager.create_context_manager.assert_not_called()
+    assert mock_run_info.context_input.items == ()
 
 
-@patch('backend.services.agent_service.submit')
-def test_save_messages(mock_submit, mock_agent_request):
+@patch('backend.services.agent_service.save_conversation_user')
+def test_save_messages(mock_save_user, mock_agent_request):
     """Test save_messages function."""
     # Test user message saving
     save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
-    mock_submit.assert_called_once()
+    mock_save_user.assert_called_once_with(mock_agent_request, "u", "t")
 
     # Test assistant message saving now raises because incremental
     # persistence has replaced the old batch path.
@@ -4262,6 +4325,39 @@ def test_save_messages(mock_submit, mock_agent_request):
             tenant_id="t",
             messages=["test message"],
         )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_effects(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("user-a", "tenant-a", "en"),
+    )
+    access_lookup = MagicMock(return_value=None)
+    update_agent = MagicMock()
+    save_user_message = MagicMock()
+    reset_stream = AsyncMock()
+    monkeypatch.setattr(agent_service, "get_conversation_service", access_lookup)
+    monkeypatch.setattr(agent_service, "update_conversation_agent_id_service", update_agent)
+    monkeypatch.setattr(agent_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", reset_stream)
+
+    with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    access_lookup.assert_called_once_with(
+        conversation_id=mock_agent_request.conversation_id,
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+    update_agent.assert_not_called()
+    save_user_message.assert_not_called()
+    reset_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4329,7 +4425,6 @@ async def test_run_agent_stream(
     "backend.services.agent_service._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("backend.services.agent_service.generate_conversation_title_service", new=AsyncMock())
 @patch("backend.services.agent_service.create_new_conversation")
 @patch("backend.services.agent_service.generate_stream_with_memory")
 @patch('backend.services.agent_service.save_messages')
@@ -4362,6 +4457,7 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
 
     # Assert agent_request got the new conversation_id
     assert mock_agent_request.conversation_id == 999
+    assert response.headers["conversation_id"] == "999"
 
     # Assert save_messages received the updated conversation_id
     mock_save_messages.assert_called_once()
@@ -4840,7 +4936,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
         unregister_called["user_id"] = user_id
 
@@ -4875,6 +4971,66 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test__stream_agent_chunks_does_not_persist_history_summary_event(monkeypatch):
+    """The live summary event is streamed but its checkpoint is already persisted."""
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="hello",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    summary_content = json.dumps({
+        "summary": {"task_overview": "done"},
+        "covered_through_message_id": 24,
+        "trigger": "soft_budget_exceeded",
+    })
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "history_summary",
+            "content": summary_content,
+        })
+
+    save_unit = MagicMock(return_value=42)
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=4242), raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        save_unit, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(), raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        MagicMock(), raising=False)
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *args, **kwargs: _FakeFuture(), raising=False)
+    memory_context = MagicMock()
+    memory_context.user_config.memory_switch = False
+
+    chunks = []
+    async for chunk in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_context
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert '"type": "history_summary"' in chunks[0]
+    save_unit.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch, caplog):
     """When agent_run raises, an error SSE chunk should be emitted and run unregistered."""
     agent_request = AgentRequest(
@@ -4895,7 +5051,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
 
     called = {"unregistered": None, "user_id": None}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         called["unregistered"] = conv_id
         called["user_id"] = user_id
 
@@ -10219,6 +10375,45 @@ def test_generate_stream_with_memory_decorated():
     assert callable(generate_stream_with_memory)
 
 
+@pytest.mark.asyncio
+async def test_run_agent_background_consumes_stream_and_returns_assistant_message():
+    request = MagicMock()
+    request.conversation_id = 99
+    request.agent_id = 42
+    request.query = "automation prompt"
+    request.is_debug = False
+    request.history = []
+    request.minio_files = []
+
+    async def fake_stream():
+        yield "chunk-1"
+        yield "chunk-2"
+
+    memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
+    with (
+        patch("backend.services.agent_service.build_memory_context", return_value=memory_context),
+        patch("backend.services.agent_service.generate_stream_no_memory", return_value=fake_stream()),
+        patch(
+            "backend.services.agent_service.get_latest_assistant_message",
+            return_value={"message_id": 123},
+        ),
+        patch("backend.services.agent_service.save_messages") as mock_save_messages,
+    ):
+        result = await agent_service.run_agent_background(
+            request,
+            user_id="user",
+            tenant_id="tenant",
+            skip_user_save=True,
+        )
+
+    assert result == {
+        "conversation_id": 99,
+        "assistant_message_id": 123,
+        "chunks": 2,
+    }
+    mock_save_messages.assert_not_called()
+
+
 # =============================================================================
 # Tests for export_agent_with_skills_impl and import_agent_with_skills_impl
 # =============================================================================
@@ -10863,7 +11058,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
     mock_agent_info.description = "desc"
     mock_agent_info.business_description = "biz"
     mock_agent_info.author = "author"
-    mock_agent_info.max_steps = 35  # Too high (> 30)
+    mock_agent_info.max_steps = -1  # Invalid: must be > 0
     mock_agent_info.provide_run_summary = True
     mock_agent_info.duty_prompt = "duty"
     mock_agent_info.constraint_prompt = "constraint"
@@ -11549,6 +11744,35 @@ async def test_process_skill_file_uploads_success(
     assert len(result) == 1
     assert result[0]["status"] == "success"
     assert result[0]["file_name"] == "test.txt"
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.upload_fileobj")
+@patch("backend.services.agent_service.is_allowed_skill_upload_path")
+@patch("backend.services.agent_service.os.path.exists")
+@patch("backend.services.agent_service.os.path.getsize")
+@patch("builtins.open", new_callable=MagicMock)
+async def test_process_skill_file_uploads_uses_structured_payloads(
+    mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
+):
+    """Structured artifacts should bypass legacy text extraction."""
+    from backend.services.agent_service import _process_skill_file_uploads
+
+    mock_exists.return_value = True
+    mock_allowed.return_value = True
+    mock_getsize.return_value = 128
+    mock_upload.return_value = {"success": True, "object_name": "obj1", "url": "http://example.com/file"}
+    payloads = [{
+        "absolute_path": "/mnt/nexent/report.docx",
+        "file_name": "report.docx",
+        "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }]
+
+    result = await _process_skill_file_uploads(payloads, "user1", "tenant1")
+
+    assert len(result) == 1
+    assert result[0]["file_name"] == "report.docx"
+    mock_upload.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -12365,6 +12589,40 @@ async def test_process_skill_file_uploads_empty_absolute_path(mock_allowed):
 
 
 @pytest.mark.asyncio
+async def test_stream_agent_chunks_accepts_none_history(monkeypatch):
+    """An omitted optional history must behave like an empty history."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = None
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", lambda *_, **__: 4242)
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "unregister_agent_run",
+        lambda *_, **__: None,
+    )
+
+    collected = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request, "u", "t", MagicMock(), MagicMock()
+        )
+    ]
+
+    assert collected
+
+
+@pytest.mark.asyncio
 async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     """_stream_agent_chunks should handle save_message exceptions gracefully."""
     from backend.services import agent_service
@@ -12398,7 +12656,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Track unregister calls
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12452,7 +12710,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12519,7 +12777,7 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12590,7 +12848,7 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12608,6 +12866,83 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     # Should have search_content chunk
     assert len(collected) >= 1
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(monkeypatch, caplog):
+    """_stream_agent_chunks should continue when search placeholders cannot persist."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "search_content",
+            "content": json.dumps([{"title": "Result", "url": "https://example.com"}]),
+        })
+
+    class FailingFuture:
+        def result(self):
+            raise RuntimeError("placeholder write failed")
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+
+    with caplog.at_level("ERROR", logger=agent_service.logger.name):
+        collected = [
+            chunk async for chunk in agent_service._stream_agent_chunks(
+                agent_request, "user", "tenant", MagicMock(), MagicMock()
+            )
+        ]
+
+    assert len(collected) == 1
+    assert "search_content" in collected[0]
+    assert "Failed to persist search_content placeholder" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monkeypatch, caplog):
+    """_stream_agent_chunks should continue when a streaming unit cannot persist."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    class FailingFuture:
+        def result(self):
+            raise RuntimeError("unit write failed")
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+
+    with caplog.at_level("ERROR", logger=agent_service.logger.name):
+        collected = [
+            chunk async for chunk in agent_service._stream_agent_chunks(
+                agent_request, "user", "tenant", MagicMock(), MagicMock()
+            )
+        ]
+
+    assert len(collected) == 1
+    assert "final_answer" in collected[0]
+    assert "Failed to persist streaming message unit" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -12674,7 +13009,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12756,7 +13091,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12837,7 +13172,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12900,7 +13235,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12942,6 +13277,75 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypatch):
+    """_stream_agent_chunks should collect unique structured skill artifacts."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    first_artifact = {
+        "absolute_path": "/tmp/first.py",
+        "file_name": "first.py",
+    }
+    second_artifact = {
+        "absolute_path": "/tmp/second.py",
+        "file_name": "second.py",
+    }
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": MockProcessType.SKILL_ARTIFACT.value,
+            "content": json.dumps({
+                "artifacts": [
+                    first_artifact,
+                    first_artifact,
+                    {"absolute_path": "   "},
+                    "not-an-artifact",
+                ]
+            }),
+        })
+        yield json.dumps({
+            "type": MockProcessType.SKILL_ARTIFACT.value,
+            "content": {"artifacts": [second_artifact]},
+        })
+        yield json.dumps({
+            "type": MockProcessType.SKILL_ARTIFACT.value,
+            "content": "not-json",
+        })
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    uploaded_payloads = []
+
+    async def fake_process_skill_file_uploads(payloads, user_id, tenant_id):
+        uploaded_payloads.extend(payloads)
+        return []
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._process_skill_file_uploads",
+        fake_process_skill_file_uploads,
+    )
+
+    collected = []
+    async for chunk in agent_service._stream_agent_chunks(
+        agent_request, "user", "tenant", MagicMock(), MagicMock()
+    ):
+        collected.append(chunk)
+
+    assert uploaded_payloads == [first_artifact, second_artifact]
+    assert len(collected) == 1
+    assert "final_answer" in collected[0]
+
+
+@pytest.mark.asyncio
 async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
     """_stream_agent_chunks should handle invalid picture_web content gracefully."""
     from backend.services import agent_service
@@ -12976,7 +13380,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13032,7 +13436,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13085,7 +13489,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13142,7 +13546,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13202,7 +13606,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13263,7 +13667,7 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13323,7 +13727,7 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, status="completed"):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14008,6 +14412,427 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
                     assert result.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
+    """Redis cancel polling should set the local stop event."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+    stop_event = asyncio.Event()
+
+    await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
+
+    assert stop_event.is_set()
+    fake_runtime_state.is_cancelled_async.assert_any_await(user_id="user1", conversation_id=123)
+    assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_poll_runtime_cancel_signal_skips_when_already_stopped(monkeypatch):
+    """Redis cancel polling should not touch Redis when the stop event is already set."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock()
+    stop_event = asyncio.Event()
+    stop_event.set()
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+    await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
+
+    fake_runtime_state.is_cancelled_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_on_runtime_signal_cancels_task(monkeypatch):
+    """Redis cancel polling should cancel an active asyncio task."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
+    task = MagicMock()
+    task.done.return_value = False
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+
+    task.cancel.assert_called_once()
+    fake_runtime_state.is_cancelled_async.assert_awaited_once_with(user_id="user1", conversation_id=123)
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_on_runtime_signal_waits_then_cancels(monkeypatch):
+    """Redis cancel polling should sleep between checks before cancelling."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
+    task = MagicMock()
+    task.done.return_value = False
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+
+    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+
+    task.cancel.assert_called_once()
+    assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_on_runtime_signal_skips_done_task(monkeypatch):
+    """Redis cancel polling should exit immediately for completed tasks."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock()
+    task = MagicMock()
+    task.done.return_value = True
+
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+
+    task.cancel.assert_not_called()
+    fake_runtime_state.is_cancelled_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch):
+    """_stream_agent_chunks should persist stopped terminal status when cancellation wins."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    stop_event = asyncio.Event()
+    stop_event.set()
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = stop_event
+    agent_run_info.query = "test"
+
+    memory_ctx = MagicMock()
+    memory_ctx.user_config.memory_switch = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    class FakeFuture:
+        def __init__(self, value=None):
+            self.value = value
+
+        def result(self):
+            return self.value
+
+    def fake_submit(fn, *args, **kwargs):
+        return FakeFuture(777)
+
+    statuses = []
+    unregister_calls = []
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_service, "submit", fake_submit, raising=False)
+    monkeypatch.setattr(agent_service, "update_unit_content", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(agent_service, "update_unit_status", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock(), raising=False)
+    monkeypatch.setattr(
+        agent_service,
+        "update_message_status",
+        lambda message_id, status, user_id: statuses.append((message_id, status, user_id)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "unregister_agent_run",
+        lambda conv_id, user_id, status="completed": unregister_calls.append((conv_id, user_id, status)),
+        raising=False,
+    )
+
+    collected = []
+    async for chunk in agent_service._stream_agent_chunks(
+        agent_request,
+        "user1",
+        "tenant1",
+        agent_run_info,
+        memory_ctx,
+    ):
+        collected.append(chunk)
+
+    assert collected
+    assert statuses[-1] == (4242, "stopped", "user1")
+    assert unregister_calls[-1] == (999, "user1", "stopped")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkeypatch):
+    """Resume should replay Redis stream events when the run lives on another replica."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.enabled = True
+    fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[
+        {"status": "running"},
+        {"status": "completed"},
+    ])
+    fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[
+        ("1-0", 'data: {"type": "model_output", "content": "old"}\n\n'),
+        ("2-0", ""),
+    ])
+    fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[
+        ("3-0", 'data: {"type": "final_answer", "content": "new"}\n\n'),
+    ])
+    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={"status": "completed"})
+
+    with patch(
+        "backend.services.agent_service._resolve_user_tenant_language",
+        return_value=("user1", "tenant1", "en"),
+    ), \
+            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
+            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
+            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+        mock_detect.return_value = {
+            "should_resume": True,
+            "message_id": 1,
+            "message_status": "streaming",
+            "resume_from_unit_index": 5,
+            "reason": "backend_streaming",
+        }
+        mock_mgr.get_agent_run_info.return_value = None
+        mock_channel_mgr.get_channel.return_value = None
+        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+        result = await agent_service.run_agent_stream(
+            agent_request,
+            MagicMock(),
+            "Bearer token",
+            resume=True,
+        )
+
+        chunks = []
+        async for chunk in result.body_iterator:
+            chunks.append(chunk)
+
+    assert result.status_code == 200
+    assert result.headers["X-Stream-Status"] == "resumed"
+    assert result.headers["X-Last-Unit-Index"] == "5"
+    assert chunks[0] == agent_service.STREAM_STATUS_EVENT
+    assert '"replay_chunk_count": 2' in chunks[1]
+    assert "old" in "".join(chunks)
+    assert "new" in "".join(chunks)
+    assert '"status": "completed"' in chunks[-1]
+    fake_runtime_state.wait_for_stream_events_async.assert_awaited_once_with(
+        user_id="user1",
+        conversation_id=999,
+        last_id="2-0",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_status(monkeypatch):
+    """Redis resume should stop from run state when no stream completion hash exists."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.enabled = True
+    fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[
+        {"status": "running"},
+        {"status": "stopped"},
+    ])
+    fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[])
+    fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[
+        ("1-0", ""),
+    ])
+    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={})
+
+    with patch(
+        "backend.services.agent_service._resolve_user_tenant_language",
+        return_value=("user1", "tenant1", "en"),
+    ), \
+            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
+            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
+            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+        mock_detect.return_value = {
+            "should_resume": True,
+            "message_id": 1,
+            "message_status": "streaming",
+            "resume_from_unit_index": 5,
+            "reason": "backend_streaming",
+        }
+        mock_mgr.get_agent_run_info.return_value = None
+        mock_channel_mgr.get_channel.return_value = None
+        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+        result = await agent_service.run_agent_stream(
+            agent_request,
+            MagicMock(),
+            "Bearer token",
+            resume=True,
+        )
+
+        chunks = []
+        async for chunk in result.body_iterator:
+            chunks.append(chunk)
+
+    assert result.status_code == 200
+    assert chunks[0] == agent_service.STREAM_STATUS_EVENT
+    assert '"replay_chunk_count": 0' in chunks[1]
+    assert '"status": "stopped"' in chunks[-1]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_channel_body_yields_completed_status(monkeypatch):
+    """Local channel resume should yield replay metadata, chunks, and completed status."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.get_run_state_async = AsyncMock(return_value={})
+
+    mock_channel = MagicMock()
+    mock_channel.history_size = 1
+
+    async def mock_subscribe(_start_index):
+        yield 'data: {"type": "final_answer", "content": "from-channel"}\n\n'
+
+    mock_channel.subscribe_with_history = mock_subscribe
+
+    with patch(
+        "backend.services.agent_service._resolve_user_tenant_language",
+        return_value=("user1", "tenant1", "en"),
+    ), \
+            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
+            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
+            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+        mock_detect.return_value = {
+            "should_resume": True,
+            "message_id": 1,
+            "message_status": "streaming",
+            "resume_from_unit_index": 5,
+            "reason": "backend_streaming",
+        }
+        mock_mgr.get_agent_run_info.return_value = MagicMock()
+        mock_channel_mgr.get_channel.return_value = mock_channel
+        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+        result = await agent_service.run_agent_stream(
+            agent_request,
+            MagicMock(),
+            "Bearer token",
+            resume=True,
+        )
+
+        chunks = []
+        async for chunk in result.body_iterator:
+            chunks.append(chunk)
+
+    assert result.status_code == 200
+    assert chunks[0] == agent_service.STREAM_STATUS_EVENT
+    assert '"replay_chunk_count": 1' in chunks[1]
+    assert "from-channel" in chunks[2]
+    assert chunks[-2] == agent_service.STREAM_STATUS_EVENT
+    assert '"status": "completed"' in chunks[-1]
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_with_memory_handles_missing_current_task(monkeypatch):
+    """Memory streaming should work even if asyncio.current_task returns None."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    fake_channel = MagicMock()
+    fake_channel.publish = AsyncMock()
+    memory_preview = MagicMock()
+    memory_preview.user_config.memory_switch = False
+    memory_ctx = MagicMock()
+    agent_run_info = MagicMock()
+
+    async def fake_stream_agent_chunks(**_kwargs):
+        yield "data: done\n\n"
+
+    fake_preprocess_manager = MagicMock()
+    monkeypatch.setattr(agent_service.asyncio, "current_task", lambda: None)
+    monkeypatch.setattr(agent_service, "preprocess_manager", fake_preprocess_manager)
+    monkeypatch.setattr(
+        agent_service.streaming_channel_manager,
+        "get_or_create_channel",
+        AsyncMock(return_value=fake_channel),
+        raising=False,
+    )
+    monkeypatch.setattr(agent_service, "build_memory_context", lambda *args, **kwargs: memory_preview)
+    monkeypatch.setattr(
+        agent_service,
+        "prepare_agent_run",
+        AsyncMock(return_value=(agent_run_info, memory_ctx)),
+    )
+    monkeypatch.setattr(agent_service, "_stream_agent_chunks", fake_stream_agent_chunks)
+
+    chunks = []
+    async for chunk in agent_service.generate_stream_with_memory(
+        agent_request,
+        "user1",
+        "tenant1",
+        "en",
+    ):
+        chunks.append(chunk)
+
+    assert chunks == ["data: done\n\n"]
+    fake_preprocess_manager.register_preprocess_task.assert_not_called()
+    fake_preprocess_manager.unregister_preprocess_task.assert_called_once()
+
+
 
 def test_validate_requested_output_tokens_no_requested_tokens():
     """_validate_requested_output_tokens_for_agent should return when requested_output_tokens is None."""
@@ -14282,153 +15107,6 @@ async def test_run_agent_stream_resume_update_message_status_exception(
         assert result.status_code == 200
         # Verify update_message_status was called
         assert mock_update.call_count == 1
-
-
-# ============================================================================
-# Tests for generate_conversation_title_service exception handling (line 3132)
-# ============================================================================
-
-
-@pytest.mark.asyncio
-@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.create_new_conversation")
-async def test_run_agent_stream_title_generation_exception(
-    mock_create_conversation,
-    mock_build_mem_ctx,
-    mock_generate_stream,
-    mock_resolve,
-    mock_agent_request,
-    mock_http_request,
-    caplog,
-):
-    """run_agent_stream should handle generate_conversation_title_service exception gracefully."""
-    import logging
-
-    # Set conversation_id to None to trigger is_new_conversation=True path
-    mock_agent_request.conversation_id = None
-    mock_agent_request.is_debug = False
-
-    mock_create_conversation.return_value = {"conversation_id": 999}
-    mock_build_mem_ctx.return_value = MagicMock(
-        user_config=MagicMock(memory_switch=True)
-    )
-
-    # Track that title generation was called
-    title_gen_called = {"called": False}
-
-    async def mock_title_gen(*args, **kwargs):
-        title_gen_called["called"] = True
-        raise Exception("Title generation failed")
-
-    mock_generate_stream.return_value = mock_stream_for_title_test()
-
-    # Use the tracking function as side_effect
-    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=mock_title_gen):
-        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
-            response = await agent_service.run_agent_stream(
-                mock_agent_request,
-                mock_http_request,
-                "Bearer token"
-            )
-
-            # Consume the stream to trigger finally block
-            chunks = []
-            async for chunk in response.body_iterator:
-                chunks.append(chunk)
-
-            # Stream should complete successfully despite title generation failure
-            assert response.status_code == 200
-
-            # Verify title generation was called (by checking chunks or title_gen_called)
-            assert len(chunks) > 0, "Stream should yield at least one chunk"
-            assert title_gen_called["called"], "Title generation should have been called"
-
-
-async def mock_stream_for_title_test():
-    """Helper to yield streaming chunks for title generation test."""
-    yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
-
-
-@pytest.mark.asyncio
-@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "zh"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.create_new_conversation")
-async def test_run_agent_stream_title_generation_zh_language(
-    mock_create_conversation,
-    mock_build_mem_ctx,
-    mock_generate_stream,
-    mock_resolve,
-    mock_agent_request,
-    mock_http_request,
-):
-    """run_agent_stream should handle title generation with zh language setting."""
-    mock_create_conversation.return_value = {"conversation_id": 999}
-    mock_build_mem_ctx.return_value = MagicMock(
-        user_config=MagicMock(memory_switch=True)
-    )
-
-    async def mock_stream():
-        yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
-
-    mock_generate_stream.return_value = mock_stream()
-
-    # Make title generation raise exception
-    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=Exception("DB error")):
-        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
-            response = await agent_service.run_agent_stream(
-                mock_agent_request,
-                mock_http_request,
-                "Bearer token"
-            )
-
-            # Should complete successfully
-            assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.create_new_conversation")
-async def test_run_agent_stream_title_generation_success(
-    mock_create_conversation,
-    mock_build_mem_ctx,
-    mock_generate_stream,
-    mock_resolve,
-    mock_agent_request,
-    mock_http_request,
-):
-    """run_agent_stream should successfully call generate_conversation_title_service."""
-    mock_create_conversation.return_value = {"conversation_id": 999}
-    mock_build_mem_ctx.return_value = MagicMock(
-        user_config=MagicMock(memory_switch=True)
-    )
-
-    async def mock_stream():
-        yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
-
-    mock_generate_stream.return_value = mock_stream()
-
-    # Track title generation call
-    title_gen_calls = []
-
-    async def mock_title_gen(*args, **kwargs):
-        title_gen_calls.append(kwargs)
-        return {"success": True}
-
-    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=mock_title_gen):
-        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
-            response = await agent_service.run_agent_stream(
-                mock_agent_request,
-                mock_http_request,
-                "Bearer token"
-            )
-
-            # Should complete successfully
-            assert response.status_code == 200
 
 
 # ============================================================================
@@ -14719,3 +15397,542 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_ids"] == []
     assert result["model_names"] == []
     assert result["model_name"] is None
+
+
+# =============================================================================
+# Tests for Sandbox Policy Builder (lines 3671-3686)
+# =============================================================================
+
+
+class TestBuildSandboxPolicy:
+    """Tests for build_sandbox_policy function.
+
+    Note: The function imports consts.const inside the function body,
+    so we test the function signature and basic existence here.
+    Integration tests would require mocking at the consts module level.
+    """
+
+    def test_build_sandbox_policy_function_exists(self):
+        """Test that build_sandbox_policy function exists and is callable."""
+        from backend.services.agent_service import build_sandbox_policy
+
+        assert callable(build_sandbox_policy)
+
+    def test_build_sandbox_policy_accepts_required_args(self):
+        """Test that build_sandbox_policy accepts tenant_id and agent_type arguments."""
+        from backend.services.agent_service import build_sandbox_policy
+        import inspect
+
+        sig = inspect.signature(build_sandbox_policy)
+        params = list(sig.parameters.keys())
+
+        assert "tenant_id" in params
+        assert "agent_type" in params
+
+
+class TestGetSandboxMinioClient:
+    """Tests for get_sandbox_minio_client function."""
+
+    def test_get_sandbox_minio_client_function_exists(self):
+        """Test that get_sandbox_minio_client function exists and is callable."""
+        from backend.services.agent_service import get_sandbox_minio_client
+
+        assert callable(get_sandbox_minio_client)
+
+
+# =============================================================================
+# Tests for helper functions in agent_service.py
+# =============================================================================
+
+
+class TestExtractJsonObjectsFromText:
+    """Tests for _extract_json_objects_from_text function."""
+
+    def test_extract_json_objects_empty_string(self):
+        """Test _extract_json_objects_from_text returns empty list for empty string."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        result = _extract_json_objects_from_text("")
+        assert result == []
+
+    def test_extract_json_objects_none_string(self):
+        """Test _extract_json_objects_from_text returns empty list for None."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        result = _extract_json_objects_from_text(None)
+        assert result == []
+
+    def test_extract_json_objects_single_object(self):
+        """Test _extract_json_objects_from_text extracts single JSON object."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"key": "value"}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 1
+        assert result[0] == {"key": "value"}
+
+    def test_extract_json_objects_multiple_objects(self):
+        """Test _extract_json_objects_from_text extracts multiple JSON objects."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"a": 1} some text {"b": 2} more text {"c": 3}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 3
+        assert result[0] == {"a": 1}
+        assert result[1] == {"b": 2}
+        assert result[2] == {"c": 3}
+
+    def test_extract_json_objects_nested_object(self):
+        """Test _extract_json_objects_from_text extracts nested JSON objects."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"outer": {"inner": "value"}}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 1
+        assert result[0] == {"outer": {"inner": "value"}}
+
+    def test_extract_json_objects_array_not_included(self):
+        """Test _extract_json_objects_from_text excludes arrays."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"key": [1, 2, 3]}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 1
+        assert result[0] == {"key": [1, 2, 3]}
+
+    def test_extract_json_objects_with_invalid_json(self):
+        """Test _extract_json_objects_from_text skips invalid JSON."""
+        from backend.services.agent_service import _extract_json_objects_from_text
+
+        text = '{"valid": true} {invalid} {"also": "valid"}'
+        result = _extract_json_objects_from_text(text)
+        assert len(result) == 2
+        assert result[0] == {"valid": True}
+        assert result[1] == {"also": "valid"}
+
+
+class TestExtractSkillFileUploadPayloads:
+    """Tests for _extract_skill_file_upload_payloads function."""
+
+    def test_extract_skill_file_payloads_empty(self):
+        """Test _extract_skill_file_upload_payloads returns empty list for empty input."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        result = _extract_skill_file_upload_payloads("")
+        assert result == []
+
+    def test_extract_skill_file_payloads_with_absolute_path(self):
+        """Test _extract_skill_file_upload_payloads extracts payloads with absolute_path."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        text = '{"absolute_path": "/tmp/test.txt", "file_name": "test.txt"}'
+        result = _extract_skill_file_upload_payloads(text)
+        assert len(result) == 1
+        assert result[0]["absolute_path"] == "/tmp/test.txt"
+
+    def test_extract_skill_file_payloads_without_absolute_path(self):
+        """Test _extract_skill_file_upload_payloads excludes payloads without absolute_path."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        text = '{"file_name": "test.txt"}'
+        result = _extract_skill_file_upload_payloads(text)
+        assert len(result) == 0
+
+    def test_extract_skill_file_payloads_multiple(self):
+        """Test _extract_skill_file_upload_payloads extracts multiple valid payloads."""
+        from backend.services.agent_service import _extract_skill_file_upload_payloads
+
+        text = '{"absolute_path": "/tmp/a.txt"} extra {"absolute_path": "/tmp/b.txt"}'
+        result = _extract_skill_file_upload_payloads(text)
+        assert len(result) == 2
+        assert result[0]["absolute_path"] == "/tmp/a.txt"
+        assert result[1]["absolute_path"] == "/tmp/b.txt"
+
+
+class TestTransformSkillFilesToStandardFormat:
+    """Tests for _transform_skill_files_to_standard_format function."""
+
+    def test_transform_skill_files_empty(self):
+        """Test _transform_skill_files_to_standard_format returns empty list for empty input."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        result = _transform_skill_files_to_standard_format([])
+        assert result == []
+
+    def test_transform_skill_files_full_fields(self):
+        """Test _transform_skill_files_to_standard_format transforms complete upload results."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {
+                "file_name": "test.txt",
+                "object_name": "obj123",
+                "url": "https://example.com/test.txt",
+                "presigned_url": "https://example.com/presigned",
+                "file_size": 1024,
+                "mime_type": "text/plain"
+            }
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert len(result) == 1
+        assert result[0]["object_name"] == "obj123"
+        assert result[0]["name"] == "test.txt"
+        assert result[0]["type"] == "file"
+        assert result[0]["size"] == 1024
+        assert result[0]["url"] == "https://example.com/test.txt"
+        assert result[0]["presigned_url"] == "https://example.com/presigned"
+        assert result[0]["description"] == ""
+
+    def test_transform_skill_files_uses_preview_url(self):
+        """Test _transform_skill_files_to_standard_format uses preview_url as fallback for presigned_url."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {
+                "file_name": "test.txt",
+                "preview_url": "https://example.com/preview",
+                "url": "https://example.com/test.txt",
+                "file_size": 1024,
+            }
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert result[0]["presigned_url"] == "https://example.com/preview"
+
+    def test_transform_skill_files_uses_size_fallback(self):
+        """Test _transform_skill_files_to_standard_format uses 'size' as fallback for 'file_size'."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {
+                "name": "test.txt",
+                "size": 2048,
+            }
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert result[0]["size"] == 2048
+
+    def test_transform_skill_files_multiple(self):
+        """Test _transform_skill_files_to_standard_format transforms multiple files."""
+        from backend.services.agent_service import _transform_skill_files_to_standard_format
+
+        upload_results = [
+            {"file_name": "a.txt", "size": 100},
+            {"file_name": "b.txt", "size": 200},
+        ]
+        result = _transform_skill_files_to_standard_format(upload_results)
+        assert len(result) == 2
+        assert result[0]["name"] == "a.txt"
+        assert result[1]["name"] == "b.txt"
+
+
+class TestSafeAgentStreamErrorChunk:
+    """Tests for _safe_agent_stream_error_chunk function."""
+
+    def test_safe_agent_stream_error_chunk_format(self):
+        """Test _safe_agent_stream_error_chunk returns properly formatted SSE chunk."""
+        from backend.services.agent_service import _safe_agent_stream_error_chunk
+
+        result = _safe_agent_stream_error_chunk()
+        assert result.startswith("data: ")
+        assert "\n\n" in result
+        assert "error" in result
+        assert "content" in result
+
+    def test_safe_agent_stream_error_chunk_contains_safe_message(self):
+        """Test _safe_agent_stream_error_chunk contains safe error message."""
+        from backend.services.agent_service import _safe_agent_stream_error_chunk
+
+        result = _safe_agent_stream_error_chunk()
+        assert "Agent execution failed" in result
+
+
+class TestGetUserGroupIds:
+    """Tests for _get_user_group_ids function."""
+
+    @patch('backend.services.agent_service.query_group_ids_by_user')
+    def test_get_user_group_ids_success(self, mock_query_groups):
+        """Test _get_user_group_ids returns comma-separated group IDs."""
+        from backend.services.agent_service import _get_user_group_ids
+
+        mock_query_groups.return_value = ["1", "2", "3"]
+
+        result = _get_user_group_ids("user123", "tenant456")
+
+        assert result == "1,2,3"
+        mock_query_groups.assert_called_once_with("user123")
+
+    @patch('backend.services.agent_service.query_group_ids_by_user')
+    def test_get_user_group_ids_empty(self, mock_query_groups):
+        """Test _get_user_group_ids returns empty string when no groups."""
+        from backend.services.agent_service import _get_user_group_ids
+
+        mock_query_groups.return_value = []
+
+        result = _get_user_group_ids("user123", "tenant456")
+
+        assert result == ""
+
+    @patch('backend.services.agent_service.query_group_ids_by_user')
+    @patch('backend.services.agent_service.logger')
+    def test_get_user_group_ids_exception(self, mock_logger, mock_query_groups):
+        """Test _get_user_group_ids returns empty string on exception."""
+        from backend.services.agent_service import _get_user_group_ids
+
+        mock_query_groups.side_effect = Exception("Database error")
+
+        result = _get_user_group_ids("user123", "tenant456")
+
+        assert result == ""
+        mock_logger.warning.assert_called_once()
+
+
+class TestResolveModelIdsWithFallback:
+    """Tests for _resolve_model_ids_with_fallback function."""
+
+    @patch('backend.services.agent_service.get_model_by_model_id')
+    @patch('backend.services.agent_service.get_model_id_by_display_name')
+    @patch('backend.services.agent_service.MODEL_CONFIG_MAPPING')
+    def test_resolve_model_ids_explicit_ids(
+        self, mock_config, mock_get_by_name, mock_get_by_id
+    ):
+        """Test _resolve_model_ids_with_fallback uses explicit model_ids when available."""
+        from backend.services.agent_service import _resolve_model_ids_with_fallback
+
+        mock_get_by_id.return_value = {"display_name": "Test Model"}
+
+        result = _resolve_model_ids_with_fallback(
+            model_ids=[1, 2],
+            model_display_names=None,
+            model_label="Model",
+            tenant_id="tenant123"
+        )
+
+        assert result == [1, 2]
+
+    @patch('backend.services.agent_service.get_model_by_model_id')
+    @patch('backend.services.agent_service.get_model_id_by_display_name')
+    @patch('backend.services.agent_service.MODEL_CONFIG_MAPPING')
+    def test_resolve_model_ids_fallback_to_names(
+        self, mock_config, mock_get_by_name, mock_get_by_id
+    ):
+        """Test _resolve_model_ids_with_fallback falls back to display names."""
+        from backend.services.agent_service import _resolve_model_ids_with_fallback
+
+        mock_get_by_id.return_value = None
+        mock_get_by_name.return_value = 5
+
+        result = _resolve_model_ids_with_fallback(
+            model_ids=None,
+            model_display_names=["TestModel"],
+            model_label="Model",
+            tenant_id="tenant123"
+        )
+
+        assert result == [5]
+
+
+class TestCollectSkillNamesFromTree:
+    """Tests for _collect_skill_names_from_tree function."""
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_empty(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree returns empty list when no skills."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = []
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == []
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_single_skill(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree collects skill names."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = [
+            {"skill_id": 1}
+        ]
+        mock_skill_db.get_skill_by_id.return_value = {"name": "TestSkill"}
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == ["TestSkill"]
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_deduplicates(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree deduplicates skill names."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = [
+            {"skill_id": 1},
+            {"skill_id": 1},
+        ]
+        mock_skill_db.get_skill_by_id.return_value = {"name": "TestSkill"}
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == ["TestSkill"]
+
+    @patch('backend.services.agent_service.skill_db')
+    @patch('backend.services.agent_service.query_sub_agent_relations')
+    def test_collect_skill_names_handles_missing_skill(self, mock_relations, mock_skill_db):
+        """Test _collect_skill_names_from_tree handles missing skill gracefully."""
+        from backend.services.agent_service import _collect_skill_names_from_tree
+
+        mock_skill_db.query_skill_instances_by_agent_id.return_value = [
+            {"skill_id": 1}
+        ]
+        mock_skill_db.get_skill_by_id.return_value = None
+        mock_relations.return_value = []
+
+        result = _collect_skill_names_from_tree(1, "tenant123", 0)
+
+        assert result == []
+
+
+class TestCollectSkillZipEntries:
+    """Tests for collect_skill_zip_entries function."""
+
+    @patch('backend.services.agent_service._collect_skill_names_from_tree')
+    def test_collect_skill_zip_entries_empty(self, mock_collect):
+        """Test collect_skill_zip_entries returns empty list when no skills."""
+        from backend.services.agent_service import collect_skill_zip_entries
+
+        mock_collect.return_value = []
+
+        result = collect_skill_zip_entries(1, "tenant123", 0)
+
+        assert result == []
+
+    @patch('backend.services.agent_service.SkillService')
+    @patch('backend.services.agent_service._collect_skill_names_from_tree')
+    def test_collect_skill_zip_entries_success(self, mock_collect, mock_skill_service):
+        """Test collect_skill_zip_entries returns skill zip entries."""
+        from backend.services.agent_service import collect_skill_zip_entries
+
+        mock_collect.return_value = ["TestSkill"]
+        mock_service_instance = MagicMock()
+        mock_service_instance.export_skills_by_names.return_value = [
+            {"skill_name": "TestSkill", "skill_zip_base64": "abc123"}
+        ]
+        mock_skill_service.return_value = mock_service_instance
+
+        result = collect_skill_zip_entries(1, "tenant123", 0)
+
+        assert len(result) == 1
+        assert result[0].skill_name == "TestSkill"
+        assert result[0].skill_zip_base64 == "abc123"
+
+
+class TestClearAgentNewMarkImpl:
+    """Tests for clear_agent_new_mark_impl function."""
+
+    @patch('backend.services.agent_service.clear_agent_new_mark')
+    @patch('backend.services.agent_service.logger')
+    async def test_clear_agent_new_mark_impl_success(self, mock_logger, mock_clear):
+        """Test clear_agent_new_mark_impl calls clear_agent_new_mark and logs result."""
+        from backend.services.agent_service import clear_agent_new_mark_impl
+
+        mock_clear.return_value = 1
+
+        result = await clear_agent_new_mark_impl(123, "tenant456", "user789")
+
+        assert result == 1
+        mock_clear.assert_called_once_with(123, "tenant456", "user789")
+        mock_logger.info.assert_called_once()
+        assert "affected_rows=1" in mock_logger.info.call_args[0][0]
+
+
+class TestLoadDefaultAgentsJsonFile:
+    """Tests for load_default_agents_json_file function."""
+
+    @patch('builtins.open', new_callable=MagicMock)
+    @patch('backend.services.agent_service.os.listdir')
+    @patch('backend.services.agent_service.os.path.join')
+    def test_load_default_agents_json_file_empty_dir(
+        self, mock_join, mock_listdir, mock_open
+    ):
+        """Test load_default_agents_json_file returns empty list for empty directory."""
+        from backend.services.agent_service import load_default_agents_json_file
+
+        mock_listdir.return_value = ["readme.txt", "config.yaml"]
+
+        result = load_default_agents_json_file("/path/to/agents")
+
+        assert result == []
+
+    @patch('builtins.open', new_callable=MagicMock)
+    @patch('backend.services.agent_service.os.listdir')
+    @patch('backend.services.agent_service.os.path.join')
+    def test_load_default_agents_json_file_with_json(
+        self, mock_join, mock_listdir, mock_open
+    ):
+        """Test load_default_agents_json_file loads JSON files."""
+        from backend.services.agent_service import load_default_agents_json_file
+        import json
+
+        mock_listdir.return_value = ["agent1.json", "readme.txt"]
+        mock_file_content = {
+            "agent_id": "1",
+            "name": "TestAgent",
+            "display_name": "Test Agent",
+            "description": "A test agent",
+            "business_description": "Test",
+            "max_steps": 5,
+            "provide_run_summary": True,
+            "enabled": True,
+            "tools": [],
+            "managed_agents": []
+        }
+        mock_file = MagicMock()
+        mock_file.__enter__ = MagicMock(return_value=mock_file)
+        mock_file.__exit__ = MagicMock(return_value=False)
+        mock_file.read.return_value = json.dumps(mock_file_content)
+        mock_open.return_value = mock_file
+        mock_join.side_effect = lambda a, b: f"{a}/{b}"
+
+        result = load_default_agents_json_file("/path/to/agents")
+
+        assert len(result) == 1
+        assert result[0].name == "TestAgent"
+
+
+class TestInsertRelatedAgentImpl:
+    """Tests for insert_related_agent_impl function."""
+
+    @patch('backend.services.agent_service.insert_related_agent')
+    @patch('backend.services.agent_service.query_sub_agents_id_list')
+    def test_insert_related_agent_impl_success(self, mock_query, mock_insert):
+        """Test insert_related_agent_impl returns success response."""
+        from backend.services.agent_service import insert_related_agent_impl
+        from fastapi.responses import JSONResponse
+
+        mock_query.return_value = [2, 3]
+        mock_insert.return_value = True
+
+        result = insert_related_agent_impl(1, 2, "tenant123")
+
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 200
+
+    @patch('backend.services.agent_service.insert_related_agent')
+    @patch('backend.services.agent_service.query_sub_agents_id_list')
+    def test_insert_related_agent_impl_failure(self, mock_query, mock_insert):
+        """Test insert_related_agent_impl returns error response."""
+        from backend.services.agent_service import insert_related_agent_impl
+        from fastapi.responses import JSONResponse
+
+        mock_query.return_value = [2, 3]
+        mock_insert.return_value = False
+
+        result = insert_related_agent_impl(1, 2, "tenant123")
+
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 400

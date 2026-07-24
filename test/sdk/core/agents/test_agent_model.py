@@ -22,6 +22,7 @@ from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 TEST_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = TEST_ROOT.parent
@@ -242,6 +243,14 @@ def _load_agent_model_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    context_package = ModuleType("sdk.nexent.core.agents.context")
+    context_package.__path__ = []
+    context_models = ModuleType("sdk.nexent.core.agents.context.models")
+    class ContextItemInput(BaseModel):
+        id: str = "item"
+    context_models.ContextItemInput = ContextItemInput
+    sys.modules["sdk.nexent.core.agents.context"] = context_package
+    sys.modules["sdk.nexent.core.agents.context.models"] = context_models
 
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.agent_model", agent_model_path)
     module = importlib.util.module_from_spec(spec)
@@ -658,6 +667,9 @@ class TestMemoryContext:
 class TestAgentRunInfo:
     """Tests for AgentRunInfo Pydantic model."""
 
+    def test_agent_run_info_does_not_own_context_manager(self):
+        assert "context_manager" not in agent_model_module.AgentRunInfo.model_fields
+
     def test_agent_run_info_creation(self):
         """Test AgentRunInfo creation with all fields."""
         observer = MessageObserver()
@@ -803,6 +815,59 @@ class TestAgentRunInfo:
 
         assert run_info.history is None
         assert run_info.mcp_host is None
+
+
+class TestAgentRunInfoPlanning:
+    """Tests for the v1.4 planing fields on AgentRunInfo."""
+
+    @staticmethod
+    def _make_run_info(**overrides):
+        observer = MessageObserver()
+        stop_event = Event()
+        model_config = agent_model_module.ModelConfig(
+            cite_name="gpt-4",
+            model_name="gpt-4",
+            url="https://api.openai.com/v1",
+        )
+        defaults = dict(
+            query="q",
+            model_config_list=[model_config],
+            observer=observer,
+            agent_config=agent_model_module.AgentConfig(
+                name="test_agent",
+                description="A test agent",
+                tools=[],
+                model_name="gpt-4",
+            ),
+            stop_event=stop_event,
+        )
+        defaults.update(overrides)
+        return agent_model_module.AgentRunInfo(**defaults)
+
+    def test_enable_planning_defaults_to_false(self):
+        run_info = self._make_run_info()
+        assert run_info.enable_planning is False
+
+    def test_enable_planning_can_be_true(self):
+        run_info = self._make_run_info(enable_planning=True)
+        assert run_info.enable_planning is True
+
+    def test_redis_client_defaults_to_none(self):
+        run_info = self._make_run_info()
+        assert run_info.redis_client is None
+
+    def test_redis_client_can_be_set(self):
+        fake_redis = object()
+        run_info = self._make_run_info(redis_client=fake_redis)
+        assert run_info.redis_client is fake_redis
+
+    def test_planning_fields_serialize_round_trip(self):
+        """Both planning fields must survive model_dump / model_validate round trips."""
+        run_info = self._make_run_info(enable_planning=True, redis_client="redis-conn")
+        round_tripped = agent_model_module.AgentRunInfo.model_validate(run_info.model_dump())
+        assert round_tripped.enable_planning is True
+        # redis_client is typed as Any; the round-trip preserves it as-is.
+        assert round_tripped.redis_client == "redis-conn"
 
 
 # ----------------------------------------------------------------------------
@@ -1238,17 +1303,8 @@ class TestAgentConfig:
         )
         assert config_max.max_steps == 30
 
-    def test_agent_config_max_steps_rejects_out_of_bounds(self):
-        """Test AgentConfig rejects max_steps values outside 1-30 range."""
-        with pytest.raises(Exception):
-            agent_model_module.AgentConfig(
-                name="too_high",
-                description="Too high steps",
-                tools=[],
-                model_name="test",
-                max_steps=31
-            )
-
+    def test_agent_config_max_steps_rejects_below_lower_bound(self):
+        """Test AgentConfig rejects max_steps values below the lower bound (1)."""
         with pytest.raises(Exception):
             agent_model_module.AgentConfig(
                 name="too_low",
@@ -1257,6 +1313,22 @@ class TestAgentConfig:
                 model_name="test",
                 max_steps=0
             )
+
+    def test_agent_config_max_steps_accepts_above_design_max(self):
+        """Test AgentConfig accepts max_steps values above the design-maximum (30).
+
+        The model enforces ge=1 (lower bound) but does not enforce an upper bound.
+        Values above 30 are silently accepted; callers are responsible for enforcing
+        application-level limits if needed.
+        """
+        config = agent_model_module.AgentConfig(
+            name="above_design_max",
+            description="Steps above 30",
+            tools=[],
+            model_name="test",
+            max_steps=31
+        )
+        assert config.max_steps == 31
 
 
 class TestAgentVerificationConfig:

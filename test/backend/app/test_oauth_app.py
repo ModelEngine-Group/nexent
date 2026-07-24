@@ -1,7 +1,10 @@
-import sys
+import json
 import os
+import sys
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
+
+import pytest
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -89,6 +92,21 @@ oauth_service_mock.parse_state = MagicMock(
 oauth_service_mock.generate_pending_oauth_token = MagicMock(return_value="pending.jwt")
 oauth_service_mock.find_supabase_user_id_by_email = MagicMock(return_value=None)
 oauth_service_mock.complete_pending_oauth_account = AsyncMock()
+oauth_service_mock.get_oauth_config = MagicMock(
+    return_value={
+        "enabled": True,
+        "login_mode": "force",
+        "auto_login_provider": "github",
+        "providers": [
+            {
+                "name": "github",
+                "display_name": "GitHub",
+                "icon": "github",
+                "enabled": True,
+            }
+        ],
+    }
+)
 sys.modules["services"] = MagicMock()
 sys.modules["services.oauth_service"] = oauth_service_mock
 
@@ -122,6 +140,19 @@ from apps.oauth_app import router
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_get_oauth_config():
+    config_endpoint = next(route.endpoint for route in router.routes if route.path == "/user/oauth/config")
+    response = await config_endpoint()
+
+    assert response.status_code == HTTPStatus.OK
+    data = json.loads(response.body)
+    assert data["message"] == "success"
+    assert data["data"]["login_mode"] == "force"
+    assert data["data"]["auto_login_provider"] == "github"
+    assert len(data["data"]["providers"]) == 1
 
 
 class TestGetProviders(unittest.TestCase):

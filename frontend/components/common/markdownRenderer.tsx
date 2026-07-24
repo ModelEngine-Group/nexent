@@ -15,7 +15,12 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
 import { resolveS3UrlToDataUrl } from "@/services/storageService";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
 
@@ -707,28 +712,36 @@ const HoverableText = ({
 
   return (
     <TooltipProvider>
-      <Tooltip
-        styles={{
-          container: { padding: 0, background: "transparent", boxShadow: "none" },
-        }}
-        title={
-          <div
-            className="z-[9999] bg-white px-3 py-2 text-sm border border-gray-200 rounded-md shadow-md max-w-xl overflow-hidden"
-            style={
-              {
-                "--scrollbar-width": "8px",
-                "--scrollbar-height": "8px",
-                "--scrollbar-track-bg": "transparent",
-                "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
-                "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
-                "--scrollbar-thumb-radius": "9999px",
-                boxSizing: "border-box",
-                /* allow larger tooltip but constrain to viewport */
-                maxWidth: "min(720px, 50vw)",
-                width: "min(720px, 50vw)",
-              } as React.CSSProperties
-            }
+      <Tooltip open={isOpen}>
+        <TooltipTrigger asChild>
+          <span
+            ref={containerRef}
+            className="inline-flex items-center relative"
+            style={{ zIndex: isOpen ? 1000 : "auto" }}
           >
+            <span className="inline-flex items-center cursor-pointer transition-colors">
+              <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
+            </span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="z-[9999] max-w-xl overflow-hidden bg-white px-3 py-2 text-sm border border-gray-200 rounded-md shadow-md"
+          style={
+            {
+              "--scrollbar-width": "8px",
+              "--scrollbar-height": "8px",
+              "--scrollbar-track-bg": "transparent",
+              "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
+              "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
+              "--scrollbar-thumb-radius": "9999px",
+              boxSizing: "border-box",
+              maxWidth: "min(720px, 50vw)",
+              width: "min(720px, 50vw)",
+            } as React.CSSProperties
+          }
+        >
+          <div>
             <div
               ref={tooltipRef}
               className="whitespace-pre-wrap overflow-y-auto"
@@ -795,19 +808,7 @@ const HoverableText = ({
               ) : null}
             </div>
           </div>
-        }
-        open={isOpen}
-        placement="top"
-      >
-        <span
-          ref={containerRef}
-          className="inline-flex items-center relative"
-          style={{ zIndex: isOpen ? 1000 : "auto" }}
-        >
-          <span className="inline-flex items-center cursor-pointer transition-colors">
-            <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
-          </span>
-        </span>
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -1354,30 +1355,29 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               },
               pre: ({ children }: any) => <>{children}</>,
               // Code blocks and inline code
-              code({ node, inline, className, children, ...props }: any) {
+              code({ node, className, children, ...props }: any) {
                 try {
-                  const match = /language-(\w+)/.exec(className || "");
+                  const match = /language-([\w-]+)/.exec(className || "");
                   const raw = Array.isArray(children)
                     ? children.join("")
                     : children ?? "";
                   const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
-                  if (match && match[1]) {
-                    // Check if it's a Mermaid diagram
+                  const isCodeBlock = node?.position?.start?.line !== node?.position?.end?.line;
+
+                  if (match?.[1] && isCodeBlock) {
                     if (match[1] === "mermaid") {
                       if (!enableMultimodal) {
-                      return renderCodeFallback(codeContent);
+                        return renderCodeFallback(codeContent);
                       }
                       return <Diagram code={codeContent} className="my-4" showToggle={showDiagramToggle} />;
                     }
-                    if (!inline) {
-                      return <CodeBlock codeContent={codeContent} language={match[1]} />;
-                    }
+                    return <CodeBlock codeContent={codeContent} language={match[1]} />;
                   }
-                } catch (error) {
-                  // Handle error silently
+                } catch {
+                  // Fall back to the default code renderer.
                 }
                 return (
-                  <code className="markdown-code" {...props}>
+                  <code className={`markdown-code ${className || ""}`} {...props}>
                     <TextWrapper>{children}</TextWrapper>
                   </code>
                 );

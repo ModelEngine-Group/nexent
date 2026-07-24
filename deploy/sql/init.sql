@@ -296,7 +296,9 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
+    is_main_agent BOOLEAN NOT NULL DEFAULT TRUE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
+    context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -332,6 +334,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.max_steps IS 'Maximum number of steps
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.parent_agent_id IS 'Parent Agent ID';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.tenant_id IS 'Belonging tenant';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enabled IS 'Enable flag';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.is_main_agent IS 'Whether this agent is a main agent';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.provide_run_summary IS 'Whether to provide the running summary to the manager agent';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.update_time IS 'Update time';
@@ -391,6 +394,117 @@ EXECUTE FUNCTION update_ag_user_agent_update_time();
 
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_ag_user_agent_update_time_trigger ON nexent.ag_user_agent_t IS 'Trigger to call update_ag_user_agent_update_time function before each update on ag_user_agent_t table';
+
+-- Agent automation tasks, proposals, and run history.
+CREATE TABLE IF NOT EXISTS nexent.agent_automation_task_t (
+    task_id BIGSERIAL PRIMARY KEY NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    agent_version_no INTEGER,
+    title VARCHAR(255) NOT NULL,
+    instruction TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    source VARCHAR(32) NOT NULL,
+    schedule_mode VARCHAR(16) NOT NULL,
+    schedule_rule_type VARCHAR(16) NOT NULL,
+    schedule_expr TEXT,
+    schedule_config JSONB NOT NULL,
+    capability_requirements JSONB,
+    capability_bindings JSONB,
+    runtime_snapshot JSONB,
+    timezone VARCHAR(64) NOT NULL,
+    next_fire_at TIMESTAMPTZ,
+    last_fire_at TIMESTAMPTZ,
+    fire_count INTEGER NOT NULL DEFAULT 0,
+    last_run_status VARCHAR(32),
+    last_error TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    timeout_seconds INTEGER NOT NULL,
+    overlap_policy VARCHAR(16) NOT NULL,
+    misfire_policy VARCHAR(16) NOT NULL,
+    lock_owner VARCHAR(128),
+    lock_until TIMESTAMPTZ,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE TABLE IF NOT EXISTS nexent.agent_automation_run_t (
+    run_id BIGSERIAL PRIMARY KEY NOT NULL,
+    task_id BIGINT NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    scheduled_fire_at TIMESTAMPTZ NOT NULL,
+    actual_fire_at TIMESTAMPTZ,
+    trigger_type VARCHAR(32) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    generated_prompt TEXT,
+    user_message_id BIGINT,
+    assistant_message_id BIGINT,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    duration_ms BIGINT,
+    error_code VARCHAR(64),
+    error_message TEXT,
+    capability_check JSONB,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t (
+    proposal_id BIGSERIAL PRIMARY KEY NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    proposed_task JSONB NOT NULL,
+    capability_resolution JSONB NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_automation_due
+    ON nexent.agent_automation_task_t (status, next_fire_at)
+    WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_agent_automation_owner
+    ON nexent.agent_automation_task_t (tenant_id, user_id, status)
+    WHERE delete_flag = 'N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_conversation_active
+    ON nexent.agent_automation_task_t (conversation_id)
+    WHERE delete_flag = 'N' AND status <> 'DELETED';
+
+CREATE INDEX IF NOT EXISTS idx_agent_automation_run_task
+    ON nexent.agent_automation_run_t (task_id, scheduled_fire_at)
+    WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_agent_automation_run_conversation
+    ON nexent.agent_automation_run_t (conversation_id, status)
+    WHERE delete_flag = 'N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence
+    ON nexent.agent_automation_run_t (task_id, scheduled_fire_at)
+    WHERE delete_flag = 'N'
+      AND trigger_type = 'SCHEDULED'
+      AND status IN ('QUEUED', 'RUNNING');
+
+CREATE INDEX IF NOT EXISTS idx_agent_automation_proposal_owner
+    ON nexent.agent_automation_proposal_t (tenant_id, user_id, status)
+    WHERE delete_flag = 'N';
 
 -- Create the ag_tool_instance_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_instance_t (

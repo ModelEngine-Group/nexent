@@ -45,6 +45,7 @@ import {
   DocumentProvider,
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
+import quotaService from "@/services/quotaService";
 
 const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
 const normalizeEmbeddingModelType = (type: string) =>
@@ -169,6 +170,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Get available embedding models for knowledge base creation
   const { models } = useModelList({ enabled: true });
+
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -229,6 +231,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
   const [newKbPreserveSourceFile, setNewKbPreserveSourceFile] =
     useState<boolean>(true);
+  const [newKbQuotaBytes, setNewKbQuotaBytes] = useState<number | null>(null);
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
@@ -756,6 +759,10 @@ function DataConfig({ isActive }: DataConfigProps) {
   const handleDeleteDocument = (docId: string) => {
     const kbId = kbState.activeKnowledgeBase?.id;
     if (!kbId) return;
+    if (kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+      message.error(t("errorCode.000202", "Access forbidden."));
+      return;
+    }
 
     confirm({
       title: t("document.modal.deleteConfirm.title"),
@@ -776,6 +783,10 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle file upload - in creation mode create knowledge base first then upload, in normal mode upload directly
   const handleFileUpload = async () => {
+    if (!isCreatingMode && kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+      message.error(t("errorCode.000202", "Access forbidden."));
+      return;
+    }
     if (!uploadFiles.length) {
       message.warning(t("document.message.noFiles"));
       return;
@@ -820,7 +831,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           newKbGroupIds,
           parsedSelectedModel.displayName,
           isMultimodal,
-          newKbPreserveSourceFile
+          newKbPreserveSourceFile,
+          newKbQuotaBytes,
         );
 
         if (!newKB) {
@@ -1093,6 +1105,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onSelectedGroupIdsChange={setNewKbGroupIds}
                 preserveSourceFile={newKbPreserveSourceFile}
                 onPreserveSourceFileChange={setNewKbPreserveSourceFile}
+                quotaLimitBytes={newKbQuotaBytes}
+                onQuotaLimitBytesChange={setNewKbQuotaBytes}
                 // Embedding model for create mode
                 availableEmbeddingModels={availableEmbeddingModels}
                 selectedEmbeddingModel={newKbEmbeddingModel}
