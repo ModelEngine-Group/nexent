@@ -348,9 +348,24 @@ class AidpSearchTool(Tool):
         resp.raise_for_status()
         return self._parse_response(resp.json())
 
-    def forward(self, query: str) -> str:
+    def forward(self, query: str, **kwargs) -> str:
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
+
+        # LLMs regularly confuse AidpSearchTool with the other knowledge-
+        # base search tools in this repo (KnowledgeBaseSearchTool,
+        # DatamateSearchTool) that accept ``index_names`` at call time.
+        # AidpSearchTool binds its search scope (``kds_list``) at __init__,
+        # not at forward time, so any kwargs the LLM passes here are
+        # meaningless — and, worse, would surface as a TypeError to the
+        # orchestrator. Swallow them with a loud warning so debugging is
+        # still possible while keeping the LLM call alive.
+        if kwargs:
+            logger.warning(
+                "aidp_search received unsupported kwargs %s — ignoring "
+                "(kds_list is configured at tool init, not at call time)",
+                sorted(kwargs.keys()),
+            )
 
         self._emit_running_prompt(query)
 

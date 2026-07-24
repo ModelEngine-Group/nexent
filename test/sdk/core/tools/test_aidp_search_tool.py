@@ -375,6 +375,81 @@ class TestAidpSearchToolForward:
 
         assert "AIDP search error: Invalid AIDP response" in str(exc_info.value)
 
+    def test_forward_ignores_unsupported_kwargs_from_llm(
+        self, aidp_tool, mock_observer
+    ):
+        """LLMs frequently confuse this tool with KnowledgeBaseSearchTool
+        and pass ``index_names`` (or ``kds_list``, ``top_k``, etc.) as call
+        arguments. ``forward`` must swallow those kwargs instead of
+        raising TypeError, because kds_list is bound at __init__ and LLM
+        input cannot override it. The search should still succeed using
+        the pre-configured kds_list."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response(
+            records=[
+                {
+                    "id": "c1",
+                    "chunk_type": "text",
+                    "title": "T",
+                    "text": "txt",
+                    "file_url": "",
+                    "score": 0.5,
+                    "pages": [1],
+                    "metadata": {},
+                }
+            ]
+        )
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        # Must NOT raise TypeError; the result should be valid JSON.
+        result = aidp_tool.forward(
+            "some query",
+            index_names=["test_cyf"],
+            top_k=5,
+            search_method="vector_search",
+        )
+        assert isinstance(json.loads(result), list)
+
+        # Confirm the search actually hit AIDP with the INIT-time kds_list
+        # (["kb1", "kb2"]), NOT anything the LLM tried to pass in. This is
+        # the security property: LLM can never expand the search scope.
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == ["kb1", "kb2"]
+
+    def test_forward_warns_but_succeeds_when_llm_passes_index_names(
+        self, aidp_tool, caplog, aidp_module
+    ):
+        """Mirror the exact production failure that prompted this change:
+        LLM called ``aidp_search(query='...', index_names=['test_cyf'])``
+        and the tool crashed with TypeError. Verify it now logs a warning
+        and completes."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response(
+            records=[
+                {
+                    "id": "c1",
+                    "chunk_type": "text",
+                    "title": "T",
+                    "text": "txt",
+                    "file_url": "",
+                    "score": 0.5,
+                    "pages": [1],
+                    "metadata": {},
+                }
+            ]
+        )
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        with caplog.at_level("WARNING", logger=aidp_module.logger.name):
+            aidp_tool.forward("骨转移瘤 诊断流程 图", index_names=["test_cyf"])
+
+        assert any(
+            "unsupported kwargs" in rec.message and "index_names" in rec.message
+            for rec in caplog.records
+        )
+
 
 class TestAidpBuildImageUrl:
     """``_build_image_url`` joins the AIDP base URL, the KnowledgeBases path
