@@ -29,7 +29,6 @@ import {
 } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import {
-  THINKING_STEPS_ZH,
   type SkillFormData,
   type ChatMessage,
   type SkillFileContent,
@@ -40,6 +39,7 @@ import {
   submitSkillFromFile,
   findSkillByName,
   createSkillStream,
+  getThinkingSteps,
   stopSkillCreation,
   type SkillListItem,
   type SkillData,
@@ -117,7 +117,7 @@ export default function SkillBuildModal({
   editingSkill,
   onBeforeEditSave,
 }: SkillBuildModalProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
   const [activeTab, setActiveTab] = useState<string>("interactive");
@@ -593,40 +593,29 @@ export default function SkillBuildModal({
               }
             : undefined,
           complexity: "complicated",
-          language: "zh",
+          language: i18n.language?.startsWith("en") ? "en" : "zh",
         },
         {
           onTaskId: (taskId) => {
             taskIdRef.current = taskId;
           },
           onThinkingUpdate: (step, desc) => {
-            setThinkingDescription(desc || t("skillManagement.generatingSkill"));
+            setThinkingDescription(
+              desc || t("skillManagement.generatingSkill")
+            );
           },
           onThinkingVisible: (visible) => {
             setIsThinkingVisible(visible);
           },
           onStepCount: (step) => {
             setThinkingDescription(
-              THINKING_STEPS_ZH.find((s) => s.step === step)?.description ||
-                t("skillManagement.generatingSkill")
+              getThinkingSteps(i18n.language).find((s) => s.step === step)
+                ?.description || t("skillManagement.generatingSkill")
             );
           },
           onFrontmatter: (content) => {
-            frontmatterBufferRef.current += content;
-            const parsed = parseStreamedFrontmatter(
-              frontmatterBufferRef.current
-            );
-            if (!parsed) return;
-            if (parsed.name && !isEditMode) {
-              form.setFieldsValue({ name: parsed.name });
-              setInteractiveSkillName(parsed.name);
-            }
-            if (parsed.description) {
-              form.setFieldsValue({ description: parsed.description });
-            }
-            if (parsed.tags.length > 0) {
-              form.setFieldsValue({ tags: parsed.tags });
-            }
+            frontmatterBufferRef.current = content;
+            parseAndUpdateFrontmatter(content);
           },
           onSkillBody: (content) => {
             if (isStreamingCompleteRef.current) return;
@@ -671,7 +660,7 @@ export default function SkillBuildModal({
                 skillInfo?.contentWithoutFrontmatter || "";
 
               const currentTabs = streamingTabsRef.current;
-              const { updatedTabs, finalTabs } = mergeGeneratedSkillTabs(
+              const { finalTabs } = mergeGeneratedSkillTabs(
                 currentTabs,
                 result.skillTabs,
                 contentWithoutFrontmatter
@@ -691,7 +680,7 @@ export default function SkillBuildModal({
               }
 
               // Update accumulated draft with assembled content for next turn
-              const assembledDraft = assembleSkillContent(updatedTabs);
+              const assembledDraft = assembleSkillContent(finalTabs);
               const newDraft = {
                 name: skillInfo?.name || draft?.name || "",
                 description: skillInfo?.description || draft?.description || "",
@@ -712,8 +701,10 @@ export default function SkillBuildModal({
             log.error("Interactive skill creation error:", errorMsg);
             message.error(t("skillManagement.message.chatError"));
             setChatMessages((prev) => prev.filter((m) => m.id !== assistantId));
+            setIsThinkingVisible(false);
             setIsStreaming(false);
             currentAssistantIdRef.current = "";
+            isStreamingCompleteRef.current = true;
           },
         },
         { signal: abortControllerRef.current.signal }
@@ -1111,7 +1102,9 @@ export default function SkillBuildModal({
       title={
         <div>
           <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {isEditMode ? t("skillManagement.edit.title") : t("skillManagement.title")}
+            {isEditMode
+              ? t("skillManagement.edit.title")
+              : t("skillManagement.title")}
           </div>
           <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
             {isEditMode

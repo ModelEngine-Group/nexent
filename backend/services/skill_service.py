@@ -4,6 +4,7 @@ import aiofiles
 import argparse
 import ast
 import asyncio
+from dataclasses import dataclass, field
 import inspect
 import io
 import json
@@ -13,7 +14,8 @@ import uuid
 import zipfile
 import re
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+import time
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import yaml
 
@@ -2377,7 +2379,8 @@ class SkillCreationStreamService:
 def create_skill_creation_stream_generator(
     observer: Any,
     classifier: "ContentClassifier",
-) -> Any:
+    state: Optional["SkillCreationStreamState"] = None,
+) -> Iterator[str]:
     """Create a generator that processes observer messages and yields SSE events.
 
     Args:
@@ -2387,24 +2390,99 @@ def create_skill_creation_stream_generator(
     Yields:
         SSE-formatted event strings
     """
-    import json
     from consts.const import STREAMABLE_CONTENT_TYPES
 
+    stream_state = state or SkillCreationStreamState()
     cached = observer.get_cached_message()
     for msg in cached:
-        if isinstance(msg, str):
-            try:
-                data = json.loads(msg)
-                msg_type = data.get("type", "")
-                content = data.get("content", "")
+        if not isinstance(msg, str):
+            continue
 
-                if msg_type == "step_count":
-                    yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
-                elif msg_type in STREAMABLE_CONTENT_TYPES:
-                    for event in classifier.classify(content):
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except (json.JSONDecodeError, Exception):
-                pass
+        try:
+            data = json.loads(msg)
+        except json.JSONDecodeError:
+            logger.warning("Ignoring malformed observer message during skill creation")
+            continue
+
+        msg_type = data.get("type", "")
+        content = str(data.get("content", "") or "")
+
+        if msg_type == "step_count":
+            yield _format_skill_stream_event({"type": "step_count", "content": content})
+        elif msg_type in STREAMABLE_CONTENT_TYPES:
+            events = classifier.classify(content)
+            yield from _yield_classified_skill_events(events, stream_state)
+        elif msg_type == "error":
+            yield from _yield_skill_stream_error(content, stream_state)
+            return
+        elif msg_type == "final_answer" and not stream_state.has_skill_body:
+            # Some model providers only expose the completed answer reliably.
+            # Re-parse it with a fresh classifier so token-stream parsing issues
+            # cannot leave the frontend with an empty draft.
+            if content.startswith("Run Agent Error:"):
+                yield from _yield_skill_stream_error(content, stream_state)
+                continue
+            fallback_classifier = type(classifier)()
+            events = fallback_classifier.classify(content)
+            events.extend(fallback_classifier.finish())
+            yield from _yield_classified_skill_events(events, stream_state)
+
+
+@dataclass
+class SkillCreationStreamState:
+    """State shared across observer polling cycles for one creation request."""
+
+    has_skill_body: bool = False
+    skill_body_parts: List[str] = field(default_factory=list)
+    error_message: Optional[str] = None
+    error_sent: bool = False
+
+
+def _format_skill_stream_event(event: Dict[str, Any]) -> str:
+    """Serialize one skill creation event as SSE."""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _yield_classified_skill_events(
+    events: List[Dict[str, Any]],
+    state: SkillCreationStreamState,
+) -> Iterator[str]:
+    """Record classified content and yield serialized SSE events."""
+    for event in events:
+        if event.get("type") == "skill_body" and event.get("content"):
+            state.has_skill_body = True
+            state.skill_body_parts.append(str(event["content"]))
+        yield _format_skill_stream_event(event)
+
+
+def _yield_skill_stream_error(
+    message: str,
+    state: SkillCreationStreamState,
+) -> Iterator[str]:
+    """Yield at most one terminal error event for a creation stream."""
+    normalized = message.strip() or "Skill creation failed"
+    state.error_message = state.error_message or normalized
+    if state.error_sent:
+        return
+    state.error_sent = True
+    yield _format_skill_stream_event({"type": "error", "message": state.error_message})
+
+
+def _validate_generated_skill_content(state: SkillCreationStreamState) -> Optional[str]:
+    """Return an error message when the streamed SKILL.md cannot be created."""
+    # XML wrapper formatting commonly leaves a newline around SKILL.md.
+    content = "".join(state.skill_body_parts).strip()
+    try:
+        parsed = SkillLoader.parse(content)
+    except Exception as exc:
+        logger.warning("Generated SKILL.md validation failed: %s", exc)
+        return f"Generated SKILL.md is invalid: {exc}"
+
+    if not str(parsed.get("name") or "").strip():
+        return "Generated SKILL.md is invalid: name is required"
+    if not str(parsed.get("description") or "").strip():
+        return "Generated SKILL.md is invalid: description is required"
+    return None
 
 
 def format_final_answer_sse(classifier: "ContentClassifier", final_result: str) -> List[str]:
@@ -2502,6 +2580,8 @@ class SkillCreationTaskManager:
 # Singleton instance
 skill_creation_task_manager = SkillCreationTaskManager()
 
+SKILL_CREATION_HEARTBEAT_INTERVAL_SECONDS = 15.0
+
 
 # ========== Skill Creation Stream Service ==========
 
@@ -2539,6 +2619,9 @@ def stream_skill_creation(
         is_task_registered = False
         observer = None
         classifier = None
+        stop_event: Optional[threading.Event] = None
+        thread: Optional[threading.Thread] = None
+        stream_state = SkillCreationStreamState()
 
         try:
             # Load prompt template
@@ -2573,23 +2656,61 @@ def stream_skill_creation(
             is_task_registered = True
 
             thread.start()
+            yield ": connected\n\n"
+            last_event_at = time.monotonic()
 
             while thread.is_alive():
-                for event in create_skill_creation_stream_generator(observer, classifier):
+                for event in create_skill_creation_stream_generator(
+                    observer,
+                    classifier,
+                    stream_state,
+                ):
                     yield event
+                    last_event_at = time.monotonic()
+                if time.monotonic() - last_event_at >= SKILL_CREATION_HEARTBEAT_INTERVAL_SECONDS:
+                    yield ": keep-alive\n\n"
+                    last_event_at = time.monotonic()
                 await asyncio.sleep(0.1)
 
             thread.join()
 
-            for event in create_skill_creation_stream_generator(observer, classifier):
+            for event in create_skill_creation_stream_generator(
+                observer,
+                classifier,
+                stream_state,
+            ):
                 yield event
 
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            trailing_events = classifier.finish()
+            for event in _yield_classified_skill_events(trailing_events, stream_state):
+                yield event
+
+            if stream_state.error_message:
+                return
+            if not stream_state.has_skill_body:
+                for event in _yield_skill_stream_error(
+                    "No valid SKILL.md content was generated",
+                    stream_state,
+                ):
+                    yield event
+                return
+
+            validation_error = _validate_generated_skill_content(stream_state)
+            if validation_error:
+                for event in _yield_skill_stream_error(validation_error, stream_state):
+                    yield event
+                return
+
+            yield _format_skill_stream_event({"type": "done"})
 
         except Exception as e:
-            logger.error(f"Error in stream_skill_creation: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            logger.exception("Error in stream_skill_creation")
+            for event in _yield_skill_stream_error(str(e), stream_state):
+                yield event
         finally:
+            if stop_event is not None and thread is not None and thread.is_alive():
+                stop_event.set()
+                logger.info("Stopped skill creation task after stream disconnect: %s", task_id)
             if is_task_registered:
                 skill_creation_task_manager.unregister_task(task_id)
 

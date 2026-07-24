@@ -13,6 +13,11 @@ import {
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import { InstallableSkill } from "@/types/agentConfig";
 import {
+  consumeSkillCreationStream,
+  type SkillStreamCallbacks,
+} from "@/lib/skillCreationStream";
+import {
+  THINKING_STEPS_EN,
   THINKING_STEPS_ZH,
   type CreateSkillStreamRequest,
   type SkillFileContent,
@@ -78,7 +83,7 @@ export interface ThinkingStep {
  * Get thinking steps based on language
  */
 export const getThinkingSteps = (lang: string): ThinkingStep[] => {
-  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_ZH;
+  return lang.startsWith("zh") ? THINKING_STEPS_ZH : THINKING_STEPS_EN;
 };
 
 /**
@@ -350,6 +355,17 @@ export const skillNameExists = (
 };
 
 export { updateSkill };
+export {
+  createSkillFrontmatterStreamParser,
+  consumeSkillCreationStream,
+  isSafeSkillFilePath,
+  SKILL_STREAM_TYPES,
+} from "@/lib/skillCreationStream";
+export type {
+  SkillStreamCallbacks,
+  SkillStreamEvent,
+  StreamEventType,
+} from "@/lib/skillCreationStream";
 
 /**
  * Interactive skill creation via backend API (SDK-backed).
@@ -363,21 +379,6 @@ export const createSkillStreamRequest = async (
     body: JSON.stringify(request),
   });
 };
-
-/**
- * Extract summary content from final_answer.
- * final_answer contains the FULL response including <SKILL> block.
- * The SKILL content was already streamed via skill_content events,
- * so we only need the summary (content AFTER </SKILL>).
- */
-function extractSummaryFromFinalAnswer(fullContent: string): string {
-  const SKILL_CLOSE = "</SKILL>";
-  const closeIndex = fullContent.indexOf(SKILL_CLOSE);
-  if (closeIndex === -1) {
-    return fullContent;
-  }
-  return fullContent.substring(closeIndex + SKILL_CLOSE.length).trim();
-}
 
 /**
  * Initialize a skill content parser state that handles multi-file streaming.
@@ -407,16 +408,13 @@ export function createSkillContentParser(): {
   };
 } {
   // State
-  let skillTabs: { path: string; content: string }[] = [
+  const skillTabs: { path: string; content: string }[] = [
     { path: "SKILL.md", content: "" },
   ];
   let activeTab = "SKILL.md";
   let summaryContent = "";
   let buffer = "";
   let summaryStarted = false;
-
-  // Pending close tag tracking
-  let pendingCloseTag = "";
 
   // Regex patterns
   const SKILL_OPEN = "<SKILL>";
@@ -493,7 +491,6 @@ export function createSkillContentParser(): {
       buffer += chunk;
       let newTabContent = "";
       let newTabPath = "";
-      let tabChanged = false;
 
       while (buffer.length > 0) {
         const tagInfo = findTagInBuffer();
@@ -563,7 +560,6 @@ export function createSkillContentParser(): {
             }
             activeTab = filePath;
             newTabPath = filePath;
-            tabChanged = true;
             buffer = buffer.substring(tagInfo.index + tagInfo.tag.length);
             break;
 
@@ -631,57 +627,6 @@ function stripFrontmatter(content: string): string {
 }
 
 /**
- * SSE event types for streaming skill creation
- */
-export const SKILL_STREAM_TYPES = {
-  STEP_COUNT: "step_count",
-  THINKING: "thinking",
-  FRONTMATTER: "frontmatter",
-  SKILL_BODY: "skill_body",
-  FILE_CONTENT: "file_content",
-  SUMMARY: "summary",
-  DONE: "done",
-  ERROR: "error",
-} as const;
-
-export type StreamEventType =
-  (typeof SKILL_STREAM_TYPES)[keyof typeof SKILL_STREAM_TYPES];
-
-/**
- * SSE event format from backend with classified content
- */
-export interface SkillStreamEvent {
-  type: StreamEventType | "final_answer" | "skill_content" | "skill_result";
-  content?: string;
-  path?: string;
-  is_new_file?: boolean;
-  message?: string;
-  skill_name?: string;
-  skill_description?: string;
-  tags?: string[];
-}
-
-/**
- * Callbacks for createSkillStream with multi-file tab support.
- * Uses backend-classified events (frontmatter, skill_body, file_content, summary).
- */
-export interface SkillStreamCallbacks {
-  onTaskId?: (taskId: string) => void;
-  onStepCount: (step: number, description: string) => void;
-  onThinkingVisible: (visible: boolean) => void;
-  onThinkingUpdate: (step: number, description: string) => void;
-  onFrontmatter: (content: string) => void;
-  onSkillBody: (content: string) => void;
-  onFileContent: (path: string, content: string, isNewFile: boolean) => void;
-  onSummary: (content: string) => void;
-  onDone: (result: {
-    skillTabs: { path: string; content: string }[];
-    summaryContent: string;
-  }) => void;
-  onError: (message: string) => void;
-}
-
-/**
  * Interactive skill creation via SSE stream with multi-file tab support.
  * Uses backend-classified events (frontmatter, skill_body, file_content, summary)
  * instead of frontend parsing.
@@ -702,11 +647,13 @@ export const createSkillStream = async (
   });
 
   if (!response.ok) {
+    callbacks.onThinkingVisible(false);
     callbacks.onError(`HTTP error: ${response.status}`);
     return { skillTabs: [], summaryContent: "" };
   }
 
   if (!response.body) {
+    callbacks.onThinkingVisible(false);
     callbacks.onError("No response body");
     return { skillTabs: [], summaryContent: "" };
   }
@@ -717,137 +664,10 @@ export const createSkillStream = async (
     callbacks.onTaskId(taskId);
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  // State management (previously done by ContentParser)
-  let skillTabs: { path: string; content: string }[] = [
-    { path: "SKILL.md", content: "" },
-  ];
-  let summaryContent = "";
-  let currentActiveTab = "SKILL.md";
-
-  callbacks.onThinkingVisible(true);
-
-  try {
-    while (true) {
-      let readResult;
-      try {
-        readResult = await reader.read();
-      } catch (readError: any) {
-        // Handle AbortError gracefully when user stops the stream
-        if (
-          readError?.name === "AbortError" ||
-          readError?.name === "AbortSignal"
-        ) {
-          break;
-        }
-        throw readError;
-      }
-      const { done, value } = readResult;
-      if (done) break;
-
-      const cleanChunk = decoder
-        .decode(value, { stream: true })
-        .replace(/\r/g, "");
-      buffer += cleanChunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const jsonStr = line.substring(5).trim();
-        if (!jsonStr) continue;
-
-        try {
-          const event: SkillStreamEvent = JSON.parse(jsonStr);
-
-          switch (event.type) {
-            case SKILL_STREAM_TYPES.STEP_COUNT: {
-              const stepMatch = String(event.content).match(/\d+/);
-              const stepNum = stepMatch ? parseInt(stepMatch[0], 10) : NaN;
-              if (!isNaN(stepNum)) {
-                callbacks.onThinkingUpdate(stepNum, "");
-                callbacks.onStepCount(stepNum, "");
-              }
-              break;
-            }
-
-            case SKILL_STREAM_TYPES.THINKING:
-              // Thinking content - currently not displayed, could add callback if needed
-              break;
-
-            case SKILL_STREAM_TYPES.FRONTMATTER:
-              // Frontmatter content - currently not displayed, could add callback if needed
-              if (event.content) {
-                callbacks.onFrontmatter?.(event.content);
-              }
-              break;
-
-            case SKILL_STREAM_TYPES.SKILL_BODY:
-              if (event.content) {
-                // Append to SKILL.md tab
-                const skillTab = skillTabs.find((t) => t.path === "SKILL.md");
-                if (skillTab) {
-                  skillTab.content += event.content;
-                }
-                callbacks.onSkillBody?.(event.content);
-              }
-              break;
-
-            case SKILL_STREAM_TYPES.FILE_CONTENT: {
-              const filePath = event.path || "file.txt";
-              let fileTab = skillTabs.find((t) => t.path === filePath);
-
-              if (!fileTab) {
-                fileTab = { path: filePath, content: "" };
-                skillTabs.push(fileTab);
-              }
-
-              if (event.content) {
-                fileTab.content += event.content;
-              }
-              currentActiveTab = filePath;
-
-              callbacks.onFileContent?.(
-                filePath,
-                event.content || "",
-                !!event.is_new_file
-              );
-              break;
-            }
-
-            case SKILL_STREAM_TYPES.SUMMARY:
-              if (event.content) {
-                summaryContent += event.content;
-                callbacks.onSummary?.(event.content);
-              }
-              break;
-
-            case "done":
-              callbacks.onThinkingVisible(false);
-              callbacks.onDone({
-                skillTabs,
-                summaryContent,
-              });
-              break;
-
-            case "error":
-              callbacks.onThinkingVisible(false);
-              callbacks.onError(event.message || "Unknown error");
-              break;
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-    }
-  } finally {
-    callbacks.onThinkingVisible(false);
-  }
-
-  return { skillTabs, summaryContent };
+  return consumeSkillCreationStream(response.body, callbacks, {
+    signal: options?.signal,
+    onProtocolWarning: (messageText, detail) => log.warn(messageText, detail),
+  });
 };
 
 /**

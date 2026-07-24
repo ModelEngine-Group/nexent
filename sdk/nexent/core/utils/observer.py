@@ -2,6 +2,7 @@ import json
 import re
 from collections import deque
 from enum import Enum
+from threading import Lock
 from typing import Any
 
 
@@ -119,6 +120,7 @@ class MessageObserver:
     def __init__(self, lang="zh"):
         # unified output to the front end string, changed to queue
         self.message_query = []
+        self._message_lock = Lock()
 
         # control output language
         self.lang = lang
@@ -140,6 +142,11 @@ class MessageObserver:
         self.in_think_mode = False
         self.think_start_pattern = re.compile(r"<think>")
         self.think_end_pattern = re.compile(r"</think>")
+
+    def _append_message(self, message: str) -> None:
+        """Append an observer message atomically with respect to queue draining."""
+        with self._message_lock:
+            self.message_query.append(message)
 
     def _init_message_transformers(self):
         """initialize the mapping of message type to transformer"""
@@ -195,7 +202,7 @@ class MessageObserver:
                 # Process think content before </think>
                 think_content = buffer_text[:end_match.start()]
                 if think_content:
-                    self.message_query.append(
+                    self._append_message(
                         Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
 
                 # Process content after </think> as normal content
@@ -214,7 +221,7 @@ class MessageObserver:
             # Send accumulated content
             if accumulated_content:
                 if self.in_think_mode:
-                    self.message_query.append(
+                    self._append_message(
                         Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, accumulated_content).to_json())
                 else:
                     self._process_normal_content(accumulated_content)
@@ -241,20 +248,20 @@ class MessageObserver:
                 # send the content before the matching position as thinking
                 prefix_text = buffer_text[:match_start]
                 if prefix_text:
-                    self.message_query.append(
+                    self._append_message(
                         Message(ProcessType.MODEL_OUTPUT_THINKING, prefix_text).to_json())
 
                 # send the content after the matching part as code
                 code_text = buffer_text[match_start:]
                 if code_text:
-                    self.message_query.append(
+                    self._append_message(
                         Message(ProcessType.MODEL_OUTPUT_CODE, code_text).to_json())
 
                 # switch mode
                 self.current_mode = ProcessType.MODEL_OUTPUT_CODE
             else:
                 # already in code mode, send the entire buffer content as code
-                self.message_query.append(
+                self._append_message(
                     Message(ProcessType.MODEL_OUTPUT_CODE, buffer_text).to_json())
 
             # clear the buffer
@@ -269,7 +276,7 @@ class MessageObserver:
                 for _ in range(len(self.token_buffer) - max_buffer_size):
                     self.token_buffer.popleft()
                 # Send accumulated content
-                self.message_query.append(
+                self._append_message(
                     Message(self.current_mode, accumulated_content).to_json())
 
     def flush_remaining_tokens(self):
@@ -283,7 +290,7 @@ class MessageObserver:
                 # Still in think mode, remove any think tags and process as deep thinking
                 think_buffer_text = re.sub(r"<think>|</think>", "", think_buffer_text)
                 if think_buffer_text:
-                    self.message_query.append(
+                    self._append_message(
                         Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_buffer_text).to_json())
             else:
                 # Not in think mode, process as normal content
@@ -294,7 +301,7 @@ class MessageObserver:
         # Process remaining normal buffer content
         if self.token_buffer:
             buffer_text = ''.join(self.token_buffer)
-            self.message_query.append(
+            self._append_message(
                 Message(self.current_mode, buffer_text).to_json())
             self.token_buffer.clear()
 
@@ -304,7 +311,7 @@ class MessageObserver:
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
-        self.message_query.append(
+        self._append_message(
             Message(process_type, formatted_content).to_json())
 
     def add_model_reasoning_content(self, reasoning_content):
@@ -312,16 +319,19 @@ class MessageObserver:
         Handle reasoning content from the model with type MODEL_OUTPUT_DEEP_THINKING
         """
         if reasoning_content:
-            self.message_query.append(
+            self._append_message(
                 Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, reasoning_content).to_json())
 
     def get_cached_message(self):
-        cached_message = self.message_query
-        self.message_query = []
+        with self._message_lock:
+            cached_message = self.message_query
+            self.message_query = []
         return cached_message
 
     def get_final_answer(self):
-        for item in self.message_query:
+        with self._message_lock:
+            cached_message = list(self.message_query)
+        for item in cached_message:
             if isinstance(item, str):
                 try:
                     data = json.loads(item)

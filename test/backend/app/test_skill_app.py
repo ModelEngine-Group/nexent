@@ -2465,6 +2465,8 @@ class TestCreateSkillInteractiveEndpoint:
 
                     assert response.status_code == 200
                     assert response.headers.get("x-task-id") == "task123"
+                    assert response.headers.get("cache-control") == "no-cache, no-transform"
+                    assert response.headers.get("x-accel-buffering") == "no"
 
     def test_create_skill_interactive_unauthorized(self, mocker):
         """Test interactive skill creation without auth."""

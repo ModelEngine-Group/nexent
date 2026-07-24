@@ -497,11 +497,15 @@ app.prepare().then(() => {
           pathname === "/api/skills/create" ||
           pathname.startsWith("/api/skills/stop/")
         ) {
+          const skillProxyTimeout =
+            pathname === "/api/skills/create"
+              ? SSE_PROXY_TIMEOUT_MS
+              : PROXY_TIMEOUT_MS;
           proxy.web(req, res, {
             target: RUNTIME_HTTP_BACKEND,
             changeOrigin: true,
-            proxyTimeout: PROXY_TIMEOUT_MS,
-            timeout: PROXY_TIMEOUT_MS,
+            proxyTimeout: skillProxyTimeout,
+            timeout: skillProxyTimeout,
           });
         } else {
           proxy.web(req, res, {

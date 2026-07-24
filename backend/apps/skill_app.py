@@ -709,13 +709,14 @@ async def create_skill(
     """Create a skill interactively via LLM agent.
 
     Loads the skill creation prompt template (simple or complicated based on complexity),
-    runs an internal agent with WriteSkillFileTool and ReadSkillMdTool, extracts the skill content
-    from the final answer, and streams step progress and token content via SSE.
+    runs an internal agent, classifies generated content, and streams the draft via SSE.
 
     Yields SSE events:
         - step_count: Current agent step number
-        - skill_content: Token-level content (thinking, code, deep_thinking, tool output)
-        - final_answer: Complete skill content with <SKILL> and <FILE> delimiters
+        - skill_body: Incremental SKILL.md content
+        - file_content: Incremental additional file content
+        - summary: Incremental user-facing summary
+        - error: Terminal generation or protocol error
         - done: Stream completion signal
     """
     try:
@@ -739,7 +740,15 @@ async def create_skill(
         complexity=request.complexity or "simple"
     )
 
-    return StreamingResponse(generator(), media_type="text/event-stream", headers={"X-Task-ID": task_id})
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "X-Task-ID": task_id,
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @skill_creator_router.get("/stop/{task_id}")

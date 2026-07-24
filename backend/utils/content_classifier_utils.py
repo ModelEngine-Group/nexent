@@ -39,6 +39,21 @@ class ContentClassifier:
         }
         self._pending_file_path: Optional[str] = None
 
+    def finish(self) -> List[Dict[str, Any]]:
+        """Flush buffered trailing content when the upstream stream ends.
+
+        Normally the buffer only contains an incomplete tag prefix. Treating it
+        as content at EOF prevents the last characters of an otherwise valid
+        SKILL.md from being silently dropped when a model stops mid-tag.
+        """
+        if not self.buffer:
+            return []
+
+        content = self.buffer
+        self.buffer = ""
+        event = self._create_event(content)
+        return [event] if event else []
+
     def classify(self, chunk: str) -> List[Dict[str, Any]]:
         """Process streaming chunk and return list of classified events."""
         results = []

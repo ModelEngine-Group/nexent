@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -1052,6 +1053,26 @@ class TestMessageObserverStateManagement:
         observer = MessageObserver()
         assert observer.message_query == []
         assert isinstance(observer.message_query, list)
+
+    def test_concurrent_enqueue_and_drain_preserves_every_message(self):
+        """Producer messages must not be lost while a stream consumer drains the queue."""
+        observer = MessageObserver(lang="en")
+        message_count = 2000
+
+        def produce_messages():
+            for index in range(message_count):
+                observer.add_message("agent", ProcessType.OTHER, str(index))
+
+        producer = threading.Thread(target=produce_messages)
+        producer.start()
+        drained = []
+        while producer.is_alive():
+            drained.extend(observer.get_cached_message())
+        producer.join()
+        drained.extend(observer.get_cached_message())
+
+        contents = [json.loads(message)["content"] for message in drained]
+        assert contents == [str(index) for index in range(message_count)]
 
 
 class TestMessageObserverMultipleOperations:

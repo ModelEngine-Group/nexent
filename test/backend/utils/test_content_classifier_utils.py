@@ -78,6 +78,26 @@ class TestContentClassifier:
         assert results == []
         assert classifier.buffer == "<"
 
+    def test_finish_flushes_incomplete_trailing_tag_as_skill_content(self):
+        """Test EOF preserves content that resembles an incomplete XML tag."""
+        classifier = ContentClassifier()
+        classifier.classify("<SKILL>")
+
+        assert classifier.classify("body<reference") == [
+            {"type": "skill_body", "content": "body"}
+        ]
+        assert classifier.finish() == [
+            {"type": "skill_body", "content": "<reference"}
+        ]
+        assert classifier.buffer == ""
+
+    def test_finish_is_idempotent(self):
+        """Test flushing an already empty classifier does not duplicate content."""
+        classifier = ContentClassifier()
+
+        assert classifier.finish() == []
+        assert classifier.finish() == []
+
     def test_full_skill_flow(self):
         """Test full SKILL -> body -> </SKILL> -> summary flow."""
         classifier = ContentClassifier()

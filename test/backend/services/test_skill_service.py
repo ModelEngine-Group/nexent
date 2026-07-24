@@ -6,6 +6,7 @@ import os
 import io
 import json
 import base64
+import threading
 import types
 
 # Add backend path for imports
@@ -167,6 +168,13 @@ TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp",
 consts_const_mock.CONTAINER_SKILLS_PATH = TEST_LOCAL_SKILLS_DIR
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
+consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset({
+    "model_output_thinking",
+    "model_output_code",
+    "model_output_deep_thinking",
+    "tool",
+    "execution_logs",
+})
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 
 class SkillException(Exception):
@@ -349,6 +357,8 @@ from backend.services.skill_service import (
     _write_skill_params_to_local_config_yaml,
     _remove_local_skill_config_yaml,
     get_skill_manager,
+    create_skill_creation_stream_generator,
+    SkillCreationStreamState,
 )
 
 # Create a mock get_skill_manager to avoid calling the real function
@@ -362,6 +372,219 @@ def create_test_service(tenant_id="test-tenant"):
     service = SkillService(tenant_id=tenant_id)
     service._overlay_params_from_local_config_yaml = lambda x: x
     return service
+
+
+class TestSkillCreationStreamGenerator:
+    """Tests for the NL2Skill observer-to-SSE compatibility layer."""
+
+    @staticmethod
+    def _payloads(events):
+        return [
+            json.loads(event.removeprefix("data: ").strip())
+            for event in events
+            if event.startswith("data: ")
+        ]
+
+    def test_final_answer_recovers_missing_token_stream_content(self):
+        """A complete final answer should recover a draft when token events are absent."""
+        from backend.utils.content_classifier_utils import ContentClassifier
+
+        observer = MockMessageObserver()
+        observer.send(json.dumps({
+            "type": "final_answer",
+            "content": (
+                "<SKILL>\n---\nname: recovered\ndescription: Recovered skill\n"
+                "---\n# Body\n</SKILL><SUMMARY>Ready</SUMMARY>"
+            ),
+        }))
+        state = SkillCreationStreamState()
+
+        payloads = self._payloads(create_skill_creation_stream_generator(
+            observer,
+            ContentClassifier(),
+            state,
+        ))
+
+        assert "".join(
+            item.get("content", "") for item in payloads if item["type"] == "skill_body"
+        ) == "\n---\nname: recovered\ndescription: Recovered skill\n---\n# Body\n"
+        assert state.has_skill_body is True
+
+    def test_final_answer_does_not_duplicate_streamed_skill_body(self):
+        """The final answer fallback must stay inactive after normal token streaming."""
+        from backend.utils.content_classifier_utils import ContentClassifier
+
+        content = (
+            "<SKILL>\n---\nname: streamed\ndescription: Streamed skill\n"
+            "---\n# Body\n</SKILL>"
+        )
+        observer = MockMessageObserver()
+        observer.send(json.dumps({"type": "model_output_thinking", "content": content}))
+        observer.send(json.dumps({"type": "final_answer", "content": content}))
+        state = SkillCreationStreamState()
+
+        payloads = self._payloads(create_skill_creation_stream_generator(
+            observer,
+            ContentClassifier(),
+            state,
+        ))
+
+        body = "".join(
+            item.get("content", "") for item in payloads if item["type"] == "skill_body"
+        )
+        assert body == "\n---\nname: streamed\ndescription: Streamed skill\n---\n# Body\n"
+
+    def test_observer_error_is_forwarded_once(self):
+        """Agent errors should terminate visibly instead of becoming an empty done event."""
+        from backend.utils.content_classifier_utils import ContentClassifier
+
+        observer = MockMessageObserver()
+        observer.send(json.dumps({"type": "error", "content": "model failed"}))
+        observer.send(json.dumps({"type": "error", "content": "duplicate"}))
+        state = SkillCreationStreamState()
+
+        payloads = self._payloads(create_skill_creation_stream_generator(
+            observer,
+            ContentClassifier(),
+            state,
+        ))
+
+        assert payloads == [{"type": "error", "message": "model failed"}]
+        assert state.error_message == "model failed"
+
+    @pytest.mark.asyncio
+    async def test_stream_skill_creation_recovers_final_answer_and_completes(self, mocker):
+        """The full service should emit recovered content before its done event."""
+        from backend.utils.content_classifier_utils import ContentClassifier
+
+        class DrainingObserver(MockMessageObserver):
+            def get_cached_message(self):
+                cached = self._cached
+                self._cached = []
+                return cached
+
+        def emit_final_answer(**kwargs):
+            kwargs["observer"].send(json.dumps({
+                "type": "final_answer",
+                "content": (
+                    "<SKILL>\n---\nname: recovered\ndescription: Recovered skill\n"
+                    "---\n# Body\n</SKILL>"
+                ),
+            }))
+
+        mocker.patch("backend.services.skill_service.MessageObserver", DrainingObserver)
+        mocker.patch("backend.services.skill_service.ContentClassifier", ContentClassifier)
+        mocker.patch(
+            "backend.services.skill_service.create_skill_from_request",
+            side_effect=emit_final_answer,
+        )
+
+        _, generator_factory = skill_service.stream_skill_creation(
+            user_request="create a skill",
+            language="en",
+            model_config=MockModelConfig(),
+        )
+        events = [event async for event in generator_factory()]
+        payloads = self._payloads(events)
+
+        assert any(item["type"] == "skill_body" for item in payloads)
+        assert payloads[-1] == {"type": "done"}
+
+    @pytest.mark.asyncio
+    async def test_stream_skill_creation_rejects_empty_success(self, mocker):
+        """A silent agent completion should become an error, never an empty done."""
+        from backend.utils.content_classifier_utils import ContentClassifier
+
+        mocker.patch("backend.services.skill_service.ContentClassifier", ContentClassifier)
+        mocker.patch(
+            "backend.services.skill_service.create_skill_from_request",
+            return_value=None,
+        )
+
+        _, generator_factory = skill_service.stream_skill_creation(
+            user_request="create a skill",
+            language="en",
+            model_config=MockModelConfig(),
+        )
+        payloads = self._payloads([
+            event async for event in generator_factory()
+        ])
+
+        assert payloads == [{
+            "type": "error",
+            "message": "No valid SKILL.md content was generated",
+        }]
+
+    @pytest.mark.asyncio
+    async def test_stream_skill_creation_rejects_invalid_skill_metadata(self, mocker):
+        """The backend must not emit done for a draft that cannot be created."""
+        from backend.utils.content_classifier_utils import ContentClassifier
+
+        class DrainingObserver(MockMessageObserver):
+            def get_cached_message(self):
+                cached = self._cached
+                self._cached = []
+                return cached
+
+        def emit_invalid_skill(**kwargs):
+            kwargs["observer"].send(json.dumps({
+                "type": "final_answer",
+                "content": "<SKILL>---\nname: invalid\ndescription:\n---\n# Body</SKILL>",
+            }))
+
+        mocker.patch("backend.services.skill_service.MessageObserver", DrainingObserver)
+        mocker.patch("backend.services.skill_service.ContentClassifier", ContentClassifier)
+        mocker.patch(
+            "backend.services.skill_service.create_skill_from_request",
+            side_effect=emit_invalid_skill,
+        )
+
+        _, generator_factory = skill_service.stream_skill_creation(
+            user_request="create a skill",
+            language="en",
+            model_config=MockModelConfig(),
+        )
+        payloads = self._payloads([event async for event in generator_factory()])
+
+        assert payloads[-1] == {
+            "type": "error",
+            "message": "Generated SKILL.md is invalid: description is required",
+        }
+        assert all(payload["type"] != "done" for payload in payloads)
+
+    @pytest.mark.asyncio
+    async def test_stream_disconnect_signals_worker_stop(self, mocker):
+        """Closing the client stream should not leave an orphan generation worker."""
+        started = threading.Event()
+        stopped = threading.Event()
+
+        def wait_for_stop(**kwargs):
+            started.set()
+            if kwargs["stop_event"].wait(timeout=2):
+                stopped.set()
+
+        mocker.patch(
+            "backend.services.skill_service.create_skill_from_request",
+            side_effect=wait_for_stop,
+        )
+        mocker.patch(
+            "backend.services.skill_service.SKILL_CREATION_HEARTBEAT_INTERVAL_SECONDS",
+            0,
+        )
+
+        _, generator_factory = skill_service.stream_skill_creation(
+            user_request="create a skill",
+            language="en",
+            model_config=MockModelConfig(),
+        )
+        stream = generator_factory()
+        assert await stream.__anext__() == ": connected\n\n"
+        assert started.wait(timeout=1)
+        assert await stream.__anext__() == ": keep-alive\n\n"
+
+        await stream.aclose()
+
+        assert stopped.wait(timeout=1)
 
 
 # ===== Helper Functions Tests =====
