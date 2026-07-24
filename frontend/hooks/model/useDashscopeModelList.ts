@@ -123,11 +123,16 @@ export const useDashscopeModelList = ({
 
   // Auto-fetch model list when batch import is enabled and API key is provided
   useEffect(() => {
+    // Only execute if this hook matches the current provider
+    if (form.provider !== "dashscope") {
+      return;
+    }
+
     if (form.isBatchImport && form.apiKey.trim() !== "") {
       getModelList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.type, form.isBatchImport]);
+  }, [form.type, form.isBatchImport, form.provider]);
 
   return {
     getModelList,

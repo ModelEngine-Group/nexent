@@ -8,6 +8,7 @@ import { ExclamationCircleFilled } from "@ant-design/icons";
 import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
+import { processProviderResponse } from "@/lib/providerError";
 import {
   CapacityCoverage,
   ModelOption,
@@ -520,11 +521,24 @@ export const ModelDeleteDialog = ({
         return;
       }
 
-      const providerRows = (result || []).map((providerModel: any) =>
+      const { models: providerRows, error } = processProviderResponse(
+        result || [],
+        provider,
+        t
+      );
+
+      if (error) {
+        message.error(error);
+        setProviderModels([]);
+        setPendingSelectedProviderIds(new Set());
+        return;
+      }
+
+      const providerRowsWithSaved = providerRows.map((providerModel: any) =>
         overlaySavedModelConfig(providerModel, provider, modelType)
       );
 
-      setProviderModels(providerRows);
+      setProviderModels(providerRowsWithSaved);
       // Initialize pending selected switch states (based on current models status)
       const currentIds = new Set(
         models
@@ -533,17 +547,15 @@ export const ModelDeleteDialog = ({
       );
       setPendingSelectedProviderIds(
         new Set(
-          providerRows
+          providerRowsWithSaved
             .map((pm: any) => pm.id)
             .filter((id: string) => currentIds.has(id))
         )
       );
-      if (!result || result.length === 0) {
-        message.error(t("model.dialog.error.noModelsFetched"));
-      }
     } catch (e) {
-      message.error(t("model.dialog.error.noModelsFetched"));
       log.error("Failed to prefetch provider models", e);
+      setProviderModels([]);
+      setPendingSelectedProviderIds(new Set());
     }
   };
 
