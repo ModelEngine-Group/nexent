@@ -28,6 +28,9 @@ consts_mock.const.CAS_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.CAS_DEFAULT_TENANT_ID = "cas-default-tenant"
 consts_mock.const.CAS_EMAIL_ATTRIBUTE = "mail"
 consts_mock.const.CAS_ENABLED = True
+consts_mock.const.CAS_HEARTBEAT_COOKIE_NAME = "AUTH_TOKEN"
+consts_mock.const.CAS_HEARTBEAT_INTERVAL_SECONDS = 300
+consts_mock.const.CAS_HEARTBEAT_URL = ""
 consts_mock.const.CAS_LOGIN_MODE = "button"
 consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300
@@ -58,6 +61,7 @@ from services.cas_service import (  # noqa: E402
     CasAuthenticationError,
     build_login_url,
     build_logout_url,
+    get_cas_config,
     parse_logout_request,
     parse_service_validate_response,
     revoke_from_logout_request,
@@ -72,6 +76,37 @@ sys.modules.pop("services.cas_service", None)
 
 
 class TestCasServiceParsing(unittest.TestCase):
+    def test_get_cas_config_returns_heartbeat_settings(self):
+        config = get_cas_config()
+
+        self.assertEqual(config["heartbeat_url"], "")
+        self.assertEqual(config["heartbeat_interval_seconds"], 300)
+        self.assertEqual(config["heartbeat_cookie_name"], "AUTH_TOKEN")
+
+        heartbeat_globals = get_cas_config.__globals__
+        original_values = (
+            heartbeat_globals["CAS_HEARTBEAT_URL"],
+            heartbeat_globals["CAS_HEARTBEAT_INTERVAL_SECONDS"],
+            heartbeat_globals["CAS_HEARTBEAT_COOKIE_NAME"],
+        )
+        heartbeat_globals["CAS_HEARTBEAT_URL"] = "https://cas.example.com/heartbeat"
+        heartbeat_globals["CAS_HEARTBEAT_INTERVAL_SECONDS"] = 60
+        heartbeat_globals["CAS_HEARTBEAT_COOKIE_NAME"] = "SESSION"
+        try:
+            custom_config = get_cas_config()
+        finally:
+            (
+                heartbeat_globals["CAS_HEARTBEAT_URL"],
+                heartbeat_globals["CAS_HEARTBEAT_INTERVAL_SECONDS"],
+                heartbeat_globals["CAS_HEARTBEAT_COOKIE_NAME"],
+            ) = original_values
+
+        self.assertEqual(
+            custom_config["heartbeat_url"], "https://cas.example.com/heartbeat"
+        )
+        self.assertEqual(custom_config["heartbeat_interval_seconds"], 60)
+        self.assertEqual(custom_config["heartbeat_cookie_name"], "SESSION")
+
     def test_parse_success_response_with_attributes(self):
         xml = """
         <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">

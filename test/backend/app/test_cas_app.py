@@ -26,6 +26,9 @@ cas_service_mock.get_cas_config = MagicMock(
     return_value={
         "enabled": True,
         "login_mode": "button",
+        "heartbeat_url": "https://cas.example.com/heartbeat",
+        "heartbeat_interval_seconds": 300,
+        "heartbeat_cookie_name": "AUTH_TOKEN",
         "renew_before_seconds": 300,
         "renew_timeout_seconds": 10,
         "display_name": "CAS",
@@ -83,6 +86,9 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(data["message"], "success")
         self.assertTrue(data["data"]["enabled"])
         self.assertEqual(data["data"]["login_mode"], "button")
+        self.assertEqual(data["data"]["heartbeat_url"], "https://cas.example.com/heartbeat")
+        self.assertEqual(data["data"]["heartbeat_interval_seconds"], 300)
+        self.assertEqual(data["data"]["heartbeat_cookie_name"], "AUTH_TOKEN")
 
     def test_login_redirects_to_cas_server(self):
         response = client.get("/user/cas/login?redirect=/chat", follow_redirects=False)

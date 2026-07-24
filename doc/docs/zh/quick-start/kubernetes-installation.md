@@ -396,12 +396,17 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | CAS 角色到 Nexent 角色的 JSON 映射 |
 | `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | CAS 本地会话最长有效期 |
 | `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent 本地会话有效期 |
+| `nexent-common.config.cas.heartbeatUrl` | `CAS_HEARTBEAT_URL` | 用户活动触发的 CAS Server 心跳 GET 地址；为空时禁用 |
+| `nexent-common.config.cas.heartbeatIntervalSeconds` | `CAS_HEARTBEAT_INTERVAL_SECONDS` | CAS 活跃用户最小心跳间隔，默认 300 秒 |
+| `nexent-common.config.cas.heartbeatCookieName` | `CAS_HEARTBEAT_COOKIE_NAME` | 复制到心跳 `X-Auth-Token` Header 的前端可读 Cookie 名称 |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | 距离过期多少秒内触发无感续期 |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | 无感续期等待超时时间 |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | CAS 未返回邮箱时生成邮箱使用的域名 |
 | `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS 登出地址。为空时 Nexent 主动退出不调用 CAS Server 登出接口 |
 | `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | 访问 CAS Server 时是否校验证书 |
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | 自定义 CA bundle 路径 |
+
+CAS 心跳仅在 CAS 用户本地会话有效、页面可见且发生用户活动时运行。首次活动立即发送 GET，之后所有浏览器标签页共享配置的最小间隔。配置的 Cookie 可读取时，请求携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送请求但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳失败不会退出用户，也不会刷新本地 JWT。
 
 常用 CAS 地址：
 
@@ -452,6 +457,9 @@ nexent-common:
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'
       sessionMaxAgeSeconds: 3600
       localSessionMaxAgeSeconds: 3600
+      heartbeatUrl: "https://<ModelEngine IP>:5443/<heartbeat-path>"
+      heartbeatIntervalSeconds: 300
+      heartbeatCookieName: "<cookie-name>"
       renewBeforeSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"

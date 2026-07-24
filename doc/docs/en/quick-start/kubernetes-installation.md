@@ -393,12 +393,17 @@ Configurable CAS values:
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | JSON mapping from CAS roles to Nexent roles |
 | `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | Maximum local CAS session lifetime |
 | `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent local session lifetime |
+| `nexent-common.config.cas.heartbeatUrl` | `CAS_HEARTBEAT_URL` | Activity-driven CAS Server heartbeat GET URL; empty disables heartbeat |
+| `nexent-common.config.cas.heartbeatIntervalSeconds` | `CAS_HEARTBEAT_INTERVAL_SECONDS` | Minimum heartbeat interval for active CAS users, default 300 seconds |
+| `nexent-common.config.cas.heartbeatCookieName` | `CAS_HEARTBEAT_COOKIE_NAME` | Readable browser Cookie copied to the `X-Auth-Token` heartbeat header |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | Trigger silent renewal within this many seconds before expiry |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | Silent renewal timeout |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | Domain used when CAS does not return an email |
 | `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS logout URL. Empty means Nexent logout will not call the CAS Server logout endpoint |
 | `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | Whether to verify CAS Server TLS certificates |
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | Custom CA bundle path |
+
+CAS heartbeat runs only for CAS users with a valid local session and visible-page activity. The first activity sends a GET immediately, then browser tabs share the configured minimum interval. A readable configured Cookie is sent as `X-Auth-Token: <cookie-name>=<cookie-value>`; if it cannot be read, the request is sent without the header. Because the browser calls the heartbeat URL directly, the endpoint must allow the Nexent origin, GET, OPTIONS, and `X-Auth-Token` through CORS. Heartbeat failures do not log the user out or refresh the local JWT.
 
 Common CAS URLs:
 
@@ -449,6 +454,9 @@ nexent-common:
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'
       sessionMaxAgeSeconds: 3600
       localSessionMaxAgeSeconds: 3600
+      heartbeatUrl: "https://<ModelEngine IP>:5443/<heartbeat-path>"
+      heartbeatIntervalSeconds: 300
+      heartbeatCookieName: "<cookie-name>"
       renewBeforeSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"

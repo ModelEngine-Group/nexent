@@ -23,7 +23,7 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
   const { isDeploymentReady, isSpeedMode } = useDeployment();
   const auth = useAuthenticationContext();
   const authz = useAuthorizationContext();
-  useSessionManager();
+  useSessionManager(authz.user);
 
   // In speed mode, skip auth checks since authentication is bypassed
   // isAuthChecking: allow rendering during auth state check to avoid blocking UI
